@@ -1,0 +1,8 @@
+﻿編號,名稱,外觀模型,類型,等級,資源量,資源密度，決定了該資源在大地圖的數量,中文注釋說明，參考用
+id,name,model,type,lv,collection_speed,density,annotation
+1,果樹,food_1,food,1,100,20,食物資源礦1級
+2,農田,food_2,food,2,300,10,食物資源礦2級
+3,石塊,stone_1,stone,1,100,20,石頭資源礦1級
+4,巨岩,stone_2,stone,2,300,10,石頭資源礦2級
+5,小灌木,wood_1,wood,1,100,100,木材資源礦1級
+6,大樹,wood_2,wood,2,300,25,木材資源礦2級

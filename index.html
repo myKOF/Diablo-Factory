@@ -1,1 +1,32 @@
-<h1>Diablo Factory 測試中</h1>
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>暗黑煉金工廠：末日準備中</title>
+    <link rel="stylesheet" href="style.css">
+    <script>
+        // 診斷指令：如果使用 file:// 協議開啟，ES 模組將無法運作
+        if (window.location.protocol === 'file:') {
+            alert('警告：請使用 Web Server（如 Vite 或 Live Server）開啟此網頁，否則 JavaScript 模組將無法加載。');
+        }
+        window.onerror = function(msg, url, line) {
+            console.error('全局錯誤捕捉:', msg, '在', url, '第', line, '行');
+            const debug = document.createElement('div');
+            debug.style.color = 'red';
+            debug.innerText = '系統錯誤：' + msg;
+            document.body.appendChild(debug);
+        };
+    </script>
+</head>
+<body>
+    <div id="game_container">
+        <!-- 底層：動畫渲染層 -->
+        <canvas id="fx_canvas"></canvas>
+        
+        <!-- 上層：UI 互動層 -->
+        <div id="ui_layer"></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
