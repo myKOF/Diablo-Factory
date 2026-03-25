@@ -12,7 +12,7 @@ window.onload = () => {
         e.preventDefault();
         return false;
     };
-    
+
     // 屏蔽特定的快捷鍵（如 Ctrl+S, Ctrl+U），只保留 F5 (KeyCode 116)
     window.addEventListener("keydown", (e) => {
         // 允許 F5 (刷新) 或 F12 (測試用，可選)
@@ -29,7 +29,7 @@ window.onload = () => {
 
 async function initGame() {
     console.log("暗黑煉金工廠：核心模組加載中...");
-    
+
     // 1. 初始化渲染系統
     window.AnimationRenderer = AnimationRenderer;
     AnimationRenderer.init();

@@ -1,4 +1,4 @@
-﻿編號,名稱,外觀模型,類型,最大可建造數量,尺寸,碰撞,增加人口,"建造所需資源{食物,木材,石頭}",中文注釋說明，參考用
+編號,名稱,外觀模型,類型,最大可建造數量,尺寸,碰撞,增加人口,"建造所需資源{食物,木材,石頭}",中文注釋說明，參考用
 id,name,model,type,max_count,size,collision,population,need_resource,annotation
 1,村莊,village,village,1,"{2,2}",1,5,"{food=100,wood=200,stone=100}",最初始的建築，用來搜集資源及產生村民
 2,農舍,farmhouse,farmhouse,10,"{1,1}",1,3,"{food=20,wood=20,stone=0}",村民的居所，增加人口上限

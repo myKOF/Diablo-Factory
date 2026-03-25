@@ -15,7 +15,7 @@ export class UIManager {
         if (!this.uiLayer) return;
 
         this.renderAll();
-        
+
         window.addEventListener("click", (e) => this.handleWorldClick(e));
         window.addEventListener("mousemove", (e) => this.handleDragMove(e));
         window.addEventListener("mouseup", (e) => this.handleDragEnd(e));
@@ -25,7 +25,7 @@ export class UIManager {
     }
 
     static renderAll() {
-        this.uiLayer.innerHTML = ""; 
+        this.uiLayer.innerHTML = "";
 
         // 1. 資源列
         const rb = UI_CONFIG.ResourceBar;
@@ -50,7 +50,7 @@ export class UIManager {
             width: ${bp.width}px; height: ${bp.height}px;
             pointer-events: auto;
         `;
-        
+
         const title = document.createElement("div");
         title.className = "title";
         title.innerText = bp.title;
@@ -64,15 +64,20 @@ export class UIManager {
         this.uiLayer.appendChild(buildingPanel);
 
         // 3. 日誌面板
-        const lp = UI_CONFIG.LogPanel;
+        const logCfg = UI_CONFIG.LogPanel;
         const logPanel = document.createElement("div");
-        logPanel.className = "panel";
         logPanel.id = "log_panel";
+        logPanel.className = "panel";
         logPanel.style.cssText = `
-            position: absolute; left: ${lp.x}px; top: ${lp.y}px;
-            width: ${lp.width}px; height: ${lp.height}px;
-            background: ${lp.bgColor}; font-family: monospace;
-            overflow: hidden; pointer-events: auto;
+            position: absolute; left: ${logCfg.x}px; top: ${logCfg.y}px;
+            width: ${logCfg.width}px; height: ${logCfg.height}px;
+            background: ${logCfg.bgColor}; color: #e0f2f1;
+            padding: ${logCfg.padding}; border: 1.5px solid ${logCfg.borderColor};
+            font-size: ${logCfg.fontSize}; font-family: 'Courier New', monospace;
+            display: flex; flex-direction: column;
+            overflow-y: auto; pointer-events: auto;
+            box-sizing: border-box;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
         `;
         this.uiLayer.appendChild(logPanel);
 
@@ -94,7 +99,7 @@ export class UIManager {
 
         Object.values(configs).forEach(cfg => {
             const currentCount = GameEngine.state.mapEntities.filter(e => e.type === cfg.model).length;
-            
+
             const costStr = [];
             if (cfg.costs.food > 0) costStr.push(`🍖${cfg.costs.food}`);
             if (cfg.costs.wood > 0) costStr.push(`🪵${cfg.costs.wood}`);
@@ -118,7 +123,7 @@ export class UIManager {
             margin: 5px 0; padding: 10px; background: rgba(0,0,0,0.3);
         `;
         btn.innerHTML = `<strong>${item.name}</strong><br><small>${item.desc}</small>`;
-        
+
         const icon = document.createElement("div");
         icon.className = "building-icon";
         icon.style.cssText = `
@@ -132,6 +137,58 @@ export class UIManager {
         };
         btn.appendChild(icon);
         container.appendChild(btn);
+    }
+
+    static createWarningHint() {
+        if (document.getElementById("warning_hint")) return;
+        const cfg = UI_CONFIG.WarningHUD;
+        const warn = document.createElement("div");
+        warn.id = "warning_hint";
+        warn.style.cssText = `
+            position: fixed; 
+            left: 50%; top: ${cfg.y};
+            transform: translate(-50%, -50%) scale(0.9);
+            color: ${cfg.fontColor};
+            font-size: ${cfg.fontSize};
+            font-weight: 600;
+            background: ${cfg.bgColor};
+            border: 2px solid ${cfg.borderColor};
+            padding: ${cfg.padding};
+            border-radius: 4px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8), inset 0 0 10px rgba(255,255,255,0.05);
+            pointer-events: none; 
+            opacity: 0; 
+            transition: all 0.3s cubic-bezier(0.19, 1, 0.22, 1);
+            z-index: 99999; 
+            text-align: center; 
+            min-width: 300px;
+            display: none;
+            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+            letter-spacing: 1px;
+        `;
+        document.body.appendChild(warn);
+    }
+
+    static showWarning(msg) {
+        this.createWarningHint();
+        const cfg = UI_CONFIG.WarningHUD;
+        const warn = document.getElementById("warning_hint");
+        if (!warn) return;
+        
+        warn.innerText = msg;
+        warn.style.display = "block";
+        
+        warn.offsetHeight;
+
+        warn.style.opacity = "1";
+        warn.style.transform = "translate(-50%, -50%) scale(1)";
+        
+        if (this.warnTimer) clearTimeout(this.warnTimer);
+        this.warnTimer = setTimeout(() => {
+            warn.style.opacity = "0";
+            warn.style.transform = "translate(-50%, -50%) scale(0.95)";
+            setTimeout(() => { if (warn.style.opacity === "0") warn.style.display = "none"; }, 300);
+        }, cfg.duration);
     }
 
     static startDrag(type, mouseX, mouseY) {
@@ -150,11 +207,11 @@ export class UIManager {
         if (!this.dragGhost) return;
         this.dragGhost.style.left = `${e.clientX - 20}px`;
         this.dragGhost.style.top = `${e.clientY - 20}px`;
-        
+
         const cam = window.AnimationRenderer.camera;
         const TS = GameEngine.TILE_SIZE;
         const cfg = GameEngine.state.buildingConfigs[this.activeBuilding];
-        
+
         let uw = 1, uh = 1;
         if (cfg && cfg.size) {
             const match = cfg.size.match(/\{(\d+),(\d+)\}/);
@@ -172,10 +229,10 @@ export class UIManager {
 
         const gx = Math.round((e.clientX - cam.x - offsetX) / TS);
         const gy = Math.round((e.clientY - cam.y - offsetY) / TS);
-        
-        GameEngine.state.previewPos = { 
-            x: gx * TS + offsetX, 
-            y: gy * TS + offsetY 
+
+        GameEngine.state.previewPos = {
+            x: gx * TS + offsetX,
+            y: gy * TS + offsetY
         };
     }
 
@@ -191,33 +248,82 @@ export class UIManager {
         GameEngine.state.previewPos = null;
     }
 
+    static getLocalMouse(e) {
+        const container = document.getElementById("game_container");
+        if (!container) return { x: e.clientX, y: e.clientY };
+        const rect = container.getBoundingClientRect();
+        // 考慮到可能的視窗拉伸，X/Y 比例分開計算
+        const scaleX = rect.width / 1920;
+        const scaleY = rect.height / 1080;
+        return {
+            x: (e.clientX - rect.left) / scaleX,
+            y: (e.clientY - rect.top) / scaleY
+        };
+    }
+
     static handleWorldClick(e) {
+        // 策略：先根據點擊點決定是否關閉，再判斷是否打開
+
+        // 如果點擊的是按鈕，不做任何處理 (按鈕內部的 onclick 會執行工作)
+        if (e.target.closest(".action-btn")) return;
+
+        // 如果點擊的是 UI 以外的地方，先無條件關閉選單
+        const wasOpen = document.getElementById("context_menu")?.style.display !== "none";
+        this.hideContextMenu();
+
+        // 如果點擊的是 UI 其它區域（如面板背景、資源列），則到此為止 (已關閉)
         if (e.target.closest(".panel")) return;
+
+        // 如果目前是建造模式，點擊大地圖是為了建造，不處理選單
+        if (this.dragGhost) return;
+
+        const local = this.getLocalMouse(e);
         const cam = window.AnimationRenderer.camera;
-        const tc = GameEngine.state.mapEntities.find(ent => ent.type === 'village' || ent.type === 'town_center');
-        if (tc) {
-            if (Math.hypot(tc.x - (e.clientX - cam.x), tc.y - (e.clientY - cam.y)) < 80) this.showContextMenu(e.clientX, e.clientY);
-            else this.hideContextMenu();
+        const entities = GameEngine.state.mapEntities;
+
+        // 偵測是否點擊了村莊
+        const clicked = entities.find(ent => {
+            const cfg = GameEngine.state.buildingConfigs[ent.type];
+            if (!cfg) return false;
+            const em = cfg.size.match(/\{(\d+),(\d+)\}/);
+            const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE;
+            const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
+            const mx = local.x - cam.x, my = local.y - cam.y;
+            // 點擊判定稍微縮減 5 像素，避免邊緣模糊判定
+            return mx > ent.x - w / 2 + 5 && mx < ent.x + w / 2 - 5 && my > ent.y - h / 2 + 5 && my < ent.y + h / 2 - 5;
+        });
+
+        if (clicked && clicked.type === 'village') {
+            const screenX = clicked.x + cam.x;
+            const screenY = clicked.y + cam.y + 110;
+            this.showContextMenu(screenX, screenY);
         }
     }
 
     static showContextMenu(x, y) {
         const menu = document.getElementById("context_menu");
-        menu.style.display = "block";
+        menu.style.display = "flex";
         menu.style.left = `${x}px`; menu.style.top = `${y}px`;
+        menu.style.width = "auto";
         menu.innerHTML = `
-            <div class="title" style="margin-bottom:10px">派遣村民</div>
-            <button class="menu-btn" onclick="GameEngine.setCommand('WOOD')">🪓 伐木</button>
-            <button class="menu-btn" onclick="GameEngine.setCommand('STONE')">⛏️ 採礦</button>
-            <button class="menu-btn" onclick="GameEngine.setCommand('FOOD')">🧺 採集食物</button>
-            <hr>
-            <button class="menu-btn" onclick="GameEngine.setCommand('RETURN'); UIManager.hideContextMenu()">🏘️ 全員召回</button>
-            <button class="menu-btn" onclick="UIManager.hideContextMenu()">❌ 關閉選單</button>
+            <div class="action-btn" id="cmd_WOOD" onclick="GameEngine.setCommand('WOOD')">
+                <span class="icon">🪓</span><span class="label">採集木材</span>
+            </div>
+            <div class="action-btn" id="cmd_STONE" onclick="GameEngine.setCommand('STONE')">
+                <span class="icon">⛏️</span><span class="label">採集石頭</span>
+            </div>
+            <div class="action-btn" id="cmd_FOOD" onclick="GameEngine.setCommand('FOOD')">
+                <span class="icon">🧺</span><span class="label">採集食物</span>
+            </div>
+            <div class="action-btn" id="cmd_RETURN" onclick="GameEngine.setCommand('RETURN')">
+                <span class="icon">🏘️</span><span class="label">全員收工</span>
+            </div>
+            <div class="action-btn" id="worker_btn" onclick="GameEngine.addToVillageQueue('villagers')">
+                <span class="icon">👤</span><span class="label">訓練工人</span>
+                <div id="queue_badge" class="queue-badge" style="display:none">0</div>
+                <div id="prod_progress" class="progress-bar-mini"></div>
+            </div>
         `;
-        menu.querySelectorAll(".menu-btn").forEach(b => b.style.cssText = `
-            display: block; width: 100%; margin: 5px 0; padding: 8px;
-            background: #4e342e; color: white; border: 1px solid #795548; cursor: pointer;
-        `);
     }
 
     static hideContextMenu() {
@@ -226,6 +332,7 @@ export class UIManager {
     }
 
     static updateValues() {
+        // 更新資源
         const rb = document.getElementById("resource_bar");
         if (rb) {
             const labels = UI_CONFIG.ResourceBar.labels;
@@ -241,8 +348,65 @@ export class UIManager {
             `;
             if (popCount >= maxPop) rb.querySelector('span:last-child').style.color = "#ff5252";
         }
+
+        // 更新日誌
         const lp = document.getElementById("log_panel");
-        if (lp) lp.innerHTML = GameEngine.state.log.map(msg => `<div>> ${msg}</div>`).join("");
+        if (lp) {
+            const history = GameEngine.state.log;
+            const content = history.map(msg => `<div>> ${msg}</div>`).join("");
+            if (lp.innerHTML !== content) {
+                // 判斷使用者是否目前正停留在底部
+                const isAtBottom = lp.scrollHeight - lp.scrollTop - lp.clientHeight < 20;
+                
+                lp.innerHTML = content;
+                
+                // 只有在使用者本來就在底部的情況下，才自動捲動
+                if (isAtBottom) {
+                    lp.scrollTop = lp.scrollHeight;
+                }
+            }
+        }
+
+        // 更新生產隊列顯示
+        const badge = document.getElementById("queue_badge");
+        const prog = document.getElementById("prod_progress");
+        const workerBtn = document.getElementById("worker_btn");
+        
+        if (badge && prog) {
+            const q = GameEngine.state.villageQueue.length;
+            const maxPop = GameEngine.getMaxPopulation();
+            const isPopFull = GameEngine.state.units.villagers.length >= maxPop;
+
+            if (q > 0) {
+                badge.style.display = "flex";
+                badge.innerText = q;
+                const p = (1 - GameEngine.state.villageProductionTimer / 5) * 100;
+                prog.style.width = `${p}%`;
+                prog.style.backgroundColor = isPopFull ? "#f44336" : "#4caf50";
+                
+                // 如果人口已滿，在按鈕標籤上顯示警告文字
+                if (isPopFull) {
+                    const label = workerBtn?.querySelector('.label');
+                    if (label) label.innerHTML = `<span style="color:#ff8a80; font-size:11px;">${GameEngine.getMessage("2")}</span>`;
+                } else {
+                    const label = workerBtn?.querySelector('.label');
+                    if (label) label.innerHTML = "訓練工人";
+                }
+            } else {
+                badge.style.display = "none";
+                prog.style.width = "0%";
+                const label = workerBtn?.querySelector('.label');
+                if (label) label.innerHTML = "訓練工人";
+            }
+        }
+        // 更新指令高亮狀態
+        ['WOOD', 'STONE', 'FOOD', 'RETURN'].forEach(cmd => {
+            const btn = document.getElementById(`cmd_${cmd}`);
+            if (btn) {
+                if (GameEngine.state.currentGlobalCommand === cmd) btn.classList.add("active");
+                else btn.classList.remove("active");
+            }
+        });
     }
 }
 
