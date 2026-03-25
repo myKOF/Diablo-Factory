@@ -2,6 +2,12 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;700&display=swap');
 
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
 :root {
     --aoe-gold: #fbc02d;
     --aoe-blood: #8e0000;
@@ -25,17 +31,12 @@ html {
 #game_container {
     position: relative;
     width: 1920px;
-    /* 基準解析度 */
     height: 1080px;
     margin: auto;
-    background-color: #333;
-    /* 提高底色亮度以便排查 */
-    border: 5px solid yellow;
-    /* 診斷用：黃色邊框 */
+    background-color: #0c0c0c;
+    overflow: hidden;
     box-shadow: 0 0 100px rgba(0, 0, 0, 0.8) inset;
     transform-origin: top left;
-    overflow: hidden;
-    display: block !important;
 }
 
 /* 底層 Canvas：負責動畫特效與地圖拖動 */
@@ -92,7 +93,8 @@ html {
     border-radius: 4px;
     box-shadow: 0 5px 25px rgba(0, 0, 0, 0.8);
     transform: translateX(-50%);
-    /* 水平置中於建築下方 */
+    overflow: hidden;
+    /* 防止內容溢出導致容器變形 */
 }
 
 .action-btn {

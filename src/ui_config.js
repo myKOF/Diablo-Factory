@@ -24,13 +24,23 @@ export const UI_CONFIG = {
         x: 20, y: 80,
         width: 320, height: 600,
         itemHeight: 90,
+        titleSize: "24px",
+        fontSize: "14px",
         title: "🛡️ 末日設施建造",
+        titleColor: "#fbc02d",
+        textColor: "#e0e0e0",
+        descColor: "rgba(224, 224, 224, 0.7)",
         list: [
             { id: "town_center", name: "城鎮中心", desc: "生產村民 (消耗黃金)" },
             { id: "alchemy_lab", name: "煉金實驗室", desc: "生產生命藥水 (需木材)" },
             { id: "cathedral", name: "遺忘教堂", desc: "自動感召牧師" },
             { id: "academy", name: "魔法學院", desc: "培養大魔導師" }
         ]
+    },
+    // 村莊底部指令快捷列 (採集、收工)
+    ActionMenu: {
+        width: 380,
+        height: 95
     },
     // 日誌通知欄
     LogPanel: {
@@ -45,13 +55,16 @@ export const UI_CONFIG = {
     },
     // 中央警告提示 (HUD)
     WarningHUD: {
-        y: "30%", // 垂直位置 (百分比或像素)
+        x: "50%",
+        y: "40%",
+        width: 400,
+        height: 50,
         fontSize: "16px",
-        fontColor: "#fff176", // 亮黃色
-        bgColor: "rgba(45, 25, 15, 0.95)", // 深褐色背景
-        borderColor: "#8d6e63", // 淺褐色邊框
+        fontColor: "#fff176",
+        bgColor: "rgba(45, 25, 15, 0.95)",
+        borderColor: "#8d6e63",
         padding: "15px 40px",
-        duration: 3000 // 顯示時長 (毫秒)
+        duration: 1500
     },
     // 地圖資源標籤 (等級與數量)
     MapResourceLabels: {
@@ -72,15 +85,17 @@ export const UI_CONFIG = {
     },
     // 建築生產 HUD (小人圖示與進度條)
     ProductionHUD: {
-        barBg: "rgba(0,0,0,0.6)",       // 進度條背景
-        barFill: "#4caf50",             // 進度條填充色 (綠色)
-        barBlocked: "#f44336",          // 進度條受阻色 (紅色)
-        badgeBg: "#c62828",             // 隊列數量圓圈背景
+        width: 85,
+        height: 12,
+        barBg: "rgba(0,0,0,0.6)",
+        barFill: "#4caf50",
+        barBlocked: "#f44336",
+        badgeBg: "#c62828",
         popLimitText: {
             fontSize: "bold 10px Arial",
-            color: "#ff8a80",           // 淺粉紅
+            color: "#ff8a80",
             outlineColor: "rgba(0,0,0,0.8)",
-            offsetY: -10                  // 相對於進度條頂部的偏移
+            offsetY: -10
         }
     }
 };

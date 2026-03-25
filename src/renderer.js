@@ -163,7 +163,7 @@ export class AnimationRenderer {
         const maxPop = GameEngine.getMaxPopulation();
         const isPopFull = state.units.villagers.length >= maxPop;
         const progress = 1.0 - (state.villageProductionTimer / 5);
-        
+
         const bx = -(uw * TS) / 2 + 15;
         const by = (uh * TS) / 2 - 35;
 
@@ -182,7 +182,7 @@ export class AnimationRenderer {
             this.ctx.fillStyle = cfg.popLimitText.color;
             this.ctx.textAlign = "center";
             this.ctx.textBaseline = "middle";
-            
+
             // 移除厚重的描邊，改用更乾淨的文字顯示
             const popMsg = GameEngine.getMessage("2"); // ID 2: 人口已達上限
             this.ctx.fillText(popMsg, bx + 45 + 42, by + 12 + cfg.popLimitText.offsetY);

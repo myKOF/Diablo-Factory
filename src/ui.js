@@ -54,6 +54,9 @@ export class UIManager {
         const title = document.createElement("div");
         title.className = "title";
         title.innerText = bp.title;
+        title.style.fontSize = bp.titleSize;
+        title.style.color = bp.titleColor;
+        title.style.borderBottomColor = bp.titleColor;
         buildingPanel.appendChild(title);
 
         const listContainer = document.createElement("div");
@@ -121,8 +124,12 @@ export class UIManager {
         btn.style.cssText = `
             position: relative; height: ${bp.itemHeight}px; border: 1px solid #555;
             margin: 5px 0; padding: 10px; background: rgba(0,0,0,0.3);
+            color: ${bp.textColor}; font-size: ${bp.fontSize};
         `;
-        btn.innerHTML = `<strong>${item.name}</strong><br><small>${item.desc}</small>`;
+        btn.innerHTML = `
+            <strong style="color: ${bp.titleColor}">${item.name}</strong><br>
+            <small style="color: ${bp.descColor}">${item.desc}</small>
+        `;
 
         const icon = document.createElement("div");
         icon.className = "building-icon";
@@ -174,15 +181,15 @@ export class UIManager {
         const cfg = UI_CONFIG.WarningHUD;
         const warn = document.getElementById("warning_hint");
         if (!warn) return;
-        
+
         warn.innerText = msg;
         warn.style.display = "block";
-        
+
         warn.offsetHeight;
 
         warn.style.opacity = "1";
         warn.style.transform = "translate(-50%, -50%) scale(1)";
-        
+
         if (this.warnTimer) clearTimeout(this.warnTimer);
         this.warnTimer = setTimeout(() => {
             warn.style.opacity = "0";
@@ -302,9 +309,12 @@ export class UIManager {
 
     static showContextMenu(x, y) {
         const menu = document.getElementById("context_menu");
+        const cfg = UI_CONFIG.ActionMenu;
         menu.style.display = "flex";
-        menu.style.left = `${x}px`; menu.style.top = `${y}px`;
-        menu.style.width = "auto";
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+        menu.style.width = cfg.width + "px";
+        menu.style.height = cfg.height + "px";
         menu.innerHTML = `
             <div class="action-btn" id="cmd_WOOD" onclick="GameEngine.setCommand('WOOD')">
                 <span class="icon">🪓</span><span class="label">採集木材</span>
@@ -321,9 +331,11 @@ export class UIManager {
             <div class="action-btn" id="worker_btn" onclick="GameEngine.addToVillageQueue('villagers')">
                 <span class="icon">👤</span><span class="label">訓練工人</span>
                 <div id="queue_badge" class="queue-badge" style="display:none">0</div>
-                <div id="prod_progress" class="progress-bar-mini"></div>
             </div>
         `;
+
+        // 立即刷新一次 UI，確保狀態（如高亮、進度、警告）即時顯示
+        this.updateValues();
     }
 
     static hideContextMenu() {
@@ -357,9 +369,9 @@ export class UIManager {
             if (lp.innerHTML !== content) {
                 // 判斷使用者是否目前正停留在底部
                 const isAtBottom = lp.scrollHeight - lp.scrollTop - lp.clientHeight < 20;
-                
+
                 lp.innerHTML = content;
-                
+
                 // 只有在使用者本來就在底部的情況下，才自動捲動
                 if (isAtBottom) {
                     lp.scrollTop = lp.scrollHeight;
@@ -371,7 +383,7 @@ export class UIManager {
         const badge = document.getElementById("queue_badge");
         const prog = document.getElementById("prod_progress");
         const workerBtn = document.getElementById("worker_btn");
-        
+
         if (badge && prog) {
             const q = GameEngine.state.villageQueue.length;
             const maxPop = GameEngine.getMaxPopulation();
@@ -383,20 +395,9 @@ export class UIManager {
                 const p = (1 - GameEngine.state.villageProductionTimer / 5) * 100;
                 prog.style.width = `${p}%`;
                 prog.style.backgroundColor = isPopFull ? "#f44336" : "#4caf50";
-                
-                // 如果人口已滿，在按鈕標籤上顯示警告文字
-                if (isPopFull) {
-                    const label = workerBtn?.querySelector('.label');
-                    if (label) label.innerHTML = `<span style="color:#ff8a80; font-size:11px;">${GameEngine.getMessage("2")}</span>`;
-                } else {
-                    const label = workerBtn?.querySelector('.label');
-                    if (label) label.innerHTML = "訓練工人";
-                }
             } else {
                 badge.style.display = "none";
                 prog.style.width = "0%";
-                const label = workerBtn?.querySelector('.label');
-                if (label) label.innerHTML = "訓練工人";
             }
         }
         // 更新指令高亮狀態
@@ -407,6 +408,20 @@ export class UIManager {
                 else btn.classList.remove("active");
             }
         });
+
+        // 更新指令選單位置 (跟隨世界座標)
+        if (this.activeMenuEntity) {
+            const menu = document.getElementById("context_menu");
+            const cam = window.AnimationRenderer.camera;
+            const TS = GameEngine.TILE_SIZE;
+            
+            // 將 entity 世界座標轉為螢幕座標 (考慮 2x2 建築的中點偏移)
+            const sx = this.activeMenuEntity.x + cam.x + (TS); 
+            const sy = this.activeMenuEntity.y + cam.y + (TS * 2) + 10; 
+            
+            menu.style.left = `${sx}px`;
+            menu.style.top = `${sy}px`;
+        }
     }
 }
 

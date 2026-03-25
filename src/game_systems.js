@@ -49,6 +49,11 @@ export class GameEngine {
         this.lastTickTime = Date.now();
         this.initBackgroundWorker();
         setInterval(() => this.productionTick(), 1000);
+        
+        // UI 更新循環 (10Hz)
+        setInterval(() => {
+            if (window.UIManager) window.UIManager.updateValues();
+        }, 100);
     }
 
     static initBackgroundWorker() {
@@ -124,10 +129,28 @@ export class GameEngine {
         return { rows, headerIdx, headers: rows[headerIdx].map(h => h.trim().toLowerCase()) };
     }
 
+    static async fetchCSVText(url) {
+        try {
+            const resp = await fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now());
+            const buffer = await resp.arrayBuffer();
+            try {
+                // 優先使用 UTF-8 嚴格模式
+                return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+            } catch (e) {
+                // 失敗則回退至 Big5
+                console.warn(`UTF-8 解碼失敗 (${url})，切換至 Big5...`);
+                return new TextDecoder("big5").decode(buffer);
+            }
+        } catch (e) {
+            console.error(`讀取 CSV 失敗 (${url}):`, e);
+            return null;
+        }
+    }
+
     static async loadNPCConfig() {
         try {
-            const response = await fetch('/config/npc_data.csv?v=' + Date.now());
-            const data = this.parseCSV(await response.text());
+            const text = await this.fetchCSVText('/config/npc_data.csv');
+            const data = this.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
             const idxName = headers.indexOf('name'), 
@@ -149,8 +172,8 @@ export class GameEngine {
 
     static async loadSystemConfig() {
         try {
-            const response = await fetch('/config/system_config.csv?v=' + Date.now());
-            const data = this.parseCSV(await response.text());
+            const text = await this.fetchCSVText('/config/system_config.csv');
+            const data = this.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
             const idxType = headers.indexOf('type'), idxValue = headers.indexOf('value');
@@ -184,20 +207,7 @@ export class GameEngine {
 
     static async loadStringsConfig() {
         try {
-            const resp = await fetch('config/strings.csv?v=' + Date.now());
-            const buffer = await resp.arrayBuffer();
-            let text;
-            
-            try {
-                // 嘗試以 UTF-8 嚴格模式編碼 (fatal: true 會在遇到非 UTF-8 字元時拋出錯誤)
-                text = new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-                console.log("CSV 成功以 UTF-8 模式加載");
-            } catch (e) {
-                // 如果拋出錯誤，則強制使用 Big5 (繁體中文 ANSI)
-                console.warn("UTF-8 驗證失敗，切換至 Big5 編碼系統...");
-                text = new TextDecoder("big5").decode(buffer);
-            }
-
+            const text = await this.fetchCSVText('config/strings.csv');
             const data = this.parseCSV(text);
             if (data) {
                 const { rows, headerIdx, headers } = data;
@@ -231,8 +241,8 @@ export class GameEngine {
 
     static async loadResourceConfig() {
         try {
-            const response = await fetch('/config/resources_data.csv?v=' + Date.now());
-            const data = this.parseCSV(await response.text());
+            const text = await this.fetchCSVText('/config/resources_data.csv');
+            const data = this.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
             const idxName = headers.indexOf('name'), idxModel = headers.indexOf('model'), idxType = headers.indexOf('type'), idxYield = headers.indexOf('collection_speed'), idxDensity = headers.indexOf('density'), idxLv = headers.indexOf('lv');
@@ -251,8 +261,8 @@ export class GameEngine {
 
     static async loadBuildingConfig() {
         try {
-            const response = await fetch('/config/buildings.csv?v=' + Date.now());
-            const data = this.parseCSV(await response.text());
+            const text = await this.fetchCSVText('/config/buildings.csv');
+            const data = this.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
             const idxModel = headers.indexOf('model'), idxCol = headers.indexOf('collision'), idxSize = headers.indexOf('size'), idxPop = headers.indexOf('population'), idxNeed = headers.indexOf('need_resource'), idxName = headers.indexOf('name'), idxMax = headers.indexOf('max_count');
@@ -620,16 +630,11 @@ export class GameEngine {
         this.state.currentGlobalCommand = commandType;
         if (commandType === 'RETURN') {
             this.state.units.villagers.forEach(v => { v.state = 'MOVING_TO_BASE'; v.isRecalled = true; v.pathTarget = null; });
-            // UI 更新循環 (提高頻率至 10Hz 以實現即時反饋)
-            setInterval(() => {
-                if (window.UIManager) window.UIManager.updateValues();
-            }, 100);
+            if (window.UIManager) window.UIManager.updateValues();
             return;
         }
         this.addLog(`全員動員：開始採集 ${commandType}。`);
         this.state.units.villagers.forEach(v => { v.type = commandType; v.state = 'MOVING_TO_RESOURCE'; v.targetId = null; v.isRecalled = false; v.pathTarget = null; });
-        
-        // 立即刷新 UI
         if (window.UIManager) window.UIManager.updateValues();
     }
 
