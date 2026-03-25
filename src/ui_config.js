@@ -40,7 +40,9 @@ export const UI_CONFIG = {
     // 村莊底部指令快捷列 (採集、收工)
     ActionMenu: {
         width: 380,
-        height: 95
+        height: 95,
+        offsetX: 15, // 相對於建築中點的水平偏移
+        offsetY: 100  // 相對於建築中點的垂直偏移
     },
     // 日誌通知欄
     LogPanel: {

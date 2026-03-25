@@ -303,11 +303,12 @@ export class UIManager {
         if (clicked && clicked.type === 'village') {
             const screenX = clicked.x + cam.x;
             const screenY = clicked.y + cam.y + 110;
-            this.showContextMenu(screenX, screenY);
+            this.showContextMenu(clicked, screenX, screenY);
         }
     }
 
-    static showContextMenu(x, y) {
+    static showContextMenu(entity, x, y) {
+        this.activeMenuEntity = entity;
         const menu = document.getElementById("context_menu");
         const cfg = UI_CONFIG.ActionMenu;
         menu.style.display = "flex";
@@ -339,6 +340,7 @@ export class UIManager {
     }
 
     static hideContextMenu() {
+        this.activeMenuEntity = null;
         const menu = document.getElementById("context_menu");
         if (menu) menu.style.display = "none";
     }
@@ -408,16 +410,19 @@ export class UIManager {
                 else btn.classList.remove("active");
             }
         });
+    }
 
-        // 更新指令選單位置 (跟隨世界座標)
+    // 每一幀由渲染器調用，確保選單絕對同步 (60FPS)
+    static updateStickyPositions() {
         if (this.activeMenuEntity) {
             const menu = document.getElementById("context_menu");
             const cam = window.AnimationRenderer.camera;
             const TS = GameEngine.TILE_SIZE;
+            const cfg = UI_CONFIG.ActionMenu;
             
-            // 將 entity 世界座標轉為螢幕座標 (考慮 2x2 建築的中點偏移)
-            const sx = this.activeMenuEntity.x + cam.x + (TS); 
-            const sy = this.activeMenuEntity.y + cam.y + (TS * 2) + 10; 
+            // 將 entity 世界座標轉為螢幕座標 (加上設定的偏移量)
+            const sx = this.activeMenuEntity.x + cam.x + (cfg.offsetX || 0); 
+            const sy = this.activeMenuEntity.y + cam.y + (cfg.offsetY || 0); 
             
             menu.style.left = `${sx}px`;
             menu.style.top = `${sy}px`;

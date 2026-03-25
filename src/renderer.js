@@ -45,6 +45,7 @@ export class AnimationRenderer {
         this.drawPlacementPreview(); // 繪製放置預覽
         this.drawUnits();
         this.ctx.restore();
+        if (window.UIManager) window.UIManager.updateStickyPositions();
         requestAnimationFrame(() => this.renderLoop());
     }
 
