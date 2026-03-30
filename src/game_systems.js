@@ -8,7 +8,7 @@ export class GameEngine {
     static state = {
         resources: { healthPotion: 0, soul: 100, gold: 100, wood: 200, stone: 0, food: 0, mana: 0 },
         buildings: { village: 1, farmhouse: 0 },
-        units: { villagers: [], priest: 0, mage: 0, archmage: 0 },
+        units: { villagers: [], priest: 0, mage: 0, archmage: 0, swordsman: 0, archer: 0 },
         mapEntities: [],
         log: ["暗黑煉金工廠：末日準備中..."],
         npcConfigs: {},
@@ -468,12 +468,13 @@ export class GameEngine {
                         const canTake = Math.min(harvestTotal, v.targetId.amount);
                         v.targetId.amount -= canTake;
 
-                        // 如果是農田，直接入庫，不增加負重，不回村中心
-                        if (v.targetId.type === 'farmland') {
-                            this.state.resources.food += canTake;
+                        // 如果是農田或樹木田，直接入庫，不增加負重，不回村中心
+                        if (v.targetId.type === 'farmland' || v.targetId.type === 'tree_plantation') {
+                            if (v.targetId.type === 'farmland') this.state.resources.food += canTake;
+                            else if (v.targetId.type === 'tree_plantation') this.state.resources.wood += canTake;
+                            
                             v.cargo = 0;
                             v.gatherTimer = 0; // 重置計時器，原地繼續採集
-
                             if (v.targetId.amount <= 0) {
                                 this.addLog(`${v.targetId.name || '農田'} 已枯竭。`);
                                 this.state.mapEntities = this.state.mapEntities.filter(e => e !== v.targetId);
@@ -553,9 +554,9 @@ export class GameEngine {
                     const type = v.constructionTarget.type;
                     v.constructionTarget.name = this.state.buildingConfigs[type].name;
 
-                    // 如果是農田，初始化資源量並設為資源節點
-                    if (type === 'farmland') {
-                        v.constructionTarget.resourceType = 'FOOD';
+                    // 如果是農田或樹木田，初始化資源量並設為資源節點
+                    if (type === 'farmland' || type === 'tree_plantation') {
+                        v.constructionTarget.resourceType = (type === 'farmland' ? 'FOOD' : 'WOOD');
                         v.constructionTarget.amount = this.state.buildingConfigs[type].resourceValue || 500;
                     }
 
@@ -588,10 +589,11 @@ export class GameEngine {
                         v.state = 'MOVING_TO_RESOURCE';
                         v.targetId = null; v.pathTarget = null; v.prevTask = null;
                         this.addLog(`建造者已自動轉為 ${v.constructionTarget.name} 的專職員工。`);
-                    } else if (type === 'farmland') {
-                        // 農田建造完後，建造者直接原地開始採集，佔住坑位
-                        v.type = 'FOOD'; v.state = 'GATHERING'; v.targetId = v.constructionTarget; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null;
-                        this.addLog(`建造者 ${cfg.name} 開始原地耕作。`);
+                    } else if (type === 'farmland' || type === 'tree_plantation') {
+                        // 農田/樹木田建造完後，建造者直接原地開始採集，佔住坑位
+                        v.type = (type === 'farmland' ? 'FOOD' : 'WOOD'); 
+                        v.state = 'GATHERING'; v.targetId = v.constructionTarget; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null;
+                        this.addLog(`建造者開始原地${type === 'farmland' ? '耕作' : '伐木'}。`);
                     } else if (type === 'barn') {
                         v.type = 'FOOD'; v.state = 'MOVING_TO_RESOURCE'; v.targetId = null; v.pathTarget = null; v.prevTask = null;
                     } else {
@@ -884,8 +886,8 @@ export class GameEngine {
         let nearest = null; let minDist = Infinity;
         this.state.mapEntities.forEach(e => {
             if (e.resourceType === type) {
-                // 如果是農田，檢查是否已有其他工人在目標中 (鎖定坑位)
-                if (e.type === 'farmland') {
+                // 如果是農田或樹木田，檢查是否已有其他工人在目標中 (鎖定坑位)
+                if (e.type === 'farmland' || e.type === 'tree_plantation') {
                     const isOccupied = this.state.units.villagers.some(v =>
                         v.id !== villagerId && (v.targetId === e || v.constructionTarget === e)
                     );
@@ -1061,6 +1063,39 @@ export class GameEngine {
         this.addLog(`已加入生產隊列：${configName} (${this.state.villageQueue.length}/10)`);
 
         // 立即刷新 UI
+        if (window.UIManager) window.UIManager.updateValues();
+    }
+
+    static addToTrainingQueue(event, type) {
+        if (event && event.stopPropagation) event.stopPropagation();
+        
+        // 目前訓練為即時完成 (簡化邏輯)
+        const costs = {
+            mage: { gold: 50, food: 20 },
+            swordsman: { gold: 30, food: 30 },
+            archer: { gold: 30, food: 20 }
+        };
+
+        const cost = costs[type];
+        if (cost) {
+            for (let r in cost) {
+                if (this.state.resources[r] < cost[r]) {
+                    this.triggerWarning("1", [r.toUpperCase()]);
+                    return;
+                }
+            }
+            // 扣錢
+            for (let r in cost) {
+                this.state.resources[r] -= cost[r];
+            }
+            // 增加計數
+            if (this.state.units.hasOwnProperty(type)) {
+                this.state.units[type]++;
+                const typeName = type === 'mage' ? '法師' : (type === 'swordsman' ? '劍士' : '弓箭手');
+                this.addLog(`培訓成功：獲得一位新${typeName}！`);
+            }
+        }
+
         if (window.UIManager) window.UIManager.updateValues();
     }
 

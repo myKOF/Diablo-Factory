@@ -307,6 +307,43 @@ export class MainScene extends Phaser.Scene {
                 }
             }
             g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+        } else if (ent.type === 'tree_plantation') {
+            g.fillStyle(0x1b5e20, finalAlpha); // 深森林綠
+            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.lineStyle(2, 0x0a3d0d, finalAlpha);
+            // 畫幾棵小樹符號
+            for(let i = -1; i <= 1; i++) {
+                for(let j = -1; j <= 1; j++) {
+                    g.fillStyle(0x2e7d32, finalAlpha);
+                    g.fillCircle(ent.x + i*25, ent.y + j*25, 12);
+                }
+            }
+            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+        } else if (ent.type === 'mage_place') {
+            g.fillStyle(0x4a148c, finalAlpha); // 深紫色 (奧術)
+            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.lineStyle(2, 0xe1f5fe, finalAlpha); // 淺藍流光邊
+            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            // 頂部裝飾
+            g.fillStyle(0xffd600, finalAlpha);
+            g.fillCircle(ent.x, ent.y, 20);
+        } else if (ent.type === 'swordsman_place') {
+            g.fillStyle(0x455a64, finalAlpha); // 鋼鐵灰
+            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.lineStyle(2, 0xf44336, finalAlpha); // 戰鬥紅
+            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            // 訓練靶子
+            g.fillStyle(0xffccbc, finalAlpha);
+            g.fillRect(ent.x - 10, ent.y - 10, 20, 20);
+        } else if (ent.type === 'archer_place') {
+            g.fillStyle(0x795548, finalAlpha); // 木質棕
+            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.lineStyle(2, 0xffeb3b, finalAlpha); // 靶標黃
+            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            // 靶心符號
+            g.lineStyle(2, 0xf44336, finalAlpha);
+            g.strokeCircle(ent.x, ent.y, 15);
+            g.strokeCircle(ent.x, ent.y, 5);
         } else if (ent.type === 'campfire') {
             g.fillStyle(0xff5722, finalAlpha);
             g.fillCircle(ent.x, ent.y, 15);

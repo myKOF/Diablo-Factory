@@ -54,40 +54,40 @@ export class UIManager {
         this.uiLayer.innerHTML = "";
 
         // 1. 資源列
-        const rb = UI_CONFIG.ResourceBar;
+        const rbCfg = UI_CONFIG.ResourceBar;
         const resourceBar = document.createElement("div");
         resourceBar.className = "panel";
-        resourceBar.style.cssText = `
-            position: absolute; left: ${rb.x}px; top: ${rb.y}px;
-            width: ${rb.width}px; height: ${rb.height}px;
-            font-size: ${rb.fontSize}; color: ${rb.fontColor};
-            display: flex; align-items: center; justify-content: space-around;
-            pointer-events: auto;
-        `;
         resourceBar.id = "resource_bar";
+        this.applyAnchorStyle(resourceBar, rbCfg);
+        
+        // 額外樣式設定
+        resourceBar.style.fontSize = rbCfg.fontSize;
+        resourceBar.style.color = rbCfg.fontColor;
+        resourceBar.style.display = "flex";
+        resourceBar.style.alignItems = "center";
+        resourceBar.style.justifyContent = "space-around";
+        resourceBar.style.pointerEvents = "auto";
+        
         this.uiLayer.appendChild(resourceBar);
 
         // 2. 建築面板
-        const bp = UI_CONFIG.BuildingPanel;
+        const bpCfg = UI_CONFIG.BuildingPanel;
         const buildingPanel = document.createElement("div");
         buildingPanel.className = "panel";
-        buildingPanel.style.cssText = `
-            position: absolute; left: ${bp.x}px; top: ${bp.y}px;
-            width: ${bp.width}px; height: ${bp.height}px;
-            pointer-events: auto;
-        `;
+        this.applyAnchorStyle(buildingPanel, bpCfg);
+        buildingPanel.style.pointerEvents = "auto";
 
         const title = document.createElement("div");
         title.className = "title";
-        title.innerText = bp.title;
-        title.style.fontSize = bp.titleSize;
-        title.style.color = bp.titleColor;
-        title.style.borderBottomColor = bp.titleColor;
+        title.innerText = bpCfg.title;
+        title.style.fontSize = bpCfg.titleSize;
+        title.style.color = bpCfg.titleColor;
+        title.style.borderBottomColor = bpCfg.titleColor;
         buildingPanel.appendChild(title);
 
         const listContainer = document.createElement("div");
         listContainer.id = "building_list";
-        this.refreshBuildingList(listContainer, bp);
+        this.refreshBuildingList(listContainer, bpCfg);
 
         buildingPanel.appendChild(listContainer);
         this.uiLayer.appendChild(buildingPanel);
@@ -97,25 +97,86 @@ export class UIManager {
         const logPanel = document.createElement("div");
         logPanel.id = "log_panel";
         logPanel.className = "panel";
-        logPanel.style.cssText = `
-            position: absolute; left: ${logCfg.x}px; top: ${logCfg.y}px;
-            width: ${logCfg.width}px; height: ${logCfg.height}px;
-            background: ${logCfg.bgColor}; color: #e0f2f1;
-            padding: ${logCfg.padding}; border: 1.5px solid ${logCfg.borderColor};
-            font-size: ${logCfg.fontSize}; font-family: 'Courier New', monospace;
-            display: flex; flex-direction: column;
-            overflow-y: auto; pointer-events: auto;
-            box-sizing: border-box;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-        `;
+        this.applyAnchorStyle(logPanel, logCfg);
+        
+        logPanel.style.background = logCfg.bgColor;
+        logPanel.style.color = "#e0f2f1";
+        logPanel.style.padding = logCfg.padding;
+        logPanel.style.border = `1.5px solid ${logCfg.borderColor}`;
+        logPanel.style.fontSize = logCfg.fontSize;
+        logPanel.style.fontFamily = "'Courier New', monospace";
+        logPanel.style.display = "flex";
+        logPanel.style.flexDirection = "column";
+        logPanel.style.overflowY = "auto";
+        logPanel.style.pointerEvents = "auto";
+        logPanel.style.boxSizing = "border-box";
+        
         this.uiLayer.appendChild(logPanel);
 
-        // 4. 指令選單
+        // 4. 指令選單 (智慧定位，暫不使用固定錨點)
         const menu = document.createElement("div");
         menu.id = "context_menu";
         menu.className = "panel";
-        menu.style.cssText = `position: absolute; display: none; width: 200px; padding: 10px; z-index: 1000; pointer-events: auto;`;
+        menu.style.cssText = `position: absolute; display: none; width: 220px; padding: 10px; z-index: 1000; pointer-events: auto;`;
         this.uiLayer.appendChild(menu);
+    }
+
+    /**
+     * 套用錨點對齊樣式
+     */
+    static applyAnchorStyle(el, cfg) {
+        if (!cfg || !cfg.anchor) return;
+        
+        el.style.position = "absolute";
+        const offX = cfg.offsetX || 0;
+        const offY = cfg.offsetY || 0;
+        
+        // 重置可能的樣式
+        el.style.left = el.style.right = el.style.top = el.style.bottom = el.style.transform = "";
+
+        switch (cfg.anchor) {
+            case "TOP_LEFT":
+                el.style.left = `${offX}px`;
+                el.style.top = `${offY}px`;
+                break;
+            case "TOP_CENTER":
+                el.style.left = "50%";
+                el.style.top = `${offY}px`;
+                el.style.transform = `translateX(-50%)`;
+                if (offX) el.style.marginLeft = `${offX}px`;
+                break;
+            case "TOP_RIGHT":
+                el.style.right = `${offX}px`;
+                el.style.top = `${offY}px`;
+                break;
+            case "BOTTOM_LEFT":
+                el.style.left = `${offX}px`;
+                el.style.bottom = `${offY}px`;
+                break;
+            case "BOTTOM_CENTER":
+                el.style.left = "50%";
+                el.style.bottom = `${offY}px`;
+                el.style.transform = `translateX(-50%)`;
+                if (offX) el.style.marginLeft = `${offX}px`;
+                break;
+            case "BOTTOM_RIGHT":
+                el.style.right = `${offX}px`;
+                el.style.bottom = `${offY}px`;
+                break;
+            case "CENTER":
+                el.style.left = "50%";
+                el.style.top = "50%";
+                el.style.transform = `translate(-50%, -50%)`;
+                if (offX || offY) el.style.transform += ` translate(${offX}px, ${offY}px)`;
+                break;
+        }
+        
+        if (cfg.width) el.style.width = typeof cfg.width === 'number' ? `${cfg.width}px` : cfg.width;
+        if (cfg.height) el.style.height = typeof cfg.height === 'number' ? `${cfg.height}px` : cfg.height;
+        
+        // 進階美化
+        if (cfg.glass) el.classList.add("glass-panel");
+        if (cfg.shadow) el.style.boxShadow = cfg.shadow;
     }
 
     static refreshBuildingList(container, bp) {
@@ -129,10 +190,15 @@ export class UIManager {
         const buildingIcons = {
             town_center: "🏰", village: "🏘️", farmhouse: "🏡",
             timber_factory: "🪵", stone_factory: "⛏️", barn: "🌾",
-            farmland: "🌱", alchemy_lab: "⚗️", cathedral: "⛪", academy: "🧙"
+            farmland: "🌱", alchemy_lab: "⚗️", cathedral: "⛪", academy: "🧙",
+            tree_plantation: "🌳", mage_place: "🧙", swordsman_place: "⚔️", archer_place: "🏹"
         };
 
-        Object.values(configs).forEach(cfg => {
+        // 改為從 bp.list 讀取，確保順序與顯示內容正確
+        bp.list.forEach(listItem => {
+            const cfg = configs[listItem.id];
+            if (!cfg) return;
+
             const currentCount = GameEngine.state.mapEntities.filter(e => e.type === cfg.model).length;
 
             const costStr = [];
@@ -143,9 +209,9 @@ export class UIManager {
 
             const item = {
                 id: cfg.model,
-                name: cfg.name,
+                name: listItem.name || cfg.name,
                 icon: buildingIcons[cfg.model] || "🏗️",
-                desc: `增加 ${cfg.population} 人口 (目前: ${currentCount}/${cfg.maxCount})<br>消耗: ${costStr.join(' ')}`
+                desc: `${listItem.desc || cfg.desc}<br>消耗: ${costStr.join(' ')}`
             };
             this.createBuildingBtn(container, bp, item);
         });
@@ -209,28 +275,26 @@ export class UIManager {
         const cfg = UI_CONFIG.WarningHUD;
         const warn = document.createElement("div");
         warn.id = "warning_hint";
-        warn.style.cssText = `
-            position: fixed; 
-            left: 50%; top: ${cfg.y};
-            transform: translate(-50%, -50%) scale(0.9);
-            color: ${cfg.fontColor};
-            font-size: ${cfg.fontSize};
-            font-weight: 600;
-            background: ${cfg.bgColor};
-            border: 2px solid ${cfg.borderColor};
-            padding: ${cfg.padding};
-            border-radius: 4px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.8), inset 0 0 10px rgba(255,255,255,0.05);
-            pointer-events: none; 
-            opacity: 0; 
-            transition: all 0.3s cubic-bezier(0.19, 1, 0.22, 1);
-            z-index: 99999; 
-            text-align: center; 
-            min-width: 300px;
-            display: none;
-            font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
-            letter-spacing: 1px;
-        `;
+        
+        this.applyAnchorStyle(warn, cfg);
+        
+        warn.style.color = cfg.fontColor;
+        warn.style.fontSize = cfg.fontSize;
+        warn.style.fontWeight = "600";
+        warn.style.background = cfg.bgColor;
+        warn.style.border = `2px solid ${cfg.borderColor}`;
+        warn.style.padding = cfg.padding;
+        warn.style.borderRadius = "8px";
+        warn.style.pointerEvents = "none";
+        warn.style.opacity = "0";
+        warn.style.transition = "all 0.4s cubic-bezier(0.19, 1, 0.22, 1)";
+        warn.style.zIndex = "99999";
+        warn.style.textAlign = "center";
+        warn.style.minWidth = "300px";
+        warn.style.display = "none";
+        warn.style.fontFamily = "'Outfit', 'Inter', sans-serif";
+        warn.style.letterSpacing = "1px";
+        
         document.body.appendChild(warn);
     }
 
@@ -290,8 +354,13 @@ export class UIManager {
     }
 
     static getWorldMousePos(clientX, clientY) {
+        // 先將螢幕座標轉換為遊戲容器內的虛擬座標 (考慮到 transform: scale)
+        const local = this.getLocalMouse({ clientX, clientY });
+
         const scene = window.PhaserScene;
-        const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
+        // Phaser 的相機座標本身就在世界空間，我們需要加上相機位置來獲取世界座標
+        // Phaser 相機 scrollX 為正值時表示畫面往右移，所以在世界空間中座標 = local + scroll
+        const cam = scene ? { x: scene.cameras.main.scrollX, y: scene.cameras.main.scrollY } : { x: 0, y: 0 };
         const TS = GameEngine.TILE_SIZE;
         const cfg = GameEngine.state.buildingConfigs[this.activeBuilding];
 
@@ -304,8 +373,8 @@ export class UIManager {
         const offsetX = (uw % 2 === 0) ? 0 : TS / 2;
         const offsetY = (uh % 2 === 0) ? 0 : TS / 2;
 
-        const gx = Math.round((clientX - cam.x - offsetX) / TS);
-        const gy = Math.round((clientY - cam.y - offsetY) / TS);
+        const gx = Math.round((local.x + cam.x - offsetX) / TS);
+        const gy = Math.round((local.y + cam.y - offsetY) / TS);
 
         return {
             x: gx * TS + offsetX,
@@ -499,6 +568,22 @@ export class UIManager {
                 `;
             }
 
+            // 訓練中心界面 (魔法學院、劍士訓練所、射箭場)
+            const trainingConfigs = {
+                mage_place: { type: 'mage', icon: '🧙', label: '招募法師' },
+                swordsman_place: { type: 'swordsman', icon: '⚔️', label: '訓練劍士' },
+                archer_place: { type: 'archer', icon: '🏹', label: '招募弓箭手' }
+            };
+
+            if (trainingConfigs[entity.type] && !entity.isUnderConstruction) {
+                const trainCfg = trainingConfigs[entity.type];
+                html += `
+                    <button class="action-btn" onclick="window.GameEngine.addToTrainingQueue(event, '${trainCfg.type}')">
+                        <span class="icon">${trainCfg.icon}</span><span class="label">${trainCfg.label}</span>
+                    </button>
+                `;
+            }
+
             // 倉庫自動化管理介面
             const isWarehouse = ['timber_factory', 'stone_factory', 'barn'].includes(entity.type);
             if (isWarehouse && !entity.isUnderConstruction) {
@@ -676,17 +761,22 @@ export class UIManager {
         });
     }
 
-    // 每一幀由渲染器調用，確保選單絕對同步 (60FPS)
     static updateStickyPositions() {
         if (this.activeMenuEntity) {
             const menu = document.getElementById("context_menu");
             const scene = window.PhaserScene;
-            const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
+            const cam = scene ? { x: scene.cameras.main.scrollX, y: scene.cameras.main.scrollY } : { x: 0, y: 0 };
             const cfg = UI_CONFIG.ActionMenu;
 
-            // 基礎螢幕中心位置
-            let sx = this.activeMenuEntity.x + cam.x;
-            let sy = this.activeMenuEntity.y + cam.y;
+            // 取得全域縮放比例與位移
+            const container = document.getElementById("game_container");
+            const rect = container ? container.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+            const scaleX = rect.width / 1920;
+            const scaleY = rect.height / 1080;
+
+            // 基礎螢幕中心位置 (將虛擬世界座標轉換為實際螢幕座標)
+            let sx = (this.activeMenuEntity.x - cam.x) * scaleX + rect.left;
+            let sy = (this.activeMenuEntity.y - cam.y) * scaleY + rect.top;
 
             // 取得選單寬高 (動態抓取，若尚未渲染則使用配置預設值)
             const menuWidth = menu.offsetWidth || cfg.width || 380;
@@ -694,20 +784,20 @@ export class UIManager {
             const screenWidth = window.innerWidth;
             const screenHeight = window.innerHeight;
 
-            // 智慧偏置計算
-            let finalX = sx + (cfg.offsetX || 0);
-            let finalY = sy + (cfg.offsetY || 0);
+            // 智慧偏置計算 (偏置量也跟隨縮放)
+            let finalX = sx + (cfg.offsetX || 0) * scaleX;
+            let finalY = sy + (cfg.offsetY || 0) * scaleY;
 
             // --- 邊界檢查與反向邏輯 ---
             
             // 1. 水平檢查：如果右側超出，改往左顯示
             if (finalX + menuWidth > screenWidth - 20) {
-                finalX = sx - menuWidth - (cfg.offsetX || 15);
+                finalX = sx - menuWidth - (cfg.offsetX || 15) * scaleX;
             }
             
             // 2. 垂直檢查：如果底部超出，改往上顯示 (建築上方)
             if (finalY + menuHeight > screenHeight - 20) {
-                finalY = sy - menuHeight - (cfg.offsetY || 100);
+                finalY = sy - menuHeight - (cfg.offsetY || 100) * scaleY;
             }
 
             // 3. 全域安全區域確保 (防止被頂部資源列或左側面板蓋住)
