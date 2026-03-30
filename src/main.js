@@ -1,5 +1,5 @@
 import { GameEngine } from "./game_systems.js";
-import { AnimationRenderer } from "./renderer.js";
+import { PhaserRenderer } from "./phaser_renderer.js";
 import { UIManager } from "./ui.js";
 
 /**
@@ -31,8 +31,7 @@ async function initGame() {
     console.log("暗黑煉金工廠：核心模組加載中...");
 
     // 1. 初始化渲染系統
-    window.AnimationRenderer = AnimationRenderer;
-    AnimationRenderer.init();
+    PhaserRenderer.init();
 
     // 2. 初始化 UI 管理器
     UIManager.init();

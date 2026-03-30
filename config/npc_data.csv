@@ -1,4 +1,4 @@
-﻿編號,名稱,外觀模型,類型,所需資源,移動速度(像素格/秒),採集速度(秒),中文注釋說明，參考用
-id,name,model,type,need_resource,speed,collection_speed,annotation
-1,villagers,meles,villagers,{food=20},15,3,村民NPC
-2,female villagers,female,villagers,{food=20},15,3,村民NPC
+﻿編號,名稱,外觀模型,類型,所需資源,移動速度(像素格/秒),採集速度(秒),每次採集資源量,中文注釋說明，參考用
+id,name,model,type,need_resource,speed,collection_speed,collection_resource,annotation
+1,villagers,meles,villagers,{food=20},15,3,5,村民NPC
+2,female villagers,female,villagers,{food=20},15,3,5,村民NPC

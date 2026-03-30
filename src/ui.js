@@ -215,7 +215,8 @@ export class UIManager {
         this.dragGhost.style.left = `${e.clientX - 20}px`;
         this.dragGhost.style.top = `${e.clientY - 20}px`;
 
-        const cam = window.AnimationRenderer.camera;
+        const scene = window.PhaserScene;
+        const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
         const TS = GameEngine.TILE_SIZE;
         const cfg = GameEngine.state.buildingConfigs[this.activeBuilding];
 
@@ -269,26 +270,18 @@ export class UIManager {
     }
 
     static handleWorldClick(e) {
-        // 策略：先根據點擊點決定是否關閉，再判斷是否打開
-
-        // 如果點擊的是按鈕，不做任何處理 (按鈕內部的 onclick 會執行工作)
-        if (e.target.closest(".action-btn")) return;
+        if (e.target.closest("#context_menu")) return;
 
         // 如果點擊的是 UI 以外的地方，先無條件關閉選單
-        const wasOpen = document.getElementById("context_menu")?.style.display !== "none";
         this.hideContextMenu();
-
-        // 如果點擊的是 UI 其它區域（如面板背景、資源列），則到此為止 (已關閉)
         if (e.target.closest(".panel")) return;
-
-        // 如果目前是建造模式，點擊大地圖是為了建造，不處理選單
         if (this.dragGhost) return;
 
         const local = this.getLocalMouse(e);
-        const cam = window.AnimationRenderer.camera;
+        const scene = window.PhaserScene;
+        const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
         const entities = GameEngine.state.mapEntities;
 
-        // 偵測是否點擊了村莊
         const clicked = entities.find(ent => {
             const cfg = GameEngine.state.buildingConfigs[ent.type];
             if (!cfg) return false;
@@ -296,47 +289,155 @@ export class UIManager {
             const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE;
             const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
             const mx = local.x - cam.x, my = local.y - cam.y;
-            // 點擊判定稍微縮減 5 像素，避免邊緣模糊判定
             return mx > ent.x - w / 2 + 5 && mx < ent.x + w / 2 - 5 && my > ent.y - h / 2 + 5 && my < ent.y + h / 2 - 5;
         });
 
-        if (clicked && clicked.type === 'village') {
+        if (clicked) {
             const screenX = clicked.x + cam.x;
             const screenY = clicked.y + cam.y + 110;
             this.showContextMenu(clicked, screenX, screenY);
         }
     }
 
-    static showContextMenu(entity, x, y) {
+    static showContextMenu(entity, x, y, isConfirming = false) {
         this.activeMenuEntity = entity;
         const menu = document.getElementById("context_menu");
         const cfg = UI_CONFIG.ActionMenu;
+
         menu.style.display = "flex";
+        menu.style.flexDirection = "column";
         menu.style.left = `${x}px`;
         menu.style.top = `${y}px`;
-        menu.style.width = cfg.width + "px";
-        menu.style.height = cfg.height + "px";
-        menu.innerHTML = `
-            <div class="action-btn" id="cmd_WOOD" onclick="GameEngine.setCommand('WOOD')">
-                <span class="icon">🪓</span><span class="label">採集木材</span>
-            </div>
-            <div class="action-btn" id="cmd_STONE" onclick="GameEngine.setCommand('STONE')">
-                <span class="icon">⛏️</span><span class="label">採集石頭</span>
-            </div>
-            <div class="action-btn" id="cmd_FOOD" onclick="GameEngine.setCommand('FOOD')">
-                <span class="icon">🧺</span><span class="label">採集食物</span>
-            </div>
-            <div class="action-btn" id="cmd_RETURN" onclick="GameEngine.setCommand('RETURN')">
-                <span class="icon">🏘️</span><span class="label">全員收工</span>
-            </div>
-            <div class="action-btn" id="worker_btn" onclick="GameEngine.addToVillageQueue('villagers')">
-                <span class="icon">👤</span><span class="label">訓練工人</span>
-                <div id="queue_badge" class="queue-badge" style="display:none">0</div>
-            </div>
-        `;
+        menu.style.width = "auto";
+        menu.style.minWidth = "200px";
+        menu.style.height = "auto";
+        menu.style.padding = "10px";
 
-        // 立即刷新一次 UI，確保狀態（如高亮、進度、警告）即時顯示
+        let name = entity.isUnderConstruction ? "施工中的建築" : (entity.name || entity.type);
+        let headerColor = isConfirming ? "#ff8a80" : "#ffcc8c";
+        let headerBorder = isConfirming ? "1px solid #c62828" : "1px solid #8b6e4b";
+        let headerText = isConfirming ? `確定銷毀 ${name} 並退還 50%？` : name;
+
+        let html = `<div style="text-align:center; padding:5px; border-bottom:${headerBorder}; margin-bottom:10px; color:${headerColor}; font-weight:bold; font-size:16px;">${headerText}</div>`;
+
+        html += `<div style="display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; justify-content:center;">`;
+
+        const eid = entity.id || `${entity.type}_${entity.x}_${entity.y}`;
+
+        if (isConfirming) {
+            // 確認銷毀模式
+            html += `
+                <button class="action-btn danger" onclick="window.UIManager.actualDestroy(event, '${eid}')" style="pointer-events: auto;">
+                    <span class="icon">✔️</span><span class="label">確定銷毀</span>
+                </button>
+                <button class="action-btn" onclick="window.UIManager.cancelDestroy(event)" style="pointer-events: auto;">
+                    <span class="icon">❌</span><span class="label">取消</span>
+                </button>
+            `;
+        } else {
+            // 一般模式
+            if (entity.type === 'town_center' || entity.type === 'village') {
+                html += `
+                    <button class="action-btn" id="cmd_WOOD" onclick="window.GameEngine.setCommand(event, 'WOOD')">
+                        <span class="icon">🪓</span><span class="label">採集木材</span>
+                    </button>
+                    <button class="action-btn" id="cmd_STONE" onclick="window.GameEngine.setCommand(event, 'STONE')">
+                        <span class="icon">⛏️</span><span class="label">採集石頭</span>
+                    </button>
+                    <button class="action-btn" id="cmd_FOOD" onclick="window.GameEngine.setCommand(event, 'FOOD')">
+                        <span class="icon">🧺</span><span class="label">採集食物</span>
+                    </button>
+                    <button class="action-btn" id="cmd_RETURN" onclick="window.GameEngine.setCommand(event, 'RETURN')">
+                        <span class="icon">🏘️</span><span class="label">收工</span>
+                    </button>
+                    <button class="action-btn" id="worker_btn" onclick="window.GameEngine.addToVillageQueue(event, 'villagers')">
+                        <span class="icon">👤</span><span class="label">訓練</span>
+                        <div id="queue_badge" class="queue-badge" style="display:none">0</div>
+                        <div id="prod_progress" class="progress-bar-mini"></div>
+                    </button>
+                `;
+            }
+
+            // 倉庫自動化管理介面
+            const isWarehouse = ['timber_factory', 'stone_factory', 'barn'].includes(entity.type);
+            if (isWarehouse && !entity.isUnderConstruction) {
+                const currentAssigned = GameEngine.state.units.villagers.filter(v => v.assignedWarehouseId === eid).length;
+                html += `
+                    <div class="warehouse-controls">
+                        <div class="control-title">自動化採集管理</div>
+                        <div class="control-row">
+                            <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)">-</button>
+                            <span class="count-display">${currentAssigned} / ${entity.targetWorkerCount || 0}</span>
+                            <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, 1)">+</button>
+                        </div>
+                        <div class="status-hint">派遣狀態</div>
+                    </div>
+                `;
+            }
+
+            // 限制：如果是最後一間「村莊中心」，不顯示銷毀選項
+            const villageCount = GameEngine.state.mapEntities.filter(e => e.type === 'town_center' || e.type === 'village').length;
+            const isLastVillage = (entity.type === 'town_center' || entity.type === 'village') && villageCount <= 1;
+
+            if (!isLastVillage) {
+                html += `
+                    <button class="action-btn danger" onclick="window.UIManager.confirmDestroy(event)">
+                        <span class="icon">💣</span><span class="label">銷毀</span>
+                    </button>
+                `;
+            }
+        }
+
+        html += `</div>`;
+
+        menu.innerHTML = html;
         this.updateValues();
+    }
+
+    static confirmDestroy(event) {
+        if (event) event.stopPropagation();
+        const ent = this.activeMenuEntity;
+        if (!ent) return;
+        
+        // 切換到確認模式
+        const scene = window.PhaserScene;
+        const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
+        this.showContextMenu(ent, ent.x + cam.x, ent.y + cam.y + 110, true);
+    }
+
+    static cancelDestroy(event) {
+        if (event) event.stopPropagation();
+        const ent = this.activeMenuEntity;
+        if (!ent) return;
+        
+        // 切換回一般模式
+        const scene = window.PhaserScene;
+        const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
+        this.showContextMenu(ent, ent.x + cam.x, ent.y + cam.y + 110, false);
+    }
+
+    static actualDestroy(event, eid) {
+        if (event) event.stopPropagation();
+        
+        // 使用 ID 查找實體，確保引用最新
+        const ent = GameEngine.state.mapEntities.find(e => {
+            const id = e.id || `${e.type}_${e.x}_${e.y}`;
+            return id === eid;
+        });
+
+        if (!ent) {
+            console.error("找不到待銷毀的實體:", eid);
+            return;
+        }
+        
+        // 呼叫引擎執行銷毀
+        GameEngine.destroyBuilding(ent);
+    }
+
+    static adjustWorkers(event, delta) {
+        if (event) event.stopPropagation();
+        if (!this.activeMenuEntity) return;
+        GameEngine.adjustWarehouseWorkers(this.activeMenuEntity, delta);
     }
 
     static hideContextMenu() {
@@ -402,6 +503,17 @@ export class UIManager {
                 prog.style.width = "0%";
             }
         }
+
+        // 更新區域：倉庫自動化管理
+        const countDisplay = document.querySelector(".count-display");
+        const statusHint = document.querySelector(".status-hint");
+        if (countDisplay && statusHint && this.activeMenuEntity) {
+            const ent = this.activeMenuEntity;
+            const current = GameEngine.state.units.villagers.filter(v => v.assignedWarehouseId === (ent.id || `${ent.type}_${ent.x}_${ent.y}`)).length;
+            countDisplay.innerText = `${current} / ${ent.targetWorkerCount || 0}`;
+            statusHint.innerText = `派遣狀態`;
+        }
+
         // 更新指令高亮狀態
         ['WOOD', 'STONE', 'FOOD', 'RETURN'].forEach(cmd => {
             const btn = document.getElementById(`cmd_${cmd}`);
@@ -416,14 +528,15 @@ export class UIManager {
     static updateStickyPositions() {
         if (this.activeMenuEntity) {
             const menu = document.getElementById("context_menu");
-            const cam = window.AnimationRenderer.camera;
+            const scene = window.PhaserScene;
+            const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
             const TS = GameEngine.TILE_SIZE;
             const cfg = UI_CONFIG.ActionMenu;
-            
+
             // 將 entity 世界座標轉為螢幕座標 (加上設定的偏移量)
-            const sx = this.activeMenuEntity.x + cam.x + (cfg.offsetX || 0); 
-            const sy = this.activeMenuEntity.y + cam.y + (cfg.offsetY || 0); 
-            
+            const sx = this.activeMenuEntity.x + cam.x + (cfg.offsetX || 0);
+            const sy = this.activeMenuEntity.y + cam.y + (cfg.offsetY || 0);
+
             menu.style.left = `${sx}px`;
             menu.style.top = `${sy}px`;
         }

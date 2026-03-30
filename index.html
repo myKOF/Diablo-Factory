@@ -18,11 +18,12 @@
             document.body.appendChild(debug);
         };
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
 </head>
 <body>
     <div id="game_container">
-        <!-- 底層：動畫渲染層 -->
-        <canvas id="fx_canvas"></canvas>
+        <!-- 底層：動畫渲染層 (由 Phaser 接管) -->
+        <div id="phaser_container"></div>
         
         <!-- 上層：UI 互動層 -->
         <div id="ui_layer"></div>

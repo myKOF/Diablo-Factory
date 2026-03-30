@@ -68,22 +68,38 @@ export const UI_CONFIG = {
         padding: "15px 40px",
         duration: 1500
     },
-    // 地圖資源標籤 (等級與數量)
+    // 地圖資源標籤 (名稱、等級與數量)
     MapResourceLabels: {
+        name: {
+            fontSize: "bold 14px Arial", // 名稱字型
+            color: "#ffffff",           // 白色
+            offsetY: -25,               // 資源上方
+            outlineColor: "rgba(0,0,0,0.8)",
+            outlineWidth: 3
+        },
         level: {
-            fontSize: "bold 12px Arial", // 文字大小與字型
-            color: "#fff176",           // 文字顏色 (亮黃色)
-            offsetY: 0,               // 垂直偏移 (負值向上，顯示在資源上方)
-            outlineColor: "rgba(0,0,0,0.8)", // 描邊顏色 (深色背景增加辨識度)
-            outlineWidth: 3             // 描邊寬度
+            fontSize: "bold 11px Arial", // 等級字型
+            color: "#fff176",           // 亮黃色
+            offsetY: 25,                 // 資源下方一點
+            outlineColor: "rgba(0,0,0,0.8)",
+            outlineWidth: 2
         },
         amount: {
-            fontSize: "bold 13px Arial", // 文字大小與字型
-            color: "#ffffff",           // 文字顏色 (白色)
-            offsetY: 25,                // 垂直偏移 (正值向下，顯示在資源下方)
-            outlineColor: "rgba(0,0,0,0.8)", // 描邊顏色
-            outlineWidth: 3             // 描邊寬度
+            fontSize: "bold 13px Arial", // 數量字型
+            color: "#81d4fa",           // 淺藍色 (與 ResourceBar 區分)
+            offsetY: 0,                // 資源更下方
+            outlineColor: "rgba(0,0,0,0.8)",
+            outlineWidth: 3
         }
+    },
+    // 建築施工進度條
+    BuildingProgressBar: {
+        widthScale: 1.0,        // 寬度相對於建築寬度的比例
+        height: 8,              // 高度
+        offsetY: 75,           // 垂直偏移 (建築頂部上方)
+        bgColor: "rgba(51, 51, 51, 1)", // 背景色
+        fillColor: "rgba(0, 255, 34, 0.83)",   // 填充色 (建造中用黃色)
+        outlineColor: "#020000ff" // 邊框顏色
     },
     // 建築生產 HUD (小人圖示與進度條)
     ProductionHUD: {
@@ -99,5 +115,14 @@ export const UI_CONFIG = {
             outlineColor: "rgba(0,0,0,0.8)",
             offsetY: -10
         }
+    },
+    // 村民狀態顏色
+    VillagerColors: {
+        IDLE: "#2d5effff",          // 閒置：亮藍色
+        CONSTRUCTING: "#da9603ff",  // 施工中：土黃色
+        WOOD: "#4fc532ff",          // 採木：綠色
+        STONE: "#687175ff",         // 採石：深灰色
+        FOOD: "#ec6250ff",          // 採糧：紅色
+        DEFAULT: "#2d5effff"        // 預設：深藍色
     }
 };

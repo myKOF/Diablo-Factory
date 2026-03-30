@@ -1,7 +1,8 @@
-編號,名稱,模型,建築類型,建造上限,尺寸,碰撞開關,人口提供,所需資源,注釋說明
-id,name,model,type,max_count,size,collision,population,need_resource,annotation
-1,村莊中心,village,village,1,"{2,2}",1,5,{food=100},城鎮中心：提供基礎人口上限與訓練工人
-2,農舍,farmhouse,farmhouse,10,"{1,1}",1,3,"{food=20,wood=20}",農舍：增加 3 人口上限
-,,,,,,,,,
-,,,,,,,,,
-,,,,,,,,,
+編號,名稱,模型,建築類型,建造上限,尺寸,碰撞開關,人口提供,所需資源,建造時間(秒),維持村民數量,資源總量,注釋說明
+id,name,model,type,max_count,size,collision,population,need_resource,building_times,need_villagers,resource_value,annotation
+1,村莊中心,village,village,1,"{2,2}",1,5,{food=100},20,0,,城鎮中心：提供基礎人口上限與訓練工人
+2,農舍,farmhouse,farmhouse,99,"{1,1}",1,3,"{food=20,wood=20}",5.5,0,,農舍：增加 3 人口上限
+3,木材廠,timber_factory,timber_factory,99,"{1,1}",1,0,{wood=50},7.5,0,,可放置木材的建築
+4,石材廠,stone_factory,stone_factory,99,"{1,1}",1,0,{wood=50},7.5,0,,可放置石頭的建築
+5,穀倉,barn,barn,99,"{1,1}",1,0,{wood=50},7.5,0,,可放置食物的建築
+6,農田,farmland,farmland,99,"{2,2}",0,0,"{food=100,wood=100}",10,1,{food=500},可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造

@@ -39,16 +39,20 @@ html {
     transform-origin: top left;
 }
 
-/* 底層 Canvas：負責動畫特效與地圖拖動 */
-#fx_canvas {
+/* 底層 Phaser 容器 */
+#phaser_container {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
     z-index: 1;
-    pointer-events: auto;
-    /* 必須為 auto 才能接收拖動事件 */
+}
+
+#phaser_container canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
 }
 
 /* 上層 UI：負責文字、按鈕與操作面板 */
@@ -110,12 +114,23 @@ html {
     cursor: pointer;
     position: relative;
     transition: all 0.1s;
+    flex: 0 0 auto; /* 防止在 flex 容器中被拉伸 */
+    text-align: center;
 }
 
 .action-btn:hover {
     background: #4e342e;
     transform: translateY(-2px);
     border-color: #ff9800;
+}
+
+.action-btn.danger {
+    background: rgba(198, 40, 40, 0.3);
+    border-color: #c62828;
+}
+.action-btn.danger:hover {
+    background: rgba(198, 40, 40, 0.6);
+    box-shadow: 0 0 10px rgba(198, 40, 40, 0.4);
 }
 
 .action-btn.active {
@@ -127,11 +142,14 @@ html {
 .action-btn .icon {
     font-size: 28px;
     margin-bottom: 4px;
+    pointer-events: none;
 }
 
 .action-btn .label {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: bold;
+    line-height: 1.1;
+    pointer-events: none;
 }
 
 .queue-badge {
@@ -160,4 +178,66 @@ html {
     height: 4px;
     background: #4caf50;
     transition: width 0.1s linear;
+}
+
+/* 倉庫管理介面樣式 */
+.warehouse-controls {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid #8b6e4b;
+    padding: 10px;
+    margin: 5px 0 15px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    border-radius: 4px;
+    width: 100%;
+}
+
+.control-title {
+    color: var(--aoe-gold);
+    font-size: 14px;
+    margin-bottom: 8px;
+    text-shadow: 1px 1px 1px black;
+    font-weight: bold;
+}
+
+.control-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 5px;
+}
+
+.adjust-btn {
+    width: 32px;
+    height: 32px;
+    background: #4e342e;
+    border: 2px solid #8b6e4b;
+    color: white;
+    font-size: 20px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.1s;
+}
+
+.adjust-btn:hover {
+    background: #5d4037;
+    border-color: var(--aoe-gold);
+}
+
+.count-display {
+    font-size: 24px;
+    font-weight: bold;
+    color: #fff;
+    min-width: 80px;
+    text-align: center;
+}
+
+.status-hint {
+    font-size: 11px;
+    color: #ccc;
+    font-style: italic;
 }
