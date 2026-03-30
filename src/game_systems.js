@@ -21,11 +21,11 @@ export class GameEngine {
         villageProductionTimer: 0,
         currentGlobalCommand: 'IDLE',
         strings: {}, // 存放從 strings.csv 讀取的訊息資料
-        lastMaxPop: 0, 
+        lastMaxPop: 0,
         hasHitPopLimit: false,
         assignmentTimer: 0 // 用於定期分配過載/空閒工人
     };
-    
+
     static RESOURCE_NAMES = {
         gold: "黃金",
         wood: "木材",
@@ -59,7 +59,7 @@ export class GameEngine {
         this.lastTickTime = Date.now();
         this.initBackgroundWorker();
         setInterval(() => this.productionTick(), 1000);
-        
+
         // UI 更新循環 (10Hz)
         setInterval(() => {
             if (window.UIManager) window.UIManager.updateValues();
@@ -110,15 +110,19 @@ export class GameEngine {
                 const success = this.spawnVillager(configName);
                 if (success) {
                     const newV = this.state.units.villagers[this.state.units.villagers.length - 1];
-                    // 生產出來的村民預設為 IDLE，讓分配引擎或建造系統優先調度
-                    newV.state = 'IDLE';
+                    // 讓生產引擎或建造系統優先調度
                     newV.isRecalled = (this.state.currentGlobalCommand === 'RETURN');
+                    this.assignNextTask(newV);
                 }
                 this.state.villageProductionTimer = this.state.villageQueue.length > 0 ? 5 : 0;
             }
         }
 
-        this.state.units.villagers.forEach(v => { this.updateVillagerMovement(v, deltaTime); });
+        this.state.units.villagers.forEach(v => { 
+            // 閒置村民隨時檢查是否有工作可做，大幅提升反應速度
+            if (v.state === 'IDLE') this.assignNextTask(v);
+            this.updateVillagerMovement(v, deltaTime); 
+        });
 
         // 每秒執行一次工人分配邏輯
         this.state.assignmentTimer += deltaTime;
@@ -165,16 +169,16 @@ export class GameEngine {
             const data = this.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
-            const idxName = headers.indexOf('name'), 
-                  idxSpeed = headers.indexOf('speed'), 
-                  idxCollect = headers.indexOf('collection_speed'),
-                  idxNeed = headers.indexOf('need_resource');
+            const idxName = headers.indexOf('name'),
+                idxSpeed = headers.indexOf('speed'),
+                idxCollect = headers.indexOf('collection_speed'),
+                idxNeed = headers.indexOf('need_resource');
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
                 if (!row[idxName]) continue;
                 this.state.npcConfigs[row[idxName].trim()] = {
-                    name: row[idxName].trim(), 
-                    speed: parseFloat(row[idxSpeed]) || 5.5, 
+                    name: row[idxName].trim(),
+                    speed: parseFloat(row[idxSpeed]) || 5.5,
                     collection_speed: parseFloat(row[idxCollect]) || 10,
                     collection_amount: parseFloat(row[headers.indexOf('collection_resource')]) || 20,
                     costs: this.parseResourceObject(row[idxNeed])
@@ -322,11 +326,13 @@ export class GameEngine {
             return false;
         }
         let config = this.state.npcConfigs[configName] || { speed: 5.5, collection_speed: 10 };
-        this.state.units.villagers.push({
+        const v = {
             id: Date.now() + Math.random(), x: 960 + 120, y: 560 + 120,
             state: 'IDLE', targetId: null, cargo: 0, type: 'WOOD', config: config,
             configName: configName, gatherTimer: 0, idleTarget: null, waitTimer: 0, pathTarget: null
-        });
+        };
+        this.state.units.villagers.push(v);
+        this.assignNextTask(v); // 剛出生就進入優先級檢查
         return true;
     }
 
@@ -417,8 +423,9 @@ export class GameEngine {
             v.targetBase = this.findNearestDepositPoint(v.x, v.y, v.type) || { x: 960, y: 560 };
         }
         const oldX = v.x, oldY = v.y;
-        const configSpeed = (v.state === 'IDLE' ? (this.state.systemConfig.village_standby_speed || 3) : (v.config.speed || 5.5));
-        const moveSpeed = configSpeed * 13; // 統一係數，並略微調高基礎速度感
+        const baseSpeed = v.config.speed || 5.5;
+        const configSpeed = (v.state === 'IDLE' ? (this.state.systemConfig.village_standby_speed || 3) : Math.max(baseSpeed, 6.0));
+        const moveSpeed = configSpeed * 13; // 統一係數，工作狀態基礎速度稍微由 5.5 提升至 6.0
 
         switch (v.state) {
             case 'IDLE':
@@ -457,13 +464,13 @@ export class GameEngine {
                     if (v.targetId) {
                         const canTake = Math.min(harvestTotal, v.targetId.amount);
                         v.targetId.amount -= canTake;
-                        
+
                         // 如果是農田，直接入庫，不增加負重，不回村中心
                         if (v.targetId.type === 'farmland') {
                             this.state.resources.food += canTake;
                             v.cargo = 0;
                             v.gatherTimer = 0; // 重置計時器，原地繼續採集
-                            
+
                             if (v.targetId.amount <= 0) {
                                 this.addLog(`${v.targetId.name || '農田'} 已枯竭。`);
                                 this.state.mapEntities = this.state.mapEntities.filter(e => e !== v.targetId);
@@ -542,7 +549,7 @@ export class GameEngine {
                     v.constructionTarget.isUnderConstruction = false;
                     const type = v.constructionTarget.type;
                     v.constructionTarget.name = this.state.buildingConfigs[type].name;
-                    
+
                     // 如果是農田，初始化資源量並設為資源節點
                     if (type === 'farmland') {
                         v.constructionTarget.resourceType = 'FOOD';
@@ -551,17 +558,21 @@ export class GameEngine {
 
                     if (type === 'farmhouse') this.state.buildings.farmhouse++;
                     this.addLog(`建造完成：${this.state.buildingConfigs[type].name}。`);
-                    
+
                     // 自動指派後續工作：優先尋找下一個「最近」且需建造的目標
                     let nextConstruction = null;
                     let minCDist = Infinity;
                     this.state.mapEntities.forEach(e => {
                         if (e.isUnderConstruction && e !== v.constructionTarget) {
+                            // 檢查是否已有人前往此工地
+                            const isClaimed = this.state.units.villagers.some(vi => vi !== v && vi.constructionTarget === e);
+                            if (isClaimed) return;
+
                             const d = Math.hypot(e.x - v.x, e.y - v.y);
                             if (d < minCDist) { minCDist = d; nextConstruction = e; }
                         }
                     });
-                    
+
                     if (nextConstruction) {
                         v.state = 'MOVING_TO_CONSTRUCTION';
                         v.constructionTarget = nextConstruction;
@@ -588,40 +599,47 @@ export class GameEngine {
                 break;
         }
 
-        // 在移動結束後統一檢查碰撞，避免忽快忽慢的跳動
-        if (this.isColliding(v.x, v.y)) {
-            v.pathTarget = null;
-            if (this.isColliding(oldX, oldY)) {
-                // 如果舊位置也撞牆，強行找附近的安全點
-                const safe = this.findSafePos(v.x, v.y);
-                v.x = safe.x; v.y = safe.y;
-            } else {
-                // 回退到舊位置
-                v.x = oldX; v.y = oldY;
+        const interactionTarget = v.targetId || v.targetBase || v.constructionTarget;
+        const collidingEnt = this.isColliding(v.x, v.y, interactionTarget);
+
+        if (collidingEnt) {
+            // 檢查舊位置是否也在此建築中
+            const wasColliding = this.isColliding(oldX, oldY, interactionTarget);
+            if (wasColliding !== collidingEnt) {
+                // 如果原本不在這個建築裡面（或是剛從別處撞進來），阻擋
+                v.x = oldX; v.y = oldY; v.pathTarget = null;
             }
-            if (v.state === 'IDLE') v.idleTarget = null;
-            // 靠近基地即便撞牆也算存款 (加寬範圍至 150)
-            if (v.state === 'MOVING_TO_BASE') {
-                const cfgB = this.state.buildingConfigs[v.targetBase.type];
-                let depositDist = 60;
-                if (cfgB && cfgB.size) {
-                    const m = cfgB.size.match(/\{(\d+),(\d+)\}/);
-                    if (m) {
-                        const uw = parseInt(m[1]), uh = parseInt(m[2]);
-                        depositDist = (Math.max(uw, uh) * this.TILE_SIZE / 2) + 20;
-                    }
+            // 如果原本就在裡面 (wasColliding === collidingEnt)，准許自由移動以便走出來
+        }
+
+        if (v.state === 'IDLE' && collidingEnt) v.idleTarget = null;
+
+        // 附近基地即便撞牆也算存款 (加寬範圍至 150)
+        if (v.state === 'MOVING_TO_BASE') {
+            const cfgB = this.state.buildingConfigs[v.targetBase.type];
+            let depositDist = 60;
+            if (cfgB && cfgB.size) {
+                const m = cfgB.size.match(/\{(\d+),(\d+)\}/);
+                if (m) {
+                    const uw = parseInt(m[1]), uh = parseInt(m[2]);
+                    depositDist = (Math.max(uw, uh) * this.TILE_SIZE / 2) + 20;
                 }
-                if (Math.hypot(v.x - v.targetBase.x, v.y - v.targetBase.y) < depositDist) {
-                    this.depositResource(v.type, v.cargo);
-                    v.cargo = 0; 
-                    v.pathTarget = null;
-                    if (v.nextStateAfterDeposit) {
-                        v.state = v.nextStateAfterDeposit;
-                        v.nextStateAfterDeposit = null;
-                    } else {
-                        v.state = v.isRecalled ? 'IDLE' : 'MOVING_TO_RESOURCE';
-                        v.isRecalled = false;
-                    }
+            }
+            if (Math.hypot(v.x - v.targetBase.x, v.y - v.targetBase.y) < depositDist) {
+                this.depositResource(v.type, v.cargo);
+                v.cargo = 0;
+                v.pathTarget = null;
+                if (v.nextStateAfterDeposit) {
+                    v.state = v.nextStateAfterDeposit;
+                    v.nextStateAfterDeposit = null;
+                } else if (v.isRecalled) {
+                    v.state = 'IDLE';
+                    v.isRecalled = false;
+                    this.assignNextTask(v);
+                } else {
+                    // 預設想回去採集，但先經過優先級檢查 (優先幫忙建造)
+                    v.state = 'MOVING_TO_RESOURCE';
+                    this.assignNextTask(v);
                 }
             }
         }
@@ -634,9 +652,76 @@ export class GameEngine {
             v.type = v.prevTask.type;
             v.prevTask = null;
         } else {
-            v.state = 'IDLE';
+            this.assignNextTask(v);
         }
         v.pathTarget = null;
+    }
+
+    static assignNextTask(v) {
+        if (v.isRecalled) { v.state = 'IDLE'; return; }
+
+        // 1. 優先找「待施工」建築 (過濾掉已有人在蓋的工地)
+        const nextConstruction = this.state.mapEntities.find(e => {
+            if (!e.isUnderConstruction) return false;
+            // 每個建築預設僅限 1 名工人負責
+            return !this.state.units.villagers.some(vi => vi !== v && vi.constructionTarget === e);
+        });
+
+        if (nextConstruction) {
+            v.state = 'MOVING_TO_CONSTRUCTION';
+            v.constructionTarget = nextConstruction;
+            v.targetId = null; v.pathTarget = null;
+            v.assignedWarehouseId = null; 
+            return;
+        }
+
+        // 2. 各倉庫滿員情況 (優先補滿專職位)
+        const warehouses = this.state.mapEntities.filter(e => 
+            ['timber_factory', 'stone_factory', 'barn'].includes(e.type) && !e.isUnderConstruction
+        );
+
+        if (v.assignedWarehouseId) {
+            const myW = warehouses.find(e => (e.id || `${e.type}_${e.x}_${e.y}`) === v.assignedWarehouseId);
+            if (myW && this.findNearestResource(v.x, v.y, v.type, v.id)) {
+                // 如果編制還在且還有資源，繼續工作
+                const currentWorkers = this.state.units.villagers.filter(vi => vi !== v && vi.assignedWarehouseId === v.assignedWarehouseId).length;
+                if (currentWorkers < (myW.targetWorkerCount || 0)) {
+                    v.state = 'MOVING_TO_RESOURCE';
+                    v.targetId = null; v.pathTarget = null;
+                    return;
+                }
+            }
+            v.assignedWarehouseId = null;
+        }
+
+        // 尋找其他有缺額且附近有資源的倉庫
+        for (const w of warehouses) {
+            const winfo = (w.id || `${w.type}_${w.x}_${w.y}`);
+            const count = this.state.units.villagers.filter(vi => vi.assignedWarehouseId === winfo).length;
+            if (count < (w.targetWorkerCount || 0)) {
+                const resType = (w.type === 'timber_factory' ? 'WOOD' : (w.type === 'stone_factory' ? 'STONE' : 'FOOD'));
+                if (this.findNearestResource(w.x, w.y, resType, v.id)) {
+                    v.assignedWarehouseId = winfo;
+                    v.type = resType;
+                    v.state = 'MOVING_TO_RESOURCE';
+                    v.targetId = null; v.pathTarget = null;
+                    return;
+                }
+            }
+        }
+
+        // 3. 通用採集指令
+        if (this.state.currentGlobalCommand && this.state.currentGlobalCommand !== 'RETURN') {
+            v.type = this.state.currentGlobalCommand;
+            if (this.findNearestResource(v.x, v.y, v.type, v.id)) {
+                v.state = 'MOVING_TO_RESOURCE';
+                v.targetId = null; v.pathTarget = null;
+                return;
+            }
+        }
+
+        // 4. 無事可做，才真正進入閒置
+        v.state = 'IDLE';
     }
 
     static findNearestDepositPoint(x, y, resourceType = 'WOOD') {
@@ -711,6 +796,7 @@ export class GameEngine {
         const queue = [[startGX, startGY, null]];
         const visited = new Set([`${startGX},${startGY}`]);
         const obstacles = this.getObstacleGrid();
+        const startIsObstacle = obstacles.has(`${startGX},${startGY}`);
 
         let iterations = 0;
         while (queue.length > 0 && iterations < 1500) {
@@ -724,7 +810,9 @@ export class GameEngine {
             for (const [dx, dy] of neighbors) {
                 const nx = gx + dx, ny = gy + dy;
                 const key = `${nx},${ny}`;
-                if (!visited.has(key) && (!obstacles.has(key) || targetCells.has(key))) {
+                // 如果起點就在障礙物裡，允許先在障礙物內穿行以尋找出口
+                const canMove = !obstacles.has(key) || targetCells.has(key) || startIsObstacle;
+                if (!visited.has(key) && canMove) {
                     visited.add(key);
                     queue.push([nx, ny, firstStep || [nx, ny]]);
                 }
@@ -737,7 +825,7 @@ export class GameEngine {
         const grid = new Set();
         this.state.mapEntities.forEach(ent => {
             const cfg = this.state.buildingConfigs[ent.type];
-            if (cfg && cfg.collision) {
+            if (cfg && cfg.collision && !ent.isUnderConstruction) { // 施工中不設障礙
                 const em = cfg.size.match(/\{(\d+),(\d+)\}/);
                 const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;
                 const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
@@ -751,14 +839,18 @@ export class GameEngine {
         return grid;
     }
 
-    static isColliding(x, y) {
-        return this.state.mapEntities.some(ent => {
+    static isColliding(x, y, ignoreEnt = null) {
+        // 回傳碰撞到的實體，方便後續判斷
+        return this.state.mapEntities.find(ent => {
+            if (ignoreEnt && ent === ignoreEnt) return false;
+            if (ent.isUnderConstruction) return false; // 施工中不具備碰撞
+
             const cfg = this.state.buildingConfigs[ent.type];
             if (cfg && cfg.collision) {
                 const match = cfg.size.match(/\{(\d+),(\d+)\}/);
                 const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
                 const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
-                return x > ent.x - w / 2 && x < ent.x + w / 2 && y > ent.y - h / 2 && y < ent.y + h / 2;
+                if (x > ent.x - w / 2 && x < ent.x + w / 2 && y > ent.y - h / 2 && y < ent.y + h / 2) return true;
             }
             return false;
         });
@@ -780,9 +872,8 @@ export class GameEngine {
             }
             return Math.abs(x - ent.x) < (w + ew) / 2 - 5 && Math.abs(y - ent.y) < (h + eh) / 2 - 5;
         });
-        if (hitEntity) return false;
-        const hitVillager = this.state.units.villagers.some(v => Math.abs(x - v.x) < w / 2 + 10 && Math.abs(y - v.y) < h / 2 + 10);
-        return !hitVillager;
+        // 不再防止村民卡住建築（因為已有卡死逃生機制），提升建造體感
+        return !hitEntity;
     }
 
     static findNearestResource(x, y, type, villagerId) {
@@ -791,10 +882,10 @@ export class GameEngine {
             if (e.resourceType === type) {
                 // 如果是農田，檢查是否已有其他工人在目標中 (鎖定坑位)
                 if (e.type === 'farmland') {
-                    const isOccupied = this.state.units.villagers.some(v => 
+                    const isOccupied = this.state.units.villagers.some(v =>
                         v.id !== villagerId && (v.targetId === e || v.constructionTarget === e)
                     );
-                    if (isOccupied) return; 
+                    if (isOccupied) return;
                 }
 
                 const d = Math.hypot(e.x - x, e.y - y);
@@ -805,10 +896,10 @@ export class GameEngine {
     }
 
     static updateWorkerAssignments() {
-        const warehouses = this.state.mapEntities.filter(e => 
+        const warehouses = this.state.mapEntities.filter(e =>
             ['timber_factory', 'stone_factory', 'barn'].includes(e.type) && !e.isUnderConstruction
         );
-        
+
         // 1. 回收所有失效倉庫的工人，並收集有效的分配情況
         const warehouseMap = new Map();
         warehouses.forEach(w => warehouseMap.set(w.id || `${w.type}_${w.x}_${w.y}`, { entity: w, workers: [] }));
@@ -837,10 +928,10 @@ export class GameEngine {
                 const overflow = workers.slice(target);
                 overflow.forEach(v => {
                     v.assignedWarehouseId = null;
-                    v.state = 'IDLE';
                     v.targetId = null;
                     v.pathTarget = null;
-                    allIdle.push(v);
+                    this.assignNextTask(v); // 釋放後立即尋找新高優先級任務
+                    if (v.state === 'IDLE') allIdle.push(v);
                 });
                 data.workers = workers.slice(0, target);
             }
@@ -899,7 +990,7 @@ export class GameEngine {
             // 指令影響閒置中的工人，或是以村莊中心 (village) 為放置點的工人
             const isIdle = v.state === 'IDLE';
             const isVillageWorker = v.targetBase && v.targetBase.type === 'village';
-            
+
             if (isIdle || isVillageWorker) {
                 // 絕對禁止中斷正在建造中的工人
                 if (v.state === 'CONSTRUCTING' || v.state === 'MOVING_TO_CONSTRUCTION') return;
@@ -908,17 +999,18 @@ export class GameEngine {
                 // 排除倉庫專員
                 if (v.assignedWarehouseId) return;
 
-                v.type = commandType; 
-                v.state = 'MOVING_TO_RESOURCE'; 
-                v.targetId = null; 
-                v.isRecalled = false; 
+                v.type = commandType;
+                v.state = 'MOVING_TO_RESOURCE';
+                v.targetId = null;
+                v.isRecalled = false;
                 v.pathTarget = null;
             }
         });
         if (window.UIManager) window.UIManager.updateValues();
     }
 
-    static addToVillageQueue(configName) {
+    static addToVillageQueue(event, configName) {
+        if (event && event.stopPropagation) event.stopPropagation();
         if (this.state.villageQueue.length >= 10) {
             this.addLog("生產隊伍已滿 (10/10)！");
             this.triggerWarning("4"); // 使用 strings.csv 中的 ID 4: 生產隊列已滿
@@ -939,13 +1031,13 @@ export class GameEngine {
                 this.state.resources[r] -= cfg.costs[r];
             }
         }
-        
+
         this.state.villageQueue.push(configName);
         if (this.state.villageQueue.length === 1 && this.state.villageProductionTimer <= 0) {
             this.state.villageProductionTimer = 5;
         }
         this.addLog(`已加入生產隊列：${configName} (${this.state.villageQueue.length}/10)`);
-        
+
         // 立即刷新 UI
         if (window.UIManager) window.UIManager.updateValues();
     }
@@ -973,14 +1065,14 @@ export class GameEngine {
         const costs = cfg.costs; const res = this.state.resources;
         if (!this.isAreaClear(x, y, type)) { this.addLog("位置受阻！"); return; }
         res.food -= costs.food; res.wood -= costs.wood; res.stone -= costs.stone; res.gold -= costs.gold;
-        
-        const newBuilding = { 
-            type: type, x: x, y: y, name: "施工中", 
+
+        const newBuilding = {
+            type: type, x: x, y: y, name: "施工中",
             isUnderConstruction: true, buildProgress: 0, buildTime: cfg.buildTime,
             targetWorkerCount: ['timber_factory', 'stone_factory', 'barn'].includes(type) ? 1 : 0 // 倉庫新建後預設人數為 1
         };
         this.state.mapEntities.push(newBuilding);
-        
+
         // 指派最近的村民
         const builder = this.findNearestAvailableVillager(x, y);
         if (builder) {
@@ -988,7 +1080,7 @@ export class GameEngine {
             // 保存當前任務
             builder.prevTask = { state: builder.state, targetId: builder.targetId, type: builder.type };
             builder.constructionTarget = newBuilding;
-            
+
             if (builder.state === 'MOVING_TO_BASE' && builder.cargo > 0) {
                 builder.nextStateAfterDeposit = 'MOVING_TO_CONSTRUCTION';
             } else {
@@ -1004,7 +1096,7 @@ export class GameEngine {
     static findNearestAvailableVillager(x, y) {
         let nearest = null;
         let minDist = Infinity;
-        
+
         // 優先找「真正閒置」且沒被倉庫綁定的村民
         this.state.units.villagers.forEach(v => {
             if (v.state === 'IDLE' && !v.assignedWarehouseId) {
@@ -1019,8 +1111,8 @@ export class GameEngine {
         this.state.units.villagers.forEach(v => {
             if (v.state === 'MOVING_TO_CONSTRUCTION' || v.state === 'CONSTRUCTING') return;
             if (v.targetId && v.targetId.type === 'farmland') return;
-            if (v.assignedWarehouseId) return; 
-            
+            if (v.assignedWarehouseId) return;
+
             const dist = Math.hypot(v.x - x, v.y - y);
             if (dist < minDist) {
                 minDist = dist;
@@ -1054,7 +1146,7 @@ export class GameEngine {
             const eid = e.id || `${e.type}_${e.x}_${e.y}`;
             return eid !== id;
         });
-        
+
         // 4. 通知日誌
         this.addLog(`銷毀了 ${cfg.name}。返還：${refundLog.join(', ') || '無'}`);
 
