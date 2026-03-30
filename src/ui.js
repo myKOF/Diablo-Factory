@@ -16,12 +16,38 @@ export class UIManager {
 
         this.renderAll();
 
+        // 綁定世界級事件
+        window.addEventListener("mousedown", (e) => this.handleWorldMouseDown(e));
+        window.addEventListener("mousemove", (e) => this.handleWorldMouseMove(e));
+        window.addEventListener("mouseup", (e) => this.handleWorldMouseUp(e));
         window.addEventListener("click", (e) => this.handleWorldClick(e));
-        window.addEventListener("mousemove", (e) => this.handleDragMove(e));
-        window.addEventListener("mouseup", (e) => this.handleDragEnd(e));
+        window.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") this.cancelBuildingMode();
+        });
+        window.addEventListener("contextmenu", (e) => {
+            if (GameEngine.state.placingType) {
+                e.preventDefault();
+                this.cancelBuildingMode();
+            }
+        });
 
         setInterval(() => this.updateValues(), 500);
-        console.log("UI 管理器已加載");
+
+        // 用於監听拖曳啟動
+        window.addEventListener("mousemove", (e) => {
+            if (this.potentialDragType && !this.dragGhost) {
+                const dist = Math.hypot(e.clientX - this.mouseDownPos.x, e.clientY - this.mouseDownPos.y);
+                if (dist > 10) {
+                    this.startDrag(this.potentialDragType, e.clientX, e.clientY);
+                    this.potentialDragType = null;
+                }
+            }
+        });
+        window.addEventListener("mouseup", () => {
+            this.potentialDragType = null;
+        });
+
+        console.log("UI 管理器已加載 (Advanced Building System)");
     }
 
     static renderAll() {
@@ -100,6 +126,12 @@ export class UIManager {
             return;
         }
 
+        const buildingIcons = {
+            town_center: "🏰", village: "🏘️", farmhouse: "🏡",
+            timber_factory: "🪵", stone_factory: "⛏️", barn: "🌾",
+            farmland: "🌱", alchemy_lab: "⚗️", cathedral: "⛪", academy: "🧙"
+        };
+
         Object.values(configs).forEach(cfg => {
             const currentCount = GameEngine.state.mapEntities.filter(e => e.type === cfg.model).length;
 
@@ -112,6 +144,7 @@ export class UIManager {
             const item = {
                 id: cfg.model,
                 name: cfg.name,
+                icon: buildingIcons[cfg.model] || "🏗️",
                 desc: `增加 ${cfg.population} 人口 (目前: ${currentCount}/${cfg.maxCount})<br>消耗: ${costStr.join(' ')}`
             };
             this.createBuildingBtn(container, bp, item);
@@ -121,10 +154,12 @@ export class UIManager {
     static createBuildingBtn(container, bp, item) {
         const btn = document.createElement("div");
         btn.className = "building-item";
+        btn.setAttribute("data-type", item.id);
         btn.style.cssText = `
             position: relative; height: ${bp.itemHeight}px; border: 1px solid #555;
             margin: 5px 0; padding: 10px; background: rgba(0,0,0,0.3);
             color: ${bp.textColor}; font-size: ${bp.fontSize};
+            cursor: pointer; transition: all 0.2s;
         `;
         btn.innerHTML = `
             <strong style="color: ${bp.titleColor}">${item.name}</strong><br>
@@ -136,12 +171,35 @@ export class UIManager {
         icon.style.cssText = `
             position: absolute; right: 10px; bottom: 10px;
             width: 40px; height: 40px; border: 2px solid #ff5722;
-            cursor: grab; background: rgba(255, 87, 34, 0.2);
+            background: rgba(255, 87, 34, 0.2);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px; pointer-events: none; /* 圖示僅作視覺展示 */
         `;
-        icon.onmousedown = (e) => {
-            e.preventDefault();
-            this.startDrag(item.id, e.clientX, e.clientY);
+        icon.innerHTML = item.icon || "🏗️";
+
+        // 統一拖曳與點擊邏輯
+        btn.onmousedown = (e) => {
+            if (e.button !== 0) return;
+            this.mouseDownPos = { x: e.clientX, y: e.clientY };
+            this.mouseDownTime = Date.now();
+            this.potentialDragType = item.id;
         };
+
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            // 如果發生過拖曳，則 onclick 不處理 (由 handleWorldMouseUp 處理建造)
+            if (this.dragGhost) return;
+            
+            // 如果點擊時間太長，也不視為純點擊
+            if (Date.now() - this.mouseDownTime > 300) return;
+
+            if (GameEngine.state.placingType === item.id) {
+                this.cancelBuildingMode();
+            } else {
+                this.startStampMode(item.id);
+            }
+        };
+
         btn.appendChild(icon);
         container.appendChild(btn);
     }
@@ -199,6 +257,7 @@ export class UIManager {
     }
 
     static startDrag(type, mouseX, mouseY) {
+        GameEngine.state.buildingMode = 'DRAG';
         this.activeBuilding = type;
         this.dragGhost = document.createElement("div");
         this.dragGhost.style.cssText = `
@@ -210,11 +269,27 @@ export class UIManager {
         GameEngine.state.placingType = type;
     }
 
-    static handleDragMove(e) {
-        if (!this.dragGhost) return;
-        this.dragGhost.style.left = `${e.clientX - 20}px`;
-        this.dragGhost.style.top = `${e.clientY - 20}px`;
+    static startStampMode(type) {
+        this.cancelBuildingMode();
+        GameEngine.state.buildingMode = 'STAMP';
+        GameEngine.state.placingType = type;
+        this.activeBuilding = type;
+        GameEngine.addLog(`進入建造模式：${GameEngine.state.buildingConfigs[type].name} (ESC 取消)`);
+    }
 
+    static cancelBuildingMode() {
+        if (!GameEngine.state.placingType) return;
+        GameEngine.state.buildingMode = 'NONE';
+        GameEngine.state.placingType = null;
+        this.activeBuilding = null;
+        GameEngine.state.linePreviewEntities = [];
+        if (this.dragGhost) {
+            document.body.removeChild(this.dragGhost);
+            this.dragGhost = null;
+        }
+    }
+
+    static getWorldMousePos(clientX, clientY) {
         const scene = window.PhaserScene;
         const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
         const TS = GameEngine.TILE_SIZE;
@@ -223,44 +298,94 @@ export class UIManager {
         let uw = 1, uh = 1;
         if (cfg && cfg.size) {
             const match = cfg.size.match(/\{(\d+),(\d+)\}/);
-            if (match) {
-                uw = parseInt(match[1]);
-                uh = parseInt(match[2]);
-            }
+            if (match) { uw = parseInt(match[1]); uh = parseInt(match[2]); }
         }
 
-        // 根據尺寸奇偶性決定偏移：
-        // 奇數尺寸 (1x1) 應該對齊格子中心 (TS/2)
-        // 偶數尺寸 (2x2) 應該對齊格線 (0)
         const offsetX = (uw % 2 === 0) ? 0 : TS / 2;
         const offsetY = (uh % 2 === 0) ? 0 : TS / 2;
 
-        const gx = Math.round((e.clientX - cam.x - offsetX) / TS);
-        const gy = Math.round((e.clientY - cam.y - offsetY) / TS);
+        const gx = Math.round((clientX - cam.x - offsetX) / TS);
+        const gy = Math.round((clientY - cam.y - offsetY) / TS);
 
-        GameEngine.state.previewPos = {
+        return {
             x: gx * TS + offsetX,
             y: gy * TS + offsetY
         };
     }
 
-    static handleDragEnd(e) {
-        if (!this.dragGhost) return;
-        if (GameEngine.state.previewPos) {
-            GameEngine.placeBuilding(this.activeBuilding, GameEngine.state.previewPos.x, GameEngine.state.previewPos.y);
+    static handleWorldMouseDown(e) {
+        if (e.target.closest("#ui_layer")) return;
+
+        // 右鍵直接取消
+        if (e.button === 2) {
+            this.cancelBuildingMode();
+            return;
         }
-        document.body.removeChild(this.dragGhost);
-        this.dragGhost = null;
-        this.activeBuilding = null;
-        GameEngine.state.placingType = null;
-        GameEngine.state.previewPos = null;
+
+        // 僅處理左鍵
+        if (e.button !== 0) return;
+        
+        const state = GameEngine.state;
+        if (state.buildingMode === 'STAMP') {
+            state.buildingMode = 'LINE';
+            state.lineStartPos = this.getWorldMousePos(e.clientX, e.clientY);
+            state.linePreviewEntities = [state.lineStartPos];
+        }
+    }
+
+    static handleWorldMouseMove(e) {
+        const state = GameEngine.state;
+        if (!state.placingType) return;
+        
+        // 如果鼠標在 UI 面板上，隱藏虛影
+        if (e.target.closest(".panel")) {
+            state.previewPos = null;
+            state.linePreviewEntities = [];
+            return;
+        }
+        
+        const pos = this.getWorldMousePos(e.clientX, e.clientY);
+        state.previewPos = pos;
+
+        if (state.buildingMode === 'DRAG') {
+            if (this.dragGhost) {
+                this.dragGhost.style.left = `${e.clientX - 20}px`;
+                this.dragGhost.style.top = `${e.clientY - 20}px`;
+            }
+        } else if (state.buildingMode === 'LINE') {
+            if (state.lineStartPos) {
+                state.linePreviewEntities = GameEngine.getLinePositions(state.placingType, state.lineStartPos.x, state.lineStartPos.y, pos.x, pos.y);
+            }
+        }
+    }
+
+    static handleWorldMouseUp(e) {
+        // 僅處理左鍵放開來確定建造。右鍵放開不應觸發建造。
+        if (e.button !== 0) return;
+
+        const state = GameEngine.state;
+        if (state.buildingMode === 'DRAG') {
+            if (state.previewPos) {
+                GameEngine.placeBuilding(state.placingType, state.previewPos.x, state.previewPos.y);
+            }
+            this.cancelBuildingMode();
+        } else if (state.buildingMode === 'LINE') {
+            const pos = this.getWorldMousePos(e.clientX, e.clientY);
+            // 如果位移足夠，執行拉排建造
+            if (state.lineStartPos && (Math.abs(pos.x - state.lineStartPos.x) > 10 || Math.abs(pos.y - state.lineStartPos.y) > 10)) {
+                GameEngine.placeBuildingLine(state.placingType, state.lineStartPos.x, state.lineStartPos.y, pos.x, pos.y);
+                this.lastLinePlacementTime = Date.now();
+            }
+            state.buildingMode = 'STAMP';
+            state.linePreviewEntities = [];
+            state.lineStartPos = null;
+        }
     }
 
     static getLocalMouse(e) {
         const container = document.getElementById("game_container");
         if (!container) return { x: e.clientX, y: e.clientY };
         const rect = container.getBoundingClientRect();
-        // 考慮到可能的視窗拉伸，X/Y 比例分開計算
         const scaleX = rect.width / 1920;
         const scaleY = rect.height / 1080;
         return {
@@ -270,12 +395,28 @@ export class UIManager {
     }
 
     static handleWorldClick(e) {
-        if (e.target.closest("#context_menu")) return;
+        const state = GameEngine.state;
+        
+        // 如果是 UI，不處理世界點擊
+        if (e.target.closest("#ui_layer")) {
+            if (!e.target.closest("#context_menu")) {
+                // 點擊 UI 空白處不關閉 Stamp 模式，除非點擊的是其它交互區域
+            }
+            return;
+        }
 
-        // 如果點擊的是 UI 以外的地方，先無條件關閉選單
+        // Stamp 模式：點擊地圖直接建造
+        if (state.buildingMode === 'STAMP') {
+            // 如果剛拉完一排，跳過本次點擊觸發 (避免在結尾點多蓋一個)
+            if (this.lastLinePlacementTime && Date.now() - this.lastLinePlacementTime < 100) return;
+            
+            const pos = this.getWorldMousePos(e.clientX, e.clientY);
+            GameEngine.placeBuilding(state.placingType, pos.x, pos.y);
+            return;
+        }
+
+        // 隱藏右鍵選單邏輯
         this.hideContextMenu();
-        if (e.target.closest(".panel")) return;
-        if (this.dragGhost) return;
 
         const local = this.getLocalMouse(e);
         const scene = window.PhaserScene;
@@ -306,12 +447,12 @@ export class UIManager {
 
         menu.style.display = "flex";
         menu.style.flexDirection = "column";
-        menu.style.left = `${x}px`;
-        menu.style.top = `${y}px`;
         menu.style.width = "auto";
         menu.style.minWidth = "200px";
         menu.style.height = "auto";
         menu.style.padding = "10px";
+
+        // ... (中間內容不變)
 
         let name = entity.isUnderConstruction ? "施工中的建築" : (entity.name || entity.type);
         let headerColor = isConfirming ? "#ff8a80" : "#ffcc8c";
@@ -392,6 +533,7 @@ export class UIManager {
 
         menu.innerHTML = html;
         this.updateValues();
+        this.updateStickyPositions(); // 立即計算智慧位置，避免首幀閃爍
     }
 
     static confirmDestroy(event) {
@@ -522,6 +664,16 @@ export class UIManager {
                 else btn.classList.remove("active");
             }
         });
+
+        // 5. 更新建築按鈕高亮
+        const placingType = GameEngine.state.placingType;
+        document.querySelectorAll(".building-item").forEach(btn => {
+            if (btn.getAttribute("data-type") === placingType) {
+                btn.classList.add("active");
+            } else {
+                btn.classList.remove("active");
+            }
+        });
     }
 
     // 每一幀由渲染器調用，確保選單絕對同步 (60FPS)
@@ -530,15 +682,40 @@ export class UIManager {
             const menu = document.getElementById("context_menu");
             const scene = window.PhaserScene;
             const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
-            const TS = GameEngine.TILE_SIZE;
             const cfg = UI_CONFIG.ActionMenu;
 
-            // 將 entity 世界座標轉為螢幕座標 (加上設定的偏移量)
-            const sx = this.activeMenuEntity.x + cam.x + (cfg.offsetX || 0);
-            const sy = this.activeMenuEntity.y + cam.y + (cfg.offsetY || 0);
+            // 基礎螢幕中心位置
+            let sx = this.activeMenuEntity.x + cam.x;
+            let sy = this.activeMenuEntity.y + cam.y;
 
-            menu.style.left = `${sx}px`;
-            menu.style.top = `${sy}px`;
+            // 取得選單寬高 (動態抓取，若尚未渲染則使用配置預設值)
+            const menuWidth = menu.offsetWidth || cfg.width || 380;
+            const menuHeight = menu.offsetHeight || cfg.height || 95;
+            const screenWidth = window.innerWidth;
+            const screenHeight = window.innerHeight;
+
+            // 智慧偏置計算
+            let finalX = sx + (cfg.offsetX || 0);
+            let finalY = sy + (cfg.offsetY || 0);
+
+            // --- 邊界檢查與反向邏輯 ---
+            
+            // 1. 水平檢查：如果右側超出，改往左顯示
+            if (finalX + menuWidth > screenWidth - 20) {
+                finalX = sx - menuWidth - (cfg.offsetX || 15);
+            }
+            
+            // 2. 垂直檢查：如果底部超出，改往上顯示 (建築上方)
+            if (finalY + menuHeight > screenHeight - 20) {
+                finalY = sy - menuHeight - (cfg.offsetY || 100);
+            }
+
+            // 3. 全域安全區域確保 (防止被頂部資源列或左側面板蓋住)
+            finalX = Math.max(20, Math.min(finalX, screenWidth - menuWidth - 20));
+            finalY = Math.max(20, Math.min(finalY, screenHeight - menuHeight - 20));
+
+            menu.style.left = `${finalX}px`;
+            menu.style.top = `${finalY}px`;
         }
     }
 }

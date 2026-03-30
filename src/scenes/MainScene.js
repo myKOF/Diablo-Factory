@@ -58,6 +58,9 @@ export class MainScene extends Phaser.Scene {
             
             if (e.target.tagName === 'CANVAS') {
                 if (window.UIManager && window.UIManager.dragGhost) return;
+                // 如果正在準備建造（Mode B），則禁用相機拖拽
+                if (GameEngine.state.placingType) return;
+                
                 isDragging = true;
                 lastPointer = { x: e.clientX, y: e.clientY };
             }
@@ -138,7 +141,7 @@ export class MainScene extends Phaser.Scene {
                 this.entities.set(id, sprite);
                 this.entityGroup.add(sprite);
             }
-            
+            sprite.clear();
             this.drawEntity(sprite, ent, 1.0);
             sprite.setDepth(10);
             this.updateEntityLabel(id, ent);
@@ -246,11 +249,8 @@ export class MainScene extends Phaser.Scene {
             if (match) { uw = parseInt(match[1]); uh = parseInt(match[2]); }
         }
 
-        g.clear();
-        
         // 施工中效果：半透明
         const finalAlpha = ent.isUnderConstruction ? alpha * 0.5 : alpha;
-        g.setAlpha(finalAlpha);
 
         // 選中高亮效果
         const isSelected = window.UIManager && window.UIManager.activeMenuEntity === ent;
@@ -264,42 +264,42 @@ export class MainScene extends Phaser.Scene {
         
         // 建築物主體
         if (ent.type === 'village' || ent.type === 'town_center') {
-            g.fillStyle(0x8d6e63, 1);
+            g.fillStyle(0x8d6e63, finalAlpha);
             g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
-            g.lineStyle(1, 0x5d4037, 1);
+            g.lineStyle(1, 0x5d4037, finalAlpha);
             g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
         } else if (ent.type === 'farmhouse') {
-            g.fillStyle(0xbcaaa4, 1);
+            g.fillStyle(0xbcaaa4, finalAlpha);
             g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
-            g.lineStyle(1, 0x8d6e63, 1);
+            g.lineStyle(1, 0x8d6e63, finalAlpha);
             g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
             
             // 屋頂
-            g.fillStyle(0x795548, 1);
+            g.fillStyle(0x795548, finalAlpha);
             g.beginPath();
             g.moveTo(ent.x - (uw * TS) / 2 - 5, ent.y - (uh * TS) / 2);
             g.lineTo(ent.x, ent.y - (uh * TS) / 2 - 20);
             g.lineTo(ent.x + (uw * TS) / 2 + 5, ent.y - (uh * TS) / 2);
             g.fillPath();
         } else if (ent.type === 'timber_factory') {
-            g.fillStyle(0x388e3c, 1);
+            g.fillStyle(0x388e3c, finalAlpha);
             g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
-            g.lineStyle(2, 0x1b5e20, 1);
+            g.lineStyle(2, 0x1b5e20, finalAlpha);
             g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
         } else if (ent.type === 'stone_factory') {
-            g.fillStyle(0x455a64, 1);
+            g.fillStyle(0x455a64, finalAlpha);
             g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
-            g.lineStyle(2, 0x263238, 1);
+            g.lineStyle(2, 0x263238, finalAlpha);
             g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
         } else if (ent.type === 'barn') {
-            g.fillStyle(0xa1887f, 1);
+            g.fillStyle(0xa1887f, finalAlpha);
             g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
-            g.lineStyle(2, 0x5d4037, 1);
+            g.lineStyle(2, 0x5d4037, finalAlpha);
             g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
         } else if (ent.type === 'farmland') {
-            g.fillStyle(0xdce775, 1); // 麥田色
+            g.fillStyle(0xdce775, finalAlpha); // 麥田色
             g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
-            g.lineStyle(1, 0xafb42b, 1);
+            g.lineStyle(1, 0xafb42b, finalAlpha);
             // 畫一些簡單的麥穗線條
             for(let i = -1; i <= 1; i++) {
                 for(let j = -1; j <= 1; j++) {
@@ -308,20 +308,20 @@ export class MainScene extends Phaser.Scene {
             }
             g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
         } else if (ent.type === 'campfire') {
-            g.fillStyle(0xff5722, 1);
+            g.fillStyle(0xff5722, finalAlpha);
             g.fillCircle(ent.x, ent.y, 15);
         } else if (ent.type.startsWith('tree') || ent.type.startsWith('wood')) {
-            g.fillStyle(0x2e7d32, 1);
+            g.fillStyle(0x2e7d32, finalAlpha);
             g.fillCircle(ent.x, ent.y, 20);
         } else if (ent.type.startsWith('stone')) {
-            g.fillStyle(0x757575, 1);
+            g.fillStyle(0x757575, finalAlpha);
             g.beginPath();
             g.moveTo(ent.x - 20, ent.y + 10);
             g.lineTo(ent.x, ent.y - 15);
             g.lineTo(ent.x + 25, ent.y + 15);
             g.fillPath();
         } else if (ent.type.startsWith('ston')) {
-            g.fillStyle(0x757575, 1);
+            g.fillStyle(0x757575, finalAlpha);
             g.beginPath();
             g.moveTo(ent.x - 15, ent.y + 15);
             g.lineTo(ent.x, ent.y - 15);
@@ -329,7 +329,7 @@ export class MainScene extends Phaser.Scene {
             g.closePath();
             g.fillPath();
         } else if (ent.type.startsWith('food')) {
-            g.fillStyle(0xc2185b, 1);
+            g.fillStyle(0xc2185b, finalAlpha);
             g.fillCircle(ent.x, ent.y, 18);
         }
 
@@ -483,12 +483,27 @@ export class MainScene extends Phaser.Scene {
     updatePlacementPreview(state) {
         const g = this.placementPreview;
         g.clear();
-        if (state.placingType && state.previewPos) {
+        
+        if (!state.placingType) return;
+
+        // 單個預覽 (Drag/Stamp)
+        if (state.previewPos && (state.buildingMode === 'DRAG' || state.buildingMode === 'STAMP' || state.buildingMode === 'NONE')) {
             this.drawEntity(g, {
                 type: state.placingType,
                 x: state.previewPos.x,
                 y: state.previewPos.y
             }, 0.5);
+        }
+
+        // 批量預覽 (Line)
+        if (state.buildingMode === 'LINE' && state.linePreviewEntities) {
+            state.linePreviewEntities.forEach(pos => {
+                this.drawEntity(g, {
+                    type: state.placingType,
+                    x: pos.x,
+                    y: pos.y
+                }, 0.3); // 拉排預覽稍微淡一點
+            });
         }
     }
 }

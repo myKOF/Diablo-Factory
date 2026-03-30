@@ -17,6 +17,9 @@ export class GameEngine {
         buildingConfigs: {},
         placingType: null,
         previewPos: null,
+        buildingMode: 'NONE', // 'NONE', 'DRAG', 'STAMP', 'LINE'
+        lineStartPos: null,
+        linePreviewEntities: [],
         villageQueue: [],
         villageProductionTimer: 0,
         currentGlobalCommand: 'IDLE',
@@ -825,7 +828,7 @@ export class GameEngine {
         const grid = new Set();
         this.state.mapEntities.forEach(ent => {
             const cfg = this.state.buildingConfigs[ent.type];
-            if (cfg && cfg.collision && !ent.isUnderConstruction) { // 施工中不設障礙
+            if (cfg && cfg.collision) { // 施工中也應具備碰撞，防止 NPC 走入或卡住
                 const em = cfg.size.match(/\{(\d+),(\d+)\}/);
                 const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;
                 const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
@@ -842,8 +845,7 @@ export class GameEngine {
     static isColliding(x, y, ignoreEnt = null) {
         // 回傳碰撞到的實體，方便後續判斷
         return this.state.mapEntities.find(ent => {
-            if (ignoreEnt && ent === ignoreEnt) return false;
-            if (ent.isUnderConstruction) return false; // 施工中不具備碰撞
+            if (ent === ignoreEnt) return false;
 
             const cfg = this.state.buildingConfigs[ent.type];
             if (cfg && cfg.collision) {
@@ -856,13 +858,16 @@ export class GameEngine {
         });
     }
 
-    static isAreaClear(x, y, type) {
+    static isAreaClear(x, y, type, tempEntities = []) {
         const cfg = this.state.buildingConfigs[type];
         if (!cfg) return true;
         const match = cfg.size.match(/\{(\d+),(\d+)\}/);
         const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
         const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
-        const hitEntity = this.state.mapEntities.some(ent => {
+        
+        const allToCheck = [...this.state.mapEntities, ...tempEntities];
+
+        const hitEntity = allToCheck.some(ent => {
             const ecfg = this.state.buildingConfigs[ent.type];
             let ew = this.TILE_SIZE, eh = this.TILE_SIZE;
             if (ecfg) {
@@ -872,7 +877,6 @@ export class GameEngine {
             }
             return Math.abs(x - ent.x) < (w + ew) / 2 - 5 && Math.abs(y - ent.y) < (h + eh) / 2 - 5;
         });
-        // 不再防止村民卡住建築（因為已有卡死逃生機制），提升建造體感
         return !hitEntity;
     }
 
@@ -975,6 +979,24 @@ export class GameEngine {
 
     static setCommand(event, commandType) {
         if (event && event.stopPropagation) event.stopPropagation();
+        
+        // 點擊兩次則變為非選取 (IDLE)
+        if (this.state.currentGlobalCommand === commandType) {
+            this.addLog(`停止全域指令：${this.RESOURCE_NAMES[commandType.toLowerCase()] || commandType}。`);
+            this.state.currentGlobalCommand = 'IDLE';
+            // 讓受影響的人立即停止手邊的工作回歸閒置
+            this.state.units.villagers.forEach(v => {
+                if (v.assignedWarehouseId) return;
+                if (v.state === 'MOVING_TO_CONSTRUCTION' || v.state === 'CONSTRUCTING') return;
+                if (v.type === commandType && (v.state === 'MOVING_TO_RESOURCE' || v.state === 'GATHERING' || v.state === 'MOVING_TO_BASE')) {
+                    v.state = 'IDLE';
+                    v.targetId = null; v.pathTarget = null;
+                }
+            });
+            if (window.UIManager) window.UIManager.updateValues();
+            return;
+        }
+
         this.state.currentGlobalCommand = commandType;
         if (commandType === 'RETURN') {
             this.state.units.villagers.forEach(v => {
@@ -985,7 +1007,7 @@ export class GameEngine {
             if (window.UIManager) window.UIManager.updateValues();
             return;
         }
-        this.addLog(`全員動員：開始採集 ${commandType}。`);
+        this.addLog(`全員動員：開始採集 ${this.RESOURCE_NAMES[commandType.toLowerCase()] || commandType}。`);
         this.state.units.villagers.forEach(v => {
             // 指令影響閒置中的工人，或是以村莊中心 (village) 為放置點的工人
             const isIdle = v.state === 'IDLE';
@@ -1049,21 +1071,21 @@ export class GameEngine {
 
     static placeBuilding(type, x, y) {
         const cfg = this.state.buildingConfigs[type];
-        if (!cfg) return;
+        if (!cfg) return false;
         const currentCount = this.state.mapEntities.filter(e => e.type === type).length;
         if (cfg.maxCount !== undefined && currentCount >= cfg.maxCount) {
             this.addLog(`建造失敗：${cfg.name} 數量已達上限！`);
-            return;
+            return false;
         }
         // 檢查資源
         for (let r in cfg.costs) {
             if (this.state.resources[r] < cfg.costs[r]) {
                 this.triggerWarning("1", [r.toUpperCase()]);
-                return;
+                return false;
             }
         }
         const costs = cfg.costs; const res = this.state.resources;
-        if (!this.isAreaClear(x, y, type)) { this.addLog("位置受阻！"); return; }
+        if (!this.isAreaClear(x, y, type)) { this.addLog("位置受阻！"); return false; }
         res.food -= costs.food; res.wood -= costs.wood; res.stone -= costs.stone; res.gold -= costs.gold;
 
         const newBuilding = {
@@ -1072,6 +1094,24 @@ export class GameEngine {
             targetWorkerCount: ['timber_factory', 'stone_factory', 'barn'].includes(type) ? 1 : 0 // 倉庫新建後預設人數為 1
         };
         this.state.mapEntities.push(newBuilding);
+        
+        // --- NPC 位移修復：如果有村民被壓在剛生成的建築下，將其推開 ---
+        const TS = this.TILE_SIZE;
+        const match = cfg.size.match(/\{(\d+),(\d+)\}/);
+        const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
+        const w = uw * TS, h = uh * TS;
+        const bLeft = x - w / 2, bRight = x + w / 2, bTop = y - h / 2, bBottom = y + h / 2;
+
+        this.state.units.villagers.forEach(v => {
+            if (v.x > bLeft && v.x < bRight && v.y > bTop && v.y < bBottom) {
+                // 在建築物內，尋找最近安全位置並傳送
+                const safePos = this.findSafePos(v.x, v.y);
+                v.x = safePos.x;
+                v.y = safePos.y;
+                v.pathTarget = null; // 重置路徑
+            }
+        });
+        // ------------------------------------------------------------
 
         // 指派最近的村民
         const builder = this.findNearestAvailableVillager(x, y);
@@ -1089,8 +1129,73 @@ export class GameEngine {
             }
         } else {
             this.addLog(`警告：目前沒有空閒村民可以建造 ${cfg.name}！`);
-            // 如果沒有村民，暫時還是直接完成，或者維持施工中等村民
         }
+        return true;
+    }
+
+    static placeBuildingLine(type, startX, startY, endX, endY) {
+        const positions = this.getLinePositions(type, startX, startY, endX, endY);
+        const cfg = this.state.buildingConfigs[type];
+        if (!cfg || positions.length === 0) return;
+
+        // 預檢總成本與可用性
+        let possibleBuildings = [];
+        let totalCosts = { food: 0, wood: 0, stone: 0, gold: 0 };
+
+        positions.forEach(pos => {
+            if (this.isAreaClear(pos.x, pos.y, type, possibleBuildings)) {
+                possibleBuildings.push({ x: pos.x, y: pos.y });
+                for (let r in cfg.costs) totalCosts[r] += cfg.costs[r];
+            }
+        });
+
+        if (possibleBuildings.length === 0) return;
+
+        // 檢查最終資源量
+        for (let r in totalCosts) {
+            if (this.state.resources[r] < totalCosts[r]) {
+                this.triggerWarning("1", [r.toUpperCase()]);
+                return;
+            }
+        }
+
+        // 批量執行
+        let count = 0;
+        possibleBuildings.forEach(pos => {
+            if (this.placeBuilding(type, pos.x, pos.y)) count++;
+        });
+        if (count > 0) this.addLog(`批次建造：${cfg.name} x${count}。`);
+    }
+
+    static getLinePositions(type, startX, startY, endX, endY) {
+        const TS = this.TILE_SIZE;
+        const cfg = this.state.buildingConfigs[type];
+        if (!cfg) return [];
+        const match = cfg.size.match(/\{(\d+),(\d+)\}/);
+        const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
+        
+        // 為了讓拉排更直覺，我們強迫它沿著主軸線排列
+        const dx = endX - startX, dy = endY - startY;
+        const positions = [];
+        
+        if (Math.abs(dx) > Math.abs(dy)) {
+            // 水平排列
+            const step = uw * TS;
+            const count = Math.floor(Math.abs(dx) / step) + 1;
+            const dir = dx > 0 ? 1 : -1;
+            for (let i = 0; i < count; i++) {
+                positions.push({ x: startX + i * step * dir, y: startY });
+            }
+        } else {
+            // 垂直排列
+            const step = uh * TS;
+            const count = Math.floor(Math.abs(dy) / step) + 1;
+            const dir = dy > 0 ? 1 : -1;
+            for (let i = 0; i < count; i++) {
+                positions.push({ x: startX, y: startY + i * step * dir });
+            }
+        }
+        return positions;
     }
 
     static findNearestAvailableVillager(x, y) {

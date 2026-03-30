@@ -1,3 +1,5 @@
+import { UI_CONFIG } from "./ui_config.js";
+
 /**
  * 獨立的角色繪製與動畫渲染引擎 (純 Canvas API 實作)
  * 不依賴任何外部圖片資產，支援標準 Canvas 2D 與 Phaser Graphics
@@ -63,14 +65,21 @@ export class CharacterRenderer {
     }
 
     static renderBody(ctx, x, y, data) {
-        let clothColor = 0x1565c0; // 預設藍色
+        const colors = UI_CONFIG.VillagerColors;
+        const parseColor = (c) => parseInt(c.replace('#', '0x').substring(0, 8)) || 0x1e88e5;
 
-        if (data.state === 'IDLE') {
-            clothColor = 0x1e88e5; // 閒置狀態：亮藍色
+        let clothColor = parseColor(colors.DEFAULT);
+
+        const state = data.state;
+        if (state === 'IDLE') {
+            clothColor = parseColor(colors.IDLE);
+        } else if (state === 'CONSTRUCTING' || state === 'MOVING_TO_CONSTRUCTION') {
+            clothColor = parseColor(colors.CONSTRUCTING);
         } else {
-            if (data.type === 'WOOD') clothColor = 0x2e7d32;
-            else if (data.type === 'STONE') clothColor = 0x546e7a;
-            else if (data.type === 'FOOD') clothColor = 0xc62828;
+            // 資源採集狀態
+            if (data.type === 'WOOD') clothColor = parseColor(colors.WOOD);
+            else if (data.type === 'STONE') clothColor = parseColor(colors.STONE);
+            else if (data.type === 'FOOD') clothColor = parseColor(colors.FOOD);
         }
 
         this.setCtxStyle(ctx, clothColor, 1);

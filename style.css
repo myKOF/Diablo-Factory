@@ -241,3 +241,33 @@ html {
     color: #ccc;
     font-style: italic;
 }
+
+#building_list {
+    height: calc(100% - 50px);
+    overflow-y: auto;
+    padding-right: 8px;
+    margin-top: 5px;
+    pointer-events: auto;
+}
+
+#building_list::-webkit-scrollbar {
+    width: 6px;
+}
+#building_list::-webkit-scrollbar-track {
+    background: rgba(0,0,0,0.2);
+}
+#building_list::-webkit-scrollbar-thumb {
+    background: #8b6e4b;
+    border-radius: 3px;
+}
+
+.building-item:hover {
+    background: rgba(139, 110, 75, 0.2) !important;
+    border-color: var(--aoe-gold) !important;
+}
+
+.building-item.active {
+    border: 3px solid var(--aoe-gold) !important;
+    background: rgba(139, 110, 75, 0.3) !important;
+    box-shadow: 0 0 20px rgba(251, 192, 45, 0.4);
+}
