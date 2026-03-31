@@ -74,7 +74,7 @@ html {
     padding: 15px;
     pointer-events: auto;
     border-radius: 4px;
-    transition: all 0.3s ease;
+    /* 不加 transition，否則 updateStickyPositions 每幀更新 left/top 時選單會滑動 */
 }
 
 .glass-panel {
@@ -95,18 +95,14 @@ html {
 
 /* 建築動作面板：顯示在建築物下方 */
 #context_menu {
-    border: 3px solid var(--aoe-gold);
-    background: rgba(20, 20, 20, 0.95);
-    display: none;
-    /* 預設隱藏，由 JS 控制顯示 */
-    flex-direction: row;
+    display: none; /* 預設隱藏，由 JS 控制顯示 */
+    flex-direction: column;
     gap: 10px;
-    padding: 10px;
-    border-radius: 4px;
-    box-shadow: 0 5px 25px rgba(0, 0, 0, 0.8);
-    transform: translateX(-50%);
-    overflow: hidden;
-    /* 防止內容溢出導致容器變形 */
+    padding: 15px;
+    /* 不加 transform: translateX(-50%)，JS 的定位邏輯自行居中計算 */
+    overflow: hidden; /* 防止內容溢出導致容器變形 */
+    /* 不加 transition，讓每幀定位立即生效，避免跟隨相機漂移 */
+    will-change: left, top; /* 提示瀏覽器用 GPU 加速位置更新 */
 }
 
 .action-btn {
@@ -125,20 +121,21 @@ html {
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     flex: 0 0 auto;
     text-align: center;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
 
 .action-btn:hover {
     background: linear-gradient(145deg, #4e342e, #3e2723);
     transform: translateY(-3px);
     border-color: #fbc02d;
-    box-shadow: 0 6px 12px rgba(0,0,0,0.5), 0 0 10px rgba(251, 192, 45, 0.2);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.5), 0 0 10px rgba(251, 192, 45, 0.2);
 }
 
 .action-btn.danger {
     background: rgba(198, 40, 40, 0.3);
     border-color: #c62828;
 }
+
 .action-btn.danger:hover {
     background: rgba(198, 40, 40, 0.6);
     box-shadow: 0 0 10px rgba(198, 40, 40, 0.4);
@@ -264,9 +261,11 @@ html {
 #building_list::-webkit-scrollbar {
     width: 6px;
 }
+
 #building_list::-webkit-scrollbar-track {
-    background: rgba(0,0,0,0.2);
+    background: rgba(0, 0, 0, 0.2);
 }
+
 #building_list::-webkit-scrollbar-thumb {
     background: #8b6e4b;
     border-radius: 3px;
@@ -281,4 +280,4 @@ html {
     border: 3px solid var(--aoe-gold) !important;
     background: rgba(139, 110, 75, 0.3) !important;
     box-shadow: 0 0 20px rgba(251, 192, 45, 0.4);
-}
+}

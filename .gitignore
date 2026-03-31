@@ -1,0 +1,37 @@
+# --- 依賴套件 (Dependencies) ---
+# 絕對不要上傳這幾千個檔案
+node_modules/
+jspm_packages/
+.npm/
+
+# --- 暫存與自動化測試 (Temp & Automation) ---
+# 根據你的規範，自動化測試產生的截圖與日誌應排除
+tmp/*
+# 但保留 tmp 資料夾本身（選用，若需要保留目錄結構可加這一行）
+!tmp/.gitkeep
+
+# --- 環境變數與秘密資訊 (Environment / Secrets) ---
+.env
+.env.local
+.env.development.local
+
+# --- 作業系統產生的雜物 (OS Junk) ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- 編輯器私有設定 (Editor Private Config) ---
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# --- 日誌檔案 (Logs) ---
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+*.log

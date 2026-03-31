@@ -9,6 +9,11 @@ export class UIManager {
     static uiLayer;
     static dragGhost = null;
     static activeBuilding = null;
+    static lastUIState = {
+        resources: "",
+        logHash: "",
+        queueInfo: ""
+    };
 
     static init() {
         this.uiLayer = document.getElementById("ui_layer");
@@ -59,7 +64,7 @@ export class UIManager {
         resourceBar.className = "panel";
         resourceBar.id = "resource_bar";
         this.applyAnchorStyle(resourceBar, rbCfg);
-        
+
         // 額外樣式設定
         resourceBar.style.fontSize = rbCfg.fontSize;
         resourceBar.style.color = rbCfg.fontColor;
@@ -67,7 +72,7 @@ export class UIManager {
         resourceBar.style.alignItems = "center";
         resourceBar.style.justifyContent = "space-around";
         resourceBar.style.pointerEvents = "auto";
-        
+
         this.uiLayer.appendChild(resourceBar);
 
         // 2. 建築面板
@@ -98,7 +103,7 @@ export class UIManager {
         logPanel.id = "log_panel";
         logPanel.className = "panel";
         this.applyAnchorStyle(logPanel, logCfg);
-        
+
         logPanel.style.background = logCfg.bgColor;
         logPanel.style.color = "#e0f2f1";
         logPanel.style.padding = logCfg.padding;
@@ -110,14 +115,14 @@ export class UIManager {
         logPanel.style.overflowY = "auto";
         logPanel.style.pointerEvents = "auto";
         logPanel.style.boxSizing = "border-box";
-        
+
         this.uiLayer.appendChild(logPanel);
 
         // 4. 指令選單 (智慧定位，暫不使用固定錨點)
         const menu = document.createElement("div");
         menu.id = "context_menu";
         menu.className = "panel";
-        menu.style.cssText = `position: absolute; display: none; width: 220px; padding: 10px; z-index: 1000; pointer-events: auto;`;
+        menu.style.cssText = `position: absolute; display: none; width: 220px; padding: 15px; z-index: 1000; pointer-events: auto;`;
         this.uiLayer.appendChild(menu);
     }
 
@@ -126,11 +131,11 @@ export class UIManager {
      */
     static applyAnchorStyle(el, cfg) {
         if (!cfg || !cfg.anchor) return;
-        
+
         el.style.position = "absolute";
         const offX = cfg.offsetX || 0;
         const offY = cfg.offsetY || 0;
-        
+
         // 重置可能的樣式
         el.style.left = el.style.right = el.style.top = el.style.bottom = el.style.transform = "";
 
@@ -170,10 +175,10 @@ export class UIManager {
                 if (offX || offY) el.style.transform += ` translate(${offX}px, ${offY}px)`;
                 break;
         }
-        
+
         if (cfg.width) el.style.width = typeof cfg.width === 'number' ? `${cfg.width}px` : cfg.width;
         if (cfg.height) el.style.height = typeof cfg.height === 'number' ? `${cfg.height}px` : cfg.height;
-        
+
         // 進階美化
         if (cfg.glass) el.classList.add("glass-panel");
         if (cfg.shadow) el.style.boxShadow = cfg.shadow;
@@ -255,7 +260,7 @@ export class UIManager {
             e.stopPropagation();
             // 如果發生過拖曳，則 onclick 不處理 (由 handleWorldMouseUp 處理建造)
             if (this.dragGhost) return;
-            
+
             // 如果點擊時間太長，也不視為純點擊
             if (Date.now() - this.mouseDownTime > 300) return;
 
@@ -275,9 +280,9 @@ export class UIManager {
         const cfg = UI_CONFIG.WarningHUD;
         const warn = document.createElement("div");
         warn.id = "warning_hint";
-        
+
         this.applyAnchorStyle(warn, cfg);
-        
+
         warn.style.color = cfg.fontColor;
         warn.style.fontSize = cfg.fontSize;
         warn.style.fontWeight = "600";
@@ -294,7 +299,7 @@ export class UIManager {
         warn.style.display = "none";
         warn.style.fontFamily = "'Outfit', 'Inter', sans-serif";
         warn.style.letterSpacing = "1px";
-        
+
         document.body.appendChild(warn);
     }
 
@@ -370,15 +375,13 @@ export class UIManager {
             if (match) { uw = parseInt(match[1]); uh = parseInt(match[2]); }
         }
 
-        const offsetX = (uw % 2 === 0) ? 0 : TS / 2;
-        const offsetY = (uh % 2 === 0) ? 0 : TS / 2;
-
-        const gx = Math.round((local.x + cam.x - offsetX) / TS);
-        const gy = Math.round((local.y + cam.y - offsetY) / TS);
+        // 在統一的 20px 網格下，直接對齊到最近的 TILE_SIZE 即可
+        const gx = Math.round((local.x + cam.x) / TS);
+        const gy = Math.round((local.y + cam.y) / TS);
 
         return {
-            x: gx * TS + offsetX,
-            y: gy * TS + offsetY
+            x: gx * TS,
+            y: gy * TS
         };
     }
 
@@ -393,7 +396,7 @@ export class UIManager {
 
         // 僅處理左鍵
         if (e.button !== 0) return;
-        
+
         const state = GameEngine.state;
         if (state.buildingMode === 'STAMP') {
             state.buildingMode = 'LINE';
@@ -405,23 +408,24 @@ export class UIManager {
     static handleWorldMouseMove(e) {
         const state = GameEngine.state;
         if (!state.placingType) return;
-        
-        // 如果鼠標在 UI 面板上，隱藏虛影
+
+        // 優先更新 HTML 拖曳外框 (確保它在 UI 面板上也能順暢跟隨滑鼠)
+        if (state.buildingMode === 'DRAG' && this.dragGhost) {
+            this.dragGhost.style.left = `${e.clientX - 20}px`;
+            this.dragGhost.style.top = `${e.clientY - 20}px`;
+        }
+
+        // 如果鼠標在 UI 面板上，隱藏 Phaser 虛影
         if (e.target.closest(".panel")) {
             state.previewPos = null;
             state.linePreviewEntities = [];
             return;
         }
-        
+
         const pos = this.getWorldMousePos(e.clientX, e.clientY);
         state.previewPos = pos;
 
-        if (state.buildingMode === 'DRAG') {
-            if (this.dragGhost) {
-                this.dragGhost.style.left = `${e.clientX - 20}px`;
-                this.dragGhost.style.top = `${e.clientY - 20}px`;
-            }
-        } else if (state.buildingMode === 'LINE') {
+        if (state.buildingMode === 'LINE') {
             if (state.lineStartPos) {
                 state.linePreviewEntities = GameEngine.getLinePositions(state.placingType, state.lineStartPos.x, state.lineStartPos.y, pos.x, pos.y);
             }
@@ -465,7 +469,7 @@ export class UIManager {
 
     static handleWorldClick(e) {
         const state = GameEngine.state;
-        
+
         // 如果是 UI，不處理世界點擊
         if (e.target.closest("#ui_layer")) {
             if (!e.target.closest("#context_menu")) {
@@ -478,7 +482,7 @@ export class UIManager {
         if (state.buildingMode === 'STAMP') {
             // 如果剛拉完一排，跳過本次點擊觸發 (避免在結尾點多蓋一個)
             if (this.lastLinePlacementTime && Date.now() - this.lastLinePlacementTime < 100) return;
-            
+
             const pos = this.getWorldMousePos(e.clientX, e.clientY);
             GameEngine.placeBuilding(state.placingType, pos.x, pos.y);
             return;
@@ -493,9 +497,9 @@ export class UIManager {
         const entities = GameEngine.state.mapEntities;
 
         const clicked = entities.find(ent => {
-            const cfg = GameEngine.state.buildingConfigs[ent.type];
+            const cfg = GameEngine.getEntityConfig(ent.type);
             if (!cfg) return false;
-            const em = cfg.size.match(/\{(\d+),(\d+)\}/);
+            const em = cfg.size ? cfg.size.match(/\{(\d+),(\d+)\}/) : null;
             const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE;
             const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
             const mx = local.x - cam.x, my = local.y - cam.y;
@@ -503,13 +507,11 @@ export class UIManager {
         });
 
         if (clicked) {
-            const screenX = clicked.x + cam.x;
-            const screenY = clicked.y + cam.y + 110;
-            this.showContextMenu(clicked, screenX, screenY);
+            this.showContextMenu(clicked);
         }
     }
 
-    static showContextMenu(entity, x, y, isConfirming = false) {
+    static showContextMenu(entity, isConfirming = false) {
         this.activeMenuEntity = entity;
         const menu = document.getElementById("context_menu");
         const cfg = UI_CONFIG.ActionMenu;
@@ -519,16 +521,15 @@ export class UIManager {
         menu.style.width = "auto";
         menu.style.minWidth = "200px";
         menu.style.height = "auto";
-        menu.style.padding = "10px";
+        menu.style.padding = "15px";
 
         // ... (中間內容不變)
 
         let name = entity.isUnderConstruction ? "施工中的建築" : (entity.name || entity.type);
-        let headerColor = isConfirming ? "#ff8a80" : "#ffcc8c";
-        let headerBorder = isConfirming ? "1px solid #c62828" : "1px solid #8b6e4b";
         let headerText = isConfirming ? `確定銷毀 ${name} 並退還 50%？` : name;
+        let titleStyle = isConfirming ? `style="text-align:center; font-size: 20px; color:#ff8a80; border-bottom-color:#c62828;"` : `style="text-align:center; font-size: 20px;"`;
 
-        let html = `<div style="text-align:center; padding:5px; border-bottom:${headerBorder}; margin-bottom:10px; color:${headerColor}; font-weight:bold; font-size:16px;">${headerText}</div>`;
+        let html = `<div class="title" ${titleStyle}>${headerText}</div>`;
 
         html += `<div style="display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; justify-content:center;">`;
 
@@ -617,35 +618,34 @@ export class UIManager {
         html += `</div>`;
 
         menu.innerHTML = html;
+        // 先把選單移出可視區域，等 DOM 渲染一幀取得真實尺寸後再定位，避免首幀跳動
+        menu.style.left = "-9999px";
+        menu.style.top = "-9999px";
         this.updateValues();
-        this.updateStickyPositions(); // 立即計算智慧位置，避免首幀閃爍
+        requestAnimationFrame(() => this.updateStickyPositions());
     }
 
     static confirmDestroy(event) {
         if (event) event.stopPropagation();
         const ent = this.activeMenuEntity;
         if (!ent) return;
-        
+
         // 切換到確認模式
-        const scene = window.PhaserScene;
-        const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
-        this.showContextMenu(ent, ent.x + cam.x, ent.y + cam.y + 110, true);
+        this.showContextMenu(ent, true);
     }
 
     static cancelDestroy(event) {
         if (event) event.stopPropagation();
         const ent = this.activeMenuEntity;
         if (!ent) return;
-        
+
         // 切換回一般模式
-        const scene = window.PhaserScene;
-        const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
-        this.showContextMenu(ent, ent.x + cam.x, ent.y + cam.y + 110, false);
+        this.showContextMenu(ent, false);
     }
 
     static actualDestroy(event, eid) {
         if (event) event.stopPropagation();
-        
+
         // 使用 ID 查找實體，確保引用最新
         const ent = GameEngine.state.mapEntities.find(e => {
             const id = e.id || `${e.type}_${e.x}_${e.y}`;
@@ -656,7 +656,7 @@ export class UIManager {
             console.error("找不到待銷毀的實體:", eid);
             return;
         }
-        
+
         // 呼叫引擎執行銷毀
         GameEngine.destroyBuilding(ent);
     }
@@ -681,14 +681,18 @@ export class UIManager {
             const res = GameEngine.state.resources;
             const popCount = GameEngine.state.units.villagers.length;
             const maxPop = GameEngine.getMaxPopulation();
-            rb.innerHTML = `
-                <span>${labels.gold} ${res.gold}</span>
-                <span>${labels.wood} ${res.wood}</span>
-                <span>${labels.stone} ${res.stone}</span>
-                <span>${labels.food} ${res.food}</span>
-                <span title="人口上限">👥 ${popCount} / ${maxPop}</span>
-            `;
-            if (popCount >= maxPop) rb.querySelector('span:last-child').style.color = "#ff5252";
+
+            const stateStr = `${res.gold}|${res.wood}|${res.stone}|${res.food}|${popCount}|${maxPop}`;
+            if (this.lastUIState.resources !== stateStr) {
+                rb.innerHTML = `
+                    <span>${labels.gold} ${res.gold}</span>
+                    <span>${labels.wood} ${res.wood}</span>
+                    <span>${labels.stone} ${res.stone}</span>
+                    <span>${labels.food} ${res.food}</span>
+                    <span title="人口上限" style="${popCount >= maxPop ? 'color: #ff5252' : ''}">👥 ${popCount} / ${maxPop}</span>
+                `;
+                this.lastUIState.resources = stateStr;
+            }
         }
 
         // 更新日誌
@@ -776,22 +780,23 @@ export class UIManager {
             // 取得選單寬高 (由於在縮放內部，這裡得到的 offsetWidth 也是虛擬像素)
             const menuWidth = menu.offsetWidth || cfg.width || 380;
             const menuHeight = menu.offsetHeight || cfg.height || 95;
-            
+
             // 虛擬畫面的邊界
             const virtualWidth = 1920;
             const virtualHeight = 1080;
 
             // 智慧偏置計算 (相對於物體中心的位移)
-            let finalX = sx + (cfg.offsetX || 15);
+            // 選單水平居中於建築下方：X 向左偏 menuWidth/2，Y 向下偏 offsetY
+            let finalX = sx - menuWidth / 2 + (cfg.offsetX || 0);
             let finalY = sy + (cfg.offsetY || 100);
 
             // --- 邊界檢查與反向邏輯 (針對 1920x1080) ---
-            
+
             // 1. 水平檢查：如果右側超出虛擬邊界，改往左顯示
             if (finalX + menuWidth > virtualWidth - 20) {
                 finalX = sx - menuWidth - (cfg.offsetX || 15);
             }
-            
+
             // 2. 垂直檢查：如果底部超出虛擬邊界，改往上顯示
             if (finalY + menuHeight > virtualHeight - 20) {
                 finalY = sy - menuHeight - (cfg.offsetY || 100);

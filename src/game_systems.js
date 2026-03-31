@@ -3,7 +3,7 @@
  * 處理生產線、資源更新、碰撞、人口上限與 A* 尋路
  */
 export class GameEngine {
-    static TILE_SIZE = 80;
+    static TILE_SIZE = 20; // 基礎座標單位
 
     static state = {
         resources: { healthPotion: 0, soul: 100, gold: 100, wood: 200, stone: 0, food: 0, mana: 0 },
@@ -26,7 +26,11 @@ export class GameEngine {
         strings: {}, // 存放從 strings.csv 讀取的訊息資料
         lastMaxPop: 0,
         hasHitPopLimit: false,
-        assignmentTimer: 0 // 用於定期分配過載/空閒工人
+        assignmentTimer: 0, // 用於定期分配過載/空閒工人
+        spatialGrid: {
+            cellSize: 240, // 3個 TILE_SIZE，作為一個搜索區域
+            cells: new Map() // key: "gx,gy", value: Set(entity)
+        }
     };
 
     static RESOURCE_NAMES = {
@@ -71,7 +75,7 @@ export class GameEngine {
 
     static initBackgroundWorker() {
         const blob = new Blob([`
-            setInterval(() => { self.postMessage('tick'); }, 20); // 提高頻率至 50FPS (20ms)
+            setInterval(() => { self.postMessage('tick'); }, 50); // 降低頻率至 20Hz (50ms)，顯著節省 CPU
         `], { type: "text/javascript" });
         const worker = new Worker(URL.createObjectURL(blob));
         worker.onmessage = () => { this.logicTick(); };
@@ -121,24 +125,38 @@ export class GameEngine {
             }
         }
 
-        this.state.units.villagers.forEach(v => { 
+        this.state.units.villagers.forEach(v => {
             // 閒置村民隨時檢查是否有工作可做，大幅提升反應速度
             if (v.state === 'IDLE') this.assignNextTask(v);
-            this.updateVillagerMovement(v, deltaTime); 
+            this.updateVillagerMovement(v, deltaTime);
         });
 
         // 每秒執行一次工人分配邏輯
         this.state.assignmentTimer += deltaTime;
         if (this.state.assignmentTimer >= 1.0) {
             this.updateWorkerAssignments();
+            this.updateSpatialGrid(); // 週期性全量刷新空間格網 (保險起見)
             this.state.assignmentTimer = 0;
         }
+    }
+
+    static updateSpatialGrid() {
+        const grid = this.state.spatialGrid;
+        grid.cells.clear();
+        this.state.mapEntities.forEach(ent => {
+            const gx = Math.floor(ent.x / grid.cellSize);
+            const gy = Math.floor(ent.y / grid.cellSize);
+            const key = `${gx},${gy}`;
+            if (!grid.cells.has(key)) grid.cells.set(key, new Set());
+            grid.cells.get(key).add(ent);
+        });
     }
 
     static parseCSV(text) {
         const rows = text.split(/\r?\n/).map(row => {
             const matches = row.match(/(".*?"|[^,]+)/g);
-            return matches ? matches.map(m => m.replace(/^"|"$/g, '')) : [];
+            // 移除前後引號並加入 trim()
+            return matches ? matches.map(m => m.replace(/^"|"$/g, '').trim()) : [];
         }).filter(r => r.length > 1);
         if (rows.length < 2) return null;
         let headerIdx = rows.findIndex(r => r.some(cell => {
@@ -265,18 +283,47 @@ export class GameEngine {
             const data = this.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
-            const idxName = headers.indexOf('name'), idxModel = headers.indexOf('model'), idxType = headers.indexOf('type'), idxYield = headers.indexOf('collection_speed'), idxDensity = headers.indexOf('density'), idxLv = headers.indexOf('lv');
+            const idxName = headers.indexOf('name'), idxModel = headers.indexOf('model'), idxType = headers.indexOf('type');
+            const idxYield = headers.indexOf('collection_speed'), idxDensity = headers.indexOf('density');
+            const idxLv = headers.indexOf('lv'), idxSize = headers.indexOf('size'), idxModelSize = headers.indexOf('model_size');
+            
             this.state.resourceConfigs = [];
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
                 if (!row[idxName]) continue;
+                
+                let parsedModelSize = { x: 1.0, y: 1.0 };
+                if (idxModelSize !== -1 && row[idxModelSize]) {
+                    const val = row[idxModelSize].trim();
+                    const match = val.match(/\{([0-9.]+)\*([0-9.]+)\}/);
+                    if (match) {
+                        parsedModelSize = { x: parseFloat(match[1]), y: parseFloat(match[2]) };
+                    } else {
+                        const num = parseFloat(val);
+                        if (!isNaN(num)) parsedModelSize = { x: num, y: num };
+                    }
+                }
+                
                 this.state.resourceConfigs.push({
                     name: row[idxName].trim(), model: row[idxModel].trim(), type: row[idxType].trim().toUpperCase(),
                     amount: parseInt(row[idxYield]) || 100, density: parseInt(row[idxDensity]) || 5,
-                    lv: parseInt(row[idxLv]) || 1
+                    lv: parseInt(row[idxLv]) || 1, size: (idxSize !== -1 && row[idxSize]) ? row[idxSize].trim() : '{1,1}',
+                    model_size: parsedModelSize
                 });
             }
         } catch (e) { }
+    }
+
+    static getEntityConfig(type) {
+        if (!type) return null;
+        if (this.state.buildingConfigs && this.state.buildingConfigs[type]) {
+            return this.state.buildingConfigs[type];
+        }
+        if (this.state.resourceConfigs) {
+            const resCfg = this.state.resourceConfigs.find(r => r.model === type);
+            if (resCfg) return resCfg;
+        }
+        return null;
     }
 
     static async loadBuildingConfig() {
@@ -352,11 +399,12 @@ export class GameEngine {
     static generateMap() {
         this.state.mapEntities = [];
         const occupied = new Set();
+
         const markOccupied = (x, y, type) => {
-            const cfg = this.state.buildingConfigs[type];
+            const cfg = this.getEntityConfig(type);
             let uw = 1, uh = 1;
-            if (cfg) {
-                const em = cfg.size.match(/\{(\d+),(\d+)\}/);
+            if (cfg && cfg.size) {
+                const em = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
                 if (em) { uw = parseInt(em[1]); uh = parseInt(em[2]); }
             }
             const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
@@ -365,6 +413,21 @@ export class GameEngine {
             for (let i = 0; i < uw; i++) {
                 for (let j = 0; j < uh; j++) occupied.add(`${gx + i},${gy + j}`);
             }
+        };
+
+        const checkOccupied = (gridX, gridY, type) => {
+            const cfg = this.getEntityConfig(type);
+            let uw = 1, uh = 1;
+            if (cfg && cfg.size) {
+                const em = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
+                if (em) { uw = parseInt(em[1]); uh = parseInt(em[2]); }
+            }
+            for (let i = 0; i < uw; i++) {
+                for (let j = 0; j < uh; j++) {
+                    if (occupied.has(`${gridX + i},${gridY + j}`)) return true;
+                }
+            }
+            return false;
         };
 
         this.state.mapEntities.push({ type: 'village', x: 960, y: 560, name: "村莊中心" });
@@ -377,18 +440,24 @@ export class GameEngine {
                 let count = 0; let attempts = 0;
                 while (count < cfg.density && attempts < 200) {
                     attempts++;
-                    const gx = Math.floor(Math.random() * 40 - 20) + 12;
-                    const gy = Math.floor(Math.random() * 25 - 12) + 7;
-                    if (occupied.has(`${gx},${gy}`)) continue;
-                    const x = gx * this.TILE_SIZE + this.TILE_SIZE / 2;
-                    const y = gy * this.TILE_SIZE + this.TILE_SIZE / 2;
+                    const gx = Math.floor(Math.random() * 160 - 80) + 48;
+                    const gy = Math.floor(Math.random() * 100 - 48) + 28;
+                    if (checkOccupied(gx, gy, cfg.model)) continue;
+
+                    const em = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
+                    const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;
+                    const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
+                    const x = gx * this.TILE_SIZE + w / 2;
+                    const y = gy * this.TILE_SIZE + h / 2;
+
                     if (Math.abs(x - 960) < 240 && Math.abs(y - 560) < 240) continue;
                     this.state.mapEntities.push({ type: cfg.model, resourceType: cfg.type, x, y, amount: cfg.amount, level: cfg.lv, name: cfg.name });
-                    occupied.add(`${gx},${gy}`);
+                    markOccupied(x, y, cfg.model);
                     count++;
                 }
             });
         }
+        this.updateSpatialGrid();
     }
 
     static findSafePos(x, y) {
@@ -396,7 +465,7 @@ export class GameEngine {
         const gx = Math.floor(x / TS), gy = Math.floor(y / TS);
         const obstacles = this.getObstacleGrid();
         if (!obstacles.has(`${gx},${gy}`)) return { x, y };
-        for (let r = 1; r < 5; r++) {
+        for (let r = 1; r < 20; r++) {
             for (let dx = -r; dx <= r; dx++) {
                 for (let dy = -r; dy <= r; dy++) {
                     if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
@@ -472,7 +541,7 @@ export class GameEngine {
                         if (v.targetId.type === 'farmland' || v.targetId.type === 'tree_plantation') {
                             if (v.targetId.type === 'farmland') this.state.resources.food += canTake;
                             else if (v.targetId.type === 'tree_plantation') this.state.resources.wood += canTake;
-                            
+
                             v.cargo = 0;
                             v.gatherTimer = 0; // 重置計時器，原地繼續採集
                             if (v.targetId.amount <= 0) {
@@ -499,7 +568,7 @@ export class GameEngine {
                 const cfgB = this.state.buildingConfigs[v.targetBase.type];
                 let depositDist = 60;
                 if (cfgB && cfgB.size) {
-                    const m = cfgB.size.match(/\{(\d+),(\d+)\}/);
+                    const m = cfgB.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
                     if (m) {
                         const uw = parseInt(m[1]), uh = parseInt(m[2]);
                         depositDist = (Math.max(uw, uh) * this.TILE_SIZE / 2) + 20;
@@ -529,7 +598,7 @@ export class GameEngine {
                 const cfgC = this.state.buildingConfigs[v.constructionTarget.type];
                 let interactionDist = 60;
                 if (cfgC && cfgC.size) {
-                    const m = cfgC.size.match(/\{(\d+),(\d+)\}/);
+                    const m = cfgC.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
                     if (m) {
                         const uw = parseInt(m[1]), uh = parseInt(m[2]);
                         interactionDist = (Math.max(uw, uh) * this.TILE_SIZE / 2) + 20;
@@ -591,7 +660,7 @@ export class GameEngine {
                         this.addLog(`建造者已自動轉為 ${v.constructionTarget.name} 的專職員工。`);
                     } else if (type === 'farmland' || type === 'tree_plantation') {
                         // 農田/樹木田建造完後，建造者直接原地開始採集，佔住坑位
-                        v.type = (type === 'farmland' ? 'FOOD' : 'WOOD'); 
+                        v.type = (type === 'farmland' ? 'FOOD' : 'WOOD');
                         v.state = 'GATHERING'; v.targetId = v.constructionTarget; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null;
                         this.addLog(`建造者開始原地${type === 'farmland' ? '耕作' : '伐木'}。`);
                     } else if (type === 'barn') {
@@ -604,12 +673,12 @@ export class GameEngine {
                 break;
         }
 
-        const interactionTarget = v.targetId || v.targetBase || v.constructionTarget;
-        const collidingEnt = this.isColliding(v.x, v.y, interactionTarget);
+        const ignoreEnts = [v.targetId, v.targetBase, v.constructionTarget].filter(Boolean);
+        const collidingEnt = this.isColliding(v.x, v.y, ignoreEnts);
 
         if (collidingEnt) {
             // 檢查舊位置是否也在此建築中
-            const wasColliding = this.isColliding(oldX, oldY, interactionTarget);
+            const wasColliding = this.isColliding(oldX, oldY, ignoreEnts);
             if (wasColliding !== collidingEnt) {
                 // 如果原本不在這個建築裡面（或是剛從別處撞進來），阻擋
                 v.x = oldX; v.y = oldY; v.pathTarget = null;
@@ -624,7 +693,7 @@ export class GameEngine {
             const cfgB = this.state.buildingConfigs[v.targetBase.type];
             let depositDist = 60;
             if (cfgB && cfgB.size) {
-                const m = cfgB.size.match(/\{(\d+),(\d+)\}/);
+                const m = cfgB.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
                 if (m) {
                     const uw = parseInt(m[1]), uh = parseInt(m[2]);
                     depositDist = (Math.max(uw, uh) * this.TILE_SIZE / 2) + 20;
@@ -676,12 +745,12 @@ export class GameEngine {
             v.state = 'MOVING_TO_CONSTRUCTION';
             v.constructionTarget = nextConstruction;
             v.targetId = null; v.pathTarget = null;
-            v.assignedWarehouseId = null; 
+            v.assignedWarehouseId = null;
             return;
         }
 
         // 2. 各倉庫滿員情況 (優先補滿專職位)
-        const warehouses = this.state.mapEntities.filter(e => 
+        const warehouses = this.state.mapEntities.filter(e =>
             ['timber_factory', 'stone_factory', 'barn'].includes(e.type) && !e.isUnderConstruction
         );
 
@@ -730,20 +799,39 @@ export class GameEngine {
     }
 
     static findNearestDepositPoint(x, y, resourceType = 'WOOD') {
-        let nearest = null; let minDist = Infinity;
-        const resType = (resourceType || 'WOOD').toUpperCase();
+        const grid = this.state.spatialGrid;
+        const startGx = Math.floor(x / grid.cellSize);
+        const startGy = Math.floor(y / grid.cellSize);
 
-        this.state.mapEntities.forEach(e => {
-            if (e.isUnderConstruction) return;
+        let nearest = null;
+        let minDist = Infinity;
 
-            let isMatch = false;
-            // 一般工人只能將資源存放在村莊中心 (village)
-            if (e.type === 'village') isMatch = true;
-
-            if (isMatch) {
-                const d = Math.hypot(e.x - x, e.y - y);
-                if (d < minDist) { minDist = d; nearest = e; }
+        // 從中心向外搜尋 5 圈 (約 1200 像素半徑)
+        for (let r = 0; r <= 5; r++) {
+            for (let dx = -r; dx <= r; dx++) {
+                for (let dy = -r; dy <= r; dy++) {
+                    if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+                    const key = `${startGx + dx},${startGy + dy}`;
+                    const cell = grid.cells.get(key);
+                    if (cell) {
+                        cell.forEach(e => {
+                            if (e.isUnderConstruction) return;
+                            if (e.type === 'village') {
+                                const d = Math.hypot(e.x - x, e.y - y);
+                                if (d < minDist) { minDist = d; nearest = e; }
+                            }
+                        });
+                    }
+                }
             }
+            if (nearest) return nearest;
+        }
+
+        // 如果附近沒找到，回退到全量搜尋防止 Bug
+        this.state.mapEntities.forEach(e => {
+            if (e.isUnderConstruction || e.type !== 'village') return;
+            const d = Math.hypot(e.x - x, e.y - y);
+            if (d < minDist) { minDist = d; nearest = e; }
         });
         return nearest;
     }
@@ -780,17 +868,18 @@ export class GameEngine {
         const targetEnt = this.state.mapEntities.find(ent => {
             const cfg = this.state.buildingConfigs[ent.type];
             if (!cfg || !cfg.collision) return false;
-            const em = cfg.size.match(/\{(\d+),(\d+)\}/);
+            const em = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
             const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;
             const w = uw * TS, h = uh * TS;
             return targetX > ent.x - w / 2 && targetX < ent.x + w / 2 && targetY > ent.y - h / 2 && targetY < ent.y + h / 2;
         });
 
         if (targetEnt) {
-            const em = this.state.buildingConfigs[targetEnt.type].size.match(/\{(\d+),(\d+)\}/);
+            const em = this.state.buildingConfigs[targetEnt.type].size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
             const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;
-            const tgx = Math.round((targetEnt.x - (uw * TS / 2)) / TS);
-            const tgy = Math.round((targetEnt.y - (uh * TS / 2)) / TS);
+            const w = uw * TS, h = uh * TS;
+            const tgx = Math.round((targetEnt.x - w / 2) / TS);
+            const tgy = Math.round((targetEnt.y - h / 2) / TS);
             for (let i = 0; i < uw; i++) {
                 for (let j = 0; j < uh; j++) targetCells.add(`${tgx + i},${tgy + j}`);
             }
@@ -804,14 +893,14 @@ export class GameEngine {
         const startIsObstacle = obstacles.has(`${startGX},${startGY}`);
 
         let iterations = 0;
-        while (queue.length > 0 && iterations < 1500) {
+        while (queue.length > 0 && iterations < 5000) {
             iterations++;
             const [gx, gy, firstStep] = queue.shift();
             if (targetCells.has(`${gx},${gy}`)) {
                 const res = firstStep || [gx, gy];
                 return { x: res[0] * TS + TS / 2, y: res[1] * TS + TS / 2 };
             }
-            const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+            const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]];
             for (const [dx, dy] of neighbors) {
                 const nx = gx + dx, ny = gy + dy;
                 const key = `${nx},${ny}`;
@@ -829,9 +918,10 @@ export class GameEngine {
     static getObstacleGrid() {
         const grid = new Set();
         this.state.mapEntities.forEach(ent => {
-            const cfg = this.state.buildingConfigs[ent.type];
-            if (cfg && cfg.collision) { // 施工中也應具備碰撞，防止 NPC 走入或卡住
-                const em = cfg.size.match(/\{(\d+),(\d+)\}/);
+            if (ent.isUnderConstruction) return;
+            const cfg = this.getEntityConfig(ent.type);
+            if (cfg && cfg.collision) {
+                const em = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
                 const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;
                 const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
                 const gx = Math.round((ent.x - w / 2) / this.TILE_SIZE);
@@ -844,14 +934,15 @@ export class GameEngine {
         return grid;
     }
 
-    static isColliding(x, y, ignoreEnt = null) {
+    static isColliding(x, y, ignoreEnts = []) {
         // 回傳碰撞到的實體，方便後續判斷
         return this.state.mapEntities.find(ent => {
-            if (ent === ignoreEnt) return false;
+            if (ent.isUnderConstruction) return false;
+            if (ignoreEnts.includes(ent)) return false;
 
-            const cfg = this.state.buildingConfigs[ent.type];
+            const cfg = this.getEntityConfig(ent.type);
             if (cfg && cfg.collision) {
-                const match = cfg.size.match(/\{(\d+),(\d+)\}/);
+                const match = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
                 const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
                 const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
                 if (x > ent.x - w / 2 && x < ent.x + w / 2 && y > ent.y - h / 2 && y < ent.y + h / 2) return true;
@@ -861,19 +952,19 @@ export class GameEngine {
     }
 
     static isAreaClear(x, y, type, tempEntities = []) {
-        const cfg = this.state.buildingConfigs[type];
+        const cfg = this.getEntityConfig(type);
         if (!cfg) return true;
-        const match = cfg.size.match(/\{(\d+),(\d+)\}/);
+        const match = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
         const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
         const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
-        
+
         const allToCheck = [...this.state.mapEntities, ...tempEntities];
 
         const hitEntity = allToCheck.some(ent => {
-            const ecfg = this.state.buildingConfigs[ent.type];
+            const ecfg = this.getEntityConfig(ent.type);
             let ew = this.TILE_SIZE, eh = this.TILE_SIZE;
             if (ecfg) {
-                const em = ecfg.size.match(/\{(\d+),(\d+)\}/);
+                const em = ecfg.size ? ecfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
                 ew = em ? parseInt(em[1]) * this.TILE_SIZE : this.TILE_SIZE;
                 eh = em ? parseInt(em[2]) * this.TILE_SIZE : this.TILE_SIZE;
             }
@@ -883,22 +974,39 @@ export class GameEngine {
     }
 
     static findNearestResource(x, y, type, villagerId) {
-        let nearest = null; let minDist = Infinity;
-        this.state.mapEntities.forEach(e => {
-            if (e.resourceType === type) {
-                // 如果是農田或樹木田，檢查是否已有其他工人在目標中 (鎖定坑位)
-                if (e.type === 'farmland' || e.type === 'tree_plantation') {
-                    const isOccupied = this.state.units.villagers.some(v =>
-                        v.id !== villagerId && (v.targetId === e || v.constructionTarget === e)
-                    );
-                    if (isOccupied) return;
-                }
+        const grid = this.state.spatialGrid;
+        const startGx = Math.floor(x / grid.cellSize);
+        const startGy = Math.floor(y / grid.cellSize);
 
-                const d = Math.hypot(e.x - x, e.y - y);
-                if (d < minDist) { minDist = d; nearest = e; }
+        let nearest = null;
+        let minDist = Infinity;
+
+        // 從中心向外搜尋 8 圈 (約 2000 像素半徑)
+        for (let r = 0; r <= 8; r++) {
+            for (let dx = -r; dx <= r; dx++) {
+                for (let dy = -r; dy <= r; dy++) {
+                    if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+                    const key = `${startGx + dx},${startGy + dy}`;
+                    const cell = grid.cells.get(key);
+                    if (cell) {
+                        cell.forEach(e => {
+                            if (e.resourceType === type) {
+                                if (e.type === 'farmland' || e.type === 'tree_plantation') {
+                                    const isOccupied = this.state.units.villagers.some(v =>
+                                        v.id !== villagerId && (v.targetId === e || v.constructionTarget === e)
+                                    );
+                                    if (isOccupied) return;
+                                }
+                                const d = Math.hypot(e.x - x, e.y - y);
+                                if (d < minDist) { minDist = d; nearest = e; }
+                            }
+                        });
+                    }
+                }
             }
-        });
-        return nearest;
+            if (nearest) return nearest;
+        }
+        return null;
     }
 
     static updateWorkerAssignments() {
@@ -981,7 +1089,7 @@ export class GameEngine {
 
     static setCommand(event, commandType) {
         if (event && event.stopPropagation) event.stopPropagation();
-        
+
         // 點擊兩次則變為非選取 (IDLE)
         if (this.state.currentGlobalCommand === commandType) {
             this.addLog(`停止全域指令：${this.RESOURCE_NAMES[commandType.toLowerCase()] || commandType}。`);
@@ -1068,7 +1176,7 @@ export class GameEngine {
 
     static addToTrainingQueue(event, type) {
         if (event && event.stopPropagation) event.stopPropagation();
-        
+
         // 目前訓練為即時完成 (簡化邏輯)
         const costs = {
             mage: { gold: 50, food: 20 },
@@ -1129,10 +1237,10 @@ export class GameEngine {
             targetWorkerCount: ['timber_factory', 'stone_factory', 'barn'].includes(type) ? 1 : 0 // 倉庫新建後預設人數為 1
         };
         this.state.mapEntities.push(newBuilding);
-        
+
         // --- NPC 位移修復：如果有村民被壓在剛生成的建築下，將其推開 ---
         const TS = this.TILE_SIZE;
-        const match = cfg.size.match(/\{(\d+),(\d+)\}/);
+        const match = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
         const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
         const w = uw * TS, h = uh * TS;
         const bLeft = x - w / 2, bRight = x + w / 2, bTop = y - h / 2, bBottom = y + h / 2;
@@ -1162,9 +1270,8 @@ export class GameEngine {
                 builder.state = 'MOVING_TO_CONSTRUCTION';
                 builder.pathTarget = null;
             }
-        } else {
-            this.addLog(`警告：目前沒有空閒村民可以建造 ${cfg.name}！`);
         }
+        this.updateSpatialGrid();
         return true;
     }
 
@@ -1206,13 +1313,13 @@ export class GameEngine {
         const TS = this.TILE_SIZE;
         const cfg = this.state.buildingConfigs[type];
         if (!cfg) return [];
-        const match = cfg.size.match(/\{(\d+),(\d+)\}/);
+        const match = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
         const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
-        
+
         // 為了讓拉排更直覺，我們強迫它沿著主軸線排列
         const dx = endX - startX, dy = endY - startY;
         const positions = [];
-        
+
         if (Math.abs(dx) > Math.abs(dy)) {
             // 水平排列
             const step = uw * TS;
@@ -1304,5 +1411,6 @@ export class GameEngine {
             window.UIManager.hideContextMenu();
             window.UIManager.updateValues();
         }
+        this.updateSpatialGrid();
     }
 }
