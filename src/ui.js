@@ -765,44 +765,41 @@ export class UIManager {
         if (this.activeMenuEntity) {
             const menu = document.getElementById("context_menu");
             const scene = window.PhaserScene;
+            // Phaser 的 scrollX 表示畫面往右移，所以在螢幕空間中：螢幕座標 = 世界座標 - scrollX
             const cam = scene ? { x: scene.cameras.main.scrollX, y: scene.cameras.main.scrollY } : { x: 0, y: 0 };
             const cfg = UI_CONFIG.ActionMenu;
 
-            // 取得全域縮放比例與位移
-            const container = document.getElementById("game_container");
-            const rect = container ? container.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
-            const scaleX = rect.width / 1920;
-            const scaleY = rect.height / 1080;
+            // 基礎螢幕位置 (虛擬 1920x1080 空間)
+            let sx = this.activeMenuEntity.x - cam.x;
+            let sy = this.activeMenuEntity.y - cam.y;
 
-            // 基礎螢幕中心位置 (將虛擬世界座標轉換為實際螢幕座標)
-            let sx = (this.activeMenuEntity.x - cam.x) * scaleX + rect.left;
-            let sy = (this.activeMenuEntity.y - cam.y) * scaleY + rect.top;
-
-            // 取得選單寬高 (動態抓取，若尚未渲染則使用配置預設值)
+            // 取得選單寬高 (由於在縮放內部，這裡得到的 offsetWidth 也是虛擬像素)
             const menuWidth = menu.offsetWidth || cfg.width || 380;
             const menuHeight = menu.offsetHeight || cfg.height || 95;
-            const screenWidth = window.innerWidth;
-            const screenHeight = window.innerHeight;
-
-            // 智慧偏置計算 (偏置量也跟隨縮放)
-            let finalX = sx + (cfg.offsetX || 0) * scaleX;
-            let finalY = sy + (cfg.offsetY || 0) * scaleY;
-
-            // --- 邊界檢查與反向邏輯 ---
             
-            // 1. 水平檢查：如果右側超出，改往左顯示
-            if (finalX + menuWidth > screenWidth - 20) {
-                finalX = sx - menuWidth - (cfg.offsetX || 15) * scaleX;
+            // 虛擬畫面的邊界
+            const virtualWidth = 1920;
+            const virtualHeight = 1080;
+
+            // 智慧偏置計算 (相對於物體中心的位移)
+            let finalX = sx + (cfg.offsetX || 15);
+            let finalY = sy + (cfg.offsetY || 100);
+
+            // --- 邊界檢查與反向邏輯 (針對 1920x1080) ---
+            
+            // 1. 水平檢查：如果右側超出虛擬邊界，改往左顯示
+            if (finalX + menuWidth > virtualWidth - 20) {
+                finalX = sx - menuWidth - (cfg.offsetX || 15);
             }
             
-            // 2. 垂直檢查：如果底部超出，改往上顯示 (建築上方)
-            if (finalY + menuHeight > screenHeight - 20) {
-                finalY = sy - menuHeight - (cfg.offsetY || 100) * scaleY;
+            // 2. 垂直檢查：如果底部超出虛擬邊界，改往上顯示
+            if (finalY + menuHeight > virtualHeight - 20) {
+                finalY = sy - menuHeight - (cfg.offsetY || 100);
             }
 
-            // 3. 全域安全區域確保 (防止被頂部資源列或左側面板蓋住)
-            finalX = Math.max(20, Math.min(finalX, screenWidth - menuWidth - 20));
-            finalY = Math.max(20, Math.min(finalY, screenHeight - menuHeight - 20));
+            // 3. 全域安全區域確保 (防止跑出 1920x1080 範圍)
+            finalX = Math.max(20, Math.min(finalX, virtualWidth - menuWidth - 20));
+            finalY = Math.max(20, Math.min(finalY, virtualHeight - menuHeight - 20));
 
             menu.style.left = `${finalX}px`;
             menu.style.top = `${finalY}px`;

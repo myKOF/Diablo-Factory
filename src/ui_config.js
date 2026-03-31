@@ -114,8 +114,17 @@ export const UI_CONFIG = {
         height: 10,
         offsetY: 85,
         bgColor: "rgba(0, 0, 0, 0.7)",
-        fillColor: "linear-gradient(90deg, #fbc02d, #ef6c00)", // 這裡之後用 JS 解析或 CSS 設定
-        outlineColor: "#000000"
+        fillColor: "linear-gradient(90deg, #fbc02d, #ef6c00)",
+        outlineColor: "#000000",
+        // 特定建築的自定義偏移
+        overrides: {
+            village: { offsetY: 120, widthScale: 0.8 },
+            town_center: { offsetY: 120, widthScale: 0.8 },
+            farmhouse: { offsetY: 60, widthScale: 1.0 },
+            timber_factory: { offsetY: 70 },
+            stone_factory: { offsetY: 70 },
+            mage_place: { offsetY: 80 }
+        }
     },
     // 建築生產 HUD
     ProductionHUD: {
@@ -129,10 +138,10 @@ export const UI_CONFIG = {
     // 村民狀態顏色
     VillagerColors: {
         IDLE: "#42a5f5",          // 亮藍色
-        CONSTRUCTING: "#ffa726",  // 橘色
+        CONSTRUCTING: "#ffa726",  // 建造中，橘色
         WOOD: "#66bb6a",          // 綠色
-        STONE: "#78909c",          // 灰藍色
+        STONE: "#78909c",          // 灰色
         FOOD: "#ef5350",          // 紅色
-        DEFAULT: "#42a5f5"
+        DEFAULT: "#42a5f5"         //預設值
     }
 };

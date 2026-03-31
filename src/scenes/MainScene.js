@@ -382,10 +382,16 @@ export class MainScene extends Phaser.Scene {
     drawBuildProgressBar(g, ent, uw, uh, TS) {
         const cfg = UI_CONFIG.BuildingProgressBar;
         const progress = ent.buildProgress / (ent.buildTime || 1);
-        const bw = (uw * TS) * (cfg.widthScale || 1.0);
-        const bh = cfg.height || 8;
+        
+        // 優先讀取建築專屬配置 (如村莊、民居等)
+        const overrides = cfg.overrides && cfg.overrides[ent.type] ? cfg.overrides[ent.type] : {};
+        const widthScale = overrides.widthScale !== undefined ? overrides.widthScale : (cfg.widthScale || 1.1);
+        const offsetY = overrides.offsetY !== undefined ? overrides.offsetY : (cfg.offsetY || 85);
+
+        const bw = (uw * TS) * widthScale;
+        const bh = cfg.height || 10;
         const bx = ent.x - bw / 2;
-        const by = ent.y - (uh * TS) / 2 + (cfg.offsetY || -20);
+        const by = ent.y - (uh * TS) / 2 + offsetY;
 
         // 背景
         const bgColor = this.hexOrRgba(cfg.bgColor);
