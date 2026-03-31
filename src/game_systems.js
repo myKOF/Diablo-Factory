@@ -20,8 +20,7 @@ export class GameEngine {
         buildingMode: 'NONE', // 'NONE', 'DRAG', 'STAMP', 'LINE'
         lineStartPos: null,
         linePreviewEntities: [],
-        villageQueue: [],
-        villageProductionTimer: 0,
+        // 生產隊列已移至各城鎮中心實體上 (entity.queue / entity.productionTimer)
         currentGlobalCommand: 'IDLE',
         strings: {}, // 存放從 strings.csv 讀取的訊息資料
         lastMaxPop: 0,
@@ -87,41 +86,47 @@ export class GameEngine {
         const deltaTime = Math.min((now - this.lastTickTime) / 1000, 0.2);
         this.lastTickTime = now;
 
-        // 處理村民生產隊伍
-        if (this.state.villageQueue.length > 0) {
-            const maxPop = this.getMaxPopulation();
-            const isPopFull = this.state.units.villagers.length >= maxPop;
+        // 處理每間城鎮中心各自的獨立生產隊列
+        const maxPop = this.getMaxPopulation();
+        const isPopFull = this.state.units.villagers.length >= maxPop;
 
-            // 偵測人口上限變動
-            if (this.state.lastMaxPop > 0 && maxPop > this.state.lastMaxPop) {
-                this.triggerWarning("3", [maxPop]);
-            }
-            this.state.lastMaxPop = maxPop;
+        // 偵測人口上限變動（全域一次即可）
+        if (this.state.lastMaxPop > 0 && maxPop > this.state.lastMaxPop) {
+            this.triggerWarning("3", [maxPop]);
+        }
+        this.state.lastMaxPop = maxPop;
+
+        const townCenters = this.state.mapEntities.filter(
+            e => (e.type === 'village' || e.type === 'town_center') && !e.isUnderConstruction
+        );
+
+        for (const tc of townCenters) {
+            if (!tc.queue) tc.queue = [];
+            if (tc.productionTimer === undefined) tc.productionTimer = 0;
+            if (tc.queue.length === 0) continue;
 
             if (!isPopFull) {
-                this.state.villageProductionTimer -= deltaTime;
-                this.state.hasHitPopLimit = false; // 重置提示標記
-            } else if (this.state.villageProductionTimer <= 0.1) {
-                this.state.villageProductionTimer = 0;
-                // 僅在第一次達到上限時提示一次 (或是狀態轉變時)
+                tc.productionTimer -= deltaTime;
+                this.state.hasHitPopLimit = false;
+            } else if (tc.productionTimer <= 0.1) {
+                tc.productionTimer = 0;
                 if (!this.state.hasHitPopLimit) {
                     this.triggerWarning("2");
                     this.state.hasHitPopLimit = true;
                 }
             } else {
-                this.state.villageProductionTimer -= deltaTime;
+                tc.productionTimer -= deltaTime;
             }
 
-            if (this.state.villageProductionTimer <= 0 && !isPopFull) {
-                const configName = this.state.villageQueue.shift();
-                const success = this.spawnVillager(configName);
+            if (tc.productionTimer <= 0 && !isPopFull) {
+                const configName = tc.queue.shift();
+                const success = this.spawnVillager(configName, tc);
                 if (success) {
                     const newV = this.state.units.villagers[this.state.units.villagers.length - 1];
-                    // 讓生產引擎或建造系統優先調度
                     newV.isRecalled = (this.state.currentGlobalCommand === 'RETURN');
                     this.assignNextTask(newV);
                 }
-                this.state.villageProductionTimer = this.state.villageQueue.length > 0 ? 5 : 0;
+                tc.productionTimer = tc.queue.length > 0 ? 5 : 0;
             }
         }
 
@@ -368,7 +373,7 @@ export class GameEngine {
         this.state.npcConfigs['female villagers'] = { speed: 5.5, collection_speed: 10 };
     }
 
-    static spawnVillager(configName) {
+    static spawnVillager(configName, townCenter = null) {
         const currentPop = this.state.units.villagers.length;
         const maxPop = this.getMaxPopulation();
         if (currentPop >= maxPop && this.isStarted) {
@@ -376,8 +381,11 @@ export class GameEngine {
             return false;
         }
         let config = this.state.npcConfigs[configName] || { speed: 5.5, collection_speed: 10 };
+        // 在對應城鎮中心旁生成；若沒有指定則使用地圖中心
+        const spawnX = townCenter ? townCenter.x + 80 : 960 + 120;
+        const spawnY = townCenter ? townCenter.y + 80 : 560 + 120;
         const v = {
-            id: Date.now() + Math.random(), x: 960 + 120, y: 560 + 120,
+            id: Date.now() + Math.random(), x: spawnX, y: spawnY,
             state: 'IDLE', targetId: null, cargo: 0, type: 'WOOD', config: config,
             configName: configName, gatherTimer: 0, idleTarget: null, waitTimer: 0, pathTarget: null
         };
@@ -430,7 +438,7 @@ export class GameEngine {
             return false;
         };
 
-        this.state.mapEntities.push({ type: 'village', x: 960, y: 560, name: "村莊中心" });
+        this.state.mapEntities.push({ type: 'village', x: 960, y: 560, name: "村莊中心", queue: [], productionTimer: 0 });
         markOccupied(960, 560, 'village');
         this.state.mapEntities.push({ type: 'campfire', x: 1100, y: 640, name: "小火堆" });
         markOccupied(1100, 640, 'campfire');
@@ -1143,9 +1151,17 @@ export class GameEngine {
 
     static addToVillageQueue(event, configName) {
         if (event && event.stopPropagation) event.stopPropagation();
-        if (this.state.villageQueue.length >= 10) {
-            this.addLog("生產隊伍已滿 (10/10)！");
-            this.triggerWarning("4"); // 使用 strings.csv 中的 ID 4: 生產隊列已滿
+
+        // 取得目前選中的城鎮中心實體
+        const tc = window.UIManager && window.UIManager.activeMenuEntity;
+        if (!tc || (tc.type !== 'village' && tc.type !== 'town_center')) {
+            this.addLog("請先點選一間城鎮中心！");
+            return;
+        }
+        if (!tc.queue) tc.queue = [];
+        if (tc.queue.length >= 10) {
+            this.addLog(`${tc.name} 的生產隊伍已滿 (10/10)！`);
+            this.triggerWarning("4");
             return;
         }
 
@@ -1158,19 +1174,17 @@ export class GameEngine {
                     return;
                 }
             }
-            // 扣除資源
             for (let r in cfg.costs) {
                 this.state.resources[r] -= cfg.costs[r];
             }
         }
 
-        this.state.villageQueue.push(configName);
-        if (this.state.villageQueue.length === 1 && this.state.villageProductionTimer <= 0) {
-            this.state.villageProductionTimer = 5;
+        tc.queue.push(configName);
+        if (tc.queue.length === 1 && (tc.productionTimer || 0) <= 0) {
+            tc.productionTimer = 5;
         }
-        this.addLog(`已加入生產隊列：${configName} (${this.state.villageQueue.length}/10)`);
+        this.addLog(`${tc.name} 加入生產隊列：${configName} (${tc.queue.length}/10)`);
 
-        // 立即刷新 UI
         if (window.UIManager) window.UIManager.updateValues();
     }
 
@@ -1231,10 +1245,13 @@ export class GameEngine {
         if (!this.isAreaClear(x, y, type)) { this.addLog("位置受阻！"); return false; }
         res.food -= costs.food; res.wood -= costs.wood; res.stone -= costs.stone; res.gold -= costs.gold;
 
+        const isTownCenter = (type === 'village' || type === 'town_center');
         const newBuilding = {
             type: type, x: x, y: y, name: "施工中",
             isUnderConstruction: true, buildProgress: 0, buildTime: cfg.buildTime,
-            targetWorkerCount: ['timber_factory', 'stone_factory', 'barn'].includes(type) ? 1 : 0 // 倉庫新建後預設人數為 1
+            targetWorkerCount: ['timber_factory', 'stone_factory', 'barn'].includes(type) ? 1 : 0, // 倉庫新建後預設人數為 1
+            // 城鎮中心：各自獨立的生產隊列
+            ...(isTownCenter ? { queue: [], productionTimer: 0 } : {})
         };
         this.state.mapEntities.push(newBuilding);
 

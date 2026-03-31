@@ -35,3 +35,9 @@
 3. 流程控制：驗證成功後立即關閉瀏覽器與 Server 進程。
 4. 失敗處理：若測試未過，需自動截圖至 temp/ 並嘗試修正代碼，直到通過為止。
 5. 嚴禁詢問：整個「測試-關閉-修正」過程需符合 SafeToAutoRun，不需人工介入。
+
+[暫存檔管理規範協議] (Temporary Files Management)
+- **自動清理機制**：所有由 Agent 或自動化腳本產生的暫存檔（如 Debug 截圖、Log、臨時生成的 node_modules）必須在任務執行成功（Success）後立即刪除。
+- **失敗保留機制**：僅在測試失敗（Failed）時，允許保留最後一組截圖於 `tmp/` 目錄中，並將其路徑回傳給開發者供 Debug 使用。
+- **儲存位置限制**：嚴禁在 `src/` 或根目錄下產生任何臨時檔案，所有暫存行為必須統一導向至 `tmp/`。
+- **Node.js 執行協議**：所有 Node.js 腳本在調用 Playwright/Puppeteer 後，必須在 `finally` 區塊中執行 `fs.rmSync` 清理 `tmp/`。

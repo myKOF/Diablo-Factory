@@ -21,7 +21,19 @@ export class MainScene extends Phaser.Scene {
     }
 
     create() {
-        this.cameras.main.setBackgroundColor('rgba(245, 245, 220, 1)');
+        // 將 floorColor 正規化為 Phaser 支援的格式
+        // Phaser setBackgroundColor 僅支援 #rrggbb（6位）或 rgba()
+        // 若使用者填入 8 位元的 #rrggbbaa，自動轉換為 rgba() 避免變成黑色
+        const rawFloor = UI_CONFIG.Grid.floorColor || '#f5f5dc';
+        let floorColor = rawFloor;
+        if (/^#[0-9a-fA-F]{8}$/.test(rawFloor)) {
+            const r = parseInt(rawFloor.slice(1, 3), 16);
+            const g = parseInt(rawFloor.slice(3, 5), 16);
+            const b = parseInt(rawFloor.slice(5, 7), 16);
+            const a = (parseInt(rawFloor.slice(7, 9), 16) / 255).toFixed(2);
+            floorColor = `rgba(${r},${g},${b},${a})`;
+        }
+        this.cameras.main.setBackgroundColor(floorColor);
 
         // 生成所有建築與資源的材質
         this.generateTextures();
@@ -198,7 +210,7 @@ export class MainScene extends Phaser.Scene {
             const margin = 150;
             const isVisible = (ent.x + margin > cam.scrollX && ent.x - margin < cam.scrollX + cam.width &&
                 ent.y + margin > cam.scrollY && ent.y - margin < cam.scrollY + cam.height);
-            
+
             if (!isVisible) return;
 
             const cfg = GameEngine.getEntityConfig(ent.type);
@@ -211,6 +223,7 @@ export class MainScene extends Phaser.Scene {
             if (ent.isUnderConstruction) {
                 this.drawBuildProgressBar(g, ent, uw, uh, TS);
             } else if (ent.type === 'village' || ent.type === 'town_center') {
+                // 每間城鎮中心各自管理自己的隊列，直接顯示
                 this.drawProductionHUD(g, ent, uw, uh, TS);
             }
         });
@@ -563,18 +576,21 @@ export class MainScene extends Phaser.Scene {
     }
 
     drawProductionHUD(g, ent, uw, uh, TS) {
-        const state = window.GAME_STATE;
         const id = ent.id || `${ent.type}_${ent.x}_${ent.y}`;
 
-        if (!state || state.villageQueue.length === 0) {
+        // 讀取此城鎮中心自己的隊列
+        const queue = ent.queue || [];
+        const timer = ent.productionTimer || 0;
+
+        if (queue.length === 0) {
             if (this.queueTexts.has(id)) this.queueTexts.get(id).setVisible(false);
             return;
         }
 
         const cfg = UI_CONFIG.ProductionHUD;
         const maxPop = GameEngine.getMaxPopulation();
-        const isPopFull = state.units.villagers.length >= maxPop;
-        const progress = 1.0 - (state.villageProductionTimer / 5);
+        const isPopFull = GameEngine.state.units.villagers.length >= maxPop;
+        const progress = 1.0 - (timer / 5);
 
         const bx = ent.x - (uw * TS) / 2 + 15;
         const by = ent.y + (uh * TS) / 2 - 35;
@@ -604,7 +620,7 @@ export class MainScene extends Phaser.Scene {
             }).setOrigin(0.5);
             this.queueTexts.set(id, txt);
         }
-        txt.setText(state.villageQueue.length);
+        txt.setText(queue.length);
         txt.setPosition(bx + 30, by + 5);
         txt.setVisible(true);
         txt.setDepth(100);

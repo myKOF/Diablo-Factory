@@ -719,14 +719,17 @@ export class UIManager {
         const workerBtn = document.getElementById("worker_btn");
 
         if (badge && prog) {
-            const q = GameEngine.state.villageQueue.length;
+            // 讀取目前選中城鎮中心自己的隊列
+            const tc = this.activeMenuEntity;
+            const q = (tc && tc.queue) ? tc.queue.length : 0;
+            const timer = (tc && tc.productionTimer !== undefined) ? tc.productionTimer : 0;
             const maxPop = GameEngine.getMaxPopulation();
             const isPopFull = GameEngine.state.units.villagers.length >= maxPop;
 
             if (q > 0) {
                 badge.style.display = "flex";
                 badge.innerText = q;
-                const p = (1 - GameEngine.state.villageProductionTimer / 5) * 100;
+                const p = (1 - timer / 5) * 100;
                 prog.style.width = `${p}%`;
                 prog.style.backgroundColor = isPopFull ? "#f44336" : "#4caf50";
             } else {

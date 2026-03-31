@@ -185,7 +185,12 @@ export const UI_CONFIG = {
         mainColor: "#000000",  // 主格線顏色（每 4 格一條粗線）
         mainAlpha: 0.12,       // 主格線透明度（12%）
         subColor: "#000000",  // 細格線顏色（每格一條細線）
-        subAlpha: 0.03        // 細格線透明度（3%，幾乎不可見）
+        subAlpha: 0.03,       // 細格線透明度（3%，幾乎不可見）
+        // 大地圖地板底色，支援以下格式：
+        //   "#rrggbb"         → 標準 6 位 hex，例如 "#f5f5dc"（米白）
+        //   "#rrggbbaa"       → 帶透明度 8 位 hex，例如 "#f5f5dcff"（不透明米白）
+        //   "rgba(r,g,b,a)"   → CSS rgba，例如 "rgba(245,245,220,1)"
+        floorColor: "#ffe4bbff"  // 米白/亞麻色（原始預設值）
     },
     // ── 自然資源渲染配置（ResourceRenderer）────────────────────
     // 每種自然資源（樹木、石頭、漿果灌木）的程序化繪製參數。
