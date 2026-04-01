@@ -1,4 +1,7 @@
-﻿編號,名稱,外觀模型,類型,所需資源,移動速度(像素格/秒),採集速度(秒),每次採集資源量,中文注釋說明，參考用
-id,name,model,type,need_resource,speed,collection_speed,collection_resource,annotation
-1,villagers,meles,villagers,{food=20},15,3,5,村民NPC
-2,female villagers,female,villagers,{food=20},15,3,5,村民NPC
+﻿編號,名稱,外觀模型,類型,所需資源,移動速度(像素格/秒),採集速度(秒),每次採集資源量,生命值,攻擊力,移動速度(像素/秒),攻速(次/秒),射程,中文注釋說明，參考用
+id,name,model,type,need_resource,speed,collection_speed,collection_resource,hp,attack,speed,attack_speed,range,annotation
+1,villagers,meles,villagers,{food=20},15,3,5,,,,,,村民NPC
+2,female villagers,female,villagers,{food=20},15,3,5,,,,,,村民NPC
+3,swordsman,swordsman,swordsman,"{food=50,gold=10}",,,,100,8,5,1,5,劍士，近戰物理單位
+4,mage,mage,mage,"{food=30,gold=30}",,,,40,15,5,0.25,20,法師，遠程魔法單位
+5,archer,archer,archer,"{food=20,wood=20,gold=10}",,,,60,5,5,0.5,20,弓箭手，遠程物理單位

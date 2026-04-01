@@ -12,6 +12,7 @@ export class MainScene extends Phaser.Scene {
         this.nameLabels = new Map();
         this.levelLabels = new Map();
         this.resourceLabels = new Map();
+        this.emitters = new Map(); // ID -> ParticleEmitter
         this.gridGraphics = null;
     }
 
@@ -108,6 +109,12 @@ export class MainScene extends Phaser.Scene {
             CharacterRenderer.render(g, w / 2, h / 2 + 10, { state: 'IDLE' }, 0);
         });
 
+        // 生成火粒子貼圖：中心較亮，向外擴散的小圓
+        createTex('fire_particle', 32, 32, (g, w, h) => {
+            g.fillStyle(0xffffff, 1);
+            g.fillCircle(w / 2, h / 2, 8);
+        });
+
         graphics.destroy();
     }
 
@@ -163,26 +170,35 @@ export class MainScene extends Phaser.Scene {
         // 將 "#rrggbb" 字串格式轉為 Phaser lineStyle 需要的數字格式
         const parseColor = (c) => typeof c === 'string' ? parseInt(c.replace('#', ''), 16) : c;
 
+        const mapCfg = GameEngine.state.systemConfig.map_size || { w: 3200, h: 2000 };
+        const cols = Math.floor(mapCfg.w / TS);
+        const rows = Math.floor(mapCfg.h / TS);
+        const minGX = Math.floor(960 / TS) - Math.floor(cols / 2);
+        const minGY = Math.floor(560 / TS) - Math.floor(rows / 2);
+
+        const startX = minGX * TS, endX = (minGX + cols) * TS;
+        const startY = minGY * TS, endY = (minGY + rows) * TS;
+
         g.clear();
 
         // 1. 繪製精細的小格 (20px)
         g.lineStyle(1, parseColor(cfg.subColor), cfg.subAlpha);
-        for (let x = -2000; x < 4000; x += TS) {
-            if (x % (TS * 4) === 0) continue; // 跳過大格線 (80px)
-            g.lineBetween(x, -2000, x, 4000);
+        for (let x = startX; x <= endX; x += TS) {
+            if (x % (TS * 4) === 0) continue;
+            g.lineBetween(x, startY, x, endY);
         }
-        for (let y = -2000; y < 4000; y += TS) {
-            if (y % (TS * 4) === 0) continue; // 跳過大格線 (80px)
-            g.lineBetween(-2000, y, 4000, y);
+        for (let y = startY; y <= endY; y += TS) {
+            if (y % (TS * 4) === 0) continue;
+            g.lineBetween(startX, y, endX, y);
         }
 
         // 2. 繪製主格線 (80px)
         g.lineStyle(1, parseColor(cfg.mainColor), cfg.mainAlpha);
-        for (let x = -2000; x < 4000; x += TS * 4) {
-            g.lineBetween(x, -2000, x, 4000);
+        for (let x = startX; x <= endX; x += TS * 4) {
+            g.lineBetween(x, startY, x, endY);
         }
-        for (let y = -2000; y < 4000; y += TS * 4) {
-            g.lineBetween(-2000, y, 4000, y);
+        for (let y = startY; y <= endY; y += TS * 4) {
+            g.lineBetween(startX, y, endX, y);
         }
     }
 
@@ -190,29 +206,109 @@ export class MainScene extends Phaser.Scene {
         const state = window.GAME_STATE;
         if (!state) return;
 
-        this.updateEntities(state.mapEntities);
+        // 計算可見區域
+        const cam = this.cameras.main;
+        const visibleEntities = GameEngine.getVisibleEntities(cam.scrollX, cam.scrollY, cam.width, cam.height, 200);
+
+        this.updateEntities(visibleEntities, state.mapEntities);
         this.updateUnits(state.units.villagers);
         this.updatePlacementPreview(state);
-        this.updateDynamicHUD(state.mapEntities);
+        this.updateDynamicHUD(visibleEntities);
 
-        if (window.UIManager) window.UIManager.updateStickyPositions();
+        if (window.UIManager) {
+            window.UIManager.updateStickyPositions();
+
+            // 即時更新座標顯示 (畫面中央世界座標)
+            const coordsEl = document.getElementById("coords_display");
+            if (coordsEl) {
+                const centerX = Math.round(cam.scrollX + cam.width / 2);
+                const centerY = Math.round(cam.scrollY + cam.height / 2);
+                coordsEl.innerText = `X: ${centerX}, Y: ${centerY}`;
+            }
+
+            // 更新 FPS 顯示
+            const fpsEl = document.getElementById("fps_display");
+            if (fpsEl) {
+                fpsEl.innerText = `FPS: ${Math.round(this.game.loop.actualFps)}`;
+            }
+
+            // 更新村莊定位按鈕
+            this.updateTownCenterLocator(cam);
+        }
     }
 
-    updateDynamicHUD(entities) {
-        const g = this.hudGraphics;
-        g.clear();
-        if (!entities) return;
+    updateTownCenterLocator(cam) {
+        const el = document.getElementById("tc_locator");
+        if (!el) return;
+
+        const tc = GameEngine.state.mapEntities.find(e => e.type === 'town_center' || e.type === 'village');
+        if (!tc) {
+            el.style.display = "none";
+            return;
+        }
 
         const TS = GameEngine.TILE_SIZE;
-        const cam = this.cameras.main;
+        const cfg = GameEngine.getEntityConfig(tc.type);
+        let uw = 3, uh = 3; // 預期 Town Center 是 3x3
+        if (cfg && cfg.size) {
+            const m = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
+            if (m) { uw = parseInt(m[1]); uh = parseInt(m[2]); }
+        }
+        const halfW = (uw * TS) / 2;
+        const halfH = (uh * TS) / 2;
 
-        entities.forEach(ent => {
-            const margin = 150;
-            const isVisible = (ent.x + margin > cam.scrollX && ent.x - margin < cam.scrollX + cam.width &&
-                ent.y + margin > cam.scrollY && ent.y - margin < cam.scrollY + cam.height);
+        // 檢查中心點是否在畫面內 (略微寬鬆一點)
+        const isVisible = (tc.x + halfW >= cam.scrollX && tc.x - halfW <= cam.scrollX + cam.width &&
+                           tc.y + halfH >= cam.scrollY && tc.y - halfH <= cam.scrollY + cam.height);
 
-            if (!isVisible) return;
+        if (isVisible) {
+            el.style.display = "none";
+        } else {
+            el.style.display = "flex";
+            const ptrCfg = UI_CONFIG.TownCenterPointer;
+            const margin = ptrCfg.margin || 40;
 
+            // 計算向量 (從畫面中心指向量村莊中心)
+            let dx = tc.x - (cam.scrollX + cam.width / 2);
+            let dy = tc.y - (cam.scrollY + cam.height / 2);
+            const angle = Math.atan2(dy, dx);
+            
+            // 更新箭頭旋轉
+            const arrow = document.getElementById("tc_arrow");
+            if (arrow) {
+                // ▶ 預設朝右(0rad)，旋轉至 angle 後平移至圓圈邊緣
+                arrow.style.transform = `rotate(${angle}rad) translateX(36px)`;
+            }
+
+            // 計算指針在螢幕上的位置 (把向量投影到螢幕邊界的矩形上)
+            const w = cam.width - margin * 2;
+            const h = cam.height - margin * 2;
+            
+            const absCos = Math.abs(Math.cos(angle));
+            const absSin = Math.abs(Math.sin(angle));
+            
+            let dist;
+            if (w * absSin <= h * absCos) {
+                dist = (w / 2) / absCos;
+            } else {
+                dist = (h / 2) / absSin;
+            }
+            
+            const px = cam.width / 2 + Math.cos(angle) * dist;
+            const py = cam.height / 2 + Math.sin(angle) * dist;
+
+            el.style.left = `${px - ptrCfg.width / 2}px`;
+            el.style.top = `${py - ptrCfg.height / 2}px`;
+        }
+    }
+
+    updateDynamicHUD(visibleEntities) {
+        const g = this.hudGraphics;
+        g.clear();
+        if (!visibleEntities) return;
+
+        const TS = GameEngine.TILE_SIZE;
+        visibleEntities.forEach(ent => {
             const cfg = GameEngine.getEntityConfig(ent.type);
             let uw = 1, uh = 1;
             if (cfg && cfg.size) {
@@ -222,25 +318,19 @@ export class MainScene extends Phaser.Scene {
 
             if (ent.isUnderConstruction) {
                 this.drawBuildProgressBar(g, ent, uw, uh, TS);
-            } else if (ent.type === 'village' || ent.type === 'town_center') {
-                // 每間城鎮中心各自管理自己的隊列，直接顯示
+            } else if (ent.queue && ent.queue.length > 0) {
                 this.drawProductionHUD(g, ent, uw, uh, TS);
             }
         });
     }
 
-    updateEntities(mapEntities) {
-        if (!mapEntities) return;
-        const currentIds = new Set();
-        const cam = this.cameras.main;
-
-        mapEntities.forEach(ent => {
-            const id = ent.id || `${ent.type}_${ent.x}_${ent.y}`;
-            currentIds.add(id);
-
-            const margin = 150;
-            const isVisible = (ent.x + margin > cam.scrollX && ent.x - margin < cam.scrollX + cam.width &&
-                ent.y + margin > cam.scrollY && ent.y - margin < cam.scrollY + cam.height);
+    updateEntities(visibleEntities, allEntities) {
+        if (!visibleEntities) return;
+        
+        const visibleIds = new Set();
+        visibleEntities.forEach(ent => {
+            const id = ent.id; // 生成時已預分配
+            visibleIds.add(id);
 
             let displayObj = this.entities.get(id);
             if (!displayObj) {
@@ -248,7 +338,6 @@ export class MainScene extends Phaser.Scene {
                 if (textureKey && this.textures.exists(textureKey)) {
                     displayObj = this.add.image(ent.x, ent.y, textureKey);
                 } else {
-                    // 如果沒有預製材質，則使用 Graphics (退路)
                     displayObj = this.add.graphics();
                     this.drawEntity(displayObj, ent, 1.0);
                 }
@@ -257,58 +346,93 @@ export class MainScene extends Phaser.Scene {
                 displayObj.setDepth(10);
             }
 
-            displayObj.setVisible(isVisible);
-            if (isVisible) {
-                // 僅在位置發生變化或需要更新時設置
-                if (displayObj.x !== ent.x || displayObj.y !== ent.y) {
-                    displayObj.setPosition(ent.x, ent.y);
-                }
-                displayObj.setAlpha(ent.isUnderConstruction ? 0.6 : 1.0);
+            displayObj.setVisible(true);
+            if (displayObj.x !== ent.x || displayObj.y !== ent.y) {
+                displayObj.setPosition(ent.x, ent.y);
+            }
+            displayObj.setAlpha(ent.isUnderConstruction ? 0.6 : 1.0);
 
-                // 動態縮放資源物件 (僅對影像紋理有效)
-                if (displayObj instanceof Phaser.GameObjects.Image) {
-                    const cfg = GameEngine.getEntityConfig(ent.type);
-                    if (cfg && cfg.model_size) {
-                        displayObj.setScale(cfg.model_size.x, cfg.model_size.y);
-                    }
+            if (displayObj instanceof Phaser.GameObjects.Image) {
+                const cfg = GameEngine.getEntityConfig(ent.type);
+                if (cfg && cfg.model_size) {
+                    const sx = cfg.model_size.x * (ent.vScaleX || 1);
+                    const sy = cfg.model_size.y * (ent.vScaleY || 1);
+                    displayObj.setScale(sx, sy);
                 }
+                if (ent.vTint !== undefined && ent.vTint !== 0xffffff) {
+                    displayObj.setTint(ent.vTint);
+                }
+            }
 
-                // 動態更新建築進度條 (如果有的話)
-                // 注意：這裡如果每個物件都有進度條，可以考慮只在進度變化時重繪
-                this.updateEntityLabel(id, ent);
-            } else {
-                this.hideEntityLabel(id);
+            this.updateEntityLabel(id, ent);
+
+            // 粒子處理
+            if (ent.type === 'campfire' && !ent.isUnderConstruction) {
+                this.handleCampfireParticles(id, ent, true);
             }
         });
 
-        for (const [id, sprite] of this.entities.entries()) {
-            if (!currentIds.has(id)) {
-                sprite.destroy();
-                this.entities.delete(id);
-
-                if (this.queueTexts.has(id)) {
-                    this.queueTexts.get(id).destroy();
-                    this.queueTexts.delete(id);
+        // 定期清理與隱藏 (效能關鍵)
+        this.frameCounter = (this.frameCounter || 0) + 1;
+        
+        // 隱藏在本次渲染中不可見的實體
+        for (const [id, displayObj] of this.entities.entries()) {
+            if (!visibleIds.has(id)) {
+                if (displayObj.visible) {
+                    displayObj.setVisible(false);
+                    this.hideEntityLabel(id);
+                    if (this.emitters.has(id)) this.emitters.get(id).setVisible(false);
                 }
-
-                if (this.nameLabels.has(id)) {
-                    this.nameLabels.get(id).destroy();
-                    this.nameLabels.delete(id);
-                }
-                if (this.levelLabels.has(id)) {
-                    this.levelLabels.get(id).destroy();
-                    this.levelLabels.delete(id);
-                }
-                if (this.resourceLabels.has(id)) {
-                    this.resourceLabels.get(id).destroy();
-                    this.resourceLabels.delete(id);
+                // 每隔 2 秒移除地圖上已不存在的實體組件
+                if (this.frameCounter % 120 === 0) {
+                    const exists = allEntities.some(e => e.id === id);
+                    if (!exists) {
+                        displayObj.destroy();
+                        this.entities.delete(id);
+                        this.cleanupEntityLabels(id);
+                    }
                 }
             }
         }
     }
 
+    handleCampfireParticles(id, ent, isVisible) {
+        let emitter = this.emitters.get(id);
+        if (!emitter) {
+            const cfg = UI_CONFIG.ResourceRenderer.Campfire.particle;
+            emitter = this.add.particles(ent.x, ent.y, 'fire_particle', {
+                lifespan: cfg.lifespan,
+                speedY: cfg.speedY,
+                scale: cfg.scale,
+                alpha: cfg.alpha,
+                tint: cfg.tints,
+                blendMode: cfg.blendMode,
+                frequency: cfg.frequency,
+                x: { min: -cfg.spreadX, max: cfg.spreadX },
+                y: { min: cfg.offsetY, max: 0 }
+            });
+            emitter.setDepth(15);
+            this.emitters.set(id, emitter);
+        }
+        emitter.setPosition(ent.x, ent.y);
+        emitter.setVisible(isVisible);
+    }
+
+    cleanupEntityLabels(id) {
+        if (this.queueTexts.has(id)) { this.queueTexts.get(id).destroy(); this.queueTexts.delete(id); }
+        if (this.nameLabels.has(id)) { this.nameLabels.get(id).destroy(); this.nameLabels.delete(id); }
+        if (this.levelLabels.has(id)) { this.levelLabels.get(id).destroy(); this.levelLabels.delete(id); }
+        if (this.resourceLabels.has(id)) { this.resourceLabels.get(id).destroy(); this.resourceLabels.delete(id); }
+        if (this.emitters.has(id)) { this.emitters.get(id).destroy(); this.emitters.delete(id); }
+    }
+
     updateEntityLabel(id, ent) {
         const cfg = UI_CONFIG.MapResourceLabels;
+        const config = GameEngine.state.buildingConfigs[ent.type];
+        const isBuilding = !!config;
+        
+        // 如果是建築物，始終顯示；如果是自然資源，則受設置開關 (showResourceInfo) 控制
+        const showLabels = isBuilding ? true : GameEngine.state.settings.showResourceInfo;
 
         // 1. 名稱標籤 (Name)
         const nameStr = ent.isUnderConstruction ? "施工中" : (ent.name || ent.type);
@@ -324,7 +448,7 @@ export class MainScene extends Phaser.Scene {
         }
         nameTxt.setText(nameStr);
         nameTxt.setPosition(ent.x, ent.y + (cfg.name.offsetY || 0));
-        nameTxt.setVisible(true);
+        nameTxt.setVisible(showLabels);
         nameTxt.setDepth(50);
 
         // 2. 等級標籤 (Level)
@@ -342,7 +466,7 @@ export class MainScene extends Phaser.Scene {
             }
             lvlTxt.setText(levelStr);
             lvlTxt.setPosition(ent.x, ent.y + (cfg.level.offsetY || 0));
-            lvlTxt.setVisible(true);
+            lvlTxt.setVisible(showLabels);
             lvlTxt.setDepth(50);
         } else if (lvlTxt) {
             lvlTxt.setVisible(false);
@@ -363,7 +487,7 @@ export class MainScene extends Phaser.Scene {
             }
             amtTxt.setText(amountStr);
             amtTxt.setPosition(ent.x, ent.y + (cfg.amount.offsetY || 0));
-            amtTxt.setVisible(true);
+            amtTxt.setVisible(showLabels);
             amtTxt.setDepth(50);
         } else if (amtTxt) {
             amtTxt.setVisible(false);
@@ -504,8 +628,32 @@ export class MainScene extends Phaser.Scene {
             g.strokeCircle(ent.x, ent.y, 15);
             g.strokeCircle(ent.x, ent.y, 5);
         } else if (ent.type === 'campfire') {
-            g.fillStyle(0xff5722, finalAlpha);
-            g.fillCircle(ent.x, ent.y, 15);
+            const cfg = UI_CONFIG.ResourceRenderer.Campfire;
+            // 1. 焦土底座
+            g.fillStyle(cfg.groundColor, finalAlpha);
+            g.fillCircle(ent.x, ent.y, 20);
+            
+            // 2. 木柴堆 (幾何堆疊)
+            g.fillStyle(cfg.woodColor, finalAlpha);
+            g.lineStyle(2, cfg.woodOutline, finalAlpha);
+            
+            // 底層兩根平行木頭
+            g.fillRect(ent.x - 14, ent.y - 4, 30, 8);
+            g.strokeRect(ent.x - 14, ent.y - 4, 30, 8);
+            
+            // 中層兩根斜交木頭
+            g.save();
+            // 注意：Graphics API 不直接支援針對單次 fillRect 的旋轉
+            // 所以我們用 fillRect 並稍微偏位來模擬交叉感
+            g.fillRect(ent.x - 4, ent.y - 14, 10, 30);
+            g.strokeRect(ent.x - 4, ent.y - 14, 10, 30);
+            
+            // 頂層斜放的小木塊
+            g.fillStyle(cfg.woodColor, finalAlpha);
+            g.fillRect(ent.x - 8, ent.y - 8, 16, 16);
+            g.strokeRect(ent.x - 8, ent.y - 8, 16, 16);
+            
+            g.restore();
         } else if (ent.type.startsWith('tree') || ent.type.startsWith('wood')) {
             g.fillStyle(0x2e7d32, finalAlpha);
             g.fillCircle(ent.x, ent.y, 20);
@@ -612,7 +760,7 @@ export class MainScene extends Phaser.Scene {
 
         let txt = this.queueTexts.get(id);
         if (!txt) {
-            txt = this.add.text(bx + 30, by + 5, state.villageQueue.length, {
+            txt = this.add.text(bx + 30, by + 5, queue.length, {
                 fontSize: '10px',
                 fontStyle: 'bold',
                 fontFamily: 'Arial',

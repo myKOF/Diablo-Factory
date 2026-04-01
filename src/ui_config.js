@@ -174,6 +174,9 @@ export const UI_CONFIG = {
         WOOD: "#66bb6a",  // 採木：綠色
         STONE: "#78909c",  // 採石：灰色
         FOOD: "#ef5350",  // 採食：紅色
+        SWORDSMAN: "#b0bec5", // 劍士：銀灰色（甲冑）
+        MAGE: "#9575cd",      // 法師：亮紫色（長袍）
+        ARCHER: "#81c784",    // 弓箭手：森綠色（皮甲）
         DEFAULT: "#42a5f5"   // 預設（同閒置）
     },
     // ── 地圖格網（Grid）──────────────────────────────────────────
@@ -190,7 +193,58 @@ export const UI_CONFIG = {
         //   "#rrggbb"         → 標準 6 位 hex，例如 "#f5f5dc"（米白）
         //   "#rrggbbaa"       → 帶透明度 8 位 hex，例如 "#f5f5dcff"（不透明米白）
         //   "rgba(r,g,b,a)"   → CSS rgba，例如 "rgba(245,245,220,1)"
-        floorColor: "#ffe4bbff"  // 米白/亞麻色（原始預設值）
+        floorColor: "#ffffffff"  // 米白/亞麻色（原始預設值）
+    },
+    // ── 設置選單 (SettingsPanel) ──────────────────────────────────
+    // 左上角的齒輪按鈕以及對應的系統設置面板。
+    SettingsButton: {
+        anchor: "TOP_LEFT",
+        offsetX: 20, offsetY: 20,          // 位於左上角最邊緣
+        width: 50, height: 50,
+        fontSize: "28px",
+        bgColor: "rgba(30, 30, 30, 0.8)",
+        borderColor: "#fbc02d",
+        icon: "⚙️"
+    },
+    SettingsPanel: {
+        anchor: "CENTER",
+        width: 350, height: "auto",
+        title: "⚙️ 系統核心設置",
+        glass: true
+    },
+    // ── 座標顯示 (CoordsDisplay) ──────────────────────────────────
+    // 顯示當前畫面中央的世界座標 (x, y)。
+    CoordsDisplay: {
+        anchor: "TOP_LEFT",
+        offsetX: 85, offsetY: 20,          // 位於設置按鈕右側
+        width: "auto", height: 50,
+        fontSize: "18px",
+        fontColor: "#ffffff",
+        glass: true,
+        padding: "0 20px"
+    },
+    // ── FPS 顯示 (FPSDisplay) ──────────────────────────────────
+    // 顯示當前遊戲的每秒幀數 (Frames Per Second)。
+    FPSDisplay: {
+        anchor: "TOP_LEFT",
+        offsetX: 280, offsetY: 20,          // 位於座標顯示右側
+        width: "auto", height: 50,
+        fontSize: "18px",
+        fontColor: "#4caf50",              // 綠色，代表性能良好
+        glass: true,
+        padding: "0 20px"
+    },
+    // ── 村莊中心指針 (TownCenterPointer) ──────────────────────────
+    // 當村莊中心（town_center）不在可見畫面時，出現在畫面邊緣的指針。
+    TownCenterPointer: {
+        width: 76, height: 76,            // 稍微變大一點更顯眼
+        fontSize: "38px",
+        bgColor: "rgba(251, 192, 45, 0.95)", // 琥珀金，調高不透明度
+        borderColor: "#ffffff",
+        icon: "🏰",
+        arrowIcon: "▶",                   // 使用實心三角箭頭
+        margin: 80,                       // 增加邊距，讓它遠離螢幕邊緣
+        panSpeed: 800                     // 稍微加快移動速度
     },
     // ── 自然資源渲染配置（ResourceRenderer）────────────────────
     // 每種自然資源（樹木、石頭、漿果灌木）的程序化繪製參數。
@@ -202,20 +256,52 @@ export const UI_CONFIG = {
             trunkColor: 0x5d4037,                      // 樹幹：溫暖棕色
             leafColors: [0x1b5e20, 0x2e7d32, 0x43a047], // 樹葉：深→淺綠漸層
             outlineColor: 0x051b07,                     // 輪廓：深墨綠
-            outlineWidth: 2
+            outlineWidth: 2,
+            visualVariation: {
+                minScale: 0.8,   // 最小隨機縮放倍率 (基礎 1.0)
+                maxScale: 1.4,   // 最大隨機縮放倍率
+                tintRange: 0.5   // 變色範圍 (0.2 表示色調亮度隨機在 80%~100% 之間浮動，數值越大隨機性越高)
+            }
         },
         // 石頭（Rock）：隨機多邊形，使用灰黑色調
         Rock: {
             colors: [0x424242, 0x212121, 0x616161],  // 深灰、暗黑、中灰
             outlineColor: 0x000000,                  // 輪廓：純黑
-            outlineWidth: 2
+            outlineWidth: 2,
+            visualVariation: {
+                minScale: 0.7,   // 最小隨機縮放
+                maxScale: 1.3,   // 最大隨機縮放
+                tintRange: 0.3  // 變色細數：用於營造岩石深淺不一的質感
+            }
         },
         // 漿果灌木（BerryBush）：橘黃色葉簇 + 紅色莓果
         BerryBush: {
             leafColor: 0xffa000,  // 葉簇：橘黃色
             berryColor: 0xd50000,  // 莓果：鮮紅色
             outlineColor: 0xbf360c,  // 輪廓：深橘紅
-            outlineWidth: 2
+            outlineWidth: 2,
+            visualVariation: {
+                minScale: 0.8,   // 灌木最小縮放
+                maxScale: 1.2,   // 灌木最大縮放
+                tintRange: 0.3   // 變色系數：使灌木叢色澤維持一致但有細微不同
+            }
+        },
+        // 營火（Campfire）：底座木柴堆 + 上方火焰粒子
+        Campfire: {
+            groundColor: 0x3e2723,    // 焦土色：深木色
+            woodColor: 0x795548,      // 木頭色：溫暖棕色
+            woodOutline: 0x3e2723,    // 木頭輪廓：深棕
+            particle: {
+                lifespan: { min: 700, max: 1200 },     // 粒子生命週期（毫秒），決定火焰高度
+                speedY: { min: -70, max: -130 },      // 垂直上升速度（負值向上）
+                scale: { start: 0.9, end: 0.1 },      // 比例變化：從大到小
+                alpha: { start: 0.8, end: 0.05 },          // 透明度變化：從不透明到完全透明
+                tints: [0xffff00, 0xffa500, 0xff4500, 0xff0000], // 火焰顏色演變（黃 -> 橙 -> 紅 -> 深紅）
+                blendMode: 'NORMAL',                     // 混合模式：ADD 可產生發光疊加感，NORMAL 正常遮蓋
+                frequency: 30,                        // 發射頻率（毫秒）：越小火勢越密
+                spreadX: 18,                          // 水平擴散範圍（左右偏移量）
+                offsetY: 10                           // 垂直初始偏移（調整火焰與木頭的中心點距離）
+            }
         }
     }
 };

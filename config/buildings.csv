@@ -1,12 +1,12 @@
-編號,名稱,模型,建築類型,建造上限,尺寸,碰撞開關,人口提供,所需資源,建造時間(秒),維持村民數量,資源總量,注釋說明
-id,name,model,type,max_count,size,collision,population,need_resource,building_times,need_villagers,resource_value,annotation
-1,城鎮中心,village,village,5,"{8,8}",1,10,{food=100},20,0,,城鎮中心：提供基礎人口上限與訓練工人
-2,民居,farmhouse,farmhouse,99,"{3,3}",1,4,"{food=20,wood=20}",5.5,0,,農舍：增加 3 人口上限
-3,木材廠,timber_factory,timber_factory,99,"{3,3}",1,0,{wood=50},7.5,0,,可放置木材的建築
-4,石材廠,stone_factory,stone_factory,99,"{3,3}",1,0,{wood=50},7.5,0,,可放置石頭的建築
-5,穀倉,barn,barn,99,"{3,3}",1,0,{wood=50},7.5,0,,可放置食物的建築
-6,農田,farmland,farmland,99,"{6,6}",0,0,"{food=100,wood=100}",10,1,{food=500},可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造
-7,樹木田,tree_plantation,tree_plantation,99,"{6,6}",0,0,"{food=100,wood=100}",10,1,{wood=500},可自動生產木材的建築，需要村民來維持生產，資源量耗盡時需重新建造
-8,魔法學院,mage_place,mage_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=200}",20,0,,法師的訓練所
-9,劍士訓練所,swordsman_place,swordsman_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=200}",20,0,,劍士的訓練所
-10,射箭場,archer_place,archer_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=200}",20,0,,弓箭手的訓練所
+編號,名稱,模型,建築類型,建造上限,尺寸,碰撞開關,人口提供,所需資源,建造時間(秒),維持村民數量,資源總量,生產npc單位,生產npc模式，rand=隨機生產，normal=單獨生產,注釋說明
+id,name,model,type,max_count,size,collision,population,need_resource,building_times,need_villagers,resource_value,npc_production,npc_production,annotation
+1,城鎮中心,village,village,5,"{8,8}",1,10,{food=100},20,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
+2,民居,farmhouse,farmhouse,99,"{3,3}",1,4,"{food=20,wood=20}",5.5,0,,,,農舍：增加 3 人口上限
+3,木材廠,timber_factory,timber_factory,99,"{3,3}",1,0,{wood=50},7.5,0,,,,可放置木材的建築
+4,石材廠,stone_factory,stone_factory,99,"{3,3}",1,0,{wood=50},7.5,0,,,,可放置石頭的建築
+5,穀倉,barn,barn,99,"{3,3}",1,0,{wood=50},7.5,0,,,,可放置食物的建築
+6,農田,farmland,farmland,99,"{6,6}",0,0,"{food=100,wood=100}",10,1,{food=500},,,可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造
+7,樹木田,tree_plantation,tree_plantation,99,"{6,6}",0,0,"{food=100,wood=100}",10,1,{wood=500},,,可自動生產木材的建築，需要村民來維持生產，資源量耗盡時需重新建造
+8,劍士訓練所,swordsman_place,swordsman_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=200}",20,0,,{3},normal,劍士的訓練所
+9,魔法學院,mage_place,mage_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=200}",20,0,,{4},normal,法師的訓練所
+10,射箭場,archer_place,archer_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=200}",20,0,,{5},normal,弓箭手的訓練所

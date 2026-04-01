@@ -69,17 +69,27 @@ export class CharacterRenderer {
         const parseColor = (c) => parseInt(c.replace('#', '0x').substring(0, 8)) || 0x1e88e5;
 
         let clothColor = parseColor(colors.DEFAULT);
+        const name = (data.configName || "").toLowerCase();
 
-        const state = data.state;
-        if (state === 'IDLE') {
-            clothColor = parseColor(colors.IDLE);
-        } else if (state === 'CONSTRUCTING' || state === 'MOVING_TO_CONSTRUCTION') {
-            clothColor = parseColor(colors.CONSTRUCTING);
+        // 職業優先配色
+        if (name === 'swordsman') {
+            clothColor = parseColor(colors.SWORDSMAN);
+        } else if (name === 'mage') {
+            clothColor = parseColor(colors.MAGE);
+        } else if (name === 'archer') {
+            clothColor = parseColor(colors.ARCHER);
         } else {
-            // 資源採集狀態
-            if (data.type === 'WOOD') clothColor = parseColor(colors.WOOD);
-            else if (data.type === 'STONE') clothColor = parseColor(colors.STONE);
-            else if (data.type === 'FOOD') clothColor = parseColor(colors.FOOD);
+            // 普通單位依據工作狀態配色
+            const state = data.state;
+            if (state === 'IDLE') {
+                clothColor = parseColor(colors.IDLE);
+            } else if (state === 'CONSTRUCTING' || state === 'MOVING_TO_CONSTRUCTION') {
+                clothColor = parseColor(colors.CONSTRUCTING);
+            } else {
+                if (data.type === 'WOOD') clothColor = parseColor(colors.WOOD);
+                else if (data.type === 'STONE') clothColor = parseColor(colors.STONE);
+                else if (data.type === 'FOOD') clothColor = parseColor(colors.FOOD);
+            }
         }
 
         this.setCtxStyle(ctx, clothColor, 1);
@@ -93,22 +103,47 @@ export class CharacterRenderer {
         this.setCtxStyle(ctx, 0xffcc8c, 1);
         ctx.fillRect(x - 8, y, 16, 16);
 
-        this.setCtxStyle(ctx, 0x333333, 1);
-        ctx.fillRect(x - 5, y + 5, 2, 2);
-        ctx.fillRect(x + 3, y + 5, 2, 2);
+        const name = (data.configName || "").toLowerCase();
 
-        this.setCtxStyle(ctx, 0x4e342e, 1);
-        if (data.configName === 'female villagers') {
-            ctx.fillRect(x - 10, y - 4, 20, 6);
-            ctx.fillRect(x - 10, y + 2, 4, 10);
-            ctx.fillRect(x + 6, y + 2, 4, 10);
-        } else {
-            ctx.fillRect(x - 9, y - 2, 18, 4);
+        if (name === 'swordsman') {
+            // 劍士：銀白頭盔
+            this.setCtxStyle(ctx, 0xe1f5fe, 1);
+            ctx.fillRect(x - 9, y - 2, 18, 10);
+            this.setCtxStyle(ctx, 0x333333, 1);
+            ctx.fillRect(x - 5, y + 4, 10, 2); // 面甲缝隙
+        } else if (name === 'mage') {
+            // 法師：紫色兜帽
+            this.setCtxStyle(ctx, 0x7e57c2, 1);
+            ctx.fillRect(x - 10, y - 4, 20, 8);
+            ctx.fillRect(x - 10, y + 4, 4, 12);
+            ctx.fillRect(x + 6, y + 4, 4, 12);
+        } else if (name === 'archer') {
+            // 弓箭手：綠色頭帶
+            this.setCtxStyle(ctx, 0x2e7d32, 1);
+            ctx.fillRect(x - 9, y + 2, 18, 4);
+        }
+
+        // 眼睛
+        this.setCtxStyle(ctx, 0x333333, 1);
+        ctx.fillRect(x - 5, y + 6, 2, 2);
+        ctx.fillRect(x + 3, y + 6, 2, 2);
+
+        // 髮型（僅針對普通村民）
+        if (name !== 'swordsman' && name !== 'mage') {
+            this.setCtxStyle(ctx, 0x4e342e, 1);
+            if (data.configName === 'female villagers') {
+                ctx.fillRect(x - 10, y - 4, 20, 6);
+                ctx.fillRect(x - 10, y + 2, 4, 10);
+                ctx.fillRect(x + 6, y + 2, 4, 10);
+            } else if (name !== 'archer') {
+                ctx.fillRect(x - 9, y - 2, 18, 4);
+            }
         }
     }
 
     static renderArmsAndTools(ctx, x, y, data, t) {
         const state = data.state;
+        const name = (data.configName || "").toLowerCase();
         this.setCtxStyle(ctx, 0xffcc8c, 1);
 
         if (state === 'CONSTRUCTING') {
@@ -118,6 +153,14 @@ export class CharacterRenderer {
             const angle = Math.sin(t * 20) * 0.8;
             const toolType = data.type === 'WOOD' ? 'AXE' : (data.type === 'STONE' ? 'PICKAXE' : 'BASKET');
             this.drawTool(ctx, x + 5, y + 15, toolType, angle);
+        } else if (name === 'swordsman') {
+            const angle = state.includes('MOVING') ? Math.sin(t * 10) * 0.3 : 0.2;
+            this.drawTool(ctx, x + 8, y + 15, 'SWORD', angle);
+        } else if (name === 'mage') {
+            const angle = Math.sin(t * 5) * 0.1;
+            this.drawTool(ctx, x + 8, y + 15, 'STAFF', angle);
+        } else if (name === 'archer') {
+            this.drawTool(ctx, x + 8, y + 15, 'BOW', 0);
         } else if (data.cargo > 0) {
             this.setCtxStyle(ctx, 0x795548, 1);
             ctx.fillRect(x - 8, y + 10, 16, 12);
@@ -167,6 +210,23 @@ export class CharacterRenderer {
             drawRectRotated(-8, -25, 20, 12, 0x424242);
         } else if (type === 'BASKET') {
             drawRectRotated(-8, 0, 16, 12, 0x8d6e63);
+        } else if (type === 'SWORD') {
+            drawRectRotated(0, -5, 3, 10, 0x795548); // 柄
+            drawRectRotated(-3, -25, 9, 20, 0x90a4ae); // 刃
+            drawRectRotated(-5, -5, 13, 3, 0xffd54f); // 護手
+        } else if (type === 'STAFF') {
+            drawRectRotated(0, -25, 4, 35, 0x5d4037); // 杖身
+            drawRectRotated(-2, -30, 8, 8, 0x4fc3f7); // 寶石
+        } else if (type === 'BOW') {
+            drawRectRotated(0, -20, 3, 30, 0x5d4037); // 弓身
+            this.setCtxStyle(ctx, 0xe0e0e0, 0.5);
+            // 弦 (簡單直線)
+            if (ctx.beginPath) {
+                ctx.beginPath();
+                ctx.moveTo(x, y - 18);
+                ctx.lineTo(x, y + 8);
+                ctx.stroke();
+            }
         }
     }
 

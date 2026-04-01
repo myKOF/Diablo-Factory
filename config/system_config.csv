@@ -2,4 +2,6 @@
 id,type,value,annotation
 1,village_standby_range,200,村民在村莊周圍待機時的移動範圍，待機移動不可超出此範圍
 2,village_standby_speed,5,村民在村莊周圍待機時的移動速度
-3,default_resource,"{food=500,wood=500,stone=500}",預設的資源
+3,default_resource,"{food=500,wood=500,stone=500,gold=500}",預設的資源
+4,map_size,{7500*7500},大地圖尺寸
+5,no_resources_range,{800*800},村莊附近不生資源範圍

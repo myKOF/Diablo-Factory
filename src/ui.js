@@ -118,7 +118,96 @@ export class UIManager {
 
         this.uiLayer.appendChild(logPanel);
 
-        // 4. 指令選單 (智慧定位，暫不使用固定錨點)
+        // 4. 系統設置按鈕 (齒輪)
+        const setBtnCfg = UI_CONFIG.SettingsButton;
+        const setBtn = document.createElement("div");
+        setBtn.id = "settings_btn";
+        setBtn.className = "panel glass-panel"; // 使用共同的面板類別
+        this.applyAnchorStyle(setBtn, setBtnCfg);
+        setBtn.style.textAlign = "center";
+        setBtn.style.lineHeight = `${setBtnCfg.height}px`;
+        setBtn.style.fontSize = setBtnCfg.fontSize;
+        setBtn.style.cursor = "pointer";
+        setBtn.style.pointerEvents = "auto";
+        setBtn.style.display = "flex";
+        setBtn.style.alignItems = "center";
+        setBtn.style.justifyContent = "center";
+        setBtn.innerHTML = setBtnCfg.icon || "⚙️";
+        setBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.toggleSettingsPanel();
+        };
+        this.uiLayer.appendChild(setBtn);
+
+        // 5. 系統設置選單面板
+        const setPanel = document.createElement("div");
+        setPanel.id = "settings_panel";
+        setPanel.className = "panel glass-panel";
+        setPanel.style.display = "none"; // 預設隱藏
+        setPanel.style.zIndex = "1001";
+        setPanel.style.pointerEvents = "auto";
+        this.applyAnchorStyle(setPanel, UI_CONFIG.SettingsPanel);
+        this.uiLayer.appendChild(setPanel);
+        
+        // 6. 座標顯示
+        const coordsCfg = UI_CONFIG.CoordsDisplay;
+        const coordsEl = document.createElement("div");
+        coordsEl.id = "coords_display";
+        coordsEl.className = "panel glass-panel";
+        this.applyAnchorStyle(coordsEl, coordsCfg);
+        coordsEl.style.display = "flex";
+        coordsEl.style.alignItems = "center";
+        coordsEl.style.justifyContent = "center";
+        coordsEl.style.fontSize = coordsCfg.fontSize;
+        coordsEl.style.color = coordsCfg.fontColor;
+        coordsEl.style.padding = coordsCfg.padding;
+        coordsEl.style.pointerEvents = "none"; // 座標顯示不應阻擋點擊
+        coordsEl.innerHTML = "X: 0, Y: 0";
+        this.uiLayer.appendChild(coordsEl);
+
+        // 7. FPS 顯示
+        const fpsCfg = UI_CONFIG.FPSDisplay;
+        const fpsEl = document.createElement("div");
+        fpsEl.id = "fps_display";
+        fpsEl.className = "panel glass-panel";
+        this.applyAnchorStyle(fpsEl, fpsCfg);
+        fpsEl.style.display = "flex";
+        fpsEl.style.alignItems = "center";
+        fpsEl.style.justifyContent = "center";
+        fpsEl.style.fontSize = fpsCfg.fontSize;
+        fpsEl.style.color = fpsCfg.fontColor;
+        fpsEl.style.padding = fpsCfg.padding;
+        fpsEl.style.pointerEvents = "none";
+        fpsEl.innerHTML = "FPS: --";
+        this.uiLayer.appendChild(fpsEl);
+
+        // 8. 村莊中心定位指針
+        const tcPtrCfg = UI_CONFIG.TownCenterPointer;
+        const tcPtr = document.createElement("div");
+        tcPtr.id = "tc_locator";
+        tcPtr.className = "panel glass-panel";
+        tcPtr.style.cssText = `
+            position: absolute; display: none; width: ${tcPtrCfg.width}px; height: ${tcPtrCfg.height}px;
+            border-radius: 50%; padding: 0; align-items: center; justify-content: center;
+            background: ${tcPtrCfg.bgColor}; border: 4px solid #ffffff;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8), inset 0 0 10px rgba(0,0,0,0.3);
+            outline: 2px solid #000000; outline-offset: -1px;
+            cursor: pointer; z-index: 2000; pointer-events: auto;
+            transition: transform 0.1s;
+        `;
+        tcPtr.innerHTML = `
+            <div style="font-size: ${tcPtrCfg.fontSize}; filter: drop-shadow(0 0 3px rgba(0,0,0,0.5));">${tcPtrCfg.icon}</div>
+            <div id="tc_arrow" style="position: absolute; font-size: 28px; color: #ffffff; text-shadow: 0 0 8px rgba(0,0,0,0.9); font-weight: bold;">${tcPtrCfg.arrowIcon}</div>
+        `;
+        tcPtr.onclick = (e) => {
+            e.stopPropagation();
+            this.panToTownCenter();
+        };
+        tcPtr.onmouseover = () => tcPtr.style.transform = "scale(1.1)";
+        tcPtr.onmouseout = () => tcPtr.style.transform = "scale(1)";
+        this.uiLayer.appendChild(tcPtr);
+
+        // 8. 指令選單 (智慧定位，暫不使用固定錨點)
         const menu = document.createElement("div");
         menu.id = "context_menu";
         menu.className = "panel";
@@ -469,14 +558,18 @@ export class UIManager {
 
     static handleWorldClick(e) {
         const state = GameEngine.state;
-
-        // 如果是 UI，不處理世界點擊
+ 
+        // 點擊 UI 區域的判斷
         if (e.target.closest("#ui_layer")) {
-            if (!e.target.closest("#context_menu")) {
-                // 點擊 UI 空白處不關閉 Stamp 模式，除非點擊的是其它交互區域
+            // 如果點擊的不是設置按鈕也不是設置面板，則關閉設置面板
+            if (!e.target.closest("#settings_btn") && !e.target.closest("#settings_panel")) {
+                this.hideSettingsPanel();
             }
             return;
         }
+        
+        // 點擊大地圖區域，關閉所有選單
+        this.hideSettingsPanel();
 
         // Stamp 模式：點擊地圖直接建造
         if (state.buildingMode === 'STAMP') {
@@ -561,28 +654,42 @@ export class UIManager {
                     <button class="action-btn" id="cmd_RETURN" onclick="window.GameEngine.setCommand(event, 'RETURN')">
                         <span class="icon">🏘️</span><span class="label">收工</span>
                     </button>
-                    <button class="action-btn" id="worker_btn" onclick="window.GameEngine.addToVillageQueue(event, 'villagers')">
-                        <span class="icon">👤</span><span class="label">訓練</span>
-                        <div id="queue_badge" class="queue-badge" style="display:none">0</div>
-                        <div id="prod_progress" class="progress-bar-mini"></div>
-                    </button>
                 `;
             }
 
-            // 訓練中心界面 (魔法學院、劍士訓練所、射箭場)
-            const trainingConfigs = {
-                mage_place: { type: 'mage', icon: '🧙', label: '招募法師' },
-                swordsman_place: { type: 'swordsman', icon: '⚔️', label: '訓練劍士' },
-                archer_place: { type: 'archer', icon: '🏹', label: '招募弓箭手' }
-            };
+            // 動態生成 NPC 生產按鈕
+            const bCfg = GameEngine.state.buildingConfigs[entity.type];
+            if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0 && !entity.isUnderConstruction) {
+                const iconMap = {
+                    'villagers': '👤', 'female villagers': '👩', 'mage': '🧙', 'swordsman': '⚔️', 'archer': '🏹',
+                    '1': '👤', '2': '👩', '3': '🧙', '4': '⚔️', '5': '🏹'
+                };
 
-            if (trainingConfigs[entity.type] && !entity.isUnderConstruction) {
-                const trainCfg = trainingConfigs[entity.type];
-                html += `
-                    <button class="action-btn" onclick="window.GameEngine.addToTrainingQueue(event, '${trainCfg.type}')">
-                        <span class="icon">${trainCfg.icon}</span><span class="label">${trainCfg.label}</span>
-                    </button>
-                `;
+                if (bCfg.productionMode === 'rand') {
+                    // 隨機生產模式
+                    const firstId = bCfg.npcProduction[0];
+                    const icon = iconMap[firstId] || '❓';
+                    html += `
+                        <button class="action-btn" onclick="window.GameEngine.addToProductionQueue(event, 'RANDOM', null)">
+                            <span class="icon">${icon}</span><span class="label">隨機招募</span>
+                            <div class="queue-badge" style="display:none">0</div>
+                            <div class="progress-bar-mini"></div>
+                        </button>
+                    `;
+                } else {
+                    // 一般生產模式
+                    bCfg.npcProduction.forEach(id => {
+                        const name = GameEngine.state.idToNameMap[id] || id;
+                        const icon = iconMap[id] || iconMap[name] || '👤';
+                        html += `
+                            <button class="action-btn" onclick="window.GameEngine.addToProductionQueue(event, '${id}', null)">
+                                <span class="icon">${icon}</span><span class="label">${name}</span>
+                                <div class="queue-badge" style="display:none">0</div>
+                                <div class="progress-bar-mini"></div>
+                            </button>
+                        `;
+                    });
+                }
             }
 
             // 倉庫自動化管理介面
@@ -666,11 +773,71 @@ export class UIManager {
         if (!this.activeMenuEntity) return;
         GameEngine.adjustWarehouseWorkers(this.activeMenuEntity, delta);
     }
+ 
+    static toggleSettingsPanel() {
+        const panel = document.getElementById("settings_panel");
+        if (!panel) return;
 
+        if (panel.style.display === "none") {
+            this.hideContextMenu(); // 先關閉其它選單
+            this.renderSettingsPanel();
+            panel.style.display = "flex";
+            panel.style.flexDirection = "column";
+        } else {
+            panel.style.display = "none";
+        }
+    }
+ 
+    static renderSettingsPanel() {
+        const panel = document.getElementById("settings_panel");
+        const cfg = UI_CONFIG.SettingsPanel;
+        const settings = GameEngine.state.settings;
+ 
+        let html = `<div class="title" style="text-align:center; font-size: 20px; border-bottom: 2px solid #8b6e4b; margin-bottom: 20px; padding-bottom: 10px;">${cfg.title}</div>`;
+        
+        html += `<div style="display:flex; flex-direction:column; gap:16px; padding: 10px;">`;
+        
+        // 1. 顯示資源資訊 (名稱、等級、數量)
+        html += `
+            <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="window.UIManager.updateSetting(event, 'showResourceInfo', !window.GAME_STATE.settings.showResourceInfo)">
+                <span style="font-size: 16px; color: #e0e0e0; font-weight: 600;">地圖資源標籤顯示</span>
+                <div class="setting-toggle ${settings.showResourceInfo ? 'active' : ''}" style="width: 54px; height: 26px; background: ${settings.showResourceInfo ? 'var(--aoe-gold)' : '#444'}; border-radius: 13px; position: relative; transition: all 0.3s; box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);">
+                    <div style="width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 3px; ${settings.showResourceInfo ? 'right: 3px' : 'left: 3px'}; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
+                </div>
+            </div>
+        `;
+ 
+        html += `</div>`;
+        
+        // 關閉按鈕
+        html += `
+            <div style="margin-top: 30px; border-top: 1px solid rgba(139, 110, 75, 0.3); padding-top: 15px;">
+                <button class="action-btn" onclick="event.stopPropagation(); window.UIManager.toggleSettingsPanel()" style="width: 100%; height: 44px; flex-direction: row; gap: 10px;">
+                    <span class="icon" style="font-size:18px; margin:0;">🔙</span><span class="label" style="font-size:14px;">返回遊戲</span>
+                </button>
+            </div>
+        `;
+ 
+        panel.innerHTML = html;
+    }
+ 
+    static updateSetting(event, key, val) {
+        if (event) event.stopPropagation();
+        GameEngine.state.settings[key] = val;
+        this.renderSettingsPanel(); // 重新渲染以更新 UI 狀態
+    }
+
+    static hideSettingsPanel() {
+        const settings = document.getElementById("settings_panel");
+        if (settings) settings.style.display = "none";
+    }
+ 
     static hideContextMenu() {
         this.activeMenuEntity = null;
         const menu = document.getElementById("context_menu");
         if (menu) menu.style.display = "none";
+        
+        // 注意：這裡不再自動隱藏 settings_panel，避免 toggle 時發生衝突
     }
 
     static updateValues() {
@@ -812,6 +979,21 @@ export class UIManager {
             menu.style.left = `${finalX}px`;
             menu.style.top = `${finalY}px`;
         }
+    }
+    /**
+     * 相機快速回歸村莊中心
+     */
+    static panToTownCenter() {
+        // 同時檢查 village 與 town_center
+        const tc = GameEngine.state.mapEntities.find(e => e.type === 'town_center' || e.type === 'village');
+        if (!tc || !window.PhaserScene) return;
+
+        const cam = window.PhaserScene.cameras.main;
+        const cfg = UI_CONFIG.TownCenterPointer;
+        
+        // 捲動相機到中心點
+        cam.pan(tc.x, tc.y, cfg.panSpeed || 1000, 'Power2');
+        GameEngine.addLog("相機移動至村莊中心");
     }
 }
 
