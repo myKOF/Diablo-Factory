@@ -58,6 +58,7 @@ export const UI_CONFIG = {
             { id: "timber_factory" },
             { id: "stone_factory" },
             { id: "barn" },
+            { id: "gold_mining_factory" },
             { id: "farmland" },
             { id: "tree_plantation" },
             { id: "mage_place" },
@@ -185,6 +186,17 @@ export const UI_CONFIG = {
                 tintRange: 0.5   // 變色系數：使灌木叢色澤維持一致但有細微不同
             }
         },
+        // 金礦（GoldMine）：金燦燦的結晶簇
+        GoldMine: {
+            colors: [0xffd700, 0xffa000, 0xffea00], // 金、橘金、鮮黃
+            outlineColor: 0x4e342e,                // 輪廓：深焦糖色
+            outlineWidth: 2,
+            visualVariation: {
+                minScale: 0.9,
+                maxScale: 1.2,
+                tintRange: 0.3
+            }
+        },
         // 營火（Campfire）：底座木柴堆 + 上方火焰粒子
         Campfire: {
             groundColor: 0x3e2723,    // 焦土色：深木色
@@ -208,8 +220,10 @@ export const UI_CONFIG = {
     // widthScale：進度條寬度相對於建築格寬的倍率（1.1 = 略寬於建築）。
     // overrides：針對特定建築類型覆蓋預設值（例如城鎮中心進度條只有 80% 寬）。
     BuildingProgressBar: {
-        widthScale: 1.1,                  // 進度條寬度倍率（相對於建築格寬）
-        height: 8,                        // 進度條高度（像素）
+        widthScale: 0.95,                  // 進度條寬度倍率 (相對於建築格寬)
+        height: 8,                       // 進度條高度 (像素)
+        align: "bottom",                 // 對齊位置：top (頂部), center (中心), bottom (底部)
+        offsetY: 0,                      // 垂直偏移量 (相對於對齊位置)
         bgColor: "rgba(0, 0, 0, 0.7)",   // 背景槽顏色（半透明黑）
         fillColor: "#fbc02d",             // 填充顏色（琥珀黃）
         outlineColor: "#000000",          // 外框線條顏色

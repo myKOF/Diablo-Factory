@@ -10,6 +10,7 @@ export class ResourceRenderer {
         this.generateTreeTexture(scene);
         this.generateRockTexture(scene);
         this.generateBerryBushTexture(scene);
+        this.generateGoldMineTexture(scene);
     }
 
     static generateTreeTexture(scene) {
@@ -108,6 +109,40 @@ export class ResourceRenderer {
         });
 
         g.generateTexture('tex_food', cw, ch);
+        g.destroy();
+    }
+ 
+    static generateGoldMineTexture(scene) {
+        if (scene.textures.exists('tex_gold')) return;
+ 
+        const cw = 120, ch = 120;
+        const cx = cw / 2, cy = ch / 2;
+        const g = scene.make.graphics({ x: 0, y: 0, add: false });
+        const cfg = UI_CONFIG.ResourceRenderer.GoldMine;
+ 
+        // 使用多個菱形/晶體堆疊成金礦
+        const crystals = [
+            // 大主晶體
+            { points: [{dx:0, dy:-25}, {dx:18, dy:0}, {dx:0, dy:20}, {dx:-18, dy:0}], x: cx, y: cy, color: cfg.colors[0] },
+            // 左側晶體
+            { points: [{dx:0, dy:-15}, {dx:12, dy:0}, {dx:0, dy:12}, {dx:-12, dy:0}], x: cx - 20, y: cy + 5, color: cfg.colors[1] },
+            // 右側晶體
+            { points: [{dx:0, dy:-12}, {dx:10, dy:0}, {dx:0, dy:10}, {dx:-10, dy:0}], x: cx + 18, y: cy + 8, color: cfg.colors[2] },
+            // 頂部小尖晶
+            { points: [{dx:0, dy:-10}, {dx:6, dy:0}, {dx:0, dy:6}, {dx:-6, dy:0}], x: cx + 5, y: cy - 15, color: cfg.colors[2] }
+        ];
+ 
+        crystals.forEach(c => {
+            this.drawPolygon(g, c.points, c.x, c.y, c.color, cfg.outlineColor, 1, cfg.outlineWidth);
+            // 加個高光線條
+            g.lineStyle(1, 0xffffff, 0.4);
+            g.beginPath();
+            g.moveTo(c.x + c.points[0].dx, c.y + c.points[0].dy);
+            g.lineTo(c.x + c.points[1].dx, c.y + c.points[1].dy);
+            g.strokePath();
+        });
+ 
+        g.generateTexture('tex_gold', cw, ch);
         g.destroy();
     }
 

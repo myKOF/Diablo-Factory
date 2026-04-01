@@ -105,7 +105,7 @@ export class MainScene extends Phaser.Scene {
         // 生成所有建築材質
         const buildingTypes = [
             'village', 'town_center', 'farmhouse', 'timber_factory',
-            'stone_factory', 'barn', 'farmland', 'tree_plantation',
+            'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation',
             'mage_place', 'swordsman_place', 'archer_place', 'campfire'
         ];
 
@@ -641,6 +641,7 @@ export class MainScene extends Phaser.Scene {
             'timber_factory': 'tex_timber_factory',
             'stone_factory': 'tex_stone_factory',
             'barn': 'tex_barn',
+            'gold_mining_factory': 'tex_gold_mining_factory',
             'farmland': 'tex_farmland',
             'tree_plantation': 'tex_tree_plantation',
             'mage_place': 'tex_mage_place',
@@ -655,6 +656,7 @@ export class MainScene extends Phaser.Scene {
         if (type.startsWith('tree') || type.startsWith('wood')) return 'tex_tree';
         if (type.startsWith('stone')) return 'tex_stone';
         if (type.startsWith('food')) return 'tex_food';
+        if (type.startsWith('gold')) return 'tex_gold';
 
         return null;
     }
@@ -719,6 +721,14 @@ export class MainScene extends Phaser.Scene {
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x5d4037, finalAlpha);
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+        } else if (ent.type === 'gold_mining_factory') {
+            g.fillStyle(0xfbc02d, finalAlpha); // 鮮亮的黃色
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            g.lineStyle(2, 0xf57f17, finalAlpha); // 橘黃色輪廓
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            // 加點晶體裝飾感
+            g.fillStyle(0xfff176, finalAlpha);
+            g.fillCircle(offX, offY, 15);
         } else if (ent.type === 'farmland') {
             g.fillStyle(0xdce775, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
@@ -800,11 +810,26 @@ export class MainScene extends Phaser.Scene {
 
         const overrides = cfg.overrides && cfg.overrides[ent.type] ? cfg.overrides[ent.type] : {};
         const widthScale = overrides.widthScale !== undefined ? overrides.widthScale : (cfg.widthScale || 1.1);
-
+        const bh = overrides.height !== undefined ? overrides.height : (cfg.height || 10);
         const bw = (uw * TS) * widthScale;
-        const bh = cfg.height || 10;
         const bx = ent.x - bw / 2;
-        const by = ent.y + (uh * TS) / 2 + 5;
+
+        // 計算垂直位置 (對齊邏輯)
+        const align = overrides.align || cfg.align || "bottom";
+        const offsetY = overrides.offsetY !== undefined ? overrides.offsetY : (cfg.offsetY || 0);
+        let by = 0;
+        switch (align) {
+            case "top":
+                by = ent.y - (uh * TS) / 2 + offsetY;
+                break;
+            case "center":
+                by = ent.y - bh / 2 + offsetY;
+                break;
+            case "bottom":
+            default:
+                by = ent.y + (uh * TS) / 2 - bh + offsetY;
+                break;
+        }
 
         const bgColor = this.hexOrRgba(cfg.bgColor);
         g.fillStyle(bgColor.color, bgColor.alpha);

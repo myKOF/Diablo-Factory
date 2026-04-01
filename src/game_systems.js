@@ -975,7 +975,7 @@ export class GameEngine {
 
         // 2. 各倉庫滿員情況 (優先補滿專職位)
         const warehouses = this.state.mapEntities.filter(e =>
-            ['timber_factory', 'stone_factory', 'barn'].includes(e.type) && !e.isUnderConstruction
+            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(e.type) && !e.isUnderConstruction
         );
 
         if (v.assignedWarehouseId) {
@@ -997,7 +997,9 @@ export class GameEngine {
             const winfo = (w.id || `${w.type}_${w.x}_${w.y}`);
             const count = this.state.units.villagers.filter(vi => vi.assignedWarehouseId === winfo).length;
             if (count < (w.targetWorkerCount || 0)) {
-                const resType = (w.type === 'timber_factory' ? 'WOOD' : (w.type === 'stone_factory' ? 'STONE' : 'FOOD'));
+                const resType = (w.type === 'timber_factory' ? 'WOOD' : 
+                                (w.type === 'stone_factory' ? 'STONE' : 
+                                (w.type === 'barn' ? 'FOOD' : 'GOLD')));
                 if (this.findNearestResource(w.x, w.y, resType, v.id)) {
                     v.assignedWarehouseId = winfo;
                     v.type = resType;
@@ -1235,7 +1237,7 @@ export class GameEngine {
 
     static updateWorkerAssignments() {
         const warehouses = this.state.mapEntities.filter(e =>
-            ['timber_factory', 'stone_factory', 'barn'].includes(e.type) && !e.isUnderConstruction
+            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(e.type) && !e.isUnderConstruction
         );
 
         // 1. 回收所有失效倉庫的工人，並收集有效的分配情況
@@ -1285,7 +1287,9 @@ export class GameEngine {
                 if (workers.length < target && allIdle.length > 0) {
                     const v = allIdle.shift();
                     v.assignedWarehouseId = wid;
-                    v.type = (entity.type === 'timber_factory' ? 'WOOD' : (entity.type === 'stone_factory' ? 'STONE' : 'FOOD'));
+                    v.type = (entity.type === 'timber_factory' ? 'WOOD' : 
+                             (entity.type === 'stone_factory' ? 'STONE' : 
+                             (entity.type === 'barn' ? 'FOOD' : 'GOLD')));
                     v.state = 'MOVING_TO_RESOURCE';
                     v.targetId = null;
                     v.pathTarget = null;
@@ -1455,7 +1459,7 @@ export class GameEngine {
             id: `build_${type}_${x}_${y}_${Date.now()}`,
             type: type, x: x, y: y, name: "施工中",
             isUnderConstruction: true, buildProgress: 0, buildTime: cfg.buildTime,
-            targetWorkerCount: ['timber_factory', 'stone_factory', 'barn', 'quarry'].includes(type) ? 1 : 0, 
+            targetWorkerCount: ['timber_factory', 'stone_factory', 'barn', 'quarry', 'gold_mining_factory'].includes(type) ? 1 : 0, 
             ...(cfg.npcProduction && cfg.npcProduction.length > 0 ? { queue: [], productionTimer: 0 } : {})
         };
         this.state.mapEntities.push(newBuilding);
