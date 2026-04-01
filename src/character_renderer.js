@@ -66,7 +66,10 @@ export class CharacterRenderer {
 
     static renderBody(ctx, x, y, data) {
         const colors = UI_CONFIG.VillagerColors;
-        const parseColor = (c) => parseInt(c.replace('#', '0x').substring(0, 8)) || 0x1e88e5;
+        const parseColor = (c) => {
+            const val = parseInt(c.replace('#', '0x').substring(0, 8));
+            return isNaN(val) ? 0x1e88e5 : val;
+        };
 
         let clothColor = parseColor(colors.DEFAULT);
         const name = (data.configName || "").toLowerCase();
@@ -89,14 +92,16 @@ export class CharacterRenderer {
                 if (data.type === 'WOOD') clothColor = parseColor(colors.WOOD);
                 else if (data.type === 'STONE') clothColor = parseColor(colors.STONE);
                 else if (data.type === 'FOOD') clothColor = parseColor(colors.FOOD);
+                else if (data.type === 'GOLD') clothColor = parseColor(colors.GOLD);
             }
         }
 
         this.setCtxStyle(ctx, clothColor, 1);
         ctx.fillRect(x - 10, y, 20, 30);
 
-        this.setCtxStyle(ctx, 0xffffff, 0.3);
-        ctx.fillRect(x - 10, y, 20, 4);
+        // 移除身體上方的白色高光效果，以顯示配置的原始純色
+        // this.setCtxStyle(ctx, 0xffffff, 0.3);
+        // ctx.fillRect(x - 10, y, 20, 4);
     }
 
     static renderHead(ctx, x, y, data) {
@@ -151,7 +156,7 @@ export class CharacterRenderer {
             this.drawTool(ctx, x + 5, y + 15, 'HAMMER', angle);
         } else if (state === 'GATHERING') {
             const angle = Math.sin(t * 20) * 0.8;
-            const toolType = data.type === 'WOOD' ? 'AXE' : (data.type === 'STONE' ? 'PICKAXE' : 'BASKET');
+            const toolType = data.type === 'WOOD' ? 'AXE' : (data.type === 'STONE' || data.type === 'GOLD' ? 'PICKAXE' : 'BASKET');
             this.drawTool(ctx, x + 5, y + 15, toolType, angle);
         } else if (name === 'swordsman') {
             const angle = state.includes('MOVING') ? Math.sin(t * 10) * 0.3 : 0.2;

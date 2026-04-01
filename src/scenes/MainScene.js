@@ -17,6 +17,14 @@ export class MainScene extends Phaser.Scene {
         this.lastRenderVersion = 0;
     }
 
+    hexToCssRgba(hex, alpha) {
+        if (!hex || !hex.startsWith('#')) return hex;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha || 1})`;
+    }
+
     preload() {
         // 目前沒有外部資產，如果有的話可以在這裡加載
         // 例如: this.load.image('village', 'assets/village.png');
@@ -496,7 +504,7 @@ export class MainScene extends Phaser.Scene {
                 speedY: cfg.speedY,
                 scale: cfg.scale,
                 alpha: cfg.alpha,
-                tint: cfg.tints,
+                tint: cfg.tints.map(t => this.hexOrRgba(t).color),
                 blendMode: cfg.blendMode,
                 frequency: cfg.frequency,
                 x: { min: -cfg.spreadX, max: cfg.spreadX },
@@ -546,7 +554,7 @@ export class MainScene extends Phaser.Scene {
                 fill: cfg.name.color,
                 align: 'center'
             }).setOrigin(0.5, 0.5);
-            nameTxt.setStroke(cfg.name.outlineColor, cfg.name.outlineWidth);
+            nameTxt.setStroke(this.hexToCssRgba(cfg.name.outlineColor, cfg.name.outlineAlpha), cfg.name.outlineWidth);
             nameTxt.setDepth(50);
             this.nameLabels.set(id, nameTxt);
         }
@@ -573,7 +581,7 @@ export class MainScene extends Phaser.Scene {
                     fill: cfg.level.color,
                     align: 'center'
                 }).setOrigin(0.5, 0.5);
-                lvlTxt.setStroke(cfg.level.outlineColor, cfg.level.outlineWidth);
+                lvlTxt.setStroke(this.hexToCssRgba(cfg.level.outlineColor, cfg.level.outlineAlpha), cfg.level.outlineWidth);
                 lvlTxt.setDepth(50);
                 this.levelLabels.set(id, lvlTxt);
             }
@@ -603,7 +611,7 @@ export class MainScene extends Phaser.Scene {
                     fill: cfg.amount.color,
                     align: 'center'
                 }).setOrigin(0.5, 0.5);
-                amtTxt.setStroke(cfg.amount.outlineColor, cfg.amount.outlineWidth);
+                amtTxt.setStroke(this.hexToCssRgba(cfg.amount.outlineColor, cfg.amount.outlineAlpha), cfg.amount.outlineWidth);
                 amtTxt.setDepth(50);
                 this.resourceLabels.set(id, amtTxt);
             }
@@ -832,7 +840,7 @@ export class MainScene extends Phaser.Scene {
         }
 
         const bgColor = this.hexOrRgba(cfg.bgColor);
-        g.fillStyle(bgColor.color, bgColor.alpha);
+        g.fillStyle(bgColor.color, cfg.bgAlpha || bgColor.alpha);
         g.fillRect(bx, by, bw, bh);
 
         const fillColor = this.hexOrRgba(cfg.fillColor);
@@ -892,7 +900,7 @@ export class MainScene extends Phaser.Scene {
         const bx = ent.x - (uw * TS) / 2 + 15;
         const by = ent.y + (uh * TS) / 2 - 35;
 
-        g.fillStyle(parseInt(cfg.barBg.replace('#', '0x')) || 0x000000, 0.6);
+        g.fillStyle(parseInt(cfg.barBg.replace('#', ''), 16), cfg.barAlpha || 0.7);
         g.fillRect(bx + 45, by + 12, 85, 12);
 
         const fillColor = isPopFull ? 0xf44336 : 0x4caf50;

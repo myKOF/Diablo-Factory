@@ -55,6 +55,14 @@ export class UIManager {
         console.log("UI 管理器已加載 (Advanced Building System)");
     }
 
+    static hexToRgba(hex, alpha) {
+        if (!hex || !hex.startsWith('#')) return hex;
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha || 1})`;
+    }
+
     static renderAll() {
         this.uiLayer.innerHTML = "";
 
@@ -104,7 +112,7 @@ export class UIManager {
         logPanel.className = "panel";
         this.applyAnchorStyle(logPanel, logCfg);
 
-        logPanel.style.background = logCfg.bgColor;
+        logPanel.style.background = this.hexToRgba(logCfg.bgColor, logCfg.bgAlpha);
         logPanel.style.color = "#e0f2f1";
         logPanel.style.padding = logCfg.padding;
         logPanel.style.border = `1.5px solid ${logCfg.borderColor}`;
@@ -127,6 +135,7 @@ export class UIManager {
         setBtn.style.textAlign = "center";
         setBtn.style.lineHeight = `${setBtnCfg.height}px`;
         setBtn.style.fontSize = setBtnCfg.fontSize;
+        setBtn.style.background = this.hexToRgba(setBtnCfg.bgColor, setBtnCfg.bgAlpha);
         setBtn.style.cursor = "pointer";
         setBtn.style.pointerEvents = "auto";
         setBtn.style.display = "flex";
@@ -189,7 +198,7 @@ export class UIManager {
         tcPtr.style.cssText = `
             position: absolute; display: none; width: ${tcPtrCfg.width}px; height: ${tcPtrCfg.height}px;
             border-radius: 50%; padding: 0; align-items: center; justify-content: center;
-            background: ${tcPtrCfg.bgColor}; border: 4px solid #ffffff;
+            background: ${this.hexToRgba(tcPtrCfg.bgColor, tcPtrCfg.bgAlpha)}; border: 4px solid #ffffff;
             box-shadow: 0 0 20px rgba(0,0,0,0.8), inset 0 0 10px rgba(0,0,0,0.3);
             outline: 2px solid #000000; outline-offset: -1px;
             cursor: pointer; z-index: 2000; pointer-events: auto;
@@ -270,7 +279,8 @@ export class UIManager {
 
         // 進階美化
         if (cfg.glass) el.classList.add("glass-panel");
-        if (cfg.shadow) el.style.boxShadow = cfg.shadow;
+        if (cfg.shadowColor) el.style.boxShadow = `0 10px 40px ${this.hexToRgba(cfg.shadowColor, cfg.shadowAlpha)}`;
+        else if (cfg.shadow) el.style.boxShadow = cfg.shadow;
     }
 
     static refreshBuildingList(container, bp) {
@@ -323,7 +333,7 @@ export class UIManager {
         `;
         btn.innerHTML = `
             <strong style="color: ${bp.titleColor}">${item.name}</strong><br>
-            <small style="color: ${bp.descColor}">${item.desc}</small>
+            <small style="color: ${this.hexToRgba(bp.descColor, bp.descAlpha)}">${item.desc}</small>
         `;
 
         const icon = document.createElement("div");
@@ -375,7 +385,7 @@ export class UIManager {
         warn.style.color = cfg.fontColor;
         warn.style.fontSize = cfg.fontSize;
         warn.style.fontWeight = "600";
-        warn.style.background = cfg.bgColor;
+        warn.style.background = this.hexToRgba(cfg.bgColor, cfg.bgAlpha);
         warn.style.border = `2px solid ${cfg.borderColor}`;
         warn.style.padding = cfg.padding;
         warn.style.borderRadius = "8px";
@@ -648,6 +658,9 @@ export class UIManager {
                     <button class="action-btn" id="cmd_STONE" onclick="window.GameEngine.setCommand(event, 'STONE')">
                         <span class="icon">⛏️</span><span class="label">採集石頭</span>
                     </button>
+                    <button class="action-btn" id="cmd_GOLD" onclick="window.GameEngine.setCommand(event, 'GOLD')">
+                        <span class="icon">💰</span><span class="label">採集黃金</span>
+                    </button>
                     <button class="action-btn" id="cmd_FOOD" onclick="window.GameEngine.setCommand(event, 'FOOD')">
                         <span class="icon">🧺</span><span class="label">採集食物</span>
                     </button>
@@ -693,7 +706,7 @@ export class UIManager {
             }
 
             // 倉庫自動化管理介面
-            const isWarehouse = ['timber_factory', 'stone_factory', 'barn'].includes(entity.type);
+            const isWarehouse = ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(entity.type);
             if (isWarehouse && !entity.isUnderConstruction) {
                 const currentAssigned = GameEngine.state.units.villagers.filter(v => v.assignedWarehouseId === eid).length;
                 html += `
@@ -917,7 +930,7 @@ export class UIManager {
         }
 
         // 更新指令高亮狀態
-        ['WOOD', 'STONE', 'FOOD', 'RETURN'].forEach(cmd => {
+        ['WOOD', 'STONE', 'GOLD', 'FOOD', 'RETURN'].forEach(cmd => {
             const btn = document.getElementById(`cmd_${cmd}`);
             if (btn) {
                 if (GameEngine.state.currentGlobalCommand === cmd) btn.classList.add("active");

@@ -1,4 +1,7 @@
 import { UI_CONFIG } from "./ui_config.js";
+import { PathfindingSystem } from "./systems/PathfindingSystem.js?v=3";
+
+
 
 /**
  * 核心遊戲邏輯系統
@@ -36,8 +39,10 @@ export class GameEngine {
             showResourceInfo: true // 預設顯示大地圖資源資訊（名稱、等級、數量）
         },
         idToNameMap: {}, // NPC ID -> NPC Name (用於從 buildings.csv 定義的 ID 找配置)
-        renderVersion: 0 // 用於通知渲染器強行刷新
+        renderVersion: 0, // 用於通知渲染器強行刷新
+        pathfinding: null // 尋路系統實例
     };
+
 
     static RESOURCE_NAMES = {
         gold: "黃金",
@@ -63,6 +68,10 @@ export class GameEngine {
             this.loadBuildingConfig(),
             this.loadStringsConfig()
         ]).catch(e => console.error(e));
+        this.state.pathfinding = new PathfindingSystem();
+        this.state.pathfinding.tileSize = this.TILE_SIZE;
+        this.state.pathfinding.setAcceptableTiles([0]);
+
         this.generateMap();
 
         this.spawnNPC('villagers');
@@ -79,6 +88,7 @@ export class GameEngine {
         }, 100);
     }
 
+
     static initBackgroundWorker() {
         const blob = new Blob([`
             setInterval(() => { self.postMessage('tick'); }, 50); // 降低頻率至 20Hz (50ms)，顯著節省 CPU
@@ -89,7 +99,9 @@ export class GameEngine {
     }
 
     static logicTick() {
+        if (this.state.pathfinding) this.state.pathfinding.update();
         const now = Date.now();
+
         const deltaTime = Math.min((now - this.lastTickTime) / 1000, 0.2);
         this.lastTickTime = now;
 
@@ -252,7 +264,7 @@ export class GameEngine {
                 if (!row[idxName]) continue;
                 const name = row[idxName].trim();
                 const id = row[idxId] ? row[idxId].trim() : null;
-                
+
                 if (id) this.state.idToNameMap[id] = name;
 
                 this.state.npcConfigs[name] = {
@@ -360,12 +372,12 @@ export class GameEngine {
             const idxName = headers.indexOf('name'), idxModel = headers.indexOf('model'), idxType = headers.indexOf('type');
             const idxYield = headers.indexOf('collection_speed'), idxDensity = headers.indexOf('density');
             const idxLv = headers.indexOf('lv'), idxSize = headers.indexOf('size'), idxModelSize = headers.indexOf('model_size');
-            
+
             this.state.resourceConfigs = [];
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
                 if (!row[idxName]) continue;
-                
+
                 let parsedModelSize = { x: 1.0, y: 1.0 };
                 if (idxModelSize !== -1 && row[idxModelSize]) {
                     const val = row[idxModelSize].trim();
@@ -378,12 +390,12 @@ export class GameEngine {
                             const num = parseFloat(m2[1]);
                             if (!isNaN(num)) parsedModelSize = { x: num, y: num };
                         } else {
-                             const num = parseFloat(val);
-                             if (!isNaN(num)) parsedModelSize = { x: num, y: num };
+                            const num = parseFloat(val);
+                            if (!isNaN(num)) parsedModelSize = { x: num, y: num };
                         }
                     }
                 }
-                
+
                 this.state.resourceConfigs.push({
                     name: row[idxName].trim(), model: row[idxModel].trim(), type: row[idxType].trim().toUpperCase(),
                     amount: parseInt(row[idxYield]) || 100, density: parseInt(row[idxDensity]) || 5,
@@ -442,7 +454,7 @@ export class GameEngine {
 
                 this.state.buildingConfigs[row[idxModel].trim()] = {
                     name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : row[idxModel].trim(),
-                    desc: (descIdx !== -1 && row[descIdx]) ? row[descIdx].trim() : "", 
+                    desc: (descIdx !== -1 && row[descIdx]) ? row[descIdx].trim() : "",
                     model: row[idxModel].trim(),
                     collision: row[idxCol] === '1',
                     size: row[idxSize] || "{1,1}",
@@ -543,20 +555,20 @@ export class GameEngine {
     static generateMap() {
         const startT = performance.now();
         this.state.mapEntities = [];
-        
+
         // 讀取外部參數 (單位皆為像素)
         const mapCfg = this.state.systemConfig.map_size || { w: 3200, h: 2000 };
         const safeCfg = this.state.systemConfig.no_resources_range || { w: 240, h: 240 };
-        
+
         // 定義地圖格網 (Tiles)
         const TS = this.TILE_SIZE;
         const cols = Math.floor(mapCfg.w / TS);
         const rows = Math.floor(mapCfg.h / TS);
-        
+
         // 將村莊中心 (960, 560) 近似地圖中央
         const minGX = Math.floor(960 / TS) - Math.floor(cols / 2);
         const minGY = Math.floor(560 / TS) - Math.floor(rows / 2);
-        
+
         const occupied = new Uint8Array(cols * rows); // 使用 TypedArray 替代 Set，效能大幅提升
 
         const getIdx = (gx, gy) => {
@@ -599,9 +611,9 @@ export class GameEngine {
         const villagePos = { x: 960, y: 560 };
         const villageFP = getFootprint('village');
         const villageCfg = this.state.buildingConfigs['village'] || {};
-        this.state.mapEntities.push({ 
-            id: 'core_village', 
-            type: 'village', x: villagePos.x, y: villagePos.y, name: villageCfg.name || "城鎮中心", queue: [], productionTimer: 0 
+        this.state.mapEntities.push({
+            id: 'core_village',
+            type: 'village', x: villagePos.x, y: villagePos.y, name: villageCfg.name || "城鎮中心", queue: [], productionTimer: 0
         });
         const vgx = Math.round((villagePos.x - (villageFP.uw * TS) / 2) / TS);
         const vgy = Math.round((villagePos.y - (villageFP.uh * TS) / 2) / TS);
@@ -609,9 +621,9 @@ export class GameEngine {
 
         const campfirePos = { x: 1100, y: 640 };
         const campfireFP = getFootprint('campfire');
-        this.state.mapEntities.push({ 
+        this.state.mapEntities.push({
             id: 'core_campfire',
-            type: 'campfire', x: campfirePos.x, y: campfirePos.y, name: "小火堆" 
+            type: 'campfire', x: campfirePos.x, y: campfirePos.y, name: "小火堆"
         });
         const cgx = Math.round((campfirePos.x - (campfireFP.uw * TS) / 2) / TS);
         const cgy = Math.round((campfirePos.y - (campfireFP.uh * TS) / 2) / TS);
@@ -639,7 +651,7 @@ export class GameEngine {
                 let count = 0;
                 const fp = getFootprint(cfg.model);
                 const resCfg = UI_CONFIG.ResourceRenderer;
-                
+
                 for (let i = 0; i < pool.length && count < cfg.density; i++) {
                     const { gx, gy } = pool[i];
                     if (checkOccupiedG(gx, gy, fp.uw, fp.uh)) continue;
@@ -666,40 +678,67 @@ export class GameEngine {
                         vTint = (c << 16) | (c << 8) | c;
                     }
 
-                    this.state.mapEntities.push({ 
+                    this.state.mapEntities.push({
                         id: `res_${cfg.type}_${this.state.mapEntities.length}`, // 分配固定唯一 ID
-                        type: cfg.model, resourceType: cfg.type, x, y, 
+                        type: cfg.model, resourceType: cfg.type, x, y,
                         amount: cfg.amount, level: cfg.lv, name: cfg.name,
                         vScaleX, vScaleY, vTint
                     });
-                    
+
                     markOccupiedG(gx, gy, fp.uw, fp.uh);
                     count++;
                 }
                 console.log(`地圖生成 - ${cfg.name} 成功放置: ${count}/${cfg.density}`);
             });
         }
+        this.updatePathfindingGrid();
         this.updateSpatialGrid();
         console.log(`地圖生成完成 [W:${mapCfg.w} H:${mapCfg.h}]，耗時: ${(performance.now() - startT).toFixed(2)}ms`);
     }
 
-    static findSafePos(x, y) {
+    /**
+     * 更新尋路用的格網數據 (將 mapEntities 轉換為 2D 陣列)
+     */
+    static updatePathfindingGrid() {
+        if (!this.state.pathfinding) return;
+
+        const mapCfg = this.state.systemConfig.map_size || { w: 3200, h: 2000 };
         const TS = this.TILE_SIZE;
-        const gx = Math.floor(x / TS), gy = Math.floor(y / TS);
-        const obstacles = this.getObstacleGrid();
-        if (!obstacles.has(`${gx},${gy}`)) return { x, y };
-        for (let r = 1; r < 20; r++) {
-            for (let dx = -r; dx <= r; dx++) {
-                for (let dy = -r; dy <= r; dy++) {
-                    if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-                    if (!obstacles.has(`${gx + dx},${gy + dy}`)) {
-                        return { x: (gx + dx) * TS + TS / 2, y: (gy + dy) * TS + TS / 2 };
+        const cols = Math.ceil(mapCfg.w / TS);
+        const rows = Math.ceil(mapCfg.h / TS);
+
+        // 初始化全 0 (可通行)
+        const matrix = Array.from({ length: rows }, () => new Array(cols).fill(0));
+
+        this.state.mapEntities.forEach(ent => {
+            if (ent.isUnderConstruction) return;
+            const cfg = this.getEntityConfig(ent.type);
+            if (cfg && cfg.collision) {
+                const em = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
+                const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;
+
+                // 計算左上角座標
+                const bWidth = uw * TS, bHeight = uh * TS;
+                const minX = ent.x - bWidth / 2, minY = ent.y - bHeight / 2;
+                const gx = Math.round(minX / TS), gy = Math.round(minY / TS);
+
+                for (let i = 0; i < uw; i++) {
+                    for (let j = 0; j < uh; j++) {
+                        const targetX = gx + i, targetY = gy + j;
+                        if (targetY >= 0 && targetY < rows && targetX >= 0 && targetX < cols) {
+                            matrix[targetY][targetX] = 1; // 障礙物
+                        }
                     }
                 }
             }
-        }
-        return { x, y };
+        });
+
+        this.state.pathfinding.setGrid(matrix);
     }
+
+
+    // 已刪除原有的 findSafePos (防卡死系統相關代碼)
+
 
     static productionTick() {
         if (this.state.buildings.alchemy_lab > 0 && this.state.resources.wood >= 5) {
@@ -856,6 +895,17 @@ export class GameEngine {
                     if (type === 'farmhouse') this.state.buildings.farmhouse++;
                     this.addLog(`建造完成：${this.state.buildingConfigs[type].name}。`);
 
+                    // 核心修復：建築完工後必須立即更新尋路格網，否則脫困機制會判定該處依然「可通行」
+                    GameEngine.updatePathfindingGrid();
+
+                    // 自動脫困：檢查是否有村民被「壓」在剛蓋好的實體下，立即推開
+                    this.state.units.villagers.forEach(vi => {
+                        const ignore = [vi.targetId, vi.targetBase].filter(Boolean);
+                        if (GameEngine.isColliding(vi.x, vi.y, ignore) === v.constructionTarget) {
+                            GameEngine.resolveStuck(vi);
+                        }
+                    });
+
                     // 自動指派後續工作：優先尋找下一個「最近」且需建造的目標
                     let nextConstruction = null;
                     let minCDist = Infinity;
@@ -906,8 +956,10 @@ export class GameEngine {
             if (wasColliding !== collidingEnt) {
                 // 如果原本不在這個建築裡面（或是剛從別處撞進來），阻擋
                 v.x = oldX; v.y = oldY; v.pathTarget = null;
+            } else {
+                // 連動脫困邏輯：原就在建築內，可能因為剛蓋好建築被壓住，啟動 8 方向螺旋搜尋脫困
+                this.resolveStuck(v);
             }
-            // 如果原本就在裡面 (wasColliding === collidingEnt)，准許自由移動以便走出來
         }
 
         if (v.state === 'IDLE' && collidingEnt) v.idleTarget = null;
@@ -997,9 +1049,9 @@ export class GameEngine {
             const winfo = (w.id || `${w.type}_${w.x}_${w.y}`);
             const count = this.state.units.villagers.filter(vi => vi.assignedWarehouseId === winfo).length;
             if (count < (w.targetWorkerCount || 0)) {
-                const resType = (w.type === 'timber_factory' ? 'WOOD' : 
-                                (w.type === 'stone_factory' ? 'STONE' : 
-                                (w.type === 'barn' ? 'FOOD' : 'GOLD')));
+                const resType = (w.type === 'timber_factory' ? 'WOOD' :
+                    (w.type === 'stone_factory' ? 'STONE' :
+                        (w.type === 'barn' ? 'FOOD' : 'GOLD')));
                 if (this.findNearestResource(w.x, w.y, resType, v.id)) {
                     v.assignedWarehouseId = winfo;
                     v.type = resType;
@@ -1062,103 +1114,98 @@ export class GameEngine {
         return nearest;
     }
 
+    /**
+     * 執行路徑移動邏輯 (非同步尋路)
+     * 根據核心協議：效能優化與穩定優先，避免每幀重複 new 物件
+     */
     static moveDetailed(v, tx, ty, speed, dt) {
-        if (!v.pathTarget || Math.hypot(v.x - v.pathTarget.x, v.y - v.pathTarget.y) < 10) {
-            v.pathTarget = this.findNextStep(v.x, v.y, tx, ty);
+        // 如果目標座標發生顯著變化，重置路徑
+        if (!v._lastTargetPos || Math.hypot(v._lastTargetPos.x - tx, v._lastTargetPos.y - ty) > 20) {
+            v._lastTargetPos = { x: tx, y: ty };
+            v.fullPath = null;
+            v.pathIndex = 0;
+            v.isFindingPath = false;
         }
-        this.moveTowards(v, v.pathTarget.x, v.pathTarget.y, speed, dt);
+
+        // 如果目前沒有路徑且也沒在尋路中，發起非同步尋路請求
+        if (!v.fullPath && !v.isFindingPath && this.state.pathfinding) {
+            v.isFindingPath = true;
+            this.state.pathfinding.findPath(v.x, v.y, tx, ty, (path) => {
+                v.isFindingPath = false;
+                if (path && path.length > 1) {
+                    v.fullPath = path;
+                    v.pathIndex = 1; // 跳過起點
+                } else {
+                    // 尋路失敗，設為空避免重複頻繁請求
+                    v.fullPath = [];
+                }
+            });
+        }
+
+        // 如果有路徑，沿著節點移動
+        if (v.fullPath && v.pathIndex < v.fullPath.length) {
+            const node = v.fullPath[v.pathIndex];
+            const dx = node.x - v.x;
+            const dy = node.y - v.y;
+            const dist = Math.hypot(dx, dy);
+            const moveDist = speed * dt;
+
+            if (dist <= moveDist) {
+                v.x = node.x;
+                v.y = node.y;
+                v.pathIndex++;
+            } else {
+                // 修正位移速度 (Velocity Normalization): Vx^2 + Vy^2 = Speed^2
+                // dx/dist 是方向向量的餘弦, dy/dist 是正弦, 確保斜向移動不加速 (1.41x)
+                v.x += (dx / dist) * moveDist;
+                v.y += (dy / dist) * moveDist;
+            }
+        } else {
+            // 沒有路徑或已到終點，嘗試直接逼近目標 (緩衝處理)
+            this.moveTowards(v, tx, ty, speed, dt);
+        }
+    }
+
+    /**
+     * 防卡死螺旋脫困邏輯 (NPC Escape Protocol)
+     * 利用 PathfindingSystem 的螺旋搜尋找到最近可用空格並傳送
+     */
+    static resolveStuck(v) {
+        if (!this.state.pathfinding) return;
+        const gx = Math.floor(v.x / this.TILE_SIZE);
+        const gy = Math.floor(v.y / this.TILE_SIZE);
+        const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100); // 擴大搜索範圍，保證能跨越大片密集建築區
+        if (nearest) {
+            // 將單位送往目標格中心，避免邊緣碰撞
+            v.x = nearest.x * this.TILE_SIZE + this.TILE_SIZE / 2;
+            v.y = nearest.y * this.TILE_SIZE + this.TILE_SIZE / 2;
+            v.fullPath = null;
+            v.pathIndex = 0;
+            v.pathTarget = null;
+            console.log(`單位脫困成功: 新座標 (${v.x.toFixed(1)}, ${v.y.toFixed(1)})`);
+        }
     }
 
     static moveTowards(v, tx, ty, speed, dt) {
         const dx = tx - v.x, dy = ty - v.y;
         const dist = Math.hypot(dx, dy);
         const moveDist = speed * dt;
-
         if (dist > moveDist) {
-            v.x += (dx / dist) * moveDist;
-            v.y += (dy / dist) * moveDist;
+            // 逼近目標時仍需做基礎碰撞檢查 (簡化版)
+            const nextX = v.x + (dx / dist) * moveDist;
+            const nextY = v.y + (dy / dist) * moveDist;
+            v.x = nextX;
+            v.y = nextY;
         } else if (dist > 0.1) {
-            v.x = tx;
-            v.y = ty;
+            v.x = tx; v.y = ty;
         }
     }
 
-    static findNextStep(startX, startY, targetX, targetY) {
-        const TS = this.TILE_SIZE;
-        const startGX = Math.floor(startX / TS), startGY = Math.floor(startY / TS);
-        const targetGX = Math.floor(targetX / TS), targetGY = Math.floor(targetY / TS);
-        if (startGX === targetGX && startGY === targetGY) return { x: targetX, y: targetY };
+    // 已刪除 BFS 版 findNextStep
 
-        // 識別目標是否在某個建築物內，如果是，整個建築物都是目標
-        const targetCells = new Set();
-        const targetEnt = this.state.mapEntities.find(ent => {
-            const cfg = this.state.buildingConfigs[ent.type];
-            if (!cfg || !cfg.collision) return false;
-            const em = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
-            const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;
-            const w = uw * TS, h = uh * TS;
-            return targetX > ent.x - w / 2 && targetX < ent.x + w / 2 && targetY > ent.y - h / 2 && targetY < ent.y + h / 2;
-        });
 
-        if (targetEnt) {
-            const em = this.state.buildingConfigs[targetEnt.type].size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
-            const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;
-            const w = uw * TS, h = uh * TS;
-            const tgx = Math.round((targetEnt.x - w / 2) / TS);
-            const tgy = Math.round((targetEnt.y - h / 2) / TS);
-            for (let i = 0; i < uw; i++) {
-                for (let j = 0; j < uh; j++) targetCells.add(`${tgx + i},${tgy + j}`);
-            }
-        } else {
-            targetCells.add(`${targetGX},${targetGY}`);
-        }
+    // 已刪除原有的 getObstacleGrid
 
-        const queue = [[startGX, startGY, null]];
-        const visited = new Set([`${startGX},${startGY}`]);
-        const obstacles = this.getObstacleGrid();
-        const startIsObstacle = obstacles.has(`${startGX},${startGY}`);
-
-        let iterations = 0;
-        while (queue.length > 0 && iterations < 5000) {
-            iterations++;
-            const [gx, gy, firstStep] = queue.shift();
-            if (targetCells.has(`${gx},${gy}`)) {
-                const res = firstStep || [gx, gy];
-                return { x: res[0] * TS + TS / 2, y: res[1] * TS + TS / 2 };
-            }
-            const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]];
-            for (const [dx, dy] of neighbors) {
-                const nx = gx + dx, ny = gy + dy;
-                const key = `${nx},${ny}`;
-                // 如果起點就在障礙物裡，允許先在障礙物內穿行以尋找出口
-                const canMove = !obstacles.has(key) || targetCells.has(key) || startIsObstacle;
-                if (!visited.has(key) && canMove) {
-                    visited.add(key);
-                    queue.push([nx, ny, firstStep || [nx, ny]]);
-                }
-            }
-        }
-        return { x: targetX, y: targetY };
-    }
-
-    static getObstacleGrid() {
-        const grid = new Set();
-        this.state.mapEntities.forEach(ent => {
-            if (ent.isUnderConstruction) return;
-            const cfg = this.getEntityConfig(ent.type);
-            if (cfg && cfg.collision) {
-                const em = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
-                const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;
-                const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
-                const gx = Math.round((ent.x - w / 2) / this.TILE_SIZE);
-                const gy = Math.round((ent.y - h / 2) / this.TILE_SIZE);
-                for (let i = 0; i < uw; i++) {
-                    for (let j = 0; j < uh; j++) grid.add(`${gx + i},${gy + j}`);
-                }
-            }
-        });
-        return grid;
-    }
 
     static isColliding(x, y, ignoreEnts = []) {
         // 回傳碰撞到的實體，方便後續判斷
@@ -1171,7 +1218,7 @@ export class GameEngine {
                 const match = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
                 const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
                 const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
-                if (x > ent.x - w / 2 && x < ent.x + w / 2 && y > ent.y - h / 2 && y < ent.y + h / 2) return true;
+                if (x > ent.x - w / 2 + 1 && x < ent.x + w / 2 - 1 && y > ent.y - h / 2 + 1 && y < ent.y + h / 2 - 1) return true;
             }
             return false;
         });
@@ -1287,9 +1334,9 @@ export class GameEngine {
                 if (workers.length < target && allIdle.length > 0) {
                     const v = allIdle.shift();
                     v.assignedWarehouseId = wid;
-                    v.type = (entity.type === 'timber_factory' ? 'WOOD' : 
-                             (entity.type === 'stone_factory' ? 'STONE' : 
-                             (entity.type === 'barn' ? 'FOOD' : 'GOLD')));
+                    v.type = (entity.type === 'timber_factory' ? 'WOOD' :
+                        (entity.type === 'stone_factory' ? 'STONE' :
+                            (entity.type === 'barn' ? 'FOOD' : 'GOLD')));
                     v.state = 'MOVING_TO_RESOURCE';
                     v.targetId = null;
                     v.pathTarget = null;
@@ -1342,26 +1389,12 @@ export class GameEngine {
                 if (v.state === 'MOVING_TO_CONSTRUCTION' || v.state === 'CONSTRUCTING') return;
                 v.state = 'MOVING_TO_BASE'; v.isRecalled = true; v.pathTarget = null;
             });
-            // 1.2 建築生產邏輯 (所有具備 npcProduction 的建築)
-            this.state.mapEntities.forEach(ent => {
-                if (ent.isUnderConstruction || !ent.queue || ent.queue.length === 0) return;
-
-                if (ent.productionTimer > 0) {
-                    ent.productionTimer -= delta;
-                    if (ent.productionTimer <= 0) {
-                        const configName = ent.queue.shift();
-                        this.spawnNPC(configName, ent.x + 40, ent.y + 40, ent);
-                        if (ent.queue.length > 0) {
-                            ent.productionTimer = 5; // 預設生產時間為 5 秒
-                        }
-                    }
-                }
-            });
             if (window.UIManager) window.UIManager.updateValues();
             return;
         }
         this.addLog(`全員動員：開始採集 ${this.RESOURCE_NAMES[commandType.toLowerCase()] || commandType}。`);
         this.state.units.villagers.forEach(v => {
+
             // 指令影響閒置中的工人，或是以村莊中心 (village) 為放置點的工人
             const isIdle = v.state === 'IDLE';
             const isVillageWorker = v.targetBase && v.targetBase.type === 'village';
@@ -1459,7 +1492,7 @@ export class GameEngine {
             id: `build_${type}_${x}_${y}_${Date.now()}`,
             type: type, x: x, y: y, name: "施工中",
             isUnderConstruction: true, buildProgress: 0, buildTime: cfg.buildTime,
-            targetWorkerCount: ['timber_factory', 'stone_factory', 'barn', 'quarry', 'gold_mining_factory'].includes(type) ? 1 : 0, 
+            targetWorkerCount: ['timber_factory', 'stone_factory', 'barn', 'quarry', 'gold_mining_factory'].includes(type) ? 1 : 0,
             ...(cfg.npcProduction && cfg.npcProduction.length > 0 ? { queue: [], productionTimer: 0 } : {})
         };
         this.state.mapEntities.push(newBuilding);
@@ -1472,15 +1505,8 @@ export class GameEngine {
         const w = uw * TS, h = uh * TS;
         const bLeft = x - w / 2, bRight = x + w / 2, bTop = y - h / 2, bBottom = y + h / 2;
 
-        this.state.units.villagers.forEach(v => {
-            if (v.x > bLeft && v.x < bRight && v.y > bTop && v.y < bBottom) {
-                // 在建築物內，尋找最近安全位置並傳送
-                const safePos = this.findSafePos(v.x, v.y);
-                v.x = safePos.x;
-                v.y = safePos.y;
-                v.pathTarget = null; // 重置路徑
-            }
-        });
+        // 已移除舊有的 findSafePos (防卡死系統) 邏輯
+
         // ------------------------------------------------------------
 
         // 指派最近的村民
@@ -1498,9 +1524,12 @@ export class GameEngine {
                 builder.pathTarget = null;
             }
         }
+
+        this.updatePathfindingGrid(); // 建造完成後刷新格網數據
         this.updateSpatialGrid();
         return true;
     }
+
 
     static placeBuildingLine(type, startX, startY, endX, endY) {
         const positions = this.getLinePositions(type, startX, startY, endX, endY);

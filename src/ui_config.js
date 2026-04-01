@@ -51,7 +51,8 @@ export const UI_CONFIG = {
         title: "🛡️ 末日設施建造",
         titleColor: "#fbc02d",             // 面板標題顏色（琥珀黃）
         textColor: "#e0e0e0",              // 建築名稱文字顏色
-        descColor: "rgba(224, 224, 224, 0.7)", // 描述文字顏色（半透明）
+        descColor: "#e0e0e0",              // 描述文字顏色
+        descAlpha: 0.7,                    // 描述文字透明度
         list: [
             { id: "village" },
             { id: "farmhouse" },
@@ -85,12 +86,14 @@ export const UI_CONFIG = {
         offsetX: 20,                          // 距右邊界的距離（像素）
         offsetY: 20,                          // 距底部邊界的距離（像素）
         width: 420, height: 200,
-        bgColor: "rgba(20, 10, 5, 0.9)",      // 深棕黑半透明背景
+        bgColor: "#140a05",                  // 深棕黑
+        bgAlpha: 0.9,                        // 背景透明度
         borderColor: "#8d6e63",               // 邊框顏色（棕色）
         fontSize: "14px",
         padding: "15px",
         maxLines: 100,                        // 保留的最大訊息行數
-        shadow: "0 10px 40px rgba(0,0,0,0.8)"
+        shadowColor: "#000000",
+        shadowAlpha: 0.8
     },
     // ── 中央警告提示 (HUD) ───────────────────────────────────────
     // 出現在畫面中央偏上的彈出式警告訊息，例如「人口已滿」、「資源不足」。
@@ -103,7 +106,8 @@ export const UI_CONFIG = {
         height: "auto",           // 高度依內容文字自動撐開
         fontSize: "18px",
         fontColor: "#fff176",     // 警告文字顏色（淺黃色）
-        bgColor: "rgba(45, 25, 15, 0.95)",  // 深黑棕半透明背景
+        bgColor: "#2d190f",       // 深黑棕
+        bgAlpha: 0.95,            // 背景透明度
         borderColor: "#fbc02d",   // 邊框顏色（琥珀黃，帶警示感）
         padding: "20px 50px",
         duration: 2000            // 顯示持續時間（毫秒）
@@ -121,7 +125,8 @@ export const UI_CONFIG = {
             offsetY: -45,              // 資源標籤往上偏移 45px
             buildingOffsetY: -15,      // 建築標籤統一在中心偏上 15px
             align: 'center',           // 強制文字內部居中
-            outlineColor: "rgba(0,0,0,0.8)",
+            outlineColor: "#000000",
+            outlineAlpha: 0.8,
             outlineWidth: 3
         },
         // 等級標籤 (黃) - 放在最頂部
@@ -132,7 +137,8 @@ export const UI_CONFIG = {
             offsetY: -65,              // 資源標籤往上偏移 65px
             buildingLevelOffsetY: -35, // 建築標籤往上偏移 35px
             align: 'center',
-            outlineColor: "rgba(0,0,0,0.8)",
+            outlineColor: "#000000",
+            outlineAlpha: 0.8,
             outlineWidth: 2
         },
         // 資源剩餘數量標籤 (藍) - 放在下方
@@ -142,7 +148,8 @@ export const UI_CONFIG = {
             offsetX: 0,                // 水平偏移
             offsetY: 35,               // 往下偏移 35px
             align: 'center',
-            outlineColor: "rgba(0,0,0,0.8)",
+            outlineColor: "#000000",
+            outlineAlpha: 0.8,
             outlineWidth: 3
         }
     },
@@ -153,9 +160,9 @@ export const UI_CONFIG = {
     ResourceRenderer: {
         // 樹木（Tree）：由樹幹 + 多層樹葉圓形組成
         Tree: {
-            trunkColor: 0x5d4037,                      // 樹幹：溫暖棕色
-            leafColors: [0x1b5e20, 0x2e7d32, 0x43a047], // 樹葉：深→淺綠漸層
-            outlineColor: 0x051b07,                     // 輪廓：深墨綠
+            trunkColor: "#5d4037",                      // 樹幹：溫暖棕色
+            leafColors: ["#1b5e20", "#2e7d32", "#43a047"], // 樹葉：深→淺綠漸層
+            outlineColor: "#051b07",                     // 輪廓：深墨綠
             outlineWidth: 2,
             visualVariation: {
                 minScale: 0.9,   // 最小隨機縮放倍率 (基礎 1.0)
@@ -165,8 +172,8 @@ export const UI_CONFIG = {
         },
         // 石頭（Rock）：隨機多邊形，使用灰黑色調
         Rock: {
-            colors: [0x424242, 0x212121, 0x616161],  // 深灰、暗黑、中灰
-            outlineColor: 0x000000,                  // 輪廓：純黑
+            colors: ["#424242", "#212121", "#616161"],  // 深灰、暗黑、中灰
+            outlineColor: "#000000",                  // 輪廓：純黑
             outlineWidth: 2,
             visualVariation: {
                 minScale: 0.9,   // 最小隨機縮放
@@ -176,9 +183,9 @@ export const UI_CONFIG = {
         },
         // 漿果灌木（BerryBush）：橘黃色葉簇 + 紅色莓果
         BerryBush: {
-            leafColor: 0xffa000,  // 葉簇：橘黃色
-            berryColor: 0xd50000,  // 莓果：鮮紅色
-            outlineColor: 0xbf360c,  // 輪廓：深橘紅
+            leafColor: "#ffa000",  // 葉簇：橘黃色
+            berryColor: "#d50000",  // 莓果：鮮紅色
+            outlineColor: "#bf360c",  // 輪廓：深橘紅
             outlineWidth: 2,
             visualVariation: {
                 minScale: 0.9,   // 灌木最小縮放
@@ -188,8 +195,8 @@ export const UI_CONFIG = {
         },
         // 金礦（GoldMine）：金燦燦的結晶簇
         GoldMine: {
-            colors: [0xffd700, 0xffa000, 0xffea00], // 金、橘金、鮮黃
-            outlineColor: 0x4e342e,                // 輪廓：深焦糖色
+            colors: ["#ffd700", "#ffa000", "#ffea00"], // 金、橘金、鮮黃
+            outlineColor: "#4e342e",                // 輪廓：深焦糖色
             outlineWidth: 2,
             visualVariation: {
                 minScale: 0.9,
@@ -197,17 +204,17 @@ export const UI_CONFIG = {
                 tintRange: 0.3
             }
         },
-        // 營火（Campfire）：底座木柴堆 + 上方火焰粒子
+        // 營火堆（Campfire）：底座木柴堆 + 上方火焰粒子
         Campfire: {
-            groundColor: 0x3e2723,    // 焦土色：深木色
-            woodColor: 0x795548,      // 木頭色：溫暖棕色
-            woodOutline: 0x3e2723,    // 木頭輪廓：深棕
+            groundColor: "#8f4c00d8",    // 焦土色：深木色
+            woodColor: "#795548",      // 木頭色：溫暖棕色
+            woodOutline: "#6d352bff",    // 木頭輪廓：深棕
             particle: {
                 lifespan: { min: 700, max: 1200 },     // 粒子生命週期（毫秒），決定火焰高度
                 speedY: { min: -70, max: -130 },      // 垂直上升速度（負值向上）
                 scale: { start: 0.9, end: 0.1 },      // 比例變化：從大到小
                 alpha: { start: 0.8, end: 0.05 },          // 透明度變化：從不透明到完全透明
-                tints: [0xffff00, 0xffa500, 0xff4500, 0xff0000], // 火焰顏色演變（黃 -> 橙 -> 紅 -> 深紅）
+                tints: ["#ffff00", "#ffa500", "#ff4500", "#ff0000"], // 火焰顏色演變（黃 -> 橙 -> 紅 -> 深紅）
                 blendMode: 'NORMAL',                     // 混合模式：ADD 可產生發光疊加感，NORMAL 正常遮蓋
                 frequency: 30,                        // 發射頻率（毫秒）：越小火勢越密
                 spreadX: 18,                          // 水平擴散範圍（左右偏移量）
@@ -224,7 +231,8 @@ export const UI_CONFIG = {
         height: 8,                       // 進度條高度 (像素)
         align: "bottom",                 // 對齊位置：top (頂部), center (中心), bottom (底部)
         offsetY: 0,                      // 垂直偏移量 (相對於對齊位置)
-        bgColor: "rgba(0, 0, 0, 0.7)",   // 背景槽顏色（半透明黑）
+        bgColor: "#000000",              // 背景槽
+        bgAlpha: 0.7,                    // 背景透明度
         fillColor: "#fbc02d",             // 填充顏色（琥珀黃）
         outlineColor: "#000000",          // 外框線條顏色
         // overrides：針對特定建築類型覆蓋 widthScale（其他屬性繼承預設值）
@@ -240,7 +248,8 @@ export const UI_CONFIG = {
     ProductionHUD: {
         width: 85,                       // 進度條寬度（像素）
         height: 12,                      // 進度條高度（像素）
-        barBg: "rgba(0,0,0,0.7)",        // 進度條背景槽顏色
+        barBg: "#000000",                // 槽底色
+        barAlpha: 0.7,                   // 透明度
         barFill: "#4caf50",              // 訓練中：綠色填充
         barBlocked: "#f44336",           // 人口已滿：紅色填充（警示）
         badgeBg: "#c62828"               // 排隊數量徽章的深紅背景
@@ -250,10 +259,11 @@ export const UI_CONFIG = {
     // 使用 CSS #rrggbb 格式，由 CharacterRenderer 讀取後轉為 Phaser tint。
     VillagerColors: {
         IDLE: "#42a5f5",  // 閒置：亮藍色
-        CONSTRUCTING: "#ffa726",  // 建造中：橘色
+        CONSTRUCTING: "#945a0491",  // 建造中：橘色
         WOOD: "#66bb6a",  // 採木：綠色
         STONE: "#78909c",  // 採石：灰色
         FOOD: "#ef5350",  // 採食：紅色
+        GOLD: "#ffca28",  // 採金：金黃色
         SWORDSMAN: "#b0bec5", // 劍士：銀灰色（甲冑）
         MAGE: "#9575cd",      // 法師：亮紫色（長袍）
         ARCHER: "#81c784",    // 弓箭手：森綠色（皮甲）
@@ -269,11 +279,8 @@ export const UI_CONFIG = {
         mainAlpha: 0.12,       // 主格線透明度（12%）
         subColor: "#000000",  // 細格線顏色（每格一條細線）
         subAlpha: 0.03,       // 細格線透明度（3%，幾乎不可見）
-        // 大地圖地板底色，支援以下格式：
         //   "#rrggbb"         → 標準 6 位 hex，例如 "#f5f5dc"（米白）
-        //   "#rrggbbaa"       → 帶透明度 8 位 hex，例如 "#f5f5dcff"（不透明米白）
-        //   "rgba(r,g,b,a)"   → CSS rgba，例如 "rgba(245,245,220,1)"
-        floorColor: "#ffffffff"  // 米白/亞麻色（原始預設值）
+        floorColor: "#ffffff"  // 米白/亞麻色
     },
     // ── 設置選單 (SettingsPanel) ──────────────────────────────────
     // 左上角的齒輪按鈕以及對應的系統設置面板。
@@ -282,7 +289,8 @@ export const UI_CONFIG = {
         offsetX: 20, offsetY: 20,          // 位於左上角最邊緣
         width: 50, height: 50,
         fontSize: "28px",
-        bgColor: "rgba(30, 30, 30, 0.8)",
+        bgColor: "#1e1e1e",
+        bgAlpha: 0.8,
         borderColor: "#fbc02d",
         icon: "⚙️"
     },
@@ -319,12 +327,18 @@ export const UI_CONFIG = {
     TownCenterPointer: {
         width: 76, height: 76,            // 稍微變大一點更顯眼
         fontSize: "38px",
-        bgColor: "rgba(251, 192, 45, 0.95)", // 琥珀金，調高不透明度
+        bgColor: "#fbc02d",               // 琥珀金
+        bgAlpha: 0.95,                    // 背景透明度
         borderColor: "#ffffff",
         icon: "🏰",
         arrowIcon: "▶",                   // 使用實心三角箭頭
         margin: 80,                       // 增加邊距，讓它遠離螢幕邊緣
         panSpeed: 800                     // 稍微加快移動速度
+    },
+    // ── 尋路系統設定 (Pathfinding) ─────────────────────────────────
+    Pathfinding: {
+        debugColor: "#00ff00",         // 路徑調試用的顏色 (HEX)
+        iterationsPerFrame: 1000       // 每幀允許的尋路計算量 (效能優化)
     }
-
 };
+
