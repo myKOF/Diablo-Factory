@@ -53,16 +53,16 @@ export const UI_CONFIG = {
         textColor: "#e0e0e0",              // 建築名稱文字顏色
         descColor: "rgba(224, 224, 224, 0.7)", // 描述文字顏色（半透明）
         list: [
-            { id: "village", name: "城鎮中心", desc: "主要的資源中心與村民訓練處。" },
-            { id: "farmhouse", name: "民居", desc: "提供基礎人口上限，讓更多人加入工廠。" },
-            { id: "timber_factory", name: "木材廠", desc: "可放置木材的建築。" },
-            { id: "stone_factory", name: "石材廠", desc: "可放置石頭的建築。" },
-            { id: "barn", name: "穀倉", desc: "可放置食物的建築。" },
-            { id: "farmland", name: "農田", desc: "可自動生產食物的建築。" },
-            { id: "tree_plantation", name: "樹木田", desc: "可自動生產木材的建築。" },
-            { id: "mage_place", name: "魔法學院", desc: "法師的訓練所。" },
-            { id: "swordsman_place", name: "劍士訓練所", desc: "劍士的訓練所。" },
-            { id: "archer_place", name: "射箭場", desc: "弓箭手的訓練所。" }
+            { id: "village" },
+            { id: "farmhouse" },
+            { id: "timber_factory" },
+            { id: "stone_factory" },
+            { id: "barn" },
+            { id: "farmland" },
+            { id: "tree_plantation" },
+            { id: "mage_place" },
+            { id: "swordsman_place" },
+            { id: "archer_place" }
         ]
     },
     // ── 建築互動指令選單（ActionMenu）───────────────────────────
@@ -112,29 +112,95 @@ export const UI_CONFIG = {
     // 座標均為相對於實體中心的世界座標偏移（offsetY 負值代表往上移動）。
     // outlineColor / outlineWidth：文字的描邊效果，增加可讀性。
     MapResourceLabels: {
-        // 建築或資源的名稱標籤（顯示在頭頂上方）
+        // 建築或資源的名稱標籤 (白)
         name: {
-            fontSize: "bold 14px Arial",
-            color: "#ffffff",          // 白色名稱
-            offsetY: -30,              // 往上偏移 30px
+            fontSize: "bold 13px Arial",
+            color: "#ffffff",
+            offsetX: 0,                // 水平偏移 (正值右移, 負值左移)
+            offsetY: -45,              // 資源標籤往上偏移 45px
+            buildingOffsetY: -15,      // 建築標籤統一在中心偏上 15px
+            align: 'center',           // 強制文字內部居中
             outlineColor: "rgba(0,0,0,0.8)",
             outlineWidth: 3
         },
-        // 等級標籤（顯示在建築下方）
+        // 等級標籤 (黃) - 放在最頂部
         level: {
-            fontSize: "bold 11px Arial",
-            color: "#fff176",          // 淺黃色等級數字
-            offsetY: 30,               // 往下偏移 30px
+            fontSize: "bold 12px Arial",
+            color: "#fff176",
+            offsetX: 0,                // 水平偏移
+            offsetY: -65,              // 資源標籤往上偏移 65px
+            buildingLevelOffsetY: -35, // 建築標籤往上偏移 35px
+            align: 'center',
             outlineColor: "rgba(0,0,0,0.8)",
             outlineWidth: 2
         },
-        // 資源剩餘數量標籤（顯示在實體中央）
+        // 資源剩餘數量標籤 (藍) - 放在下方
         amount: {
             fontSize: "bold 13px Arial",
-            color: "#81d4fa",          // 天藍色數量文字
-            offsetY: 0,
+            color: "#81d4fa",
+            offsetX: 0,                // 水平偏移
+            offsetY: 35,               // 往下偏移 35px
+            align: 'center',
             outlineColor: "rgba(0,0,0,0.8)",
             outlineWidth: 3
+        }
+    },
+    // ── 自然資源渲染配置（ResourceRenderer）────────────────────
+    // 每種自然資源（樹木、石頭、漿果灌木）的程序化繪製參數。
+    // 這些顏色由 ResourceRenderer.js 讀取，直接傳入 Phaser Graphics API，
+    // 因此使用 Phaser 原生的 0xRRGGBB 十六進位數字格式（非 CSS 字串）。
+    ResourceRenderer: {
+        // 樹木（Tree）：由樹幹 + 多層樹葉圓形組成
+        Tree: {
+            trunkColor: 0x5d4037,                      // 樹幹：溫暖棕色
+            leafColors: [0x1b5e20, 0x2e7d32, 0x43a047], // 樹葉：深→淺綠漸層
+            outlineColor: 0x051b07,                     // 輪廓：深墨綠
+            outlineWidth: 2,
+            visualVariation: {
+                minScale: 0.9,   // 最小隨機縮放倍率 (基礎 1.0)
+                maxScale: 1.2,   // 最大隨機縮放倍率
+                tintRange: 0.5   // 變色範圍 (0.2 表示色調亮度隨機在 80%~100% 之間浮動，數值越大隨機性越高)
+            }
+        },
+        // 石頭（Rock）：隨機多邊形，使用灰黑色調
+        Rock: {
+            colors: [0x424242, 0x212121, 0x616161],  // 深灰、暗黑、中灰
+            outlineColor: 0x000000,                  // 輪廓：純黑
+            outlineWidth: 2,
+            visualVariation: {
+                minScale: 0.9,   // 最小隨機縮放
+                maxScale: 1.2,   // 最大隨機縮放
+                tintRange: 0.5  // 變色細數：用於營造岩石深淺不一的質感
+            }
+        },
+        // 漿果灌木（BerryBush）：橘黃色葉簇 + 紅色莓果
+        BerryBush: {
+            leafColor: 0xffa000,  // 葉簇：橘黃色
+            berryColor: 0xd50000,  // 莓果：鮮紅色
+            outlineColor: 0xbf360c,  // 輪廓：深橘紅
+            outlineWidth: 2,
+            visualVariation: {
+                minScale: 0.9,   // 灌木最小縮放
+                maxScale: 1.2,   // 灌木最大縮放
+                tintRange: 0.5   // 變色系數：使灌木叢色澤維持一致但有細微不同
+            }
+        },
+        // 營火（Campfire）：底座木柴堆 + 上方火焰粒子
+        Campfire: {
+            groundColor: 0x3e2723,    // 焦土色：深木色
+            woodColor: 0x795548,      // 木頭色：溫暖棕色
+            woodOutline: 0x3e2723,    // 木頭輪廓：深棕
+            particle: {
+                lifespan: { min: 700, max: 1200 },     // 粒子生命週期（毫秒），決定火焰高度
+                speedY: { min: -70, max: -130 },      // 垂直上升速度（負值向上）
+                scale: { start: 0.9, end: 0.1 },      // 比例變化：從大到小
+                alpha: { start: 0.8, end: 0.05 },          // 透明度變化：從不透明到完全透明
+                tints: [0xffff00, 0xffa500, 0xff4500, 0xff0000], // 火焰顏色演變（黃 -> 橙 -> 紅 -> 深紅）
+                blendMode: 'NORMAL',                     // 混合模式：ADD 可產生發光疊加感，NORMAL 正常遮蓋
+                frequency: 30,                        // 發射頻率（毫秒）：越小火勢越密
+                spreadX: 18,                          // 水平擴散範圍（左右偏移量）
+                offsetY: 10                           // 垂直初始偏移（調整火焰與木頭的中心點距離）
+            }
         }
     },
     // ── 建築施工進度條（BuildingProgressBar）───────────────────
@@ -245,63 +311,6 @@ export const UI_CONFIG = {
         arrowIcon: "▶",                   // 使用實心三角箭頭
         margin: 80,                       // 增加邊距，讓它遠離螢幕邊緣
         panSpeed: 800                     // 稍微加快移動速度
-    },
-    // ── 自然資源渲染配置（ResourceRenderer）────────────────────
-    // 每種自然資源（樹木、石頭、漿果灌木）的程序化繪製參數。
-    // 這些顏色由 ResourceRenderer.js 讀取，直接傳入 Phaser Graphics API，
-    // 因此使用 Phaser 原生的 0xRRGGBB 十六進位數字格式（非 CSS 字串）。
-    ResourceRenderer: {
-        // 樹木（Tree）：由樹幹 + 多層樹葉圓形組成
-        Tree: {
-            trunkColor: 0x5d4037,                      // 樹幹：溫暖棕色
-            leafColors: [0x1b5e20, 0x2e7d32, 0x43a047], // 樹葉：深→淺綠漸層
-            outlineColor: 0x051b07,                     // 輪廓：深墨綠
-            outlineWidth: 2,
-            visualVariation: {
-                minScale: 0.8,   // 最小隨機縮放倍率 (基礎 1.0)
-                maxScale: 1.4,   // 最大隨機縮放倍率
-                tintRange: 0.5   // 變色範圍 (0.2 表示色調亮度隨機在 80%~100% 之間浮動，數值越大隨機性越高)
-            }
-        },
-        // 石頭（Rock）：隨機多邊形，使用灰黑色調
-        Rock: {
-            colors: [0x424242, 0x212121, 0x616161],  // 深灰、暗黑、中灰
-            outlineColor: 0x000000,                  // 輪廓：純黑
-            outlineWidth: 2,
-            visualVariation: {
-                minScale: 0.7,   // 最小隨機縮放
-                maxScale: 1.3,   // 最大隨機縮放
-                tintRange: 0.3  // 變色細數：用於營造岩石深淺不一的質感
-            }
-        },
-        // 漿果灌木（BerryBush）：橘黃色葉簇 + 紅色莓果
-        BerryBush: {
-            leafColor: 0xffa000,  // 葉簇：橘黃色
-            berryColor: 0xd50000,  // 莓果：鮮紅色
-            outlineColor: 0xbf360c,  // 輪廓：深橘紅
-            outlineWidth: 2,
-            visualVariation: {
-                minScale: 0.8,   // 灌木最小縮放
-                maxScale: 1.2,   // 灌木最大縮放
-                tintRange: 0.3   // 變色系數：使灌木叢色澤維持一致但有細微不同
-            }
-        },
-        // 營火（Campfire）：底座木柴堆 + 上方火焰粒子
-        Campfire: {
-            groundColor: 0x3e2723,    // 焦土色：深木色
-            woodColor: 0x795548,      // 木頭色：溫暖棕色
-            woodOutline: 0x3e2723,    // 木頭輪廓：深棕
-            particle: {
-                lifespan: { min: 700, max: 1200 },     // 粒子生命週期（毫秒），決定火焰高度
-                speedY: { min: -70, max: -130 },      // 垂直上升速度（負值向上）
-                scale: { start: 0.9, end: 0.1 },      // 比例變化：從大到小
-                alpha: { start: 0.8, end: 0.05 },          // 透明度變化：從不透明到完全透明
-                tints: [0xffff00, 0xffa500, 0xff4500, 0xff0000], // 火焰顏色演變（黃 -> 橙 -> 紅 -> 深紅）
-                blendMode: 'NORMAL',                     // 混合模式：ADD 可產生發光疊加感，NORMAL 正常遮蓋
-                frequency: 30,                        // 發射頻率（毫秒）：越小火勢越密
-                spreadX: 18,                          // 水平擴散範圍（左右偏移量）
-                offsetY: 10                           // 垂直初始偏移（調整火焰與木頭的中心點距離）
-            }
-        }
     }
+
 };

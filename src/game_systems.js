@@ -35,7 +35,8 @@ export class GameEngine {
         settings: {
             showResourceInfo: true // 預設顯示大地圖資源資訊（名稱、等級、數量）
         },
-        idToNameMap: {} // NPC ID -> NPC Name (用於從 buildings.csv 定義的 ID 找配置)
+        idToNameMap: {}, // NPC ID -> NPC Name (用於從 buildings.csv 定義的 ID 找配置)
+        renderVersion: 0 // 用於通知渲染器強行刷新
     };
 
     static RESOURCE_NAMES = {
@@ -368,12 +369,18 @@ export class GameEngine {
                 let parsedModelSize = { x: 1.0, y: 1.0 };
                 if (idxModelSize !== -1 && row[idxModelSize]) {
                     const val = row[idxModelSize].trim();
-                    const match = val.match(/\{([0-9.]+)\*([0-9.]+)\}/);
+                    const match = val.match(/\{[ ]*([0-9.]+)[ ]*[\*x][ ]*([0-9.]+)[ ]*\}/);
                     if (match) {
                         parsedModelSize = { x: parseFloat(match[1]), y: parseFloat(match[2]) };
                     } else {
-                        const num = parseFloat(val);
-                        if (!isNaN(num)) parsedModelSize = { x: num, y: num };
+                        const m2 = val.match(/\{[ ]*([0-9.]+)[ ]*\}/);
+                        if (m2) {
+                            const num = parseFloat(m2[1]);
+                            if (!isNaN(num)) parsedModelSize = { x: num, y: num };
+                        } else {
+                             const num = parseFloat(val);
+                             if (!isNaN(num)) parsedModelSize = { x: num, y: num };
+                        }
                     }
                 }
                 
@@ -410,11 +417,17 @@ export class GameEngine {
                 idxSize = headers.indexOf('size'),
                 idxPop = headers.indexOf('population'),
                 idxNeed = headers.indexOf('need_resource'),
-                idxName = headers.indexOf('name'),
+                idxName = headers.find(h => h === 'name' || h === '名稱'),
+                idxDesc = headers.find(h => h === 'desc' || h === '描述'), // 建築描述
                 idxMax = headers.indexOf('max_count'),
                 idxTime = headers.indexOf('building_times'),
                 idxProd = headers.indexOf('npc_production'), // ID 列表，如 "{1,2}"
                 idxProdType = headers.lastIndexOf('npc_production'); // 生產模式，如 "rand"
+
+            // 轉換為 index
+            const hIdx = (h) => headers.indexOf(h);
+            const nameIdx = headers.indexOf(idxName);
+            const descIdx = headers.indexOf(idxDesc);
 
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -428,7 +441,8 @@ export class GameEngine {
                 }
 
                 this.state.buildingConfigs[row[idxModel].trim()] = {
-                    name: row[idxName] ? row[idxName].trim() : row[idxModel].trim(),
+                    name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : row[idxModel].trim(),
+                    desc: (descIdx !== -1 && row[descIdx]) ? row[descIdx].trim() : "", 
                     model: row[idxModel].trim(),
                     collision: row[idxCol] === '1',
                     size: row[idxSize] || "{1,1}",
@@ -584,9 +598,10 @@ export class GameEngine {
         // 1. 放置核心建築
         const villagePos = { x: 960, y: 560 };
         const villageFP = getFootprint('village');
+        const villageCfg = this.state.buildingConfigs['village'] || {};
         this.state.mapEntities.push({ 
             id: 'core_village', 
-            type: 'village', x: villagePos.x, y: villagePos.y, name: "村莊中心", queue: [], productionTimer: 0 
+            type: 'village', x: villagePos.x, y: villagePos.y, name: villageCfg.name || "城鎮中心", queue: [], productionTimer: 0 
         });
         const vgx = Math.round((villagePos.x - (villageFP.uw * TS) / 2) / TS);
         const vgy = Math.round((villagePos.y - (villageFP.uh * TS) / 2) / TS);
@@ -828,6 +843,7 @@ export class GameEngine {
                 v.constructionTarget.buildProgress += dt;
                 if (v.constructionTarget.buildProgress >= v.constructionTarget.buildTime) {
                     v.constructionTarget.isUnderConstruction = false;
+                    this.state.renderVersion++; // 通知渲染器刷新
                     const type = v.constructionTarget.type;
                     v.constructionTarget.name = this.state.buildingConfigs[type].name;
 
@@ -1436,13 +1452,14 @@ export class GameEngine {
         res.food -= costs.food; res.wood -= costs.wood; res.stone -= costs.stone; res.gold -= costs.gold;
 
         const newBuilding = {
+            id: `build_${type}_${x}_${y}_${Date.now()}`,
             type: type, x: x, y: y, name: "施工中",
             isUnderConstruction: true, buildProgress: 0, buildTime: cfg.buildTime,
-            targetWorkerCount: ['timber_factory', 'stone_factory', 'barn'].includes(type) ? 1 : 0, // 倉庫新建後預設人數為 1
-            // 若此建築有生產 NPC 表，則初始化獨立隊列
+            targetWorkerCount: ['timber_factory', 'stone_factory', 'barn', 'quarry'].includes(type) ? 1 : 0, 
             ...(cfg.npcProduction && cfg.npcProduction.length > 0 ? { queue: [], productionTimer: 0 } : {})
         };
         this.state.mapEntities.push(newBuilding);
+        this.state.renderVersion++; // 通知渲染器刷新
 
         // --- NPC 位移修復：如果有村民被壓在剛生成的建築下，將其推開 ---
         const TS = this.TILE_SIZE;
@@ -1599,6 +1616,8 @@ export class GameEngine {
             const eid = e.id || `${e.type}_${e.x}_${e.y}`;
             return eid !== id;
         });
+
+        this.state.renderVersion++; // 通知渲染器刷新
 
         // 4. 通知日誌
         this.addLog(`銷毀了 ${cfg.name}。返還：${refundLog.join(', ') || '無'}`);

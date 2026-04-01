@@ -14,6 +14,7 @@ export class MainScene extends Phaser.Scene {
         this.resourceLabels = new Map();
         this.emitters = new Map(); // ID -> ParticleEmitter
         this.gridGraphics = null;
+        this.lastRenderVersion = 0;
     }
 
     preload() {
@@ -47,6 +48,15 @@ export class MainScene extends Phaser.Scene {
         this.entityGroup = this.add.group();
         this.unitGroup = this.add.group();
 
+        // 效能協議：為資源實作物業層級的 Blitter (離屏快取渲染方案)
+        // Blitter 對於數千個相同材質的靜態物件有無與倫比的效能
+        this.resourceBlitters = {
+            'tree': this.add.blitter(0, 0, 'tex_tree').setDepth(8),
+            'stone': this.add.blitter(0, 0, 'tex_stone').setDepth(8),
+            'food': this.add.blitter(0, 0, 'tex_food').setDepth(8)
+        };
+        this.resourceBobs = new Map(); // ID -> Bob
+
         // 預覽配置 (用於建築放置)
         this.placementPreview = this.add.graphics();
         this.placementPreview.setDepth(100);
@@ -56,6 +66,11 @@ export class MainScene extends Phaser.Scene {
         this.hudGraphics.setDepth(60);
 
         // 相機控制
+        this.lastCamX = -9999;
+        this.lastCamY = -9999;
+        this.isDragging = false;
+        this.lastVisibleEntities = [];
+        this.pendingVisibleEntities = true; // 強制首幀加載
         this.setupCamera();
 
         // 設置全局引用
@@ -76,11 +91,15 @@ export class MainScene extends Phaser.Scene {
             graphics.generateTexture(key, width, height);
         };
 
-        // 為了解決 drawEntity 使用中心座標的問題，我們封裝一個中轉函數
+        // 為了解決 drawEntity 使用相對座標 (0,0) 的問題，我們在繪製材質時先進行位移
         const wrapDraw = (type) => (g, w, h) => {
-            // 模擬一個虛擬實體傳給 drawEntity
-            const mockEnt = { type, x: w / 2, y: h / 2, isUnderConstruction: false };
-            this.drawEntity(g, mockEnt, 1.0);
+            // 將畫筆移到材質中心
+            g.save();
+            g.translateCanvas && g.translateCanvas(w / 2, h / 2); // 部分 Phaser 版本支援
+            // 如果不支援 translateCanvas，可以手動在 drawEntity 傳入偏移，但這裡我們統一用 mockEnt 傳達意圖 (雖然現在 drawEntity 忽略它)
+            // 修正：手動偏移才是最穩定的
+            this.drawEntity(g, { type, isUnderConstruction: false }, 1.0);
+            g.restore();
         };
 
         // 生成所有建築材質
@@ -94,8 +113,12 @@ export class MainScene extends Phaser.Scene {
             const cfg = GameEngine.state.buildingConfigs[type];
             let uw = 1, uh = 1;
             if (cfg && cfg.size) {
-                const match = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
-                if (match) { uw = parseInt(match[1]); uh = parseInt(match[2]); }
+                const cleanSize = cfg.size.toString().replace(/['"]/g, '');
+                const match = cleanSize.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
+                if (match) {
+                    uw = parseFloat(match[1]);
+                    uh = parseFloat(match[2]);
+                }
             }
             createTex(`tex_${type}`, uw * TS + 20, uh * TS + 40, wrapDraw(type));
         });
@@ -104,7 +127,6 @@ export class MainScene extends Phaser.Scene {
         ResourceRenderer.generateAllTextures(this);
 
         // 村民材質 (可以根據狀態生成幾種，或使用 tint)
-        // 這裡我們先生成基礎外觀
         createTex('tex_villager', 40, 60, (g, w, h) => {
             CharacterRenderer.render(g, w / 2, h / 2 + 10, { state: 'IDLE' }, 0);
         });
@@ -118,27 +140,33 @@ export class MainScene extends Phaser.Scene {
         graphics.destroy();
     }
 
+
     setupCamera() {
         const cam = this.cameras.main;
-
         cam.scrollX = 0;
         cam.scrollY = 0;
 
-        let isDragging = false;
         let lastPointer = { x: 0, y: 0 };
 
         const onDown = (e) => {
             if (e.target.tagName === 'CANVAS') {
-                if (window.UIManager && window.UIManager.dragGhost) return;
-                if (GameEngine.state.placingType) return;
+                const isPlacement = !!GameEngine.state.placingType;
+                const isMiddleDrag = (e.button === 1);
 
-                isDragging = true;
+                // 排除 UI 拖曳干擾
+                if (window.UIManager && window.UIManager.dragGhost) return;
+
+                // 如果在建造模式下，左鍵是用來建造的，不拿來拖地圖；
+                // 但中鍵 (Middle Click) 永遠可以用來拖地圖。
+                if (isPlacement && !isMiddleDrag) return;
+
+                this.isDragging = true;
                 lastPointer = { x: e.clientX, y: e.clientY };
             }
         };
 
         const onMove = (e) => {
-            if (isDragging) {
+            if (this.isDragging) {
                 const dx = e.clientX - lastPointer.x;
                 const dy = e.clientY - lastPointer.y;
                 cam.scrollX -= dx;
@@ -148,7 +176,7 @@ export class MainScene extends Phaser.Scene {
         };
 
         const onUp = () => {
-            isDragging = false;
+            this.isDragging = false;
         };
 
         window.addEventListener('mousedown', onDown);
@@ -206,19 +234,25 @@ export class MainScene extends Phaser.Scene {
         const state = window.GAME_STATE;
         if (!state) return;
 
-        // 計算可見區域
         const cam = this.cameras.main;
-        const visibleEntities = GameEngine.getVisibleEntities(cam.scrollX, cam.scrollY, cam.width, cam.height, 200);
 
-        this.updateEntities(visibleEntities, state.mapEntities);
-        this.updateUnits(state.units.villagers);
+        // 1. 抓取狀態並更新基礎 UI (此部分負擔極輕，需保證即時性)
+        const camMoved = this.lastCamX !== cam.scrollX || this.lastCamY !== cam.scrollY;
+        this.lastCamX = cam.scrollX;
+        this.lastCamY = cam.scrollY;
+
+        const entitiesCountChanged = (this.lastEntitiesCount !== state.mapEntities.length);
+        this.lastEntitiesCount = state.mapEntities.length;
+
+        const renderVersionChanged = (this.lastRenderVersion !== state.renderVersion);
+        this.lastRenderVersion = state.renderVersion;
+
+        // 即時更新建造預覽 - 必須在跳過邏輯之前，否則無法即時追隨滑鼠
         this.updatePlacementPreview(state);
-        this.updateDynamicHUD(visibleEntities);
 
         if (window.UIManager) {
             window.UIManager.updateStickyPositions();
 
-            // 即時更新座標顯示 (畫面中央世界座標)
             const coordsEl = document.getElementById("coords_display");
             if (coordsEl) {
                 const centerX = Math.round(cam.scrollX + cam.width / 2);
@@ -226,15 +260,29 @@ export class MainScene extends Phaser.Scene {
                 coordsEl.innerText = `X: ${centerX}, Y: ${centerY}`;
             }
 
-            // 更新 FPS 顯示
             const fpsEl = document.getElementById("fps_display");
             if (fpsEl) {
                 fpsEl.innerText = `FPS: ${Math.round(this.game.loop.actualFps)}`;
             }
 
-            // 更新村莊定位按鈕
             this.updateTownCenterLocator(cam);
         }
+
+        // 2. 判斷是否可以跳過重度的實體渲染計算
+        // 如果相機沒動、加載完畢、實體數量沒變，且且渲染版本未更新，跳過繁重計算
+        if (!camMoved && !this.pendingVisibleEntities && !entitiesCountChanged && !renderVersionChanged && !state.placingType) {
+            this.updateUnits(state.units.villagers);
+            this.updateDynamicHUD(this.lastVisibleEntities);
+            return;
+        }
+
+        // 3. 執行重度渲染與裁剪
+        const visibleEntities = GameEngine.getVisibleEntities(cam.scrollX, cam.scrollY, cam.width, cam.height, 200);
+        this.lastVisibleEntities = visibleEntities;
+
+        this.updateEntities(visibleEntities, state.mapEntities);
+        this.updateUnits(state.units.villagers);
+        this.updateDynamicHUD(visibleEntities);
     }
 
     updateTownCenterLocator(cam) {
@@ -259,7 +307,7 @@ export class MainScene extends Phaser.Scene {
 
         // 檢查中心點是否在畫面內 (略微寬鬆一點)
         const isVisible = (tc.x + halfW >= cam.scrollX && tc.x - halfW <= cam.scrollX + cam.width &&
-                           tc.y + halfH >= cam.scrollY && tc.y - halfH <= cam.scrollY + cam.height);
+            tc.y + halfH >= cam.scrollY && tc.y - halfH <= cam.scrollY + cam.height);
 
         if (isVisible) {
             el.style.display = "none";
@@ -272,7 +320,7 @@ export class MainScene extends Phaser.Scene {
             let dx = tc.x - (cam.scrollX + cam.width / 2);
             let dy = tc.y - (cam.scrollY + cam.height / 2);
             const angle = Math.atan2(dy, dx);
-            
+
             // 更新箭頭旋轉
             const arrow = document.getElementById("tc_arrow");
             if (arrow) {
@@ -283,17 +331,17 @@ export class MainScene extends Phaser.Scene {
             // 計算指針在螢幕上的位置 (把向量投影到螢幕邊界的矩形上)
             const w = cam.width - margin * 2;
             const h = cam.height - margin * 2;
-            
+
             const absCos = Math.abs(Math.cos(angle));
             const absSin = Math.abs(Math.sin(angle));
-            
+
             let dist;
             if (w * absSin <= h * absCos) {
                 dist = (w / 2) / absCos;
             } else {
                 dist = (h / 2) / absSin;
             }
-            
+
             const px = cam.width / 2 + Math.cos(angle) * dist;
             const py = cam.height / 2 + Math.sin(angle) * dist;
 
@@ -318,7 +366,11 @@ export class MainScene extends Phaser.Scene {
 
             if (ent.isUnderConstruction) {
                 this.drawBuildProgressBar(g, ent, uw, uh, TS);
-            } else if (ent.queue && ent.queue.length > 0) {
+                // 施工中時，確保生產隊列標籤隱藏
+                const id = ent.id || `${ent.type}_${ent.x}_${ent.y}`;
+                if (this.queueTexts.has(id)) this.queueTexts.get(id).setVisible(false);
+            } else if (ent.queue) {
+                // 不論 queue.length 是否大於 0 都呼叫，讓 drawProductionHUD 內部處理隱藏邏輯
                 this.drawProductionHUD(g, ent, uw, uh, TS);
             }
         });
@@ -326,55 +378,98 @@ export class MainScene extends Phaser.Scene {
 
     updateEntities(visibleEntities, allEntities) {
         if (!visibleEntities) return;
-        
+
         const visibleIds = new Set();
-        visibleEntities.forEach(ent => {
-            const id = ent.id; // 生成時已預分配
+        const MAX_NEW_PER_FRAME = 20;
+        let newlyCreatedCount = 0;
+
+        // 1. 處理可見實體
+        for (let i = 0; i < visibleEntities.length; i++) {
+            const ent = visibleEntities[i];
+            const id = ent.id;
             visibleIds.add(id);
 
             let displayObj = this.entities.get(id);
+
             if (!displayObj) {
+                // 非同步加載限制
+                if (newlyCreatedCount >= MAX_NEW_PER_FRAME) {
+                    this.pendingVisibleEntities = true;
+                    continue;
+                }
+
                 const textureKey = this.getTextureKey(ent.type);
+                const isResource = !GameEngine.state.buildingConfigs[ent.type];
+
                 if (textureKey && this.textures.exists(textureKey)) {
+                    // 統一使用 Image，確保支援 setScale 與正確中心點邏輯
                     displayObj = this.add.image(ent.x, ent.y, textureKey);
-                } else {
+                    displayObj.setPipeline && displayObj.setPipeline('TextureTintPipeline');
+                    this.entities.set(id, displayObj);
+                    this.entityGroup.add(displayObj);
+                    displayObj.setDepth(isResource ? 8 : 10);
+                } else if (!textureKey && !['campfire'].includes(ent.type)) {
                     displayObj = this.add.graphics();
                     this.drawEntity(displayObj, ent, 1.0);
+                    this.entities.set(id, displayObj);
+                    this.entityGroup.add(displayObj);
+                    displayObj.setDepth(10);
                 }
-                this.entities.set(id, displayObj);
-                this.entityGroup.add(displayObj);
-                displayObj.setDepth(10);
+                newlyCreatedCount++;
             }
 
-            displayObj.setVisible(true);
-            if (displayObj.x !== ent.x || displayObj.y !== ent.y) {
-                displayObj.setPosition(ent.x, ent.y);
-            }
-            displayObj.setAlpha(ent.isUnderConstruction ? 0.6 : 1.0);
+            // 更新 GameObject (不論是資源還是建築)
+            if (displayObj) {
+                if (!displayObj.visible) displayObj.setVisible(true);
 
-            if (displayObj instanceof Phaser.GameObjects.Image) {
-                const cfg = GameEngine.getEntityConfig(ent.type);
-                if (cfg && cfg.model_size) {
-                    const sx = cfg.model_size.x * (ent.vScaleX || 1);
-                    const sy = cfg.model_size.y * (ent.vScaleY || 1);
-                    displayObj.setScale(sx, sy);
+                // 設置位置 (同步 ent.x/y)
+                if (displayObj.x !== ent.x || displayObj.y !== ent.y) {
+                    displayObj.setPosition(ent.x, ent.y);
                 }
-                if (ent.vTint !== undefined && ent.vTint !== 0xffffff) {
-                    displayObj.setTint(ent.vTint);
+
+                // 處理透明度與縮放 (如果是 Image)
+                if (displayObj instanceof Phaser.GameObjects.Image) {
+                    const targetAlpha = ent.isUnderConstruction ? 0.6 : 1.0;
+                    if (displayObj.alpha !== targetAlpha) displayObj.setAlpha(targetAlpha);
+
+                    const cfg = GameEngine.getEntityConfig(ent.type);
+                    if (cfg && cfg.model_size) {
+                        let sx = 0.6, sy = 0.6;
+                        if (typeof cfg.model_size === 'string') {
+                            const m = cfg.model_size.match(/\{[ ]*([\d.]+)[ ]*[\*x][ ]*([\d.]+)[ ]*\}/);
+                            if (m) { sx = parseFloat(m[1]); sy = parseFloat(m[2]); }
+                        } else if (cfg.model_size.x) { sx = cfg.model_size.x; sy = cfg.model_size.y; }
+
+                        const finalSx = sx * (ent.vScaleX || 1);
+                        const finalSy = sy * (ent.vScaleY || 1);
+                        if (displayObj.scaleX !== finalSx || displayObj.scaleY !== finalSy) {
+                            displayObj.setScale(finalSx, finalSy);
+                        }
+                    }
+                    if (ent.vTint !== undefined && displayObj.tintTopLeft !== ent.vTint) displayObj.setTint(ent.vTint);
+                } else if (displayObj instanceof Phaser.GameObjects.Graphics) {
+                    if (displayObj._wasConstruction !== ent.isUnderConstruction) {
+                        displayObj.clear();
+                        this.drawEntity(displayObj, ent, 1.0);
+                        displayObj._wasConstruction = ent.isUnderConstruction;
+                    }
                 }
             }
 
             this.updateEntityLabel(id, ent);
-
-            // 粒子處理
             if (ent.type === 'campfire' && !ent.isUnderConstruction) {
                 this.handleCampfireParticles(id, ent, true);
             }
-        });
+        }
 
-        // 定期清理與隱藏 (效能關鍵)
+        if (newlyCreatedCount < MAX_NEW_PER_FRAME) {
+            this.pendingVisibleEntities = false;
+        }
+
+        // 2. 定期清理與隱藏 (效能關鍵)
         this.frameCounter = (this.frameCounter || 0) + 1;
-        
+        const isCleanupFrame = (this.frameCounter % 180 === 0);
+
         // 隱藏在本次渲染中不可見的實體
         for (const [id, displayObj] of this.entities.entries()) {
             if (!visibleIds.has(id)) {
@@ -383,14 +478,10 @@ export class MainScene extends Phaser.Scene {
                     this.hideEntityLabel(id);
                     if (this.emitters.has(id)) this.emitters.get(id).setVisible(false);
                 }
-                // 每隔 2 秒移除地圖上已不存在的實體組件
-                if (this.frameCounter % 120 === 0) {
-                    const exists = allEntities.some(e => e.id === id);
-                    if (!exists) {
-                        displayObj.destroy();
-                        this.entities.delete(id);
-                        this.cleanupEntityLabels(id);
-                    }
+                if (isCleanupFrame && !allEntities.some(e => e.id === id)) {
+                    displayObj.destroy();
+                    this.entities.delete(id);
+                    this.cleanupEntityLabels(id);
                 }
             }
         }
@@ -414,91 +505,131 @@ export class MainScene extends Phaser.Scene {
             emitter.setDepth(15);
             this.emitters.set(id, emitter);
         }
-        emitter.setPosition(ent.x, ent.y);
-        emitter.setVisible(isVisible);
+        if (emitter.x !== ent.x || emitter.y !== ent.y) emitter.setPosition(ent.x, ent.y);
+        if (emitter.visible !== isVisible) emitter.setVisible(isVisible);
     }
 
     cleanupEntityLabels(id) {
-        if (this.queueTexts.has(id)) { this.queueTexts.get(id).destroy(); this.queueTexts.delete(id); }
-        if (this.nameLabels.has(id)) { this.nameLabels.get(id).destroy(); this.nameLabels.delete(id); }
-        if (this.levelLabels.has(id)) { this.levelLabels.get(id).destroy(); this.levelLabels.delete(id); }
-        if (this.resourceLabels.has(id)) { this.resourceLabels.get(id).destroy(); this.resourceLabels.delete(id); }
-        if (this.emitters.has(id)) { this.emitters.get(id).destroy(); this.emitters.delete(id); }
+        const labels = [this.queueTexts, this.nameLabels, this.levelLabels, this.resourceLabels, this.emitters];
+        labels.forEach(map => {
+            if (map.has(id)) {
+                map.get(id).destroy();
+                map.delete(id);
+            }
+        });
     }
 
     updateEntityLabel(id, ent) {
         const cfg = UI_CONFIG.MapResourceLabels;
         const config = GameEngine.state.buildingConfigs[ent.type];
         const isBuilding = !!config;
-        
-        // 如果是建築物，始終顯示；如果是自然資源，則受設置開關 (showResourceInfo) 控制
+
         const showLabels = isBuilding ? true : GameEngine.state.settings.showResourceInfo;
 
-        // 1. 名稱標籤 (Name)
+        if (!this._cachedLabelValues) this._cachedLabelValues = new Map();
+        let cache = this._cachedLabelValues.get(id);
+        if (!cache) {
+            cache = { name: '', level: '', amount: -1, visible: false };
+            this._cachedLabelValues.set(id, cache);
+        }
+
+        // 1. 取得視覺物件中心點 (世界座標直接就是中心)
+        const visualX = Math.round(ent.x);
+        const visualY = Math.round(ent.y);
+
+        // 2. 名稱標籤 (Name)
         const nameStr = ent.isUnderConstruction ? "施工中" : (ent.name || ent.type);
         let nameTxt = this.nameLabels.get(id);
         if (!nameTxt) {
-            nameTxt = this.add.text(ent.x, ent.y, nameStr, {
+            nameTxt = this.add.text(visualX, visualY, nameStr, {
                 font: cfg.name.fontSize,
                 fill: cfg.name.color,
                 align: 'center'
             }).setOrigin(0.5, 0.5);
             nameTxt.setStroke(cfg.name.outlineColor, cfg.name.outlineWidth);
+            nameTxt.setDepth(50);
             this.nameLabels.set(id, nameTxt);
         }
-        nameTxt.setText(nameStr);
-        nameTxt.setPosition(ent.x, ent.y + (cfg.name.offsetY || 0));
-        nameTxt.setVisible(showLabels);
-        nameTxt.setDepth(50);
 
-        // 2. 等級標籤 (Level)
+        if (cache.name !== nameStr) {
+            nameTxt.setText(nameStr);
+            cache.name = nameStr;
+        }
+        const nOffY = isBuilding ? (cfg.name.buildingOffsetY || -15) : (cfg.name.offsetY || -45);
+        const tx = visualX + (cfg.name.offsetX || 0);
+        const ty = visualY + nOffY;
+        if (nameTxt.x !== tx || nameTxt.y !== ty) {
+            nameTxt.setPosition(tx, ty);
+        }
+        if (nameTxt.visible !== showLabels) nameTxt.setVisible(showLabels);
+
+        // 3. 等級標籤 (Level)
         let lvlTxt = this.levelLabels.get(id);
         if (ent.level !== undefined) {
             const levelStr = `Lv.${ent.level}`;
             if (!lvlTxt) {
-                lvlTxt = this.add.text(ent.x, ent.y, levelStr, {
+                lvlTxt = this.add.text(visualX, visualY, levelStr, {
                     font: cfg.level.fontSize,
                     fill: cfg.level.color,
                     align: 'center'
                 }).setOrigin(0.5, 0.5);
                 lvlTxt.setStroke(cfg.level.outlineColor, cfg.level.outlineWidth);
+                lvlTxt.setDepth(50);
                 this.levelLabels.set(id, lvlTxt);
             }
-            lvlTxt.setText(levelStr);
-            lvlTxt.setPosition(ent.x, ent.y + (cfg.level.offsetY || 0));
-            lvlTxt.setVisible(showLabels);
-            lvlTxt.setDepth(50);
-        } else if (lvlTxt) {
+            if (cache.level !== levelStr) {
+                lvlTxt.setText(levelStr);
+                cache.level = levelStr;
+            }
+            const lOffY = isBuilding ? (cfg.level.buildingLevelOffsetY || -35) : (cfg.level.offsetY || -65);
+            const ltx = visualX + (cfg.level.offsetX || 0);
+            const lty = visualY + lOffY;
+            if (lvlTxt.x !== ltx || lvlTxt.y !== lty) {
+                lvlTxt.setPosition(ltx, lty);
+            }
+            if (lvlTxt.visible !== showLabels) lvlTxt.setVisible(showLabels);
+        } else if (lvlTxt && lvlTxt.visible) {
             lvlTxt.setVisible(false);
         }
 
         // 3. 數量標籤 (Amount)
         let amtTxt = this.resourceLabels.get(id);
         if (ent.amount !== undefined) {
-            const amountStr = `(${Math.floor(ent.amount)})`;
+            const amountVal = Math.floor(ent.amount);
+            const amountStr = `(${amountVal})`;
             if (!amtTxt) {
-                amtTxt = this.add.text(ent.x, ent.y, amountStr, {
+                amtTxt = this.add.text(visualX, visualY, amountStr, {
                     font: cfg.amount.fontSize,
                     fill: cfg.amount.color,
                     align: 'center'
                 }).setOrigin(0.5, 0.5);
                 amtTxt.setStroke(cfg.amount.outlineColor, cfg.amount.outlineWidth);
+                amtTxt.setDepth(50);
                 this.resourceLabels.set(id, amtTxt);
             }
-            amtTxt.setText(amountStr);
-            amtTxt.setPosition(ent.x, ent.y + (cfg.amount.offsetY || 0));
-            amtTxt.setVisible(showLabels);
-            amtTxt.setDepth(50);
-        } else if (amtTxt) {
+            if (cache.amount !== amountVal) {
+                amtTxt.setText(amountStr);
+                cache.amount = amountVal;
+            }
+            const atx = visualX + (cfg.amount.offsetX || 0);
+            const aty = visualY + (cfg.amount.offsetY || 0);
+            if (amtTxt.x !== atx || amtTxt.y !== aty) {
+                amtTxt.setPosition(atx, aty);
+            }
+            if (amtTxt.visible !== showLabels) amtTxt.setVisible(showLabels);
+        } else if (amtTxt && amtTxt.visible) {
             amtTxt.setVisible(false);
         }
     }
 
     hideEntityLabel(id) {
-        if (this.nameLabels.has(id)) this.nameLabels.get(id).setVisible(false);
-        if (this.levelLabels.has(id)) this.levelLabels.get(id).setVisible(false);
-        if (this.resourceLabels.has(id)) this.resourceLabels.get(id).setVisible(false);
-        if (this.queueTexts.has(id)) this.queueTexts.get(id).setVisible(false);
+        const labels = [this.nameLabels, this.levelLabels, this.resourceLabels, this.queueTexts];
+        labels.forEach(map => {
+            if (map.has(id)) {
+                const obj = map.get(id);
+                if (obj.visible) obj.setVisible(false);
+            }
+        });
     }
 
     getTextureKey(type) {
@@ -528,145 +659,138 @@ export class MainScene extends Phaser.Scene {
         return null;
     }
 
-    drawEntity(g, ent, alpha) {
+    drawEntity(g, ent, alpha, offX = 0, offY = 0) {
         const TS = GameEngine.TILE_SIZE;
         const cfg = GameEngine.getEntityConfig(ent.type);
         let uw = 1, uh = 1;
         if (cfg && cfg.size) {
-            const match = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
-            if (match) { uw = parseInt(match[1]); uh = parseInt(match[2]); }
+            const cleanSize = cfg.size.toString().replace(/['"]/g, '');
+            const match = cleanSize.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
+            if (match) {
+                uw = parseFloat(match[1]);
+                uh = parseFloat(match[2]);
+            }
         }
 
-        if (ent.isUnderConstruction) {
-            console.log(`[DEBUG] 渲染施工實體: type=${ent.type}, size=${uw}x${uh}, pos=${ent.x},${ent.y}`);
-        }
+        const isUnderConstruction = ent.isUnderConstruction === true || ent.isUnderConstruction === 1;
+        const finalAlpha = isUnderConstruction ? (alpha * 0.5) : Math.max(alpha, 0.6);
 
-        const finalAlpha = ent.isUnderConstruction ? alpha * 0.5 : alpha;
+        // 如果是預覽模式，加強視覺引導：外框與高透明度
+        if (alpha < 1.0) {
+            g.lineStyle(2, 0x2196f3, 0.8);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+        }
 
         const isSelected = window.UIManager && window.UIManager.activeMenuEntity === ent;
         if (isSelected) {
             g.lineStyle(4, 0xffeb3b, 1);
-            g.strokeRect(ent.x - (uw * TS) / 2 - 2, ent.y - (uh * TS) / 2 - 2, uw * TS + 4, uh * TS + 4);
-            g.lineStyle(2, 0xffffff, 0.5);
-            g.strokeRect(ent.x - (uw * TS) / 2 - 4, ent.y - (uh * TS) / 2 - 4, uw * TS + 8, uh * TS + 8);
+            g.strokeRect(offX - (uw * TS) / 2 - 2, offY - (uh * TS) / 2 - 2, uw * TS + 4, uh * TS + 4);
         }
 
         if (ent.type === 'village' || ent.type === 'town_center') {
             g.fillStyle(0x8d6e63, finalAlpha);
-            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(1, 0x5d4037, finalAlpha);
-            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
         } else if (ent.type === 'farmhouse') {
             g.fillStyle(0xbcaaa4, finalAlpha);
-            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(1, 0x8d6e63, finalAlpha);
-            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
 
             g.fillStyle(0x795548, finalAlpha);
             g.beginPath();
-            g.moveTo(ent.x - (uw * TS) / 2 - 5, ent.y - (uh * TS) / 2);
-            g.lineTo(ent.x, ent.y - (uh * TS) / 2 - 20);
-            g.lineTo(ent.x + (uw * TS) / 2 + 5, ent.y - (uh * TS) / 2);
+            g.moveTo(offX - (uw * TS) / 2 - 5, offY - (uh * TS) / 2);
+            g.lineTo(offX, offY - (uh * TS) / 2 - 20);
+            g.lineTo(offX + (uw * TS) / 2 + 5, offY - (uh * TS) / 2);
             g.fillPath();
         } else if (ent.type === 'timber_factory') {
             g.fillStyle(0x388e3c, finalAlpha);
-            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x1b5e20, finalAlpha);
-            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
-        } else if (ent.type === 'stone_factory') {
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+        } else if (ent.type === 'stone_factory' || ent.type === 'quarry') {
             g.fillStyle(0x455a64, finalAlpha);
-            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x263238, finalAlpha);
-            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
         } else if (ent.type === 'barn') {
             g.fillStyle(0xa1887f, finalAlpha);
-            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x5d4037, finalAlpha);
-            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
         } else if (ent.type === 'farmland') {
             g.fillStyle(0xdce775, finalAlpha);
-            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(1, 0xafb42b, finalAlpha);
-            // 動態繪製耕地線條
             for (let i = -(uw / 2); i < uw / 2; i += 0.5) {
-                g.lineBetween(ent.x + i * TS, ent.y - (uh * TS) / 2 + 5, ent.x + i * TS, ent.y + (uh * TS) / 2 - 5);
+                g.lineBetween(offX + i * TS, offY - (uh * TS) / 2 + 5, offX + i * TS, offY + (uh * TS) / 2 - 5);
             }
-            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
         } else if (ent.type === 'tree_plantation') {
             g.fillStyle(0x1b5e20, finalAlpha);
-            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x0a3d0d, finalAlpha);
-            // 動態分布小樹苗
             const step = TS;
             for (let i = -(uw * TS) / 2 + 10; i < (uw * TS) / 2; i += step) {
                 for (let j = -(uh * TS) / 2 + 10; j < (uh * TS) / 2; j += step) {
                     g.fillStyle(0x2e7d32, finalAlpha);
-                    g.fillCircle(ent.x + i, ent.y + j, 8);
+                    g.fillCircle(offX + i, offY + j, 8);
                 }
             }
-            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
         } else if (ent.type === 'mage_place') {
             g.fillStyle(0x4a148c, finalAlpha);
-            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0xe1f5fe, finalAlpha);
-            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.fillStyle(0xffd600, finalAlpha);
-            g.fillCircle(ent.x, ent.y, 20);
+            g.fillCircle(offX, offY, 20);
         } else if (ent.type === 'swordsman_place') {
             g.fillStyle(0x455a64, finalAlpha);
-            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0xf44336, finalAlpha);
-            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.fillStyle(0xffccbc, finalAlpha);
-            g.fillRect(ent.x - 10, ent.y - 10, 20, 20);
+            g.fillRect(offX - 10, offY - 10, 20, 20);
         } else if (ent.type === 'archer_place') {
             g.fillStyle(0x795548, finalAlpha);
-            g.fillRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0xffeb3b, finalAlpha);
-            g.strokeRect(ent.x - (uw * TS) / 2, ent.y - (uh * TS) / 2, uw * TS, uh * TS);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0xf44336, finalAlpha);
-            g.strokeCircle(ent.x, ent.y, 15);
-            g.strokeCircle(ent.x, ent.y, 5);
+            g.strokeCircle(offX, offY, 15);
+            g.strokeCircle(offX, offY, 5);
         } else if (ent.type === 'campfire') {
             const cfg = UI_CONFIG.ResourceRenderer.Campfire;
-            // 1. 焦土底座
             g.fillStyle(cfg.groundColor, finalAlpha);
-            g.fillCircle(ent.x, ent.y, 20);
-            
-            // 2. 木柴堆 (幾何堆疊)
+            g.fillCircle(offX, offY, 20);
             g.fillStyle(cfg.woodColor, finalAlpha);
             g.lineStyle(2, cfg.woodOutline, finalAlpha);
-            
-            // 底層兩根平行木頭
-            g.fillRect(ent.x - 14, ent.y - 4, 30, 8);
-            g.strokeRect(ent.x - 14, ent.y - 4, 30, 8);
-            
-            // 中層兩根斜交木頭
+            g.strokeRect(offX - 14, offY - 4, 30, 8);
+
             g.save();
-            // 注意：Graphics API 不直接支援針對單次 fillRect 的旋轉
-            // 所以我們用 fillRect 並稍微偏位來模擬交叉感
-            g.fillRect(ent.x - 4, ent.y - 14, 10, 30);
-            g.strokeRect(ent.x - 4, ent.y - 14, 10, 30);
-            
-            // 頂層斜放的小木塊
+            g.fillRect(offX - 4, offY - 14, 10, 30);
+            g.strokeRect(offX - 4, offY - 14, 10, 30);
+
             g.fillStyle(cfg.woodColor, finalAlpha);
-            g.fillRect(ent.x - 8, ent.y - 8, 16, 16);
-            g.strokeRect(ent.x - 8, ent.y - 8, 16, 16);
-            
+            g.fillRect(offX - 8, offY - 8, 16, 16);
+            g.strokeRect(offX - 8, offY - 8, 16, 16);
+
             g.restore();
         } else if (ent.type.startsWith('tree') || ent.type.startsWith('wood')) {
             g.fillStyle(0x2e7d32, finalAlpha);
-            g.fillCircle(ent.x, ent.y, 20);
+            g.fillCircle(offX, offY, 20);
         } else if (ent.type.startsWith('stone')) {
             g.fillStyle(0x757575, finalAlpha);
             g.beginPath();
-            g.moveTo(ent.x - 20, ent.y + 10);
-            g.lineTo(ent.x, ent.y - 15);
-            g.lineTo(ent.x + 25, ent.y + 15);
+            g.moveTo(offX - 20, offY + 10);
+            g.lineTo(offX, offY - 15);
+            g.lineTo(offX + 25, offY + 15);
             g.fillPath();
         } else if (ent.type.startsWith('food')) {
             g.fillStyle(0xc2185b, finalAlpha);
-            g.fillCircle(ent.x, ent.y, 18);
+            g.fillCircle(offX, offY, 18);
         }
     }
 
@@ -759,8 +883,9 @@ export class MainScene extends Phaser.Scene {
         g.fillCircle(bx + 30, by + 5, 8);
 
         let txt = this.queueTexts.get(id);
+        const queueStr = queue.length.toString();
         if (!txt) {
-            txt = this.add.text(bx + 30, by + 5, queue.length, {
+            txt = this.add.text(bx + 30, by + 5, queueStr, {
                 fontSize: '10px',
                 fontStyle: 'bold',
                 fontFamily: 'Arial',
@@ -768,9 +893,10 @@ export class MainScene extends Phaser.Scene {
             }).setOrigin(0.5);
             this.queueTexts.set(id, txt);
         }
-        txt.setText(queue.length);
-        txt.setPosition(bx + 30, by + 5);
-        txt.setVisible(true);
+
+        if (txt.text !== queueStr) txt.setText(queueStr);
+        if (txt.x !== bx + 30 || txt.y !== by + 5) txt.setPosition(bx + 30, by + 5);
+        if (!txt.visible) txt.setVisible(true);
         txt.setDepth(100);
     }
 
@@ -817,21 +943,31 @@ export class MainScene extends Phaser.Scene {
         // 單個預覽 (Drag/Stamp)
         if (state.previewPos && (state.buildingMode === 'DRAG' || state.buildingMode === 'STAMP' || state.buildingMode === 'NONE')) {
             this.drawEntity(g, {
-                type: state.placingType,
-                x: state.previewPos.x,
-                y: state.previewPos.y
-            }, 0.5);
+                type: state.placingType
+            }, 0.5, state.previewPos.x, state.previewPos.y);
         }
 
         // 批量預覽 (Line)
         if (state.buildingMode === 'LINE' && state.linePreviewEntities) {
             state.linePreviewEntities.forEach(pos => {
                 this.drawEntity(g, {
-                    type: state.placingType,
-                    x: pos.x,
-                    y: pos.y
-                }, 0.3); // 拉排預覽稍微淡一點
+                    type: state.placingType
+                }, 0.3, pos.x, pos.y); // 拉排預覽稍微淡一點
             });
         }
+    }
+
+    // 新增支援位移的繪製方法
+    drawEntityAt(g, x, y, ent, alpha) {
+        g.save();
+        // Phaser Graphics 的 Canvas 模式可以使用 translateCanvas
+        // WebGL 模式需要使用內建的轉換或手動加算
+        // 這裡我們直接手動加算最穩
+        const oldX = g.x, oldY = g.y;
+        // 我們不能改 Graphics 的 x/y 因為它可能已經被放在其他地方
+        // 但 placementPreview 預設在 0,0。
+        // 最簡單的方法：修改 drawEntity 讓它接收 x, y
+        this.drawEntity(g, { ...ent, x, y, forcePos: true }, alpha);
+        g.restore();
     }
 }

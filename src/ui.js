@@ -824,6 +824,7 @@ export class UIManager {
     static updateSetting(event, key, val) {
         if (event) event.stopPropagation();
         GameEngine.state.settings[key] = val;
+        GameEngine.state.renderVersion++; // 通知渲染器刷新 (處理顯示/隱藏標籤)
         this.renderSettingsPanel(); // 重新渲染以更新 UI 狀態
     }
 
@@ -993,7 +994,7 @@ export class UIManager {
         
         // 捲動相機到中心點
         cam.pan(tc.x, tc.y, cfg.panSpeed || 1000, 'Power2');
-        GameEngine.addLog("相機移動至村莊中心");
+        GameEngine.addLog("相機移動至城鎮中心");
     }
 }
 

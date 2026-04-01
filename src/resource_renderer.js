@@ -15,24 +15,28 @@ export class ResourceRenderer {
     static generateTreeTexture(scene) {
         if (scene.textures.exists('tex_tree')) return;
         
-        // 畫布大小：設定 100x100，中心為 50,50
-        const cw = 110, ch = 110;
-        const cx = cw / 2, cy = ch / 2 + 10; 
+        // 畫布大小：統一使用 120x120 以利精確置中
+        const cw = 120, ch = 120;
+        const cx = cw / 2, cy = ch / 2; 
         const g = scene.make.graphics({ x: 0, y: 0, add: false });
         
         const cfg = UI_CONFIG.ResourceRenderer.Tree;
-        const trunkW = 18, trunkH = 22;
+        const trunkW = 12, trunkH = 16;
+
+        // 樹幹 - 調整座標使整棵樹的視覺中心位於 cy
         
-        // 樹幹
+        // 樹幹 - 調整座標使整棵樹的視覺中心位於 cy
+        // 樹頂約在 cy+17-33=cy-16, 樹底約在 cy+17+16=cy+33. 
+        // 視覺範圍約 [cy-33, cy+33]
         g.fillStyle(cfg.trunkColor, 1);
         g.lineStyle(cfg.outlineWidth, 0x1a0a00, 1);
-        g.fillRect(cx - trunkW / 2, cy - 5, trunkW, trunkH);
-        g.strokeRect(cx - trunkW / 2, cy - 5, trunkW, trunkH);
+        g.fillRect(cx - trunkW / 2, cy + 17, trunkW, trunkH);
+        g.strokeRect(cx - trunkW / 2, cy + 17, trunkW, trunkH);
 
-        // 樹葉
-        this.drawTriangle(g, cx, cy + 5, 75, 50, cfg.leafColors[0], cfg.outlineColor, 1, cfg.outlineWidth);
-        this.drawTriangle(g, cx, cy - 10, 60, 45, cfg.leafColors[1], cfg.outlineColor, 1, cfg.outlineWidth);
-        this.drawTriangle(g, cx, cy - 25, 42, 33, cfg.leafColors[2], cfg.outlineColor, 1, cfg.outlineWidth);
+        // 樹葉 - 使用偶數寬度與優化後的垂直分佈
+        this.drawTriangle(g, cx, cy + 19, 56, 40, cfg.leafColors[0], cfg.outlineColor, 1, cfg.outlineWidth);
+        this.drawTriangle(g, cx, cy + 5, 44, 34, cfg.leafColors[1], cfg.outlineColor, 1, cfg.outlineWidth);
+        this.drawTriangle(g, cx, cy - 8, 32, 25, cfg.leafColors[2], cfg.outlineColor, 1, cfg.outlineWidth);
 
         g.generateTexture('tex_tree', cw, ch);
         g.destroy();
@@ -42,24 +46,26 @@ export class ResourceRenderer {
         if (scene.textures.exists('tex_stone')) return;
 
         const cw = 120, ch = 120;
-        const cx = cw / 2, cy = ch / 2 + 15;
+        const cx = cw / 2, cy = ch / 2; // 修正：移除 +15 偏移
         const g = scene.make.graphics({ x: 0, y: 0, add: false });
         const cfg = UI_CONFIG.ResourceRenderer.Rock;
 
-        // 主岩石
+        // 主岩石 - 重新精算頂點，確保幾何中心在 (0,0)
+
+        // 主岩石 - 重新精算頂點，確保幾何中心在 (0,0)
         this.drawPolygon(g, [
-            { dx: -35, dy: 15 }, { dx: -15, dy: -30 }, { dx: 25, dy: 5 }, { dx: 10, dy: 25 }
+            { dx: -22.5, dy: 7 }, { dx: -8.5, dy: -23 }, { dx: 19.5, dy: 1 }, { dx: 11.5, dy: 15 }
         ], cx, cy, cfg.colors[0], cfg.outlineColor, 1, cfg.outlineWidth);
 
-        // 次岩石
+        // 次岩石 - 修正偏移 (由原本平均 dx=15, dy=7 修改為置中)
         this.drawPolygon(g, [
-            { dx: 10, dy: 20 }, { dx: 15, dy: -10 }, { dx: 40, dy: 15 }, { dx: 30, dy: 30 }
-        ], cx, cy, cfg.colors[1], cfg.outlineColor, 1, cfg.outlineWidth);
+            { dx: -9, dy: 3 }, { dx: -5, dy: -17 }, { dx: 11, dy: -1 }, { dx: 3, dy: 11 }
+        ], cx + 15, cy + 7, cfg.colors[1], cfg.outlineColor, 1, cfg.outlineWidth);
 
-        // 小石
+        // 小石 - 修正偏移 (由原本平均 dx=3, dy=-14 修改為置中)
         this.drawPolygon(g, [
-            { dx: -10, dy: -15 }, { dx: -5, dy: -35 }, { dx: 15, dy: -20 }, { dx: 18, dy: -10 }
-        ], cx, cy, cfg.colors[2], cfg.outlineColor, 1, cfg.outlineWidth);
+            { dx: -11, dy: 4 }, { dx: -7, dy: -10 }, { dx: 9, dy: 0 }, { dx: 11, dy: 6 }
+        ], cx + 2, cy - 14, cfg.colors[2], cfg.outlineColor, 1, cfg.outlineWidth);
 
         g.generateTexture('tex_stone', cw, ch);
         g.destroy();
@@ -68,19 +74,19 @@ export class ResourceRenderer {
     static generateBerryBushTexture(scene) {
         if (scene.textures.exists('tex_food')) return;
 
-        const cw = 110, ch = 110;
-        const cx = cw / 2, cy = ch / 2 + 5;
+        const cw = 120, ch = 120;
+        const cx = cw / 2, cy = ch / 2;
         const g = scene.make.graphics({ x: 0, y: 0, add: false });
         const cfg = UI_CONFIG.ResourceRenderer.BerryBush;
 
         g.lineStyle(cfg.outlineWidth, cfg.outlineColor, 1);
         
         const blobs = [
-            { dx: -20, dy: 0, r: 25, color: cfg.leafColor }, 
-            { dx: 20, dy: 5, r: 22, color: 0xfb8c00 }, 
-            { dx: 0, dy: -15, r: 28, color: cfg.leafColor }, 
-            { dx: -10, dy: 15, r: 20, color: 0xffb300 }, 
-            { dx: 15, dy: 12, r: 18, color: cfg.leafColor }
+            { dx: -18, dy: -4, r: 18, color: cfg.leafColor }, 
+            { dx: 18, dy: -4, r: 18, color: cfg.leafColor }, 
+            { dx: 0, dy: -15, r: 20, color: cfg.leafColor }, 
+            { dx: -10, dy: 12, r: 16, color: 0xfb8c00 }, 
+            { dx: 10, dy: 12, r: 16, color: 0xfb8c00 }
         ];
 
         blobs.forEach(b => {
