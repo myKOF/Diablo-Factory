@@ -339,6 +339,17 @@ export const UI_CONFIG = {
     Pathfinding: {
         debugColor: "#00ff00",         // 路徑調試用的顏色 (HEX)
         iterationsPerFrame: 1000       // 每幀允許的尋路計算量 (效能優化)
+    },
+    // ── 建築集結點 (RallyPoint) ────────────────────────────────────
+    RallyPoint: {
+        lineColor: "#0026fcff",          // 虛線顏色
+        lineAlpha: 1,                // 虛線透明度
+        lineDash: [10, 5],             // 虛線長度與間距 [dash, gap]
+        circleColor: "#00e5ff",        // 光圈顏色 (青藍色)
+        circleAlpha: 0.6,              // 光圈透明度
+        circleMinRadius: 8,            // 光圈最小半徑
+        circleMaxRadius: 15,           // 光圈最大半徑
+        pulseSpeed: 0.005              // 縮放速度
     }
 };
 

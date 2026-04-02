@@ -9,6 +9,11 @@ export class UIManager {
     static uiLayer;
     static dragGhost = null;
     static activeBuilding = null;
+    static logHeight = 200; // 預設日誌高度
+    static isResizingLog = false;
+    static logFilters = { COMMON: true, PATH: true }; // 日誌篩選器
+    static startY = 0;
+    static startHeight = 200;
     static lastUIState = {
         resources: "",
         logHash: "",
@@ -26,13 +31,38 @@ export class UIManager {
         window.addEventListener("mousemove", (e) => this.handleWorldMouseMove(e));
         window.addEventListener("mouseup", (e) => this.handleWorldMouseUp(e));
         window.addEventListener("click", (e) => this.handleWorldClick(e));
+        window.addEventListener("mousemove", (e) => {
+            if (UIManager.isResizingLog) {
+                const dy = UIManager.startY - e.clientY; 
+                UIManager.logHeight = Math.max(100, Math.min(window.innerHeight - 200, UIManager.startHeight + dy));
+                const logPanel = document.getElementById("log_panel");
+                if (logPanel) {
+                    logPanel.style.height = `${UIManager.logHeight}px`;
+                    const restoreBtn = document.getElementById("log_restore_btn");
+                    if (restoreBtn) {
+                        const defaultHeight = UI_CONFIG.LogPanel.height || 200;
+                        restoreBtn.style.display = Math.abs(UIManager.logHeight - defaultHeight) > 5 ? "flex" : "none";
+                    }
+                }
+            }
+        });
+        window.addEventListener("mouseup", () => {
+            if (UIManager.isResizingLog) {
+                UIManager.isResizingLog = false;
+                const logPanel = document.getElementById("log_panel");
+                if (logPanel) {
+                    logPanel.style.borderTopColor = "";
+                    logPanel.style.borderTopWidth = "1.5px";
+                }
+            }
+        });
         window.addEventListener("keydown", (e) => {
             if (e.key === "Escape") this.cancelBuildingMode();
         });
         window.addEventListener("contextmenu", (e) => {
-            if (GameEngine.state.placingType) {
+            if (GameEngine.state.placingType || this.activeMenuEntity) {
                 e.preventDefault();
-                this.cancelBuildingMode();
+                if (GameEngine.state.placingType) this.cancelBuildingMode();
             }
         });
 
@@ -120,9 +150,167 @@ export class UIManager {
         logPanel.style.fontFamily = "'Courier New', monospace";
         logPanel.style.display = "flex";
         logPanel.style.flexDirection = "column";
-        logPanel.style.overflowY = "auto";
+        logPanel.style.overflow = "visible"; // 確保拉伸把手和按鈕不被裁剪
         logPanel.style.pointerEvents = "auto";
         logPanel.style.boxSizing = "border-box";
+        logPanel.style.height = `${this.logHeight}px`;
+        logPanel.style.position = "absolute"; // 確保子元素絕對定位正常
+
+        // 日誌內容容器 (真正滾動的地方)
+        const logContent = document.createElement("div");
+        logContent.id = "log_content";
+        logContent.style.cssText = `
+            flex: 1; width: 100%; overflow-y: auto;
+            pointer-events: auto; padding: 0;
+        `;
+        logPanel.appendChild(logContent);
+
+        // [TEST] 加入選中單位調試列 (刷新座標)
+        const debugInfo = document.createElement("div");
+        debugInfo.id = "unit_debug_info";
+        debugInfo.style.cssText = `
+            background: rgba(0,0,0,0.5); padding: 5px 10px;
+            color: #ffeb3b; font-weight: bold; font-size: 11px;
+            border-top: 1px solid rgba(255, 235, 59, 0.3);
+            display: none;
+        `;
+        logPanel.appendChild(debugInfo);
+
+        // 加上拉伸拉手 (視覺化的小橫線)
+        const handle = document.createElement("div");
+        handle.id = "log_handle";
+        handle.style.cssText = `
+            position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+            width: 40px; height: 16px; display: flex; align-items: center; justify-content: center;
+            cursor: ns-resize; font-size: 14px; color: ${this.hexToRgba(logCfg.borderColor, 0.7)};
+            background: ${this.hexToRgba(logCfg.bgColor, 0.9)}; border: 1px solid ${this.hexToRgba(logCfg.borderColor, 0.5)};
+            border-top: none; border-radius: 0 0 6px 6px; z-index: 200; pointer-events: auto;
+        `;
+        handle.innerHTML = "•••"; 
+        logPanel.appendChild(handle);
+
+        // 面板本身的滑鼠事件處理 (用於偵測頂部邊緣)
+        logPanel.onmousemove = (e) => {
+            const rect = logPanel.getBoundingClientRect();
+            // 在頂部 10px 區域顯示拉伸游標
+            if (e.clientY <= rect.top + 10) {
+                logPanel.style.cursor = "ns-resize";
+            } else {
+                logPanel.style.cursor = "default";
+            }
+        };
+
+        logPanel.onmousedown = (e) => {
+            const rect = logPanel.getBoundingClientRect();
+            if (e.clientY <= rect.top + 15) {
+                e.preventDefault();
+                UIManager.isResizingLog = true;
+                UIManager.startY = e.clientY;
+                UIManager.startHeight = UIManager.logHeight;
+                logPanel.style.borderTopColor = "#ffeb3b";
+                logPanel.style.borderTopWidth = "3px";
+                return;
+            }
+        };
+
+        // 加入恢復按鈕 (向下箭頭)
+        const restoreBtn = document.createElement("div");
+        restoreBtn.id = "log_restore_btn";
+        restoreBtn.innerHTML = "▼";
+        restoreBtn.title = "恢復預設高度";
+        restoreBtn.style.cssText = `
+            position: absolute; top: 12px; right: 12px; width: 24px; height: 24px;
+            background: ${this.hexToRgba(logCfg.bgColor, 0.95)}; border: 1.5px solid ${logCfg.borderColor};
+            color: #fff; display: none; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 12px; border-radius: 4px; transition: all 0.2s;
+            z-index: 300; pointer-events: auto;
+        `;
+        restoreBtn.onclick = (e) => {
+            e.stopPropagation();
+            UIManager.logHeight = logCfg.height || 200;
+            const lp = document.getElementById("log_panel");
+            if (lp) lp.style.height = `${UIManager.logHeight}px`;
+            restoreBtn.style.display = "none";
+        };
+        restoreBtn.onmouseover = () => restoreBtn.style.background = logCfg.borderColor;
+        restoreBtn.onmouseout = () => restoreBtn.style.background = this.hexToRgba(logCfg.bgColor, 0.95);
+        logPanel.appendChild(restoreBtn);
+
+        // 加入清理按鈕 (垃圾桶)
+        const clearBtn = document.createElement("div");
+        clearBtn.id = "log_clear_btn";
+        clearBtn.innerHTML = "🗑️";
+        clearBtn.title = "清理日誌內容";
+        clearBtn.style.cssText = `
+            position: absolute; top: 12px; right: 44px; width: 24px; height: 24px;
+            background: ${this.hexToRgba(logCfg.bgColor, 0.95)}; border: 1.5px solid ${logCfg.borderColor};
+            color: #fff; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 13px; border-radius: 4px; transition: all 0.2s;
+            z-index: 300; pointer-events: auto;
+        `;
+        clearBtn.onclick = (e) => {
+            e.stopPropagation();
+            GameEngine.state.log = [];
+            const lc = document.getElementById("log_content");
+            if (lc) lc.innerHTML = "";
+            GameEngine.addLog("日誌系統已重置。");
+        };
+        clearBtn.onmouseover = () => clearBtn.style.background = logCfg.borderColor;
+        clearBtn.onmouseout = () => clearBtn.style.background = this.hexToRgba(logCfg.bgColor, 0.95);
+        logPanel.appendChild(clearBtn);
+
+        // 加入篩選按鈕 (漏斗)
+        const filterBtn = document.createElement("div");
+        filterBtn.id = "log_filter_btn";
+        filterBtn.innerHTML = "🔍";
+        filterBtn.title = "篩選日誌類型";
+        filterBtn.style.cssText = `
+            position: absolute; top: 12px; right: 76px; width: 24px; height: 24px;
+            background: ${this.hexToRgba(logCfg.bgColor, 0.95)}; border: 1.5px solid ${logCfg.borderColor};
+            color: #fff; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 13px; border-radius: 4px; transition: all 0.2s;
+            z-index: 300; pointer-events: auto;
+        `;
+        
+        // 篩選選單容器
+        const filterMenu = document.createElement("div");
+        filterMenu.id = "log_filter_menu";
+        filterMenu.style.cssText = `
+            position: absolute; bottom: 30px; right: 0; width: 120px;
+            background: ${this.hexToRgba(logCfg.bgColor, 0.95)}; border: 1.5px solid ${logCfg.borderColor};
+            border-radius: 4px; padding: 10px; display: none; flex-direction: column; gap: 8px;
+            z-index: 400; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        `;
+
+        const categories = { COMMON: "一般訊息", PATH: "尋路訊息" };
+        Object.entries(categories).forEach(([key, label]) => {
+            const item = document.createElement("label");
+            item.style.cssText = `display: flex; align-items: center; gap: 8px; font-size: 13px; color: #fff; cursor: pointer;`;
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked = this.logFilters[key];
+            checkbox.onchange = (e) => {
+                e.stopPropagation();
+                this.logFilters[key] = checkbox.checked;
+                this.updateValues(true); // 強制更新
+            };
+            item.appendChild(checkbox);
+            item.appendChild(document.createTextNode(label));
+            filterMenu.appendChild(item);
+        });
+
+        // 防止點擊選單內部時導致選單關閉
+        filterMenu.onclick = (e) => e.stopPropagation();
+
+        filterBtn.onclick = (e) => {
+            e.stopPropagation();
+            const isVisible = filterMenu.style.display === "flex";
+            filterMenu.style.display = isVisible ? "none" : "flex";
+            
+            // 如果開啟選單，隱藏其它可能干擾的 UI (如果有)
+        };
+        filterBtn.appendChild(filterMenu);
+        logPanel.appendChild(filterBtn);
 
         this.uiLayer.appendChild(logPanel);
 
@@ -487,9 +675,18 @@ export class UIManager {
     static handleWorldMouseDown(e) {
         if (e.target.closest("#ui_layer")) return;
 
-        // 右鍵直接取消
+        // 右鍵邏輯：設定集結點或取消建造模式
         if (e.button === 2) {
-            this.cancelBuildingMode();
+            const ent = this.activeMenuEntity;
+            const bCfg = ent ? GameEngine.state.buildingConfigs[ent.type] : null;
+            // 只有具備生產清單的建築才能設定集結點
+            if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
+                const pos = this.getWorldMousePos(e.clientX, e.clientY);
+                ent.rallyPoint = pos;
+                GameEngine.addLog(`建築集結點已設定。`);
+            } else {
+                this.cancelBuildingMode();
+            }
             return;
         }
 
@@ -567,6 +764,18 @@ export class UIManager {
     }
 
     static handleWorldClick(e) {
+        // 全域關閉日誌篩選選單
+        // 指的是除了「篩選按鈕本身」與「選單內部」之外，點擊界面任何處 (包括日誌面板其它區域) 都關閉
+        const filterMenu = document.getElementById("log_filter_menu");
+        if (filterMenu && filterMenu.style.display === "flex") {
+            const filterBtn = document.getElementById("log_filter_btn");
+            // 檢查點擊目標是否不在按鈕內
+            if (filterBtn && !filterBtn.contains(e.target)) {
+                filterMenu.style.display = "none";
+            }
+        }
+        
+        if (this.dragGhost) return;
         const state = GameEngine.state;
  
         // 點擊 UI 區域的判斷
@@ -609,8 +818,21 @@ export class UIManager {
             return mx > ent.x - w / 2 + 5 && mx < ent.x + w / 2 - 5 && my > ent.y - h / 2 + 5 && my < ent.y + h / 2 - 5;
         });
 
+        // 單位點擊檢查 (優先級可自行調整)
+        const mx = local.x - cam.x, my = local.y - cam.y;
+        const clickedUnit = GameEngine.state.units.villagers.find(v => Math.hypot(v.x - mx, v.y - my) < 25);
+
+        if (clickedUnit) {
+            GameEngine.state.selectedUnitId = clickedUnit.id;
+            // 單位點擊不顯示右鍵選單，保持選中狀態即可
+            return;
+        }
+
         if (clicked) {
             this.showContextMenu(clicked);
+        } else {
+            // 點擊空白處，取消單位選中
+            GameEngine.state.selectedUnitId = null;
         }
     }
 
@@ -854,12 +1076,33 @@ export class UIManager {
         // 注意：這裡不再自動隱藏 settings_panel，避免 toggle 時發生衝突
     }
 
-    static updateValues() {
+    static updateValues(forceUpdate = false) {
+        const state = GameEngine.state;
+        const res = state.resources;
+
+        // 更新區域：日誌系統 (優化篩選與顏色)
+        const lc = document.getElementById("log_content");
+        if (lc) {
+            const history = state.log;
+            const filtered = history.filter(item => this.logFilters[item.category]);
+            
+            // 建立內容字串並附帶顏色
+            const content = filtered.map(item => {
+                const color = item.category === 'PATH' ? '#ffff00' : '#ffffff';
+                return `<div style="color: ${color}">> ${item.msg}</div>`;
+            }).join("");
+
+            if (lc.innerHTML !== content || forceUpdate) {
+                const isAtBottom = lc.scrollHeight - lc.scrollTop - lc.clientHeight < 30;
+                lc.innerHTML = content;
+                if (isAtBottom) lc.scrollTop = lc.scrollHeight;
+            }
+        }
+
         // 更新資源
         const rb = document.getElementById("resource_bar");
         if (rb) {
             const labels = UI_CONFIG.ResourceBar.labels;
-            const res = GameEngine.state.resources;
             const popCount = GameEngine.state.units.villagers.length;
             const maxPop = GameEngine.getMaxPopulation();
 
@@ -877,10 +1120,51 @@ export class UIManager {
         }
 
         // 更新日誌
-        const lp = document.getElementById("log_panel");
+        this.updateLogPanel();
+    }
+
+    static updateLogPanel() {
+        // [TEST] 更新選中單位即時座標與狀態
+        const debugInfo = document.getElementById("unit_debug_info");
+        const selId = GameEngine.state.selectedUnitId;
+        const v = selId ? GameEngine.state.units.villagers.find(u => u.id === selId) : null;
+        
+        if (v && debugInfo) {
+            debugInfo.style.display = "block";
+            const target = (v.fullPath && v.fullPath[v.pathIndex]) ? 
+                `➟ (${v.fullPath[v.pathIndex].x.toFixed(0)}, ${v.fullPath[v.pathIndex].y.toFixed(0)})` : " (待命)";
+            debugInfo.innerHTML = `[DEBUG] ${v.configName} (${v.state}): (${v.x.toFixed(0)}, ${v.y.toFixed(0)}) ${target}`;
+        } else if (debugInfo) {
+            debugInfo.style.display = "none";
+        }
+
+        const lp = document.getElementById("log_content");
         if (lp) {
             const history = GameEngine.state.log;
-            const content = history.map(msg => `<div>> ${msg}</div>`).join("");
+            
+            // 核心修復：執行真正的過濾邏輯
+            const filtered = history.filter(entry => {
+                const cat = (typeof entry === 'object') ? entry.category : 'COMMON';
+                return UIManager.logFilters[cat];
+            });
+
+            // 修正：日誌現在是物件格式 { msg, category, id }，按照分類上色
+            const content = filtered.map(entry => {
+                let text = (typeof entry === 'object') ? entry.msg : entry;
+                let colorAttr = '';
+                
+                if (typeof entry === 'object') {
+                    switch(entry.category) {
+                        case 'PATH': 
+                        case 'STUCK': colorAttr = ' style="color: #ffeb3b;"'; break;
+                        case 'STATE': colorAttr = ' style="color: #4fc3f7;"'; break;
+                        case 'SYSTEM': colorAttr = ' style="color: #f48fb1;"'; break;
+                    }
+                }
+                
+                return `<div${colorAttr}>> ${text}</div>`;
+            }).join("");
+            
             if (lp.innerHTML !== content) {
                 // 判斷使用者是否目前正停留在底部
                 const isAtBottom = lp.scrollHeight - lp.scrollTop - lp.clientHeight < 20;

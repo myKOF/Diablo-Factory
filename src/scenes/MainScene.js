@@ -151,50 +151,67 @@ export class MainScene extends Phaser.Scene {
 
     setupCamera() {
         const cam = this.cameras.main;
-        cam.scrollX = 0;
-        cam.scrollY = 0;
-
         let lastPointer = { x: 0, y: 0 };
+        this.isDragging = false;
 
-        const onDown = (e) => {
-            if (e.target.tagName === 'CANVAS') {
-                const isPlacement = !!GameEngine.state.placingType;
-                const isMiddleDrag = (e.button === 1);
+        this.input.on('pointerdown', (pointer) => {
+            const isPlacement = !!GameEngine.state.placingType;
+            const isMiddleDrag = pointer.middleButtonDown();
 
-                // 排除 UI 拖曳干擾
-                if (window.UIManager && window.UIManager.dragGhost) return;
+            // 排除 UI 拖曳干擾
+            if (window.UIManager && window.UIManager.dragGhost) return;
 
-                // 如果在建造模式下，左鍵是用來建造的，不拿來拖地圖；
-                // 但中鍵 (Middle Click) 永遠可以用來拖地圖。
-                if (isPlacement && !isMiddleDrag) return;
+            // 單位點擊檢查 (調試用，40px 容錯)
+            // 不管是否在建造模式，點擊單位都應該觸發 Log
+            let bestDist = 40;
+            let clickedUnit = null;
+            GameEngine.state.units.villagers.forEach(v => {
+                const d = Math.hypot(v.x - pointer.worldX, v.y - pointer.worldY);
+                if (d < bestDist) { bestDist = d; clickedUnit = v; }
+            });
 
-                this.isDragging = true;
-                lastPointer = { x: e.clientX, y: e.clientY };
+            if (clickedUnit) {
+                GameEngine.state.selectedUnitId = clickedUnit.id;
+                GameEngine.state.lastSelectionTime = Date.now();
+                
+                console.group(`[選取單位詳細資訊] ${clickedUnit.configName} (${clickedUnit.id})`);
+                console.log(`%c狀態: ${clickedUnit.state}`, "color: #ffeb3b; font-weight: bold; background: #212121; padding: 2px 5px;");
+                console.log(`坐標: (${clickedUnit.x.toFixed(1)}, ${clickedUnit.y.toFixed(1)})`);
+                console.log(`目標: `, clickedUnit.targetId || clickedUnit.targetBase || clickedUnit.constructionTarget || clickedUnit.idleTarget || "無");
+                
+                const pf = GameEngine.state.pathfinding;
+                if (pf) {
+                    const gx = Math.floor(clickedUnit.x / GameEngine.TILE_SIZE);
+                    const gy = Math.floor(clickedUnit.y / GameEngine.TILE_SIZE);
+                    const isWalkable = pf.grid[gy] && pf.grid[gy][gx] === 0;
+                    console.log(`尋路網格狀態: ${isWalkable ? "✅ 可通行" : "❌ 障礙物中 (卡死!)"} (${gx}, ${gy})`);
+                    console.log(`當前路徑: ${clickedUnit.fullPath ? (clickedUnit.fullPath.length + " 節點, 當前進度: " + clickedUnit.pathIndex) : "無"}`);
+                    console.log(`尋路中: ${clickedUnit.isFindingPath}`);
+                }
+                console.groupEnd();
+                return; // 點中單位就不觸發拖曳
+            } else {
+                GameEngine.state.selectedUnitId = null;
             }
-        };
 
-        const onMove = (e) => {
+            if (isPlacement && !isMiddleDrag) return;
+
+            this.isDragging = true;
+            lastPointer = { x: pointer.x, y: pointer.y };
+        });
+
+        this.input.on('pointermove', (pointer) => {
             if (this.isDragging) {
-                const dx = e.clientX - lastPointer.x;
-                const dy = e.clientY - lastPointer.y;
+                const dx = pointer.x - lastPointer.x;
+                const dy = pointer.y - lastPointer.y;
                 cam.scrollX -= dx;
                 cam.scrollY -= dy;
-                lastPointer = { x: e.clientX, y: e.clientY };
+                lastPointer = { x: pointer.x, y: pointer.y };
             }
-        };
+        });
 
-        const onUp = () => {
+        this.input.on('pointerup', () => {
             this.isDragging = false;
-        };
-
-        window.addEventListener('mousedown', onDown);
-        window.addEventListener('mousemove', onMove);
-        window.addEventListener('mouseup', onUp);
-
-        this.events.once('shutdown', () => {
-            window.removeEventListener('mousedown', onDown);
-            window.removeEventListener('mousemove', onMove);
-            window.removeEventListener('mouseup', onUp);
         });
     }
 
@@ -381,7 +398,49 @@ export class MainScene extends Phaser.Scene {
                 // 不論 queue.length 是否大於 0 都呼叫，讓 drawProductionHUD 內部處理隱藏邏輯
                 this.drawProductionHUD(g, ent, uw, uh, TS);
             }
+
+            // 繪製集結點 (僅在選中且有集結點時顯示)
+            if (ent.rallyPoint && window.UIManager && window.UIManager.activeMenuEntity === ent) {
+                this.drawRallyPoint(g, ent);
+            }
         });
+    }
+
+    drawRallyPoint(g, ent) {
+        const cfg = UI_CONFIG.RallyPoint;
+        const color = typeof cfg.lineColor === 'string' ? parseInt(cfg.lineColor.replace('#', ''), 16) : cfg.lineColor;
+        const circleColor = typeof cfg.circleColor === 'string' ? parseInt(cfg.circleColor.replace('#', ''), 16) : cfg.circleColor;
+
+        const dx = ent.rallyPoint.x - ent.x;
+        const dy = ent.rallyPoint.y - ent.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 5) return;
+
+        // 1. 繪製虛線
+        const dashLen = cfg.lineDash[0];
+        const gapLen = cfg.lineDash[1];
+        const totalStep = dashLen + gapLen;
+
+        g.lineStyle(2, color, cfg.lineAlpha);
+        for (let i = 0; i < dist; i += totalStep) {
+            const startRatio = i / dist;
+            const endRatio = Math.min((i + dashLen) / dist, 1);
+            g.lineBetween(
+                ent.x + dx * startRatio, ent.y + dy * startRatio,
+                ent.x + dx * endRatio, ent.y + dy * endRatio
+            );
+        }
+
+        // 2. 繪製縮放光圈
+        const time = Date.now() * cfg.pulseSpeed;
+        const scale = (Math.sin(time) + 1) / 2; // 0 ~ 1
+        const radius = cfg.circleMinRadius + (cfg.circleMaxRadius - cfg.circleMinRadius) * scale;
+
+        g.lineStyle(2, circleColor, cfg.circleAlpha);
+        g.strokeCircle(ent.rallyPoint.x, ent.rallyPoint.y, radius);
+
+        g.fillStyle(circleColor, cfg.circleAlpha * 0.3);
+        g.fillCircle(ent.rallyPoint.x, ent.rallyPoint.y, radius * 0.6);
     }
 
     updateEntities(visibleEntities, allEntities) {

@@ -29,6 +29,11 @@ export class CharacterRenderer {
             bodyBob = Math.sin(t * 10) * 2;
         }
 
+        // 0. 繪製選中光圈 (在最下面)
+        if (window.GameEngine && window.GameEngine.state.selectedUnitId === unitData.id) {
+            this.drawSelectionRing(ctx, x, y, time);
+        }
+
         // 1. 繪製陰影
         this.drawShadow(ctx, x, y);
 
@@ -44,6 +49,29 @@ export class CharacterRenderer {
 
         // 5. 繪製手臂與工具
         this.renderArmsAndTools(ctx, x, bodyY, unitData, t);
+    }
+
+    static drawSelectionRing(ctx, x, y, time) {
+        const pulse = (Math.sin(time * 0.01) + 1) / 2; // 0 ~ 1
+        const radius = 20 + pulse * 5;
+        const alpha = 0.5 + pulse * 0.5;
+
+        if (ctx.lineStyle !== undefined) {
+            // Phaser Graphics
+            ctx.lineStyle(2, 0x00ffff, alpha);
+            ctx.strokeCircle(x, y + 15, radius);
+            ctx.fillStyle(0x00ffff, alpha * 0.3);
+            ctx.fillCircle(x, y + 15, radius - 2);
+        } else {
+            // Canvas Context
+            ctx.strokeStyle = `rgba(0, 255, 255, ${alpha})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(x, y + 15, radius, radius * 0.4, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = `rgba(0, 255, 255, ${alpha * 0.3})`;
+            ctx.fill();
+        }
     }
 
     static drawShadow(ctx, x, y) {

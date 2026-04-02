@@ -40,7 +40,8 @@ export class GameEngine {
         },
         idToNameMap: {}, // NPC ID -> NPC Name (用於從 buildings.csv 定義的 ID 找配置)
         renderVersion: 0, // 用於通知渲染器強行刷新
-        pathfinding: null // 尋路系統實例
+        pathfinding: null, // 尋路系統實例
+        selectedUnitId: null // 目前選中的單位 ID (用於調試)
     };
 
 
@@ -257,7 +258,8 @@ export class GameEngine {
                 idxAtk = headers.indexOf('attack'),
                 idxCbtSpeed = headers.lastIndexOf('speed'), // 取得後面那個戰鬥位移速度
                 idxAtkSpeed = headers.indexOf('attack_speed'),
-                idxRange = headers.indexOf('range');
+                idxRange = headers.indexOf('range'),
+                idxType = headers.indexOf('type');
 
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -270,6 +272,7 @@ export class GameEngine {
                 this.state.npcConfigs[name] = {
                     id: id,
                     name: name,
+                    type: row[idxType] ? row[idxType].trim() : 'other',
                     speed: parseFloat(row[idxSpeed]) || 5.5,
                     collection_speed: parseFloat(row[idxCollect]) || 10,
                     collection_amount: parseFloat(row[headers.indexOf('collection_resource')]) || 20,
@@ -535,9 +538,18 @@ export class GameEngine {
         };
 
         this.state.units.villagers.push(v);
+
         // 如果是村民，則賦予採集任務
-        if (v.type !== 'GUARD' && v.config.type === 'villagers') {
+        if (v.config.type === 'villagers') {
             this.assignNextTask(v);
+        }
+
+        // 如果仍為 IDLE (表示沒被指派採集任務)，且建築有集結點，則走向集結點
+        if (v.state === 'IDLE' && building && building.rallyPoint) {
+            // 加入些許隨機偏置避免重疊 (集結點單位不要全擠成一團)
+            const offsetX = (Math.random() - 0.5) * 60;
+            const offsetY = (Math.random() - 0.5) * 60;
+            v.idleTarget = { x: building.rallyPoint.x + offsetX, y: building.rallyPoint.y + offsetY };
         }
         return true;
     }
@@ -734,6 +746,13 @@ export class GameEngine {
         });
 
         this.state.pathfinding.setGrid(matrix);
+
+        // 核心要求：網格更新後，所有正在移動中的單位必須重新計算路徑，以避開剛生成的建築
+        this.state.units.villagers.forEach(v => {
+            v.fullPath = null;
+            v.pathIndex = 0;
+            v._lastTargetPos = null; // 強制重置追蹤位置
+        });
     }
 
 
@@ -748,6 +767,23 @@ export class GameEngine {
     }
 
     static updateVillagerMovement(v, dt) {
+        // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
+        if (v.config.type !== 'villagers') {
+            const oldX = v.x, oldY = v.y;
+            const moveSpeed = (v.config.speed || 5.5) * 13;
+            if (v.state === 'IDLE' && v.idleTarget) {
+                this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
+                if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) v.idleTarget = null;
+            }
+            // 基礎碰撞處理
+            const colliding = this.isColliding(v.x, v.y);
+            if (colliding) {
+                if (this.isColliding(oldX, oldY) !== colliding) { v.x = oldX; v.y = oldY; }
+                else { this.resolveStuck(v); }
+            }
+            return;
+        }
+
         // 優先前往分派的倉庫，否則前往最近存放點
         if (v.assignedWarehouseId) {
             const w = this.state.mapEntities.find(e => (e.id || `${e.type}_${e.x}_${e.y}`) === v.assignedWarehouseId);
@@ -760,6 +796,14 @@ export class GameEngine {
         const baseSpeed = v.config.speed || 5.5;
         const configSpeed = (v.state === 'IDLE' ? (this.state.systemConfig.village_standby_speed || 3) : Math.max(baseSpeed, 6.0));
         const moveSpeed = configSpeed * 13; // 統一係數，工作狀態基礎速度稍微由 5.5 提升至 6.0
+
+        // [TEST] 紀錄狀態變遷 (僅限選中單位)
+        if (v.id === GameEngine.state.selectedUnitId && v._lastRecordedState !== v.state) {
+            const msg = `[狀態轉進] ${v.configName}: ${v._lastRecordedState || 'IDLE'} -> ${v.state} (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`;
+            console.log(`%c${msg}`, "color: #4fc3f7; font-weight: bold;");
+            GameEngine.addLog(msg, 'STATE');
+            v._lastRecordedState = v.state;
+        }
 
         switch (v.state) {
             case 'IDLE':
@@ -881,40 +925,42 @@ export class GameEngine {
                 }
                 v.constructionTarget.buildProgress += dt;
                 if (v.constructionTarget.buildProgress >= v.constructionTarget.buildTime) {
-                    v.constructionTarget.isUnderConstruction = false;
+                    const finishedBuilding = v.constructionTarget; // 鎖定當前完工建築引用
+                    finishedBuilding.isUnderConstruction = false;
                     this.state.renderVersion++; // 通知渲染器刷新
-                    const type = v.constructionTarget.type;
-                    v.constructionTarget.name = this.state.buildingConfigs[type].name;
+                    const type = finishedBuilding.type;
+                    finishedBuilding.name = this.state.buildingConfigs[type].name;
 
                     // 如果是農田或樹木田，初始化資源量並設為資源節點
                     if (type === 'farmland' || type === 'tree_plantation') {
-                        v.constructionTarget.resourceType = (type === 'farmland' ? 'FOOD' : 'WOOD');
-                        v.constructionTarget.amount = this.state.buildingConfigs[type].resourceValue || 500;
+                        finishedBuilding.resourceType = (type === 'farmland' ? 'FOOD' : 'WOOD');
+                        finishedBuilding.amount = this.state.buildingConfigs[type].resourceValue || 500;
                     }
 
                     if (type === 'farmhouse') this.state.buildings.farmhouse++;
                     this.addLog(`建造完成：${this.state.buildingConfigs[type].name}。`);
 
-                    // 核心修復：建築完工後必須立即更新尋路格網，否則脫困機制會判定該處依然「可通行」
+                    // 核心要求：建築完工後必須立即更新尋路格網
                     GameEngine.updatePathfindingGrid();
 
-                    // 自動脫困：檢查是否有村民被「壓」在剛蓋好的實體下，立即推開
+                    // 自動脫困：使用已保存的 finishedBuilding 引用，確保正確推開所有被壓住的人
                     this.state.units.villagers.forEach(vi => {
                         const ignore = [vi.targetId, vi.targetBase].filter(Boolean);
-                        if (GameEngine.isColliding(vi.x, vi.y, ignore) === v.constructionTarget) {
+                        if (GameEngine.isColliding(vi.x, vi.y, ignore) === finishedBuilding) {
+                            // 觸發防卡死機制
                             GameEngine.resolveStuck(vi);
                         }
                     });
+                    // 3. 建造完成後刷新尋路格網數據 (重要!)
+                    this.updatePathfindingGrid();
 
-                    // 自動指派後續工作：優先尋找下一個「最近」且需建造的目標
+                    // 自動指派後續工作
                     let nextConstruction = null;
                     let minCDist = Infinity;
                     this.state.mapEntities.forEach(e => {
-                        if (e.isUnderConstruction && e !== v.constructionTarget) {
-                            // 檢查是否已有人前往此工地
+                        if (e.isUnderConstruction && e !== finishedBuilding) {
                             const isClaimed = this.state.units.villagers.some(vi => vi !== v && vi.constructionTarget === e);
                             if (isClaimed) return;
-
                             const d = Math.hypot(e.x - v.x, e.y - v.y);
                             if (d < minCDist) { minCDist = d; nextConstruction = e; }
                         }
@@ -925,24 +971,20 @@ export class GameEngine {
                         v.constructionTarget = nextConstruction;
                         v.pathTarget = null;
                         this.addLog(`工人前往建設下一個目標：${nextConstruction.name || nextConstruction.type}。`);
-                    } else if (['timber_factory', 'stone_factory', 'barn'].includes(type)) {
-                        // 倉庫建造完後，建造者自動轉為該倉庫的專職員工
-                        v.assignedWarehouseId = (v.constructionTarget.id || `${v.constructionTarget.type}_${v.constructionTarget.x}_${v.constructionTarget.y}`);
-                        v.type = (type === 'timber_factory' ? 'WOOD' : (type === 'stone_factory' ? 'STONE' : 'FOOD'));
+                    } else if (['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(type)) {
+                        v.assignedWarehouseId = (finishedBuilding.id || `${finishedBuilding.type}_${finishedBuilding.x}_${finishedBuilding.y}`);
+                        v.type = (type === 'timber_factory' ? 'WOOD' : (type === 'stone_factory' ? 'STONE' : (type === 'barn' ? 'FOOD' : 'GOLD')));
                         v.state = 'MOVING_TO_RESOURCE';
-                        v.targetId = null; v.pathTarget = null; v.prevTask = null;
-                        this.addLog(`建造者已自動轉為 ${v.constructionTarget.name} 的專職員工。`);
+                        v.targetId = null; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
+                        this.addLog(`建造者已自動轉為 ${finishedBuilding.name} 的專職員工。`);
                     } else if (type === 'farmland' || type === 'tree_plantation') {
-                        // 農田/樹木田建造完後，建造者直接原地開始採集，佔住坑位
                         v.type = (type === 'farmland' ? 'FOOD' : 'WOOD');
-                        v.state = 'GATHERING'; v.targetId = v.constructionTarget; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null;
+                        v.state = 'GATHERING'; v.targetId = finishedBuilding; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
                         this.addLog(`建造者開始原地${type === 'farmland' ? '耕作' : '伐木'}。`);
-                    } else if (type === 'barn') {
-                        v.type = 'FOOD'; v.state = 'MOVING_TO_RESOURCE'; v.targetId = null; v.pathTarget = null; v.prevTask = null;
                     } else {
                         this.restoreVillagerTask(v);
+                        v.constructionTarget = null; // 恢復舊任務後清空工程目標
                     }
-                    v.constructionTarget = null;
                 }
                 break;
         }
@@ -956,9 +998,29 @@ export class GameEngine {
             if (wasColliding !== collidingEnt) {
                 // 如果原本不在這個建築裡面（或是剛從別處撞進來），阻擋
                 v.x = oldX; v.y = oldY; v.pathTarget = null;
+                
+                // [防卡死強化] 如果被物理碰撞反覆阻擋超過一定次數，視同卡死，強制脫困
+                v._stuckFrames = (v._stuckFrames || 0) + 1;
+                if (v._stuckFrames > 30) {
+                    this.resolveStuck(v);
+                    v._stuckFrames = 0;
+                }
             } else {
                 // 連動脫困邏輯：原就在建築內，可能因為剛蓋好建築被壓住，啟動 8 方向螺旋搜尋脫困
                 this.resolveStuck(v);
+                v._stuckFrames = 0;
+            }
+        } else {
+            // 沒撞到，重設計數器
+            if (Math.hypot(v.x - oldX, v.y - oldY) > 0.1) {
+                v._stuckFrames = 0;
+            } else if (v.state.startsWith('MOVING')) {
+                // 有在動但坐標完全沒變 (可能是被其他邏輯擋到)
+                v._stuckFrames = (v._stuckFrames || 0) + 1;
+                if (v._stuckFrames > 60) {
+                    this.resolveStuck(v);
+                    v._stuckFrames = 0;
+                }
             }
         }
 
@@ -1008,7 +1070,11 @@ export class GameEngine {
     }
 
     static assignNextTask(v) {
-        if (v.isRecalled) { v.state = 'IDLE'; return; }
+        // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集工作能力
+        if (v.config.type !== 'villagers' || v.isRecalled) {
+            v.state = 'IDLE';
+            return;
+        }
 
         // 1. 優先找「待施工」建築 (過濾掉已有人在蓋的工地)
         const nextConstruction = this.state.mapEntities.find(e => {
@@ -1129,15 +1195,26 @@ export class GameEngine {
 
         // 如果目前沒有路徑且也沒在尋路中，發起非同步尋路請求
         if (!v.fullPath && !v.isFindingPath && this.state.pathfinding) {
+            if (v.id === GameEngine.state.selectedUnitId) {
+                const msg = `[尋路請求] (${v.x.toFixed(0)}, ${v.y.toFixed(0)}) -> (${tx.toFixed(0)}, ${ty.toFixed(0)})`;
+                console.log(`%c${msg}`, "color: #ffeb3b; font-weight: bold;");
+                GameEngine.addLog(msg, 'PATH');
+            }
             v.isFindingPath = true;
             this.state.pathfinding.findPath(v.x, v.y, tx, ty, (path) => {
                 v.isFindingPath = false;
                 if (path && path.length > 1) {
                     v.fullPath = path;
                     v.pathIndex = 1; // 跳過起點
+                    if (v.id === GameEngine.state.selectedUnitId) {
+                        GameEngine.addLog(`[尋路成功] 路徑長度: ${path.length}`, 'PATH');
+                    }
                 } else {
                     // 尋路失敗，設為空避免重複頻繁請求
                     v.fullPath = [];
+                    if (v.id === GameEngine.state.selectedUnitId) {
+                        GameEngine.addLog(`[尋路失敗!] 無法到達 (${tx.toFixed(0)}, ${ty.toFixed(0)})`, 'PATH');
+                    }
                 }
             });
         }
@@ -1154,6 +1231,12 @@ export class GameEngine {
                 v.x = node.x;
                 v.y = node.y;
                 v.pathIndex++;
+                
+                // [TEST] 當走到下一個節點時，於 UI 日誌顯示新目標點
+                if (v.id === GameEngine.state.selectedUnitId && v.fullPath && v.pathIndex < v.fullPath.length) {
+                    const nextNode = v.fullPath[v.pathIndex];
+                    GameEngine.addLog(`   ┗ 前往下一點: (${nextNode.x.toFixed(0)}, ${nextNode.y.toFixed(0)})`, 'PATH');
+                }
             } else {
                 // 修正位移速度 (Velocity Normalization): Vx^2 + Vy^2 = Speed^2
                 // dx/dist 是方向向量的餘弦, dy/dist 是正弦, 確保斜向移動不加速 (1.41x)
@@ -1172,17 +1255,28 @@ export class GameEngine {
      */
     static resolveStuck(v) {
         if (!this.state.pathfinding) return;
+        
+        const isSelected = v.id === GameEngine.state.selectedUnitId;
+        if (isSelected) {
+            GameEngine.addLog(`[防卡死觸發] ${v.configName}, 狀態: ${v.state}, 座標: (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`, 'PATH');
+        }
+
         const gx = Math.floor(v.x / this.TILE_SIZE);
         const gy = Math.floor(v.y / this.TILE_SIZE);
-        const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100); // 擴大搜索範圍，保證能跨越大片密集建築區
+        const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100); 
         if (nearest) {
-            // 將單位送往目標格中心，避免邊緣碰撞
             v.x = nearest.x * this.TILE_SIZE + this.TILE_SIZE / 2;
             v.y = nearest.y * this.TILE_SIZE + this.TILE_SIZE / 2;
             v.fullPath = null;
             v.pathIndex = 0;
             v.pathTarget = null;
-            console.log(`單位脫困成功: 新座標 (${v.x.toFixed(1)}, ${v.y.toFixed(1)})`);
+            if (isSelected) {
+                GameEngine.addLog(`[防卡死修復] 已移至自由點: (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`, 'PATH');
+            }
+        } else {
+            if (isSelected) {
+                GameEngine.addLog(`[防卡死失敗] 找不到脫困空間!`, 'PATH');
+            }
         }
     }
 
@@ -1292,6 +1386,7 @@ export class GameEngine {
         warehouses.forEach(w => warehouseMap.set(w.id || `${w.type}_${w.x}_${w.y}`, { entity: w, workers: [] }));
 
         this.state.units.villagers.forEach(v => {
+            if (v.config.type !== 'villagers') return; // 僅村民可指派倉庫工作
             if (v.assignedWarehouseId) {
                 const data = warehouseMap.get(v.assignedWarehouseId);
                 if (!data) {
@@ -1371,7 +1466,7 @@ export class GameEngine {
             this.state.currentGlobalCommand = 'IDLE';
             // 讓受影響的人立即停止手邊的工作回歸閒置
             this.state.units.villagers.forEach(v => {
-                if (v.assignedWarehouseId) return;
+                if (v.config.type !== 'villagers' || v.assignedWarehouseId) return;
                 if (v.state === 'MOVING_TO_CONSTRUCTION' || v.state === 'CONSTRUCTING') return;
                 if (v.type === commandType && (v.state === 'MOVING_TO_RESOURCE' || v.state === 'GATHERING' || v.state === 'MOVING_TO_BASE')) {
                     v.state = 'IDLE';
@@ -1385,6 +1480,7 @@ export class GameEngine {
         this.state.currentGlobalCommand = commandType;
         if (commandType === 'RETURN') {
             this.state.units.villagers.forEach(v => {
+                if (v.config.type !== 'villagers') return;
                 // 正在建造的村民不執行回城指令，除非建造完成
                 if (v.state === 'MOVING_TO_CONSTRUCTION' || v.state === 'CONSTRUCTING') return;
                 v.state = 'MOVING_TO_BASE'; v.isRecalled = true; v.pathTarget = null;
@@ -1394,6 +1490,7 @@ export class GameEngine {
         }
         this.addLog(`全員動員：開始採集 ${this.RESOURCE_NAMES[commandType.toLowerCase()] || commandType}。`);
         this.state.units.villagers.forEach(v => {
+            if (v.config.type !== 'villagers') return;
 
             // 指令影響閒置中的工人，或是以村莊中心 (village) 為放置點的工人
             const isIdle = v.state === 'IDLE';
@@ -1464,8 +1561,8 @@ export class GameEngine {
         if (window.UIManager) window.UIManager.updateValues();
     }
 
-    static addLog(msg) {
-        this.state.log.push(msg);
+    static addLog(msg, category = 'COMMON') {
+        this.state.log.push({ msg, category, id: Date.now() + Math.random() });
         if (this.state.log.length > 100) this.state.log.shift();
     }
 

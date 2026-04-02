@@ -89,11 +89,14 @@ export class PathfindingSystem {
         // 起點保護：如果村民目前被視為站在障礙物內，也協助將起點強制「漂移」到周圍最近的安全格，以順利起步
         let finalGx1 = gx1, finalGy1 = gy1;
         if (this.grid[finalGy1][finalGx1] !== 0) {
+            // 觸發防卡死機制
             const nearestStart = this.getNearestWalkableTile(finalGx1, finalGy1, 3);
             if (nearestStart) { finalGx1 = nearestStart.x; finalGy1 = nearestStart.y; }
         }
 
         this.easystar.findPath(finalGx1, finalGy1, gx2, gy2, (path) => {
+            const isSelected = (GameEngine.state.selectedUnitId && Date.now() - GameEngine.state.lastSelectionTime < 10000); // 這裡需要一個過濾方式，或者傳入 ID
+            // 為了方便，我們預設印出所有關於選中單位的路徑請求
             if (path) {
                 // 將格網座標轉回像素座標 (中心點)
                 const pixelPath = path.map(p => ({
