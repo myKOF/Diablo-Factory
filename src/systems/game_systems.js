@@ -853,8 +853,8 @@ export class GameEngine {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
         if (v.config.type !== 'villagers') {
             const oldX = v.x, oldY = v.y;
-            // 決定移動速度 (閒置閒逛用 idle_speed, 其餘用 fighting_speed)
-            const moveBaseSpeed = (v.state === 'IDLE') ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
+            // 決定移動速度：如果有 idleTarget (巡邏目標)，優先讀取 idle_speed 避免跑得太快
+            const moveBaseSpeed = (v.idleTarget) ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
             const moveSpeed = moveBaseSpeed * 13;
             if (v.idleTarget) {
                 v.state = 'MOVING';
@@ -878,12 +878,12 @@ export class GameEngine {
 
                     v.waitTimer = minWait + Math.random() * (maxWait - minWait);
                 }
-            } else if (v.state === 'IDLE' && v.config.patrolRange > 0) {
+            } else if (v.state === 'IDLE' && v.config.patrol_range > 0) {
                 // 動物或敵人的巡邏邏輯
                 if (v.waitTimer > 0) {
                     v.waitTimer -= dt;
                 } else {
-                    const pr = v.config.patrolRange * this.TILE_SIZE;
+                    const pr = v.config.patrol_range * this.TILE_SIZE;
                     const angle = Math.random() * Math.PI * 2;
                     const dist = Math.random() * pr;
                     v.idleTarget = {
