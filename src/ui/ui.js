@@ -714,13 +714,25 @@ export class UIManager {
 
         let uw = 1, uh = 1;
         if (cfg && cfg.size) {
-            const match = cfg.size.match(/\{(\d+),(\d+)\}/);
+            const match = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
             if (match) { uw = parseInt(match[1]); uh = parseInt(match[2]); }
         }
 
-        // 在統一的 20px 網格下，直接對齊到最近的 TILE_SIZE 即可
-        const gx = Math.round((local.x + cam.x) / TS);
-        const gy = Math.round((local.y + cam.y) / TS);
+        // 核心對齊演算法：
+        // 奇數尺寸 (1x1, 3x3) 的建築物中心點應在「格子正中央」 (例如 x.5 * 20)
+        // 偶數尺寸 (2x2) 的建築物中心點應在「格子交界線上」 (例如 x.0 * 20)
+        let gx, gy;
+        if (uw % 2 !== 0) {
+            gx = Math.floor((local.x + cam.x) / TS) + 0.5;
+        } else {
+            gx = Math.round((local.x + cam.x) / TS);
+        }
+
+        if (uh % 2 !== 0) {
+            gy = Math.floor((local.y + cam.y) / TS) + 0.5;
+        } else {
+            gy = Math.round((local.y + cam.y) / TS);
+        }
 
         return {
             x: gx * TS,

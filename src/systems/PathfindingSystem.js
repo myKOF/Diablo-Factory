@@ -78,7 +78,7 @@ export class PathfindingSystem {
 
         // 核心修復：如果目標本身是不可行走區域（如倉庫、城鎮中心），自動導航到其「邊緣最近的空地」
         if (this.grid[gy2][gx2] !== 0) {
-            const nearestEnd = this.getNearestWalkableTile(gx2, gy2, 5); // 在5格半徑內找最近著陸點
+            const nearestEnd = this.getNearestWalkableTile(gx2, gy2, 5, false); // 修改為格網索引模式
             if (nearestEnd) {
                 gx2 = nearestEnd.x;
                 gy2 = nearestEnd.y;
@@ -91,7 +91,7 @@ export class PathfindingSystem {
         let finalGx1 = gx1, finalGy1 = gy1;
         if (this.grid[finalGy1][finalGx1] !== 0) {
             // 觸發防卡死機制
-            const nearestStart = this.getNearestWalkableTile(finalGx1, finalGy1, 3);
+            const nearestStart = this.getNearestWalkableTile(finalGx1, finalGy1, 10, false); // 修改為格網索引模式，加大半徑
             if (nearestStart) { finalGx1 = nearestStart.x; finalGy1 = nearestStart.y; }
         }
 
@@ -113,18 +113,19 @@ export class PathfindingSystem {
 
     /**
      * getNearestWalkableTile: 螺旋搜尋最近的可行格
-     * 連動脫困邏輯：支援 8 方向檢測，提高脫困效率
-     * @param {number} gx 
-     * @param {number} gy 
-     * @param {number} maxRadius 
-     * @returns {{x: number, y: number} | null}
+     * @param {number} gx 座標X
+     * @param {number} gy 座標Y
+     * @param {number} maxRadius 搜尋半徑
+     * @param {boolean} isAbsolute 是世界座標(需扣offset)還是網格索引(不需扣)
+     * @returns {{x: number, y: number} | null} 回傳與輸入相同類別的座標
      */
     getNearestWalkableTile(gx, gy, maxRadius = 10, isAbsolute = true) {
         if (!this.isGridSet || !this.grid) return null;
         const offset = isAbsolute ? (GameEngine.state.mapOffset || { x: 0, y: 0 }) : { x: 0, y: 0 };
         const lgx = gx - offset.x, lgy = gy - offset.y;
 
-        if (this.grid[lgy] && this.grid[lgy][lgx] === 0) return { x: gx, y: gy };
+        // 如果當前點就可行，直接回傳
+        if (this.isValidAndWalkable(lgx, lgy, false)) return { x: gx, y: gy };
 
         // 螺旋搜尋 (Spiral Search)
         for (let r = 1; r <= maxRadius; r++) {

@@ -1527,25 +1527,41 @@ export class GameEngine {
         if (!this.state.pathfinding) return;
 
         const isSelected = v.id === GameEngine.state.selectedUnitId;
-        if (isSelected) {
-            GameEngine.addLog(`[防卡死觸發] ${v.configName}, 狀態: ${v.state}, 座標: (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`, 'PATH');
-        }
+        const oldX = v.x, oldY = v.y;
 
+        // 計算當前所在格線座標 (絕對座標)
         const gx = Math.floor(v.x / this.TILE_SIZE);
         const gy = Math.floor(v.y / this.TILE_SIZE);
-        const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100);
+        
+        // 搜尋最近的空地 (格網索引)
+        const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100, true);
+        
         if (nearest) {
-            v.x = nearest.x * this.TILE_SIZE + this.TILE_SIZE / 2;
-            v.y = nearest.y * this.TILE_SIZE + this.TILE_SIZE / 2;
+            // 傳送至該格的像素中心
+            const targetX = nearest.x * this.TILE_SIZE + this.TILE_SIZE / 2;
+            const targetY = nearest.y * this.TILE_SIZE + this.TILE_SIZE / 2;
+            
+            // 如果位移非常小 (小於 1px)，表示 getNearest 找到的就是目前位置，但可能因為精度問題微卡
+            // 此時稍微隨機偏移一下，協助物理引擎跳出
+            if (Math.hypot(targetX - oldX, targetY - oldY) < 1) {
+                v.x += (Math.random() - 0.5) * 5;
+                v.y += (Math.random() - 0.5) * 5;
+            } else {
+                v.x = targetX;
+                v.y = targetY;
+            }
+
             v.fullPath = null;
             v.pathIndex = 0;
             v.pathTarget = null;
+            v._stuckFrames = 0; // 重置計數
+
             if (isSelected) {
-                GameEngine.addLog(`[防卡死修復] 已移至自由點: (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`, 'PATH');
+                GameEngine.addLog(`[防卡死修復] 已由 (${oldX.toFixed(0)},${oldY.toFixed(0)}) 移至 (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`, 'PATH');
             }
         } else {
             if (isSelected) {
-                GameEngine.addLog(`[防卡死失敗] 找不到脫困空間!`, 'PATH');
+                GameEngine.addLog(`[防卡死失敗] 100格半徑內找不到脫困空間!`, 'PATH');
             }
         }
     }
@@ -1803,18 +1819,21 @@ export class GameEngine {
             if (v.state === 'CONSTRUCTING' || v.state === 'MOVING_TO_CONSTRUCTION') return;
             if (v.targetId && (v.targetId.type === 'farmland' || v.targetId.type === 'tree_plantation')) return;
 
-            // 指令優先影響：閒置中的工人、倉庫工人（採集場工人）以及預設以村莊中心為基礎的通用工人
+            // 只有「通用工人」(沒有被分配到特定採集場) 才受全域指令控制
+            if (v.assignedWarehouseId) return;
+
             const isIdle = v.state === 'IDLE';
-            const isWarehouseWorker = !!v.assignedWarehouseId;
             const isVillageWorker = v.targetBase && v.targetBase.type === 'village';
 
-            if (isIdle || isWarehouseWorker || isVillageWorker) {
+            if (isIdle || isVillageWorker) {
                 v.type = commandType;
                 v.state = 'MOVING_TO_RESOURCE';
                 v.targetId = null;
                 v.isRecalled = false;
                 v.pathTarget = null;
                 v.workOffset = null; // 切換任務時清除偏移量
+                // 通用任務一律回傳給城鎮中心處理
+                v.targetBase = this.findNearestDepositPoint(v.x, v.y, v.type);
             }
         });
         if (window.UIManager) window.UIManager.updateValues();
