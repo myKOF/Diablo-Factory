@@ -66,10 +66,11 @@ export class PathfindingSystem {
     findPath(startX, startY, endX, endY, callback) {
         if (!this.isGridSet) return;
 
-        const gx1 = Math.floor(startX / this.tileSize);
-        const gy1 = Math.floor(startY / this.tileSize);
-        let gx2 = Math.floor(endX / this.tileSize);
-        let gy2 = Math.floor(endY / this.tileSize);
+        const offset = (GameEngine.state.mapOffset) || { x: 0, y: 0 };
+        const gx1 = Math.floor(startX / this.tileSize) - offset.x;
+        const gy1 = Math.floor(startY / this.tileSize) - offset.y;
+        let gx2 = Math.floor(endX / this.tileSize) - offset.x;
+        let gy2 = Math.floor(endY / this.tileSize) - offset.y;
 
         // 邊界檢查
         if (gy1 < 0 || gy1 >= this.grid.length || gx1 < 0 || gx1 >= this.grid[0].length) { callback(null); return; }
@@ -100,8 +101,8 @@ export class PathfindingSystem {
             if (path) {
                 // 將格網座標轉回像素座標 (中心點)
                 const pixelPath = path.map(p => ({
-                    x: p.x * this.tileSize + this.tileSize / 2,
-                    y: p.y * this.tileSize + this.tileSize / 2
+                    x: (p.x + offset.x) * this.tileSize + this.tileSize / 2,
+                    y: (p.y + offset.y) * this.tileSize + this.tileSize / 2
                 }));
                 callback(pixelPath);
             } else {
@@ -118,34 +119,39 @@ export class PathfindingSystem {
      * @param {number} maxRadius 
      * @returns {{x: number, y: number} | null}
      */
-    getNearestWalkableTile(gx, gy, maxRadius = 10) {
+    getNearestWalkableTile(gx, gy, maxRadius = 10, isAbsolute = true) {
         if (!this.isGridSet || !this.grid) return null;
-        if (this.grid[gy] && this.grid[gy][gx] === 0) return { x: gx, y: gy };
+        const offset = isAbsolute ? (GameEngine.state.mapOffset || { x: 0, y: 0 }) : { x: 0, y: 0 };
+        const lgx = gx - offset.x, lgy = gy - offset.y;
+
+        if (this.grid[lgy] && this.grid[lgy][lgx] === 0) return { x: gx, y: gy };
 
         // 螺旋搜尋 (Spiral Search)
         for (let r = 1; r <= maxRadius; r++) {
             // 從上方橫向搜尋 (含對角線)
-            for (let x = gx - r; x <= gx + r; x++) {
-                if (this.isValidAndWalkable(x, gy - r)) return { x, y: gy - r };
+            for (let x = lgx - r; x <= lgx + r; x++) {
+                if (this.isValidAndWalkable(x, lgy - r, false)) return { x: x + offset.x, y: gy - r };
             }
             // 從下方橫向搜尋
-            for (let x = gx - r; x <= gx + r; x++) {
-                if (this.isValidAndWalkable(x, gy + r)) return { x, y: gy + r };
+            for (let x = lgx - r; x <= lgx + r; x++) {
+                if (this.isValidAndWalkable(x, lgy + r, false)) return { x: x + offset.x, y: gy + r };
             }
             // 從左側縱向搜尋
-            for (let y = gy - r + 1; y < gy + r; y++) {
-                if (this.isValidAndWalkable(gx - r, y)) return { x: gx - r, y };
+            for (let y = lgy - r + 1; y < lgy + r; y++) {
+                if (this.isValidAndWalkable(lgx - r, y, false)) return { x: gx - r, y: y + offset.y };
             }
             // 從右側縱向搜尋
-            for (let y = gy - r + 1; y < gy + r; y++) {
-                if (this.isValidAndWalkable(gx + r, y)) return { x: gx + r, y };
+            for (let y = lgy - r + 1; y < lgy + r; y++) {
+                if (this.isValidAndWalkable(lgx + r, y, false)) return { x: gx + r, y: y + offset.y };
             }
         }
         return null;
     }
 
-    isValidAndWalkable(x, y) {
-        return (y >= 0 && y < this.grid.length && x >= 0 && x < this.grid[0].length && this.grid[y][x] === 0);
+    isValidAndWalkable(x, y, isAbsolute = true) {
+        const offset = isAbsolute ? (GameEngine.state.mapOffset || { x: 0, y: 0 }) : { x: 0, y: 0 };
+        const lx = x - offset.x, ly = y - offset.y;
+        return (ly >= 0 && ly < this.grid.length && lx >= 0 && lx < this.grid[0].length && this.grid[ly][lx] === 0);
     }
 
     /**

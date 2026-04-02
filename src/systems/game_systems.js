@@ -75,9 +75,14 @@ export class GameEngine {
 
         this.generateMap();
 
-        this.spawnNPC('villagers');
-        this.spawnNPC('female villagers');
-        this.spawnNPC('villagers');
+        const tc = this.state.mapEntities.find(e => e.id === 'core_village');
+        const bx = tc ? tc.x : 960;
+        const by = tc ? tc.y : 560;
+
+        // 核心設定：一開始出生的三個市民由城鎮中心下方的三個合適點位出生，避免重疊
+        this.spawnNPC('villagers', null, { x: bx - 40, y: by + 60 });
+        this.spawnNPC('female villagers', null, { x: bx, y: by + 60 });
+        this.spawnNPC('villagers', null, { x: bx + 40, y: by + 60 });
 
         this.lastTickTime = Date.now();
         this.initBackgroundWorker();
@@ -614,7 +619,17 @@ export class GameEngine {
         if (v.config.type === 'villagers') this.assignNextTask(v);
 
         if (v.state === 'IDLE' && building && building.rallyPoint) {
-            v.idleTarget = { x: building.rallyPoint.x, y: building.rallyPoint.y };
+            // 為集結點計算偏移量，讓單位以 5xN 的方塊形式排列，相隔 1 格 (20px)
+            const idx = building.spawnIdx - 1; // 剛才已經 ++ 過了
+            const spacing = 20; 
+            const gridW = 5;
+            const offsetX = (idx % gridW - Math.floor(gridW / 2)) * spacing;
+            const offsetY = (Math.floor(idx / gridW)) * spacing;
+            
+            v.idleTarget = { 
+                x: building.rallyPoint.x + offsetX, 
+                y: building.rallyPoint.y + offsetY 
+            };
         }
         return true;
     }
@@ -664,6 +679,7 @@ export class GameEngine {
         // 將村莊中心 (960, 560) 近似地圖中央
         const minGX = Math.floor(960 / TS) - Math.floor(cols / 2);
         const minGY = Math.floor(560 / TS) - Math.floor(rows / 2);
+        this.state.mapOffset = { x: minGX, y: minGY };
 
         const occupied = new Uint8Array(cols * rows); // 使用 TypedArray 替代 Set，效能大幅提升
 
@@ -862,9 +878,10 @@ export class GameEngine {
                 const minX = ent.x - bWidth / 2, minY = ent.y - bHeight / 2;
                 const gx = Math.round(minX / TS), gy = Math.round(minY / TS);
 
+                const offset = this.state.mapOffset || { x: 0, y: 0 };
                 for (let i = 0; i < uw; i++) {
                     for (let j = 0; j < uh; j++) {
-                        const targetX = gx + i, targetY = gy + j;
+                        const targetX = (gx + i) - offset.x, targetY = (gy + j) - offset.y;
                         if (targetY >= 0 && targetY < rows && targetX >= 0 && targetX < cols) {
                             matrix[targetY][targetX] = 1; // 障礙物
                         }
@@ -1669,7 +1686,11 @@ export class GameEngine {
         warehouses.forEach(w => warehouseMap.set(w.id || `${w.type}_${w.x}_${w.y}`, { entity: w, workers: [] }));
 
         this.state.units.villagers.forEach(v => {
-            if (v.config.type !== 'villagers') return; // 僅村民可指派倉庫工作
+            // 核心修復：核心邏輯僅限於我方村民，非我方或非建築工之單位不應持有倉庫 ID
+            if (!v.config || v.config.type !== 'villagers' || v.config.camp !== 'player') {
+                v.assignedWarehouseId = null; 
+                return;
+            }
             if (v.assignedWarehouseId) {
                 const data = warehouseMap.get(v.assignedWarehouseId);
                 if (!data) {
@@ -1683,7 +1704,10 @@ export class GameEngine {
         });
 
         // 2. 處理每個倉庫的溢出與缺額
-        let allIdle = this.state.units.villagers.filter(v => v.state === 'IDLE' && !v.assignedWarehouseId && !v.isRecalled);
+        let allIdle = this.state.units.villagers.filter(v => 
+            v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
+            v.state === 'IDLE' && !v.assignedWarehouseId && !v.isRecalled
+        );
 
         // 先釋放溢出的人手，回歸閒置池
         warehouseMap.forEach((data, wid) => {

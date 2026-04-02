@@ -1015,7 +1015,10 @@ export class UIManager {
             // 倉庫自動化管理介面
             const isWarehouse = ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(entity.type);
             if (isWarehouse && !entity.isUnderConstruction) {
-                const currentAssigned = GameEngine.state.units.villagers.filter(v => v.assignedWarehouseId === eid).length;
+                const currentAssigned = GameEngine.state.units.villagers.filter(v => 
+                    v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
+                    v.assignedWarehouseId === eid
+                ).length;
                 html += `
                     <div class="warehouse-controls">
                         <div class="control-title">自動化採集管理</div>
@@ -1306,7 +1309,10 @@ export class UIManager {
         const statusHint = document.querySelector(".status-hint");
         if (countDisplay && statusHint && this.activeMenuEntity) {
             const ent = this.activeMenuEntity;
-            const current = GameEngine.state.units.villagers.filter(v => v.assignedWarehouseId === (ent.id || `${ent.type}_${ent.x}_${ent.y}`)).length;
+            const current = GameEngine.state.units.villagers.filter(v => 
+                v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
+                v.assignedWarehouseId === (ent.id || `${ent.type}_${ent.x}_${ent.y}`)
+            ).length;
             countDisplay.innerText = `${current} / ${ent.targetWorkerCount || 0}`;
             statusHint.innerText = `派遣狀態`;
         }

@@ -8,6 +8,6 @@ id,name,model,type,max_count,size,collision,population,need_resource,building_ti
 6,金礦場,gold_mining_factory,gold_mining_factory,99,"{3,3}",1,0,{wood=50},7.5,0,,,,可放置黃金的建築
 7,農田,farmland,farmland,99,"{6,6}",0,0,"{food=100,wood=100}",10,1,{food=500},,,可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造
 8,樹木田,tree_plantation,tree_plantation,99,"{6,6}",0,0,"{food=100,wood=100}",10,1,{wood=500},,,可自動生產木材的建築，需要村民來維持生產，資源量耗盡時需重新建造
-9,劍士訓練所,swordsman_place,swordsman_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=200}",20,0,,{3},normal,劍士的訓練所
-10,魔法學院,mage_place,mage_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=200}",20,0,,{4},normal,法師的訓練所
-11,射箭場,archer_place,archer_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=200}",20,0,,{5},normal,弓箭手的訓練所
+9,劍士訓練所,swordsman_place,swordsman_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=150}",20,0,,{3},normal,劍士的訓練所
+10,魔法學院,mage_place,mage_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=150}",20,0,,{4},normal,法師的訓練所
+11,射箭場,archer_place,archer_place,10,"{6,6}",1,0,"{food=100,wood=100,stone=150}",20,0,,{5},normal,弓箭手的訓練所
