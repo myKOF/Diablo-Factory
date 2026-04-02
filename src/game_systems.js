@@ -108,7 +108,8 @@ export class GameEngine {
 
         // 處理每間城鎮中心各自的獨立生產隊列
         const maxPop = this.getMaxPopulation();
-        const isPopFull = this.state.units.villagers.length >= maxPop;
+        const currentPop = this.getCurrentPopulation();
+        const isPopFull = currentPop >= maxPop;
 
         // 偵測人口上限變動（全域一次即可）
         if (this.state.lastMaxPop > 0 && maxPop > this.state.lastMaxPop) {
@@ -259,10 +260,12 @@ export class GameEngine {
                 idxNeed = headers.indexOf('need_resource'),
                 idxHp = headers.indexOf('hp'),
                 idxAtk = headers.indexOf('attack'),
-                idxCbtSpeed = headers.lastIndexOf('speed'), // 取得後面那個戰鬥位移速度
+                idxCbtSpeed = headers.lastIndexOf('speed'),
                 idxAtkSpeed = headers.indexOf('attack_speed'),
                 idxRange = headers.indexOf('range'),
-                idxType = headers.indexOf('type');
+                idxType = headers.indexOf('type'),
+                idxCamp = headers.indexOf('camp'),
+                idxPop = headers.indexOf('population');
 
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -276,6 +279,8 @@ export class GameEngine {
                     id: id,
                     name: name,
                     type: row[idxType] ? row[idxType].trim() : 'other',
+                    camp: (row[idxCamp] && row[idxCamp].trim()) || 'player',
+                    population: parseInt(row[idxPop]) || 1,
                     speed: parseFloat(row[idxSpeed]) || 5.5,
                     collection_speed: parseFloat(row[idxCollect]) || 10,
                     collection_amount: parseFloat(row[headers.indexOf('collection_resource')]) || 20,
@@ -494,62 +499,57 @@ export class GameEngine {
     }
 
     static spawnNPC(targetIdOrName, building = null) {
-        const currentPop = this.state.units.villagers.length;
-        const maxPop = this.getMaxPopulation();
-        if (currentPop >= maxPop && this.isStarted) {
-            this.addLog(`人口上限已達 (${maxPop})，請建造農舍！`);
-            return false;
-        }
-
-        // --- 隨機生產邏輯實作 ---
+        // 1. 解析最終配置名稱 (考慮隨機生產)
         let finalConfigName = targetIdOrName;
-        // 如果 targetIdOrName 是建築生產列表中的 ID
         if (this.state.idToNameMap[targetIdOrName]) {
             finalConfigName = this.state.idToNameMap[targetIdOrName];
         } else if (building) {
-            // 檢查建築配置，判斷是否為隨機池
             const bCfg = this.state.buildingConfigs[building.type];
             if (bCfg && bCfg.productionMode === 'rand' && bCfg.npcProduction.length > 0) {
-                // 隨機選一個 ID
                 const randId = bCfg.npcProduction[Math.floor(Math.random() * bCfg.npcProduction.length)];
                 finalConfigName = this.state.idToNameMap[randId] || finalConfigName;
             }
         }
 
-        const config = this.state.npcConfigs[finalConfigName] || { speed: 5.5, collection_speed: 10 };
-        const spawnX = building ? building.x + 80 : 960 + 120;
-        const spawnY = building ? building.y + 80 : 560 + 120;
+        const config = this.state.npcConfigs[finalConfigName] || { speed: 5.5, collection_speed: 10, camp: 'player', population: 1 };
+
+        // 2. 人口上限檢查 (僅限制我方陣營)
+        const currentPop = this.getCurrentPopulation();
+        const maxPop = this.getMaxPopulation();
+        const unitPop = config.population || 1;
+
+        if (config.camp === 'player' && (currentPop + unitPop) > maxPop && this.isStarted) {
+            this.addLog(`人口上限已達 (${currentPop}/${maxPop})，不可再生產！`);
+            return false;
+        }
+
+        // 3. 實例化單位
+        const spawnX = building ? building.x + 40 : 960 + 120;
+        const spawnY = building ? building.y + 40 : 560 + 120;
 
         const v = {
-            id: Date.now() + Math.random(),
+            id: 'unit_' + Math.random().toString(36).substr(2, 9),
             x: spawnX, y: spawnY,
             state: 'IDLE', targetId: null, cargo: 0,
-            type: config.type === 'villagers' ? 'WOOD' : 'GUARD', // 非村民預設為守衛或待機
+            type: config.type === 'villagers' ? 'WOOD' : 'GUARD',
             config: config,
             configName: finalConfigName,
             gatherTimer: 0,
             idleTarget: null,
             waitTimer: 0,
             pathTarget: null,
-            // 戰鬥屬性掛載
             hp: config.hp || 100,
             maxHp: config.hp || 100,
             attack: config.attack || 10,
-            moveSpeed: config.combatSpeed || config.speed || 5, // 優先使用戰鬥位移速度
+            moveSpeed: config.combatSpeed || config.speed || 5,
             attackSpeed: config.attackSpeed || 1,
             range: config.range || 10
         };
 
         this.state.units.villagers.push(v);
+        if (v.config.type === 'villagers') this.assignNextTask(v);
 
-        // 如果是村民，則賦予採集任務
-        if (v.config.type === 'villagers') {
-            this.assignNextTask(v);
-        }
-
-        // 如果仍為 IDLE (表示沒被指派採集任務)，且建築有集結點，則走向集結點
         if (v.state === 'IDLE' && building && building.rallyPoint) {
-            // 加入些許隨機偏置避免重疊 (集結點單位不要全擠成一團)
             const offsetX = (Math.random() - 0.5) * 60;
             const offsetY = (Math.random() - 0.5) * 60;
             v.idleTarget = { x: building.rallyPoint.x + offsetX, y: building.rallyPoint.y + offsetY };
@@ -560,11 +560,20 @@ export class GameEngine {
     static getMaxPopulation() {
         let total = 0;
         this.state.mapEntities.forEach(ent => {
-            if (ent.isUnderConstruction) return; // 施工中的建築不提供人口
+            if (ent.isUnderConstruction) return;
             const cfg = this.state.buildingConfigs[ent.type];
             if (cfg && cfg.population) total += cfg.population;
         });
         return total || 5;
+    }
+
+    /**
+     * 計算當前我方陣營總佔用人口 (排除敵方與中立單位)
+     */
+    static getCurrentPopulation() {
+        return (this.state.units.villagers || [])
+            .filter(v => v.config && v.config.camp === 'player')
+            .reduce((sum, v) => sum + (v.config.population || 1), 0);
     }
 
     static generateMap() {
@@ -774,9 +783,16 @@ export class GameEngine {
         if (v.config.type !== 'villagers') {
             const oldX = v.x, oldY = v.y;
             const moveSpeed = (v.config.speed || 5.5) * 13;
-            if (v.state === 'IDLE' && v.idleTarget) {
+            // 修正：集結點移動時也給予 MOVING 狀態，以觸發步行動畫
+            if (v.idleTarget) {
+                v.state = 'MOVING';
                 this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
-                if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) v.idleTarget = null;
+                if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
+                    v.idleTarget = null;
+                    v.state = 'IDLE';
+                }
+            } else if (v.state === 'MOVING') {
+                v.state = 'IDLE'; // 抵達後重置回 IDLE
             }
             // 基礎碰撞處理
             const colliding = this.isColliding(v.x, v.y);

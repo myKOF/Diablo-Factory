@@ -1194,7 +1194,7 @@ export class UIManager {
         const rb = document.getElementById("resource_bar");
         if (rb) {
             const labels = UI_CONFIG.ResourceBar.labels;
-            const popCount = GameEngine.state.units.villagers.length;
+            const popCount = GameEngine.getCurrentPopulation();
             const maxPop = GameEngine.getMaxPopulation();
 
             const stateStr = `${res.gold}|${res.wood}|${res.stone}|${res.food}|${popCount}|${maxPop}`;
@@ -1280,7 +1280,7 @@ export class UIManager {
             const q = (tc && tc.queue) ? tc.queue.length : 0;
             const timer = (tc && tc.productionTimer !== undefined) ? tc.productionTimer : 0;
             const maxPop = GameEngine.getMaxPopulation();
-            const isPopFull = GameEngine.state.units.villagers.length >= maxPop;
+            const isPopFull = GameEngine.getCurrentPopulation() >= maxPop;
 
             if (q > 0) {
                 badge.style.display = "flex";

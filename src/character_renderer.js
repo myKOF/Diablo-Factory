@@ -19,10 +19,13 @@ export class CharacterRenderer {
         const animationSpeed = 0.01;
         const t = time * animationSpeed;
 
+        const isMoving = state.includes('MOVING'); // 精確判斷是否正在移動
+        const isIdle = (state === 'IDLE');
+
         // 步行動畫：雙腿交替
         let legOffset = 0;
         let bodyBob = 0;
-        if (state.includes('MOVING')) {
+        if (isMoving) {
             legOffset = Math.sin(t * 15) * 8;
             bodyBob = Math.abs(Math.cos(t * 15)) * 4;
         } else if (state === 'CONSTRUCTING' || state === 'GATHERING') {
@@ -182,22 +185,34 @@ export class CharacterRenderer {
         if (state === 'CONSTRUCTING') {
             const angle = Math.sin(t * 20) * 0.8;
             this.drawTool(ctx, x + 5, y + 15, 'HAMMER', angle);
+            // 繪製另一隻手臂
+            ctx.fillRect(x - 14, y + 5, 4, 18);
         } else if (state === 'GATHERING') {
             const angle = Math.sin(t * 20) * 0.8;
             const toolType = data.type === 'WOOD' ? 'AXE' : (data.type === 'STONE' || data.type === 'GOLD' ? 'PICKAXE' : 'BASKET');
             this.drawTool(ctx, x + 5, y + 15, toolType, angle);
+            // 繪製另一隻手臂
+            ctx.fillRect(x - 14, y + 5, 4, 18);
         } else if (name === 'swordsman') {
-            const angle = state.includes('MOVING') ? Math.sin(t * 10) * 0.3 : 0.2;
+            const isMoving = state.includes('MOVING');
+            const angle = isMoving ? Math.sin(t * 10) * 0.3 : 0.2;
             this.drawTool(ctx, x + 8, y + 15, 'SWORD', angle);
+            // 修復：職業單位在 IDLE 時也應該繪製另一隻手臂，以免看起來不協調
+            ctx.fillRect(x - 14, y + 5, 4, 18);
         } else if (name === 'mage') {
-            const angle = Math.sin(t * 5) * 0.1;
+            const isMoving = state.includes('MOVING');
+            // 修復：法師在 IDLE 時法杖應該維持靜止 (垂直)，移動時才晃動
+            const angle = isMoving ? Math.sin(t * 5) * 0.1 : 0;
             this.drawTool(ctx, x + 8, y + 15, 'STAFF', angle);
+            ctx.fillRect(x - 14, y + 5, 4, 18);
         } else if (name === 'archer') {
             this.drawTool(ctx, x + 8, y + 15, 'BOW', 0);
+            ctx.fillRect(x - 14, y + 5, 4, 18);
         } else if (data.cargo > 0) {
             this.setCtxStyle(ctx, 0x795548, 1);
             ctx.fillRect(x - 8, y + 10, 16, 12);
         } else {
+            // IDLE 狀態雙臂垂下
             ctx.fillRect(x - 14, y + 5, 4, 18);
             ctx.fillRect(x + 10, y + 5, 4, 18);
         }
