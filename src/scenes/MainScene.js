@@ -1093,7 +1093,7 @@ export class MainScene extends Phaser.Scene {
                 if (Math.abs(v.y - v.renderY) < 0.1) v.renderY = v.y;
 
                 sprite.clear();
-                sprite.setDepth(20);
+                sprite.setDepth(200);
                 CharacterRenderer.render(sprite, v.renderX, v.renderY, v, this.time.now);
 
                 // 更新單位的姓名與等級標籤 (Phaser Text 方案)
@@ -1129,7 +1129,7 @@ export class MainScene extends Phaser.Scene {
 
             label.setStroke('#000000', 3);
             label.setShadow(1, 1, 'rgba(0,0,0,0.6)', 2);
-            label.setDepth(100);
+            label.setDepth(210);
             this.nameLabels.set(id, label);
         }
 

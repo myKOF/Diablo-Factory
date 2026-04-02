@@ -538,8 +538,53 @@ export class GameEngine {
         }
 
         // 3. 實例化單位
-        let spawnX = building ? building.x + 40 : 960 + 120;
-        let spawnY = building ? building.y + 40 : 560 + 120;
+        let spawnX = building ? building.x : 960 + 120;
+        let spawnY = building ? building.y : 560 + 120;
+
+        if (building) {
+            // 計算環繞位置：從左下開始，逆時針排列
+            const fp = GameEngine.getFootprint(building.type);
+            const uw = fp.uw;
+            const uh = fp.uh;
+            const TS = this.TILE_SIZE;
+
+            if (building.spawnIdx === undefined) building.spawnIdx = 0;
+            const idx = building.spawnIdx;
+            building.spawnIdx++;
+
+            // 周長 (包含四個角落)
+            const perimeter = 2 * (uw + uh) + 4;
+            const currentIdx = idx % perimeter;
+            const layer = Math.floor(idx / perimeter);
+            const R = 1 + layer; // 距離邊緣的層數 (格)
+
+            let tx, ty;
+            // 順序：下邊(左->右)、右邊(下->上)、上邊(右->左)、左邊(上->下)
+            if (currentIdx <= uw + 1) {
+                // 下邊 (包含左右角落)
+                let k = currentIdx;
+                tx = k - (uw + 1) / 2;
+                ty = (uh + 2 * R - 1) / 2;
+            } else if (currentIdx <= (uw + 1) + (uh + 1)) {
+                // 右邊 (包含右上角落，不包含右下角落以免重疊)
+                let k = currentIdx - (uw + 1);
+                tx = (uw + 2 * R - 1) / 2;
+                ty = (uh + 1) / 2 - k;
+            } else if (currentIdx <= (uw + 1) + (uh + 1) + (uw + 1)) {
+                // 上邊 (包含左上角落)
+                let k = currentIdx - (uw + 1 + uh + 1);
+                tx = (uw + 1) / 2 - k;
+                ty = -(uh + 2 * R - 1) / 2;
+            } else {
+                // 左邊 (剩餘部分)
+                let k = currentIdx - (uw + 1 + uh + 1 + uw + 1);
+                tx = -(uw + 2 * R - 1) / 2;
+                ty = -(uh + 1) / 2 + k;
+            }
+            spawnX = building.x + tx * TS;
+            spawnY = building.y + ty * TS;
+        }
+
         if (options && options.x !== undefined) spawnX = options.x;
         if (options && options.y !== undefined) spawnY = options.y;
 
@@ -569,11 +614,19 @@ export class GameEngine {
         if (v.config.type === 'villagers') this.assignNextTask(v);
 
         if (v.state === 'IDLE' && building && building.rallyPoint) {
-            const offsetX = (Math.random() - 0.5) * 60;
-            const offsetY = (Math.random() - 0.5) * 60;
-            v.idleTarget = { x: building.rallyPoint.x + offsetX, y: building.rallyPoint.y + offsetY };
+            v.idleTarget = { x: building.rallyPoint.x, y: building.rallyPoint.y };
         }
         return true;
+    }
+
+    static getFootprint(type) {
+        const cfg = this.getEntityConfig(type);
+        let uw = 1, uh = 1;
+        if (cfg && cfg.size) {
+            const em = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
+            if (em) { uw = parseInt(em[1]); uh = parseInt(em[2]); }
+        }
+        return { uw, uh };
     }
 
     static getMaxPopulation() {
@@ -621,15 +674,7 @@ export class GameEngine {
             return lx + ly * cols;
         };
 
-        const getFootprint = (type) => {
-            const cfg = this.getEntityConfig(type);
-            let uw = 1, uh = 1;
-            if (cfg && cfg.size) {
-                const em = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
-                if (em) { uw = parseInt(em[1]); uh = parseInt(em[2]); }
-            }
-            return { uw, uh };
-        };
+        const getFootprint = (type) => GameEngine.getFootprint(type);
 
         const markOccupiedG = (gx, gy, uw, uh) => {
             for (let i = 0; i < uw; i++) {
