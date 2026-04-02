@@ -256,7 +256,7 @@ export class GameEngine {
             const idxId = headers.indexOf('id'),
                 idxName = headers.indexOf('name'),
                 idxModel = headers.indexOf('model'),
-                idxFightingSpeed = headers.indexOf('speed'),
+                idxFightingSpeed = headers.indexOf('fighting_speed'),
                 idxIdleSpeed = headers.indexOf('idle_speed'),
                 idxColSpeed = headers.indexOf('collection_speed'),
                 idxColAmt = headers.indexOf('collection_resource'),
@@ -264,7 +264,6 @@ export class GameEngine {
                 idxLv = headers.indexOf('lv'),
                 idxHp = headers.indexOf('hp'),
                 idxAtk = headers.indexOf('attack'),
-                idxCbtSpeed = headers.lastIndexOf('speed'),
                 idxAtkSpeed = headers.indexOf('attack_speed'),
                 idxRange = headers.indexOf('range'),
                 idxType = headers.indexOf('type'),
@@ -288,18 +287,17 @@ export class GameEngine {
                     camp: (row[idxCamp] && row[idxCamp].trim()) || 'player',
                     population: parseInt(row[idxPop]) || 1,
                     fighting_speed: parseFloat(row[idxFightingSpeed]) || 5.5,
+                    combatSpeed: parseFloat(row[idxFightingSpeed]) || 5.5, // 備援欄位：兼容 spawnNPC 的調用
                     idle_speed: parseFloat(row[idxIdleSpeed]) || 2.5,
-                    collection_speed: parseFloat(row[idxColSpeed]) || 10,
-                    collection_amount: parseFloat(row[idxColAmt]) || 20,
-                    costs: this.parseResourceObject(row[idxNeed]),
+                    collection_speed: parseFloat(row[idxColSpeed]) || 3,
+                    collection_resource: parseFloat(row[idxColAmt]) || 5,
+                    need_resource: row[idxNeed],
                     lv: parseInt(row[idxLv]) || 1,
-                    // 戰鬥屬性
                     hp: parseInt(row[idxHp]) || 100,
                     attack: parseInt(row[idxAtk]) || 10,
-                    combatSpeed: parseFloat(row[idxCbtSpeed]) || 5,
                     attackSpeed: parseFloat(row[idxAtkSpeed]) || 1,
                     range: parseInt(row[idxRange]) || 10,
-                    patrolRange: parseFloat(row[idxPatrol]) || 0
+                    patrol_range: parseFloat(row[idxPatrol]) || 0
                 };
             }
         } catch (e) { }
@@ -560,7 +558,8 @@ export class GameEngine {
             attack: config.attack || 10,
             moveSpeed: config.combatSpeed || config.speed || 5,
             attackSpeed: config.attackSpeed || 1,
-            range: config.range || 10
+            range: config.range || 10,
+            facing: 1 // 1: 右, -1: 左
         };
 
         this.state.units.villagers.push(v);
@@ -745,13 +744,13 @@ export class GameEngine {
                 let i = 0;
                 // 使用臨時格網記錄同 ID 敵人的間距佔位，避免 N^2 座標比對
                 const proximityGrid = new Uint8Array(cols * rows);
-                
+
                 for (i = 0; i < pool.length && count < density; i++) {
                     const { gx, gy } = pool[i];
-                    
+
                     // 1. 基本佔用檢查 (建築/資源)
                     if (checkOccupiedG(gx, gy, 1, 1)) continue;
-                    
+
                     // 2. 同 ID 敵人間距檢查 (查閱 proximityGrid)
                     if (proximityGrid[gy * cols + gx] === 1) continue;
 
@@ -763,7 +762,7 @@ export class GameEngine {
 
                     // 正式產出
                     this.spawnNPC(npcID, null, { x, y });
-                    
+
                     // 標記間距範圍 (以當前點為中心，半徑為 minInterval 的區域)
                     const r = Math.ceil(minInterval);
                     if (r > 0) {
@@ -860,7 +859,7 @@ export class GameEngine {
                 if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                     v.idleTarget = null;
                     v.state = 'IDLE';
-                    
+
                     // 解析巡邏間隔配置 {min,max}，例如 {5,10}
                     let minWait = 3, maxWait = 6;
                     const cfg = this.state.systemConfig.enemy_patrol_time;
@@ -873,8 +872,8 @@ export class GameEngine {
                     } else if (typeof cfg === 'number') {
                         minWait = cfg; maxWait = cfg * 1.5;
                     }
-                    
-                    v.waitTimer = minWait + Math.random() * (maxWait - minWait); 
+
+                    v.waitTimer = minWait + Math.random() * (maxWait - minWait);
                 }
             } else if (v.state === 'IDLE' && v.config.patrolRange > 0) {
                 // 動物或敵人的巡邏邏輯
@@ -884,9 +883,9 @@ export class GameEngine {
                     const pr = v.config.patrolRange * this.TILE_SIZE;
                     const angle = Math.random() * Math.PI * 2;
                     const dist = Math.random() * pr;
-                    v.idleTarget = { 
-                        x: (v.spawnX || v.x) + Math.cos(angle) * dist, 
-                        y: (v.spawnY || v.y) + Math.sin(angle) * dist 
+                    v.idleTarget = {
+                        x: (v.spawnX || v.x) + Math.cos(angle) * dist,
+                        y: (v.spawnY || v.y) + Math.sin(angle) * dist
                     };
                 }
             } else if (v.state === 'MOVING') {
@@ -910,6 +909,12 @@ export class GameEngine {
             v.targetBase = this.findNearestDepositPoint(v.x, v.y, v.type) || { x: 960, y: 560 };
         }
         const oldX = v.x, oldY = v.y;
+        
+        // 安全機制：如果正在執行特定任務（非閒置），則清除閒逛目標，避免動畫頻率錯誤 (Point 2)
+        if (v.state !== 'IDLE' && v.idleTarget) {
+            v.idleTarget = null;
+        }
+
         // 決定移動速度 (閒置閒逛用 idle_speed, 其餘用 fighting_speed)
         const configSpeed = (v.state === 'IDLE') ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
         const moveSpeed = configSpeed * 13; 
@@ -947,9 +952,9 @@ export class GameEngine {
                     // 針對農田與樹木田，隨機化目標位置以使其待在田內部而非停在邊緣
                     if (!v.workOffset) v.workOffset = { x: 0, y: 0 };
                     if ((target.type === 'farmland' || target.type === 'tree_plantation') && v.workOffset.x === 0) {
-                        v.workOffset = { 
-                            x: (Math.random() - 0.5) * 50, 
-                            y: (Math.random() - 0.5) * 50 
+                        v.workOffset = {
+                            x: (Math.random() - 0.5) * 50,
+                            y: (Math.random() - 0.5) * 50
                         };
                     }
 
@@ -1160,7 +1165,7 @@ export class GameEngine {
             if (wasColliding !== collidingEnt) {
                 // 如果原本不在這個建築裡面（或是剛從別處撞進來），阻擋
                 v.x = oldX; v.y = oldY; v.pathTarget = null;
-                
+
                 // [防卡死強化] 如果被物理碰撞反覆阻擋超過一定次數，視同卡死，強制脫困
                 v._stuckFrames = (v._stuckFrames || 0) + 1;
                 if (v._stuckFrames > 30) {
@@ -1398,6 +1403,10 @@ export class GameEngine {
 
                 if (dist <= moveDist) {
                     // 到達當前節點，扣除消耗的時間並前往下一個
+                    const deltaX = node.x - v.x;
+                    if (Math.abs(deltaX) > 0.01) {
+                        v.facing = deltaX > 0 ? 1 : -1;
+                    }
                     v.x = node.x;
                     v.y = node.y;
                     v.pathIndex++;
@@ -1411,8 +1420,13 @@ export class GameEngine {
                 } else if (dist > 0.01) {
                     // [速度正規化 Velocity Normalization] 防止斜向移動比直線移動快 (1.414 -> 1.0)
                     const ratio = moveDist / dist;
-                    v.x += dx * ratio;
+                    const deltaX = dx * ratio;
+                    v.x += deltaX;
                     v.y += dy * ratio;
+
+                    if (Math.abs(deltaX) > 0.01) {
+                        v.facing = deltaX > 0 ? 1 : -1;
+                    }
                     remainingDt = 0;
                 } else {
                     // 距離過小，直接跳過該點
@@ -1432,7 +1446,7 @@ export class GameEngine {
      */
     static resolveStuck(v) {
         if (!this.state.pathfinding) return;
-        
+
         const isSelected = v.id === GameEngine.state.selectedUnitId;
         if (isSelected) {
             GameEngine.addLog(`[防卡死觸發] ${v.configName}, 狀態: ${v.state}, 座標: (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`, 'PATH');
@@ -1440,7 +1454,7 @@ export class GameEngine {
 
         const gx = Math.floor(v.x / this.TILE_SIZE);
         const gy = Math.floor(v.y / this.TILE_SIZE);
-        const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100); 
+        const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100);
         if (nearest) {
             v.x = nearest.x * this.TILE_SIZE + this.TILE_SIZE / 2;
             v.y = nearest.y * this.TILE_SIZE + this.TILE_SIZE / 2;
@@ -1462,12 +1476,19 @@ export class GameEngine {
         const dist = Math.hypot(dx, dy);
         const moveDist = speed * dt;
         if (dist > moveDist) {
-            // 逼近目標時仍需做基礎碰撞檢查 (簡化版)
-            const nextX = v.x + (dx / dist) * moveDist;
+            const deltaX = (dx / dist) * moveDist;
+            const nextX = v.x + deltaX;
             const nextY = v.y + (dy / dist) * moveDist;
+            if (Math.abs(deltaX) > 0.01) {
+                v.facing = deltaX > 0 ? 1 : -1;
+            }
             v.x = nextX;
             v.y = nextY;
         } else if (dist > 0.1) {
+            const deltaX = tx - v.x;
+            if (Math.abs(deltaX) > 0.01) {
+                v.facing = deltaX > 0 ? 1 : -1;
+            }
             v.x = tx; v.y = ty;
         }
     }

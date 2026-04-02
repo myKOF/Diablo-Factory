@@ -358,6 +358,17 @@ export const UI_CONFIG = {
         circleMinRadius: 8,            // 光圈最小半徑
         circleMaxRadius: 15,           // 光圈最大半徑
         pulseSpeed: 0.005              // 縮放速度
+    },
+    // ── 單位動畫設定 (Animation) ────────────────────────────────────
+    // 調整單位在不同狀態下的動作頻率 (Hz)。
+    // 修改此處可改變行走、待機及工作的動畫節奏。
+    Animation: {
+        runningFreq: 5,          // 跑步(快走)時的步頻
+        wanderingFreq: 1.5,          // 閒逛(慢走)時的步頻
+        breathingFreq: 1,       // 待機站立時的呼吸頻率
+        workFreq: 2,              // 工作中(建築/採集)的晃動頻率
+        armSwingFreqRunning: 5,   // 跑步時的手臂晃動頻率
+        armSwingFreqWandering: 1   // 閒逛時的手臂晃動頻率
     }
 };
 

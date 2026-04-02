@@ -20,26 +20,56 @@ export class CharacterRenderer {
         }
 
         const state = unitData.state || 'IDLE';
+        const isMoving = state.includes('MOVING'); // 精確判斷是否正在移動
+        const isWandering = !!unitData.idleTarget; // 判斷是否正在閒晃 (包含村民與戰鬥單位巡邏)
 
+        // 計算動畫頻率與振幅
         const animationSpeed = 0.01;
         const t = time * animationSpeed;
 
-        const isMoving = state.includes('MOVING'); // 精確判斷是否正在移動
-        const isIdle = (state === 'IDLE');
+        const anim = UI_CONFIG.Animation || { runningFreq: 15, wanderingFreq: 5, breathingFreq: 1.33, workFreq: 10, armSwingFreqRunning: 10, armSwingFreqWandering: 4 };
 
         // 步行動畫：雙腿交替
         let legOffset = 0;
         let bodyBob = 0;
-        if (isMoving) {
-            legOffset = Math.sin(t * 15) * 8;
-            bodyBob = Math.abs(Math.cos(t * 15)) * 4;
-        } else if (state === 'CONSTRUCTING' || state === 'GATHERING') {
-            bodyBob = Math.sin(t * 10) * 2;
+
+        if (state === 'CONSTRUCTING' || state === 'GATHERING') {
+            // 工作狀態優先：原地站立，身體微晃，但不準有腳步動畫
+            bodyBob = Math.sin(t * anim.workFreq) * 2;
+            legOffset = 0;
+        } else if (isMoving || isWandering) {
+            // 精確判斷：如果狀態是前往某地任務，即為跑步，無視殘留的 idleTarget (Point 2)
+            const isMissionMove = state.includes('MOVING_TO');
+            const isRunning = isMissionMove || (isMoving && !isWandering);
+            const moveFreq = isRunning ? anim.runningFreq : anim.wanderingFreq;
+            legOffset = Math.sin(t * moveFreq) * 8;
+            bodyBob = Math.abs(Math.cos(t * moveFreq)) * 4;
+        } else {
+            // 預設為呼吸效果
+            bodyBob = Math.sin(t * anim.breathingFreq) * 1.5;
         }
 
-        // 0. 繪製選中光圈 (在最下面)
+        // 0. 繪製選中光圈 (在最下面) - 不參與縮放鏡像
         if (window.GAME_STATE && window.GAME_STATE.selectedUnitId === unitData.id) {
             this.drawSelectionRing(ctx, x, y, time);
+        }
+
+        const facing = unitData.facing || 1;
+        const needsFlip = facing === -1;
+
+        if (needsFlip) {
+            if (ctx.save) {
+                ctx.save();
+                if (ctx.translateCanvas) {
+                    ctx.translateCanvas(x, 0);
+                    ctx.scaleCanvas(-1, 1);
+                    ctx.translateCanvas(-x, 0);
+                } else if (ctx.translate) {
+                    ctx.translate(x, 0);
+                    ctx.scale(-1, 1);
+                    ctx.translate(-x, 0);
+                }
+            }
         }
 
         // 1. 繪製陰影
@@ -57,6 +87,10 @@ export class CharacterRenderer {
 
         // 5. 繪製手臂與工具
         this.renderArmsAndTools(ctx, x, bodyY, unitData, t);
+
+        if (needsFlip && ctx.restore) {
+            ctx.restore();
+        }
     }
 
     static drawSelectionRing(ctx, x, y, time) {
@@ -187,67 +221,112 @@ export class CharacterRenderer {
         const name = (data.configName || "").toLowerCase();
         this.setCtxStyle(ctx, 0xffcc8c, 1);
 
+        const isMoving = state.includes('MOVING');
+        const isWandering = !!data.idleTarget;
+        
+        // 分類判定：如果是工作狀態，不計入移動動畫 (Point 2)
+        const isWorking = (state === 'CONSTRUCTING' || state === 'GATHERING');
+        const isActuallyMoving = !isWorking && (isMoving || isWandering);
+        const isRunning = isActuallyMoving && isMoving && !isWandering;
+
+        // 動畫頻率: 閒逛/奔跑/呼吸 (讀取 UI_CONFIG)
+        const anim = UI_CONFIG.Animation || { armSwingFreqRunning: 10, armSwingFreqWandering: 4, breathingFreq: 1.33, workFreq: 10, runningFreq: 15, wanderingFreq: 5 };
+        const armFreq = isRunning ? anim.armSwingFreqRunning : (isActuallyMoving ? anim.armSwingFreqWandering : anim.breathingFreq);
+        const breatheFreq = anim.breathingFreq;
+
         if (state === 'CONSTRUCTING') {
-            const angle = Math.sin(t * 20) * 0.8;
+            const angle = Math.sin(t * (anim.workFreq * 2)) * 0.8;
             this.drawTool(ctx, x + 5, y + 15, 'HAMMER', angle);
             // 繪製另一隻手臂
-            ctx.fillRect(x - 14, y + 5, 4, 18);
+            ctx.fillRect(x - 14, y + 5 + Math.sin(t * anim.workFreq) * 2, 4, 18);
         } else if (state === 'GATHERING') {
-            const angle = Math.sin(t * 20) * 0.8;
+            const angle = Math.sin(t * (anim.workFreq * 2)) * 0.8;
             const toolType = data.type === 'WOOD' ? 'AXE' : (data.type === 'STONE' || data.type === 'GOLD' ? 'PICKAXE' : 'BASKET');
             this.drawTool(ctx, x + 5, y + 15, toolType, angle);
             // 繪製另一隻手臂
-            ctx.fillRect(x - 14, y + 5, 4, 18);
+            ctx.fillRect(x - 14, y + 5 + Math.sin(t * anim.workFreq) * 2, 4, 18);
         } else if (name === 'swordsman') {
-            const isMoving = state.includes('MOVING');
-            const angle = isMoving ? Math.sin(t * 10) * 0.3 : 0.2;
+            const angle = isActuallyMoving ? Math.sin(t * armFreq) * 0.3 : 0.2 + Math.sin(t * breatheFreq) * 0.05;
             this.drawTool(ctx, x + 8, y + 15, 'SWORD', angle);
-            // 修復：職業單位在 IDLE 時也應該繪製另一隻手臂，以免看起來不協調
-            ctx.fillRect(x - 14, y + 5, 4, 18);
+            ctx.fillRect(x - 14, y + 5 + (isActuallyMoving ? 0 : Math.sin(t * breatheFreq) * 2), 4, 18);
         } else if (name === 'mage') {
-            const isMoving = state.includes('MOVING');
-            // 修復：法師在 IDLE 時法杖應該維持靜止 (垂直)，移動時才晃動
-            const angle = isMoving ? Math.sin(t * 5) * 0.1 : 0;
+            const angle = isActuallyMoving ? Math.sin(t * armFreq) * 0.1 : Math.sin(t * breatheFreq) * 0.05;
             this.drawTool(ctx, x + 8, y + 15, 'STAFF', angle);
-            ctx.fillRect(x - 14, y + 5, 4, 18);
+            ctx.fillRect(x - 14, y + 5 + (isActuallyMoving ? 0 : Math.sin(t * breatheFreq) * 2), 4, 18);
         } else if (name === 'archer') {
-            this.drawTool(ctx, x + 8, y + 15, 'BOW', 0);
-            ctx.fillRect(x - 14, y + 5, 4, 18);
+            const angle = isActuallyMoving ? Math.sin(t * armFreq) * 0.1 : Math.sin(t * breatheFreq) * 0.03;
+            this.drawTool(ctx, x + 8, y + 15, 'BOW', angle);
+            ctx.fillRect(x - 14, y + 5 + (isActuallyMoving ? 0 : Math.sin(t * breatheFreq) * 1), 4, 18);
         } else if (data.cargo > 0) {
             this.setCtxStyle(ctx, 0x795548, 1);
-            ctx.fillRect(x - 8, y + 10, 16, 12);
+            // 負重搬運時的籃子晃動
+            const cargoFreq = isRunning ? anim.runningFreq : (isActuallyMoving ? anim.wanderingFreq : anim.breathingFreq);
+            ctx.fillRect(x - 8, y + 10 + Math.sin(t * cargoFreq) * 2, 16, 12);
         } else {
-            // IDLE 狀態雙臂垂下
-            ctx.fillRect(x - 14, y + 5, 4, 18);
-            ctx.fillRect(x + 10, y + 5, 4, 18);
+            // IDLE 或 步行狀態的雙臂晃動
+            const swingFreq = isActuallyMoving ? armFreq : breatheFreq;
+            const idleSwing = Math.sin(t * swingFreq) * 2;
+            ctx.fillRect(x - 14, y + 5 + idleSwing, 4, 18);
+            ctx.fillRect(x + 10, y + 5 - idleSwing, 4, 18);
         }
     }
 
     static renderAnimal(ctx, x, y, unitData, time) {
         if (!unitData || !unitData.config) return;
         const model = unitData.config.model;
-        const isMoving = (unitData.state || 'IDLE').includes('MOVING');
+        const state = (unitData.state || 'IDLE');
+        const isMoving = state.includes('MOVING');
+        const isWandering = !!unitData.idleTarget;
+        const anim = UI_CONFIG.Animation || { runningFreq: 15, wanderingFreq: 5, breathingFreq: 1.33 };
         const t = time * 0.01;
 
-        // 1. 繪製選中光圈
+        // 1. 繪製選中光圈 - 不參與縮放鏡像
         if (window.GAME_STATE && window.GAME_STATE.selectedUnitId === unitData.id) {
             this.drawSelectionRing(ctx, x, y, time);
+        }
+
+        const facing = (unitData && unitData.facing) || 1;
+        const needsFlip = facing === -1;
+
+        if (needsFlip) {
+            if (ctx.save) {
+                ctx.save();
+                if (ctx.translateCanvas) {
+                    ctx.translateCanvas(x, 0);
+                    ctx.scaleCanvas(-1, 1);
+                    ctx.translateCanvas(-x, 0);
+                } else if (ctx.translate) {
+                    ctx.translate(x, 0);
+                    ctx.scale(-1, 1);
+                    ctx.translate(-x, 0);
+                }
+            }
         }
 
         // 2. 繪製陰影
         this.drawShadow(ctx, x, y);
 
+        // 使用動畫設定 (Point 1)
+        const isRunning = isMoving && !isWandering;
+        const moveFreq = isRunning ? anim.runningFreq : anim.wanderingFreq;
+        const headBobFreq = isRunning ? anim.runningFreq : anim.wanderingFreq;
+        const breatheFreq = anim.breathingFreq;
+
         if (model === 'wolf') {
-            this.renderWolf(ctx, x, y, t, isMoving);
+            this.renderWolf(ctx, x, y, t, isMoving, moveFreq, headBobFreq, breatheFreq);
         } else if (model === 'bear') {
-            this.renderBear(ctx, x, y, t, isMoving);
+            this.renderBear(ctx, x, y, t, isMoving, moveFreq, headBobFreq, breatheFreq);
+        }
+
+        if (needsFlip && ctx.restore) {
+            ctx.restore();
         }
     }
 
-    static renderWolf(ctx, x, y, t, isMoving) {
+    static renderWolf(ctx, x, y, t, isMoving, moveFreq, headBobFreq, breatheFreq) {
         const color = 0x78909c; // 狼灰
         const eyeColor = 0xffff00; // 黃眼
-        const legOffset = isMoving ? Math.sin(t * 15) * 6 : 0;
+        const legOffset = isMoving ? Math.sin(t * moveFreq) * 6 : 0;
 
         this.setCtxStyle(ctx, color, 1);
         // 腳 (四肢)
@@ -258,17 +337,17 @@ export class CharacterRenderer {
 
         // 身體
         ctx.fillRect(x - 12, y - 5, 24, 12);
-        
+
         // 呼吸效果 (待機時縮放身體)
-        const breathing = isMoving ? 0 : Math.sin(t * 5) * 1.2;
-        
+        const breathing = isMoving ? 0 : Math.sin(t * breatheFreq * 1.2) * 1.2;
+
         // 頭部
-        const headBob = isMoving ? Math.sin(t * 15) * 2 : Math.sin(t * 3) * 1;
+        const headBob = isMoving ? Math.sin(t * headBobFreq) * 2 : Math.sin(t * breatheFreq * 0.8) * 1;
         const headX = x + 8;
         const headY = y - 12 + headBob + breathing;
-        
+
         ctx.fillRect(headX, headY, 12, 10); // 狼頭向右
-        
+
         // 耳朵
         ctx.fillRect(headX + 2, headY - 4, 3, 5);
         ctx.fillRect(headX + 7, headY - 4, 3, 5);
@@ -281,26 +360,26 @@ export class CharacterRenderer {
         }
     }
 
-    static renderBear(ctx, x, y, t, isMoving) {
+    static renderBear(ctx, x, y, t, isMoving, moveFreq, headBobFreq, breatheFreq) {
         const color = 0x5d4037; // 棕熊
         const eyeColor = 0x000000;
-        const legOffset = isMoving ? Math.sin(t * 10) * 4 : 0;
+        const legOffset = isMoving ? Math.sin(t * moveFreq) * 4 : 0;
 
         this.setCtxStyle(ctx, color, 1);
         // 腳 (粗壯)
-        ctx.fillRect(x - 12, y + 8 + legOffset, 6, 10);
-        ctx.fillRect(x + 6, y + 8 - legOffset, 6, 10);
-        ctx.fillRect(x - 8, y + 5 - legOffset, 6, 10);
-        ctx.fillRect(x + 2, y + 5 + legOffset, 6, 10);
+        ctx.fillRect(x - 12, y + 5 + legOffset, 8, 12); // 左前
+        ctx.fillRect(x + 4, y + 5 - legOffset, 8, 12);  // 右前
+        ctx.fillRect(x - 8, y + 2 - legOffset, 8, 12);  // 左後
+        ctx.fillRect(x + 0, y + 2 + legOffset, 8, 12);  // 右後
 
         // 呼吸效果 (熊比較壯碩，呼吸更慢)
-        const breathing = isMoving ? 0 : Math.sin(t * 3) * 1.5;
+        const breathing = isMoving ? 0 : Math.sin(t * breatheFreq * 0.8) * 1.5;
 
         // 身體 (壯碩)
-        ctx.fillRect(x - 15, y - 10 - (breathing/2), 30, 20 + breathing);
+        ctx.fillRect(x - 15, y - 10 - (breathing / 2), 30, 20 + breathing);
 
         // 頭 (圓大)
-        const headBob = isMoving ? Math.sin(t * 10) * 1 : Math.cos(t * 2) * 1.5;
+        const headBob = isMoving ? Math.sin(t * headBobFreq) * 1 : Math.cos(t * breatheFreq * 0.6) * 1.5;
         const headX = x + 10;
         const headY = y - 15 + headBob;
         ctx.fillRect(headX, headY, 15, 15);

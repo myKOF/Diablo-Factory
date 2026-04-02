@@ -178,12 +178,12 @@ export class MainScene extends Phaser.Scene {
             if (clickedUnit) {
                 GameEngine.state.selectedUnitId = clickedUnit.id;
                 GameEngine.state.lastSelectionTime = Date.now();
-                
+
                 console.group(`[選取單位詳細資訊] ${clickedUnit.configName} (${clickedUnit.id})`);
                 console.log(`%c狀態: ${clickedUnit.state}`, "color: #ffeb3b; font-weight: bold; background: #212121; padding: 2px 5px;");
                 console.log(`坐標: (${clickedUnit.x.toFixed(1)}, ${clickedUnit.y.toFixed(1)})`);
                 console.log(`目標: `, clickedUnit.targetId || clickedUnit.targetBase || clickedUnit.constructionTarget || clickedUnit.idleTarget || "無");
-                
+
                 const pf = GameEngine.state.pathfinding;
                 if (pf) {
                     const gx = Math.floor(clickedUnit.x / GameEngine.TILE_SIZE);
@@ -472,12 +472,12 @@ export class MainScene extends Phaser.Scene {
         const h = uh * TS;
 
         // 繪製高飽和度的選取框 (深橘黃色，無透明度)
-        g.lineStyle(4, 0xff9800, 1); 
-        g.strokeRect(ent.x - w/2 - 2, ent.y - h/2 - 2, w + 4, h + 4);
-        
+        g.lineStyle(4, 0xff9800, 1);
+        g.strokeRect(ent.x - w / 2 - 2, ent.y - h / 2 - 2, w + 4, h + 4);
+
         // 內層白色輔助線，增加對比感
         g.lineStyle(1.5, 0xffffff, 1);
-        g.strokeRect(ent.x - w/2 - 0, ent.y - h/2 - 0, w, h);
+        g.strokeRect(ent.x - w / 2 - 0, ent.y - h / 2 - 0, w, h);
     }
 
     updateEntities(visibleEntities, allEntities) {
@@ -998,7 +998,7 @@ export class MainScene extends Phaser.Scene {
         const iconReserved = 30;
         const barWidth = Math.max(50, (uw * TS) * 0.6);
         const totalHudWidth = iconReserved + 15 + barWidth; // 圖示 + 間距 + 進度條
-        
+
         const bx = ent.x - totalHudWidth / 2;
         const by = ent.y + (uh * TS) / 2 - 35; // 稍微往上提一點，避免被底部邊緣切掉
 
@@ -1057,10 +1057,10 @@ export class MainScene extends Phaser.Scene {
 
     updateUnits(villagers) {
         if (!villagers) return;
- 
+
         const currentIds = new Set();
         const cam = this.cameras.main;
- 
+
         villagers.forEach(v => {
             currentIds.add(v.id);
             let sprite = this.units.get(v.id);
@@ -1072,30 +1072,30 @@ export class MainScene extends Phaser.Scene {
                 v.renderX = v.x;
                 v.renderY = v.y;
             }
- 
+
             const isVisible = (v.x + 50 > cam.scrollX && v.x - 50 < cam.scrollX + cam.width &&
                 v.y + 50 > cam.scrollY && v.y - 50 < cam.scrollY + cam.height);
- 
+
             sprite.setVisible(isVisible);
             if (isVisible) {
                 // 核心優化：渲染插值 (Lerp)
                 // 邏輯坐標 (v.x, v.y) 每 50ms 更新一次，但渲染每 16ms 執行一次
                 // 透過逼近算法讓視覺座標平滑過渡，消除跳動感
                 if (v.renderX === undefined) { v.renderX = v.x; v.renderY = v.y; }
-                
+
                 // 使用平滑係數 0.25 (在 60fps 下約 4 幀追上 90% 位移)
                 const lerpFactor = 0.25;
                 v.renderX += (v.x - v.renderX) * lerpFactor;
                 v.renderY += (v.y - v.renderY) * lerpFactor;
-                
+
                 // 如果差距極小則直接對齊
                 if (Math.abs(v.x - v.renderX) < 0.1) v.renderX = v.x;
                 if (Math.abs(v.y - v.renderY) < 0.1) v.renderY = v.y;
- 
+
                 sprite.clear();
                 sprite.setDepth(20);
                 CharacterRenderer.render(sprite, v.renderX, v.renderY, v, this.time.now);
-                
+
                 // 更新單位的姓名與等級標籤 (Phaser Text 方案)
                 this.updateUnitLabel(v.id, v, v.renderX, v.renderY);
             } else {
@@ -1118,7 +1118,7 @@ export class MainScene extends Phaser.Scene {
 
         const cfg = UI_CONFIG.NPCLabel || { fontSize: "bold 14px Arial", enemyColor: "#ff4444", offsetY: -65 };
         const labelStr = `${unit.config.name || '敵人'} (Lv. ${unit.config.lv || 1})`;
-        
+
         let label = this.nameLabels.get(id);
         if (!label) {
             label = this.add.text(x, y + cfg.offsetY, labelStr, {
@@ -1126,7 +1126,7 @@ export class MainScene extends Phaser.Scene {
                 fill: cfg.enemyColor,
                 align: 'center'
             }).setOrigin(0.5, 0.5);
-            
+
             label.setStroke('#000000', 3);
             label.setShadow(1, 1, 'rgba(0,0,0,0.6)', 2);
             label.setDepth(100);
