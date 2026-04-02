@@ -1,5 +1,5 @@
 import EasyStarNamespace from 'https://esm.sh/easystarjs@0.4.4';
-import { UI_CONFIG } from '../ui_config.js';
+import { UI_CONFIG } from "../ui/ui_config.js";
 
 /**
  * 核心尋路系統 (Pathfinding System)

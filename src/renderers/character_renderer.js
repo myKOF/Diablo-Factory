@@ -1,4 +1,4 @@
-import { UI_CONFIG } from "./ui_config.js";
+import { UI_CONFIG } from "../ui/ui_config.js";
 
 /**
  * 獨立的角色繪製與動畫渲染引擎 (純 Canvas API 實作)
@@ -14,6 +14,11 @@ export class CharacterRenderer {
      * @param {number} time
      */
     static render(ctx, x, y, unitData, time) {
+        const name = (unitData.configName || "").toLowerCase();
+        if (name === 'wolf' || name === 'bear') {
+            return this.renderAnimal(ctx, x, y, unitData, time);
+        }
+
         const state = unitData.state || 'IDLE';
 
         const animationSpeed = 0.01;
@@ -33,7 +38,7 @@ export class CharacterRenderer {
         }
 
         // 0. 繪製選中光圈 (在最下面)
-        if (window.GameEngine && window.GameEngine.state.selectedUnitId === unitData.id) {
+        if (window.GAME_STATE && window.GAME_STATE.selectedUnitId === unitData.id) {
             this.drawSelectionRing(ctx, x, y, time);
         }
 
@@ -52,6 +57,11 @@ export class CharacterRenderer {
 
         // 5. 繪製手臂與工具
         this.renderArmsAndTools(ctx, x, bodyY, unitData, t);
+
+        // 6. 繪製名稱與等級 (極致安全性加固：檢查 unitData 及其 config)
+        if (unitData && unitData.config && unitData.config.camp === 'enemy') {
+            this.renderNPCLabel(ctx, x, y, unitData, time);
+        }
     }
 
     static drawSelectionRing(ctx, x, y, time) {
@@ -218,55 +228,155 @@ export class CharacterRenderer {
         }
     }
 
+    static renderAnimal(ctx, x, y, unitData, time) {
+        const name = (unitData.configName || "").toLowerCase();
+        const t = time * 0.01;
+        const state = unitData.state || 'IDLE';
+        const isMoving = state.includes('MOVING');
+
+        // 1. 繪製選中光圈
+        if (window.GAME_STATE && window.GAME_STATE.selectedUnitId === unitData.id) {
+            this.drawSelectionRing(ctx, x, y, time);
+        }
+
+        // 2. 繪製陰影
+        this.drawShadow(ctx, x, y);
+
+        if (name === 'wolf') {
+            this.renderWolf(ctx, x, y, t, isMoving);
+        } else if (name === 'bear') {
+            this.renderBear(ctx, x, y, t, isMoving);
+        }
+
+        // 3. 繪製名稱與等級 (動物敵人，極致安全性加固：檢查 unitData 及其 config)
+        if (unitData && unitData.config && unitData.config.camp === 'enemy') {
+            this.renderNPCLabel(ctx, x, y, unitData, time);
+        }
+    }
+
+    static renderNPCLabel(ctx, x, y, unitData, time) {
+        if (!unitData || !unitData.config || !UI_CONFIG.NPCLabel) return;
+        
+        const config = UI_CONFIG.NPCLabel;
+        const npcConfig = unitData.config;
+        const name = npcConfig.name || "敵人";
+        const lv = npcConfig.lv || 1;
+        const label = `${name} (Lv. ${lv})`;
+
+        // 呼吸動畫跟隨
+        const isMoving = (unitData.state || 'IDLE').includes('MOVING');
+        const t = time * 0.01;
+        const breathing = isMoving ? 0 : Math.sin(t * 3) * 3; 
+
+        if (ctx.fillText === undefined) {
+             // Phaser Graphics 不支援直接畫 Text，Phaser 控制器會負責建立獨立的 Text 物件
+             // 不過在純 Canvas 模式下我們希望直接繪製
+             return;
+        }
+
+        ctx.font = config.fontSize;
+        ctx.textAlign = 'center';
+
+        // 繪製陰影
+        ctx.fillStyle = config.shadowColor;
+        ctx.fillText(label, x + 1, y + config.offsetY + breathing + 1);
+
+        // 繪製主文字 (鮮紅色)
+        ctx.fillStyle = config.enemyColor;
+        ctx.fillText(label, x, y + config.offsetY + breathing);
+    }
+
+    static renderWolf(ctx, x, y, t, isMoving) {
+        const color = 0x78909c; // 狼灰
+        const eyeColor = 0xffff00; // 黃眼
+        const legOffset = isMoving ? Math.sin(t * 15) * 6 : 0;
+
+        this.setCtxStyle(ctx, color, 1);
+        // 腳 (四肢)
+        ctx.fillRect(x - 10, y + 5 + legOffset, 4, 8); // 左前
+        ctx.fillRect(x + 6, y + 5 - legOffset, 4, 8);  // 右前
+        ctx.fillRect(x - 8, y + 2 - legOffset, 4, 8);  // 左後
+        ctx.fillRect(x + 4, y + 2 + legOffset, 4, 8);  // 右後
+
+        // 身體
+        ctx.fillRect(x - 12, y - 5, 24, 12);
+        
+        // 呼吸效果 (待機時縮放身體)
+        const breathing = isMoving ? 0 : Math.sin(t * 5) * 1.2;
+        
+        // 頭部
+        const headBob = isMoving ? Math.sin(t * 15) * 2 : Math.sin(t * 3) * 1;
+        const headX = x + 8;
+        const headY = y - 12 + headBob + breathing;
+        
+        ctx.fillRect(headX, headY, 12, 10); // 狼頭向右
+        
+        // 耳朵
+        ctx.fillRect(headX + 2, headY - 4, 3, 5);
+        ctx.fillRect(headX + 7, headY - 4, 3, 5);
+
+        // 眼睛 (偶爾眨眼)
+        const isBlinking = !isMoving && (Math.sin(t * 2) > 0.95);
+        if (!isBlinking) {
+            this.setCtxStyle(ctx, eyeColor, 1);
+            ctx.fillRect(headX + 8, headY + 4, 2, 2);
+        }
+    }
+
+    static renderBear(ctx, x, y, t, isMoving) {
+        const color = 0x5d4037; // 棕熊
+        const eyeColor = 0x000000;
+        const legOffset = isMoving ? Math.sin(t * 10) * 4 : 0;
+
+        this.setCtxStyle(ctx, color, 1);
+        // 腳 (粗壯)
+        ctx.fillRect(x - 12, y + 8 + legOffset, 6, 10);
+        ctx.fillRect(x + 6, y + 8 - legOffset, 6, 10);
+        ctx.fillRect(x - 8, y + 5 - legOffset, 6, 10);
+        ctx.fillRect(x + 2, y + 5 + legOffset, 6, 10);
+
+        // 呼吸效果 (熊比較壯碩，呼吸更慢)
+        const breathing = isMoving ? 0 : Math.sin(t * 3) * 1.5;
+
+        // 身體 (壯碩)
+        ctx.fillRect(x - 15, y - 10 - (breathing/2), 30, 20 + breathing);
+
+        // 頭 (圓大)
+        const headBob = isMoving ? Math.sin(t * 10) * 1 : Math.cos(t * 2) * 1.5;
+        const headX = x + 10;
+        const headY = y - 15 + headBob;
+        ctx.fillRect(headX, headY, 15, 15);
+
+        // 耳朵 (小而圓)
+        ctx.fillRect(headX + 2, headY - 3, 4, 4);
+        ctx.fillRect(headX + 9, headY - 3, 4, 4);
+
+        // 眼睛
+        this.setCtxStyle(ctx, eyeColor, 1);
+        ctx.fillRect(headX + 8, headY + 5, 2, 2);
+    }
+
     static drawTool(ctx, x, y, type, angle) {
-        const cos = Math.cos(angle);
-        const sin = Math.sin(angle);
-
-        const drawRectRotated = (rx, ry, rw, rh, color) => {
-            this.setCtxStyle(ctx, color, 1);
-            const pts = [
-                { dx: rx, dy: ry },
-                { dx: rx + rw, dy: ry },
-                { dx: rx + rw, dy: ry + rh },
-                { dx: rx, dy: ry + rh }
-            ];
-
-            const rotatedPts = pts.map(p => ({
-                px: x + (p.dx * cos - p.dy * sin),
-                py: y + (p.dx * sin + p.dy * cos)
-            }));
-
-            if (ctx.beginPath) ctx.beginPath();
-            if (ctx.moveTo) ctx.moveTo(rotatedPts[0].px, rotatedPts[0].py);
-            if (ctx.lineTo) {
-                for (let i = 1; i < 4; i++) ctx.lineTo(rotatedPts[i].px, rotatedPts[i].py);
-            }
-            if (ctx.closePath) ctx.closePath();
-
-            if (ctx.fillPath) ctx.fillPath();
-            else if (ctx.fill) ctx.fill();
-        };
-
         if (type === 'AXE') {
-            drawRectRotated(0, -15, 3, 20, 0x5d4037);
-            drawRectRotated(0, -20, 10, 8, 0x9e9e9e);
+            this.drawRectRotated(ctx, x, y, 0, -15, 3, 20, angle, 0x5d4037);
+            this.drawRectRotated(ctx, x, y, 0, -20, 10, 8, angle, 0x9e9e9e);
         } else if (type === 'PICKAXE') {
-            drawRectRotated(0, -15, 3, 20, 0x5d4037);
-            drawRectRotated(-10, -18, 20, 4, 0x757575);
+            this.drawRectRotated(ctx, x, y, 0, -15, 3, 20, angle, 0x5d4037);
+            this.drawRectRotated(ctx, x, y, -10, -18, 20, 4, angle, 0x757575);
         } else if (type === 'HAMMER') {
-            drawRectRotated(0, -15, 4, 25, 0x5d4037);
-            drawRectRotated(-8, -25, 20, 12, 0x424242);
+            this.drawRectRotated(ctx, x, y, 0, -15, 4, 25, angle, 0x5d4037);
+            this.drawRectRotated(ctx, x, y, -8, -25, 20, 12, angle, 0x424242);
         } else if (type === 'BASKET') {
-            drawRectRotated(-8, 0, 16, 12, 0x8d6e63);
+            this.drawRectRotated(ctx, x, y, -8, 0, 16, 12, angle, 0x8d6e63);
         } else if (type === 'SWORD') {
-            drawRectRotated(0, -5, 3, 10, 0x795548); // 柄
-            drawRectRotated(-3, -25, 9, 20, 0x90a4ae); // 刃
-            drawRectRotated(-5, -5, 13, 3, 0xffd54f); // 護手
+            this.drawRectRotated(ctx, x, y, 0, -5, 3, 10, angle, 0x795548); // 柄
+            this.drawRectRotated(ctx, x, y, -3, -25, 9, 20, angle, 0x90a4ae); // 刃
+            this.drawRectRotated(ctx, x, y, -5, -5, 13, 3, angle, 0xffd54f); // 護手
         } else if (type === 'STAFF') {
-            drawRectRotated(0, -25, 4, 35, 0x5d4037); // 杖身
-            drawRectRotated(-2, -30, 8, 8, 0x4fc3f7); // 寶石
+            this.drawRectRotated(ctx, x, y, 0, -25, 4, 35, angle, 0x5d4037); // 杖身
+            this.drawRectRotated(ctx, x, y, -2, -30, 8, 8, angle, 0x4fc3f7); // 寶石
         } else if (type === 'BOW') {
-            drawRectRotated(0, -20, 3, 30, 0x5d4037); // 弓身
+            this.drawRectRotated(ctx, x, y, 0, -20, 3, 30, angle, 0x5d4037); // 弓身
             this.setCtxStyle(ctx, 0xe0e0e0, 0.5);
             // 弦 (簡單直線)
             if (ctx.beginPath) {
@@ -276,6 +386,33 @@ export class CharacterRenderer {
                 ctx.stroke();
             }
         }
+    }
+
+    static drawRectRotated(ctx, x, y, rx, ry, rw, rh, angle, color) {
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const pts = [
+            { dx: rx, dy: ry },
+            { dx: rx + rw, dy: ry },
+            { dx: rx + rw, dy: ry + rh },
+            { dx: rx, dy: ry + rh }
+        ];
+
+        const rotatedPts = pts.map(p => ({
+            px: x + (p.dx * cos - p.dy * sin),
+            py: y + (p.dx * sin + p.dy * cos)
+        }));
+
+        this.setCtxStyle(ctx, color, 1);
+        if (ctx.beginPath) ctx.beginPath();
+        if (ctx.moveTo) ctx.moveTo(rotatedPts[0].px, rotatedPts[0].py);
+        if (ctx.lineTo) {
+            for (let i = 1; i < 4; i++) ctx.lineTo(rotatedPts[i].px, rotatedPts[i].py);
+        }
+        if (ctx.closePath) ctx.closePath();
+
+        if (ctx.fillPath) ctx.fillPath();
+        else if (ctx.fill) ctx.fill();
     }
 
     static setCtxStyle(ctx, color, alpha) {

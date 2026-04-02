@@ -1,5 +1,5 @@
-import { UI_CONFIG } from "./ui_config.js";
-import { PathfindingSystem } from "./systems/PathfindingSystem.js?v=3";
+import { UI_CONFIG } from "../ui/ui_config.js";
+import { PathfindingSystem } from "./PathfindingSystem.js?v=3";
 
 
 
@@ -256,8 +256,10 @@ export class GameEngine {
             const idxId = headers.indexOf('id'),
                 idxName = headers.indexOf('name'),
                 idxSpeed = headers.indexOf('speed'),
-                idxCollect = headers.indexOf('collection_speed'),
+                idxColSpeed = headers.indexOf('collection_speed'),
+                idxColAmt = headers.indexOf('collection_resource'),
                 idxNeed = headers.indexOf('need_resource'),
+                idxLv = headers.indexOf('lv'),
                 idxHp = headers.indexOf('hp'),
                 idxAtk = headers.indexOf('attack'),
                 idxCbtSpeed = headers.lastIndexOf('speed'),
@@ -265,7 +267,8 @@ export class GameEngine {
                 idxRange = headers.indexOf('range'),
                 idxType = headers.indexOf('type'),
                 idxCamp = headers.indexOf('camp'),
-                idxPop = headers.indexOf('population');
+                idxPop = headers.indexOf('population'),
+                idxPatrol = headers.indexOf('patrol_range');
 
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -282,15 +285,17 @@ export class GameEngine {
                     camp: (row[idxCamp] && row[idxCamp].trim()) || 'player',
                     population: parseInt(row[idxPop]) || 1,
                     speed: parseFloat(row[idxSpeed]) || 5.5,
-                    collection_speed: parseFloat(row[idxCollect]) || 10,
-                    collection_amount: parseFloat(row[headers.indexOf('collection_resource')]) || 20,
+                    collection_speed: parseFloat(row[idxColSpeed]) || 10,
+                    collection_amount: parseFloat(row[idxColAmt]) || 20,
                     costs: this.parseResourceObject(row[idxNeed]),
+                    lv: parseInt(row[idxLv]) || 1,
                     // 戰鬥屬性
                     hp: parseInt(row[idxHp]) || 100,
                     attack: parseInt(row[idxAtk]) || 10,
                     combatSpeed: parseFloat(row[idxCbtSpeed]) || 5,
                     attackSpeed: parseFloat(row[idxAtkSpeed]) || 1,
-                    range: parseInt(row[idxRange]) || 10
+                    range: parseInt(row[idxRange]) || 10,
+                    patrolRange: parseFloat(row[idxPatrol]) || 0
                 };
             }
         } catch (e) { }
@@ -327,6 +332,11 @@ export class GameEngine {
                     } else {
                         this.state.systemConfig[type] = parts[0] || 0;
                     }
+                } else if (val.startsWith('{') && val.includes(',')) {
+                    // 解析 "{6,500,30}" 為 [6, 500, 30]
+                    const clean = val.replace(/[\{\}]/g, '');
+                    const parts = clean.split(',').map(s => parseFloat(s.trim()));
+                    this.state.systemConfig[type] = parts;
                 } else {
                     const num = parseFloat(val);
                     this.state.systemConfig[type] = isNaN(num) ? val : num;
@@ -498,7 +508,7 @@ export class GameEngine {
         this.state.npcConfigs['female villagers'] = { speed: 5.5, collection_speed: 10 };
     }
 
-    static spawnNPC(targetIdOrName, building = null) {
+    static spawnNPC(targetIdOrName, building = null, options = null) {
         // 1. 解析最終配置名稱 (考慮隨機生產)
         let finalConfigName = targetIdOrName;
         if (this.state.idToNameMap[targetIdOrName]) {
@@ -524,12 +534,15 @@ export class GameEngine {
         }
 
         // 3. 實例化單位
-        const spawnX = building ? building.x + 40 : 960 + 120;
-        const spawnY = building ? building.y + 40 : 560 + 120;
+        let spawnX = building ? building.x + 40 : 960 + 120;
+        let spawnY = building ? building.y + 40 : 560 + 120;
+        if (options && options.x !== undefined) spawnX = options.x;
+        if (options && options.y !== undefined) spawnY = options.y;
 
         const v = {
             id: 'unit_' + Math.random().toString(36).substr(2, 9),
             x: spawnX, y: spawnY,
+            spawnX: spawnX, spawnY: spawnY, // 記錄初始位置用於巡邏
             state: 'IDLE', targetId: null, cargo: 0,
             type: config.type === 'villagers' ? 'WOOD' : 'GUARD',
             config: config,
@@ -715,6 +728,58 @@ export class GameEngine {
                 console.log(`地圖生成 - ${cfg.name} 成功放置: ${count}/${cfg.density}`);
             });
         }
+
+        // 5. 隨機生成野外敵人 (enemy1, enemy2) - 使用高效的網格採樣演算法
+        ['enemy1', 'enemy2'].forEach(enemyKey => {
+            const configTriplet = this.state.systemConfig[enemyKey];
+            if (Array.isArray(configTriplet) && configTriplet.length === 3) {
+                const [npcID, density, minInterval] = configTriplet;
+                const name = this.state.idToNameMap[npcID];
+                if (!name) return;
+
+                let count = 0;
+                let i = 0;
+                // 使用臨時格網記錄同 ID 敵人的間距佔位，避免 N^2 座標比對
+                const proximityGrid = new Uint8Array(cols * rows);
+                
+                for (i = 0; i < pool.length && count < density; i++) {
+                    const { gx, gy } = pool[i];
+                    
+                    // 1. 基本佔用檢查 (建築/資源)
+                    if (checkOccupiedG(gx, gy, 1, 1)) continue;
+                    
+                    // 2. 同 ID 敵人間距檢查 (查閱 proximityGrid)
+                    if (proximityGrid[gy * cols + gx] === 1) continue;
+
+                    const x = gx * TS + TS / 2;
+                    const y = gy * TS + TS / 2;
+
+                    // 3. 安全區檢查 (避免離出生點太近)
+                    if (Math.abs(x - villagePos.x) < safeCfg.w / 2 && Math.abs(y - villagePos.y) < safeCfg.h / 2) continue;
+
+                    // 正式產出
+                    this.spawnNPC(npcID, null, { x, y });
+                    
+                    // 標記間距範圍 (以當前點為中心，半徑為 minInterval 的區域)
+                    const r = Math.ceil(minInterval);
+                    if (r > 0) {
+                        const r2 = r * r;
+                        for (let dy = -r; dy <= r; dy++) {
+                            const ny = gy + dy;
+                            if (ny < 0 || ny >= rows) continue;
+                            for (let dx = -r; dx <= r; dx++) {
+                                const nx = gx + dx;
+                                if (nx >= 0 && nx < cols && (dx * dx + dy * dy <= r2)) {
+                                    proximityGrid[ny * cols + nx] = 1;
+                                }
+                            }
+                        }
+                    }
+                    count++;
+                }
+                console.log(`地圖生成 - 敵人 ${name} 成功放置: ${count}/${density} (總嘗試: ${i})`);
+            }
+        });
         this.updatePathfindingGrid();
         this.updateSpatialGrid();
         console.log(`地圖生成完成 [W:${mapCfg.w} H:${mapCfg.h}]，耗時: ${(performance.now() - startT).toFixed(2)}ms`);
@@ -783,16 +848,29 @@ export class GameEngine {
         if (v.config.type !== 'villagers') {
             const oldX = v.x, oldY = v.y;
             const moveSpeed = (v.config.speed || 5.5) * 13;
-            // 修正：集結點移動時也給予 MOVING 狀態，以觸發步行動畫
             if (v.idleTarget) {
                 v.state = 'MOVING';
                 this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
                 if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                     v.idleTarget = null;
                     v.state = 'IDLE';
+                    v.waitTimer = 2 + Math.random() * 3; // 待機更久一點
+                }
+            } else if (v.state === 'IDLE' && v.config.patrolRange > 0) {
+                // 動物或敵人的巡邏邏輯
+                if (v.waitTimer > 0) {
+                    v.waitTimer -= dt;
+                } else {
+                    const pr = v.config.patrolRange * this.TILE_SIZE;
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = Math.random() * pr;
+                    v.idleTarget = { 
+                        x: (v.spawnX || v.x) + Math.cos(angle) * dist, 
+                        y: (v.spawnY || v.y) + Math.sin(angle) * dist 
+                    };
                 }
             } else if (v.state === 'MOVING') {
-                v.state = 'IDLE'; // 抵達後重置回 IDLE
+                v.state = 'IDLE';
             }
             // 基礎碰撞處理
             const colliding = this.isColliding(v.x, v.y);
@@ -1381,20 +1459,43 @@ export class GameEngine {
 
 
     static isColliding(x, y, ignoreEnts = []) {
-        // 回傳碰撞到的實體，方便後續判斷
-        return this.state.mapEntities.find(ent => {
-            if (ent.isUnderConstruction) return false;
-            if (ignoreEnts.includes(ent)) return false;
+        const grid = this.state.spatialGrid;
+        if (!grid || !grid.cells) return null;
 
-            const cfg = this.getEntityConfig(ent.type);
-            if (cfg && cfg.collision) {
-                const match = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
-                const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
-                const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
-                if (x > ent.x - w / 2 + 1 && x < ent.x + w / 2 - 1 && y > ent.y - h / 2 + 1 && y < ent.y + h / 2 - 1) return true;
+        const cellSize = grid.cellSize;
+        const gx = Math.floor(x / cellSize);
+        const gy = Math.floor(y / cellSize);
+
+        // 偵測當前格點週邊的 4 個格子即可（因為單位體積比 cellSize 小得多）
+        for (let i = gx - 1; i <= gx + 1; i++) {
+            for (let j = gy - 1; j <= gy + 1; j++) {
+                const cell = grid.cells.get(`${i},${j}`);
+                if (!cell) continue;
+
+                for (const ent of cell) {
+                    if (ent.isUnderConstruction) continue;
+                    if (ignoreEnts.includes(ent)) continue;
+
+                    const cfg = this.getEntityConfig(ent.type);
+                    if (cfg && cfg.collision) {
+                        // 快取或即時解析尺寸 (避免 Regex 迴圈消耗)
+                        if (!ent._collisionW) {
+                            const match = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
+                            const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
+                            ent._collisionW = uw * this.TILE_SIZE;
+                            ent._collisionH = uh * this.TILE_SIZE;
+                        }
+
+                        const w = ent._collisionW, h = ent._collisionH;
+                        // 精確碰撞矩形檢查 (誤差補償 +/- 1px 避免邊緣抖動)
+                        if (x > ent.x - w / 2 + 1 && x < ent.x + w / 2 - 1 && y > ent.y - h / 2 + 1 && y < ent.y + h / 2 - 1) {
+                            return ent;
+                        }
+                    }
+                }
             }
-            return false;
-        });
+        }
+        return null;
     }
 
     static isAreaClear(x, y, type, tempEntities = []) {

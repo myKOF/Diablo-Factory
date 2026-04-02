@@ -1,4 +1,4 @@
-import { MainScene } from "./scenes/MainScene.js";
+import { MainScene } from "../scenes/MainScene.js";
 
 /**
  * Phaser 渲染器封裝

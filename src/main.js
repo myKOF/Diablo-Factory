@@ -1,6 +1,6 @@
-import { GameEngine } from "./game_systems.js";
-import { PhaserRenderer } from "./phaser_renderer.js";
-import { UIManager } from "./ui.js";
+import { GameEngine } from "./systems/game_systems.js";
+import { PhaserRenderer } from "./renderers/phaser_renderer.js";
+import { UIManager } from "./ui/ui.js";
 
 /**
  * 遊戲啟動與環境限制

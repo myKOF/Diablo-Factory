@@ -1,7 +1,7 @@
-import { GameEngine } from "../game_systems.js";
-import { UI_CONFIG } from "../ui_config.js";
-import { CharacterRenderer } from "../character_renderer.js";
-import { ResourceRenderer } from "../resource_renderer.js";
+import { GameEngine } from "../systems/game_systems.js";
+import { UI_CONFIG } from "../ui/ui_config.js";
+import { CharacterRenderer } from "../renderers/character_renderer.js";
+import { ResourceRenderer } from "../renderers/resource_renderer.js";
 
 export class MainScene extends Phaser.Scene {
     constructor() {

@@ -267,7 +267,15 @@ export const UI_CONFIG = {
         SWORDSMAN: "#b0bec5", // 劍士：銀灰色（甲冑）
         MAGE: "#9575cd",      // 法師：亮紫色（長袍）
         ARCHER: "#81c784",    // 弓箭手：森綠色（皮甲）
+        ENEMY_LABEL: "#ff4444", // 敵人標籤：鮮紅色
         DEFAULT: "#42a5f5"   // 預設（同閒置）
+    },
+    // ── NPC 標籤顯示 (NPCLabel) ──────────────────────────────────
+    NPCLabel: {
+        fontSize: "bold 14px Arial",
+        enemyColor: "#ff4444",
+        offsetY: -65,            // 顯示在單位頭頂上方 65px
+        shadowColor: "rgba(0, 0, 0, 0.6)"
     },
     // ── 地圖格網（Grid）──────────────────────────────────────────
     // 渲染在地圖底層的格線，分為「主格線」（每 80px）與「細格線」（每 20px）。

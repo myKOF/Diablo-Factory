@@ -1,5 +1,5 @@
 import { UI_CONFIG } from "./ui_config.js";
-import { GameEngine } from "./game_systems.js";
+import { GameEngine } from "../systems/game_systems.js";
 
 /**
  * UI 管理器

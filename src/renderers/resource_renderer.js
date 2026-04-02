@@ -1,4 +1,4 @@
-import { UI_CONFIG } from "./ui_config.js";
+import { UI_CONFIG } from "../ui/ui_config.js";
 
 /**
  * 資源模型渲染器 - 材質生成版 (Texture Generation)
