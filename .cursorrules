@@ -57,6 +57,23 @@
    - 領地限制：嚴禁在 src/ 或根目錄產生暫存檔，所有臨時行為限於 tmp/。
 5. 模組架構：嚴禁 src/ 根目錄產檔。邏輯入 /systems/，渲染入 /renderers/，配置入 /ui/。
 
+[單位動畫系統規範協議]
+1. 資源定義 (Atlas First)：
+   - 強制使用 Texture Packer / SpriteSheet。嚴禁單張圖片逐一加載。
+   - 命名規範：[單位名]_[動作]_[方向] (如: worker_walk_down)。
+2. 配置解耦 (JSON Config)：
+   - 幀率、重複次數、前綴等參數必須寫入 config/animations.json。
+   - 邏輯代碼僅調用 playAnimation(key)，禁止在 JS 內硬編碼幀數。
+3. 狀態機連動 (FSM Integration)：
+   - 動畫必須與 Entity State 綁定。切換狀態時自動對齊動畫，避免滑步。
+   - 必須實作「動作中斷」與「動作鎖定」機制（如攻擊動畫播放完畢前禁止切換移動）。
+4. 效能優化 (Batch & Culling)：
+   - 視口外單位自動暫停動畫計算 (Culling)。
+   - 同類型單位共用同一個 Animation Data，禁止重複創建相同的動畫對象。
+5. 自我驗證 (Visual Test)：
+   - 測試腳本需驗證：1. Atlas 加載成功。2. 動畫播放無 Console 報錯。3. 循環播放時無記憶體異常增長。
+6. 進程自毀：測試結束後必須關閉 Headless 瀏覽器並清理 tmp/。
+
 [靜默檢索協定]
 1. 禁令：嚴禁使用 PowerShell (Get-ChildItem/Select-String) 進行檔案搜尋或內容檢索。
 2. 代替：必須改寫 .cjs 腳本利用 fs 模組執行遍歷與過濾。
