@@ -54,6 +54,12 @@ export class CharacterRenderer {
             this.drawSelectionRing(ctx, x, y, time);
         }
 
+        // 0.1 繪製視界圈 (紅色線條) - 座標系修正：CSV 數值為網格數，需乘以 20 像素
+        if (window.GAME_STATE && window.GAME_STATE.settings.showVisionRange) {
+            const visionRadius = (unitData.field_vision || 150) * 20; 
+            this.drawVisionRange(ctx, x, y, visionRadius);
+        }
+
         const facing = unitData.facing || 1;
         const needsFlip = facing === -1;
 
@@ -113,6 +119,28 @@ export class CharacterRenderer {
             ctx.stroke();
             ctx.fillStyle = `rgba(0, 255, 255, ${alpha * 0.3})`;
             ctx.fill();
+        }
+    }
+
+    static drawVisionRange(ctx, x, y, radius) {
+        const cfg = UI_CONFIG.VisionRange || { lineColor: "#ff0000", lineAlpha: 0.8, lineWidth: 1.5 };
+        const colorHex = parseInt(cfg.lineColor.replace('#', '0x'));
+        const alpha = cfg.lineAlpha;
+
+        if (ctx.lineStyle !== undefined) {
+            // Phaser Graphics
+            ctx.lineStyle(cfg.lineWidth, colorHex, alpha);
+            ctx.strokeCircle(x, y, radius);
+        } else {
+            // Canvas Context
+            const r = (colorHex >> 16) & 255;
+            const g = (colorHex >> 8) & 255;
+            const b = colorHex & 255;
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            ctx.lineWidth = cfg.lineWidth;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.stroke();
         }
     }
 
@@ -283,6 +311,12 @@ export class CharacterRenderer {
         // 1. 繪製選中光圈 - 不參與縮放鏡像
         if (window.GAME_STATE && window.GAME_STATE.selectedUnitId === unitData.id) {
             this.drawSelectionRing(ctx, x, y, time);
+        }
+
+        // 1.1 繪製視界圈 (紅色線條) - 座標系修正
+        if (window.GAME_STATE && window.GAME_STATE.settings.showVisionRange) {
+            const visionRadius = (unitData.field_vision || 150) * 20;
+            this.drawVisionRange(ctx, x, y, visionRadius);
         }
 
         const facing = (unitData && unitData.facing) || 1;

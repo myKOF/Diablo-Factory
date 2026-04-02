@@ -369,6 +369,12 @@ export const UI_CONFIG = {
         workFreq: 2,              // 工作中(建築/採集)的晃動頻率
         armSwingFreqRunning: 5,   // 跑步時的手臂晃動頻率
         armSwingFreqWandering: 1   // 閒逛時的手臂晃動頻率
+    },
+    // ── 單位視界圈 (VisionRange) ──────────────────────────────────
+    VisionRange: {
+        lineColor: "#ff0000",          // 紅色線條
+        lineAlpha: 0.8,                // 線條透明度
+        lineWidth: 1.5,                // 線條寬度
     }
 };
 

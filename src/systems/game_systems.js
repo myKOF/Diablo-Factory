@@ -269,7 +269,8 @@ export class GameEngine {
                 idxType = headers.indexOf('type'),
                 idxCamp = headers.indexOf('camp'),
                 idxPop = headers.indexOf('population'),
-                idxPatrol = headers.indexOf('patrol_range');
+                idxPatrol = headers.indexOf('patrol_range'),
+                idxVision = headers.indexOf('field_vision');
 
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -297,7 +298,8 @@ export class GameEngine {
                     attack: parseInt(row[idxAtk]) || 10,
                     attackSpeed: parseFloat(row[idxAtkSpeed]) || 1,
                     range: parseInt(row[idxRange]) || 10,
-                    patrol_range: parseFloat(row[idxPatrol]) || 0
+                    patrol_range: parseFloat(row[idxPatrol]) || 0,
+                    field_vision: parseFloat(row[idxVision]) || 15
                 };
             }
         } catch (e) { }
@@ -559,6 +561,7 @@ export class GameEngine {
             moveSpeed: config.combatSpeed || config.speed || 5,
             attackSpeed: config.attackSpeed || 1,
             range: config.range || 10,
+            field_vision: (config.field_vision !== undefined) ? config.field_vision : 15,
             facing: 1 // 1: 右, -1: 左
         };
 
@@ -909,7 +912,7 @@ export class GameEngine {
             v.targetBase = this.findNearestDepositPoint(v.x, v.y, v.type) || { x: 960, y: 560 };
         }
         const oldX = v.x, oldY = v.y;
-        
+
         // 安全機制：如果正在執行特定任務（非閒置），則清除閒逛目標，避免動畫頻率錯誤 (Point 2)
         if (v.state !== 'IDLE' && v.idleTarget) {
             v.idleTarget = null;
@@ -917,7 +920,7 @@ export class GameEngine {
 
         // 決定移動速度 (閒置閒逛用 idle_speed, 其餘用 fighting_speed)
         const configSpeed = (v.state === 'IDLE') ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
-        const moveSpeed = configSpeed * 13; 
+        const moveSpeed = configSpeed * 13;
 
         // [TEST] 紀錄狀態變遷 (僅限選中單位)
         if (v.id === GameEngine.state.selectedUnitId && v._lastRecordedState !== v.state) {
@@ -1243,11 +1246,25 @@ export class GameEngine {
             return;
         }
 
-        // 1. 優先找「待施工」建築 (過濾掉已有人在蓋的工地)
+        // 1. 優先找「視野內」的待施工建築 (過濾掉已有人在蓋的工地)
+        // 視野換算：網格數 * 20 像素 + 80 像素寬容度 (更激進的搜尋)
+        const visionPx = ((v.field_vision || 15) * 20) + 80;
+
         const nextConstruction = this.state.mapEntities.find(e => {
-            if (!e.isUnderConstruction) return false;
-            // 每個建築預設僅限 1 名工人負責
-            return !this.state.units.villagers.some(vi => vi !== v && vi.constructionTarget === e);
+            if (!e || !e.isUnderConstruction) return false;
+            
+            // 距離檢查
+            const dist = Math.hypot(e.x - v.x, e.y - v.y);
+            if (dist > visionPx) return false;
+
+            // 互斥檢查修復：只有當正在有人「前往或正在施工中」才放手
+            const hasActiveWorker = this.state.units.villagers.some(vi => 
+                vi.id !== v.id && 
+                vi.constructionTarget && 
+                (vi.constructionTarget === e || vi.constructionTarget.id === e.id) &&
+                ['MOVING_TO_CONSTRUCTION', 'CONSTRUCTING'].includes(vi.state)
+            );
+            return !hasActiveWorker;
         });
 
         if (nextConstruction) {
@@ -1826,21 +1843,9 @@ export class GameEngine {
 
         // ------------------------------------------------------------
 
-        // 指派最近的村民
-        const builder = this.findNearestAvailableVillager(x, y);
-        if (builder) {
-            this.addLog(`已指派村民前往建造 ${cfg.name}。`);
-            // 保存當前任務
-            builder.prevTask = { state: builder.state, targetId: builder.targetId, type: builder.type };
-            builder.constructionTarget = newBuilding;
-
-            if (builder.state === 'MOVING_TO_BASE' && builder.cargo > 0) {
-                builder.nextStateAfterDeposit = 'MOVING_TO_CONSTRUCTION';
-            } else {
-                builder.state = 'MOVING_TO_CONSTRUCTION';
-                builder.pathTarget = null;
-            }
-        }
+        // 已修復：由村民在 assignNextTask 中依紅圈視野自行「領取」任務
+        // 這能解決「遠方村民霸佔任務」導致「身邊村民不蓋房」且「無視紅圈內建築」的問題
+        this.addLog(`批次配置成功：${cfg.name} 已加入建造清單。`, 'COMMON');
 
         this.updatePathfindingGrid(); // 建造完成後刷新格網數據
         this.updateSpatialGrid();

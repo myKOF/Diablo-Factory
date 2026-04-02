@@ -1129,6 +1129,13 @@ export class UIManager {
                     <div style="width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 3px; ${settings.showResourceInfo ? 'right: 3px' : 'left: 3px'}; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
                 </div>
             </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="window.UIManager.updateSetting(event, 'showVisionRange', !window.GAME_STATE.settings.showVisionRange)">
+                <span style="font-size: 16px; color: #e0e0e0; font-weight: 600;">單位視界圈顯示</span>
+                <div class="setting-toggle ${settings.showVisionRange ? 'active' : ''}" style="width: 54px; height: 26px; background: ${settings.showVisionRange ? 'var(--aoe-gold)' : '#444'}; border-radius: 13px; position: relative; transition: all 0.3s; box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);">
+                    <div style="width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 3px; ${settings.showVisionRange ? 'right: 3px' : 'left: 3px'}; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
+                </div>
+            </div>
         `;
 
         html += `</div>`;
