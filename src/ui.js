@@ -30,10 +30,10 @@ export class UIManager {
         window.addEventListener("mousedown", (e) => this.handleWorldMouseDown(e));
         window.addEventListener("mousemove", (e) => this.handleWorldMouseMove(e));
         window.addEventListener("mouseup", (e) => this.handleWorldMouseUp(e));
-        window.addEventListener("click", (e) => this.handleWorldClick(e));
+        window.addEventListener("click", (e) => this.handleWorldClick(e), { capture: true });
         window.addEventListener("mousemove", (e) => {
             if (UIManager.isResizingLog) {
-                const dy = UIManager.startY - e.clientY; 
+                const dy = UIManager.startY - e.clientY;
                 UIManager.logHeight = Math.max(100, Math.min(window.innerHeight - 200, UIManager.startHeight + dy));
                 const logPanel = document.getElementById("log_panel");
                 if (logPanel) {
@@ -186,7 +186,7 @@ export class UIManager {
             background: ${this.hexToRgba(logCfg.bgColor, 0.9)}; border: 1px solid ${this.hexToRgba(logCfg.borderColor, 0.5)};
             border-top: none; border-radius: 0 0 6px 6px; z-index: 200; pointer-events: auto;
         `;
-        handle.innerHTML = "•••"; 
+        handle.innerHTML = "•••";
         logPanel.appendChild(handle);
 
         // 面板本身的滑鼠事件處理 (用於偵測頂部邊緣)
@@ -271,7 +271,7 @@ export class UIManager {
             cursor: pointer; font-size: 13px; border-radius: 4px; transition: all 0.2s;
             z-index: 300; pointer-events: auto;
         `;
-        
+
         // 篩選選單容器
         const filterMenu = document.createElement("div");
         filterMenu.id = "log_filter_menu";
@@ -306,7 +306,7 @@ export class UIManager {
             e.stopPropagation();
             const isVisible = filterMenu.style.display === "flex";
             filterMenu.style.display = isVisible ? "none" : "flex";
-            
+
             // 如果開啟選單，隱藏其它可能干擾的 UI (如果有)
         };
         filterBtn.appendChild(filterMenu);
@@ -345,7 +345,7 @@ export class UIManager {
         setPanel.style.pointerEvents = "auto";
         this.applyAnchorStyle(setPanel, UI_CONFIG.SettingsPanel);
         this.uiLayer.appendChild(setPanel);
-        
+
         // 6. 座標顯示
         const coordsCfg = UI_CONFIG.CoordsDisplay;
         const coordsEl = document.createElement("div");
@@ -534,7 +534,7 @@ export class UIManager {
         const btn = document.createElement("div");
         btn.className = "building-item";
         btn.setAttribute("data-type", item.id);
-        
+
         // 使用 Flexbox 佈局以適應不同高度
         btn.style.cssText = `
             position: relative; 
@@ -692,6 +692,7 @@ export class UIManager {
         if (!GameEngine.state.placingType) return;
         GameEngine.state.buildingMode = 'NONE';
         GameEngine.state.placingType = null;
+        GameEngine.state.previewPos = null; // 核心修復：清除上一次的預覽位置，防止跳躍
         this.activeBuilding = null;
         GameEngine.state.linePreviewEntities = [];
         if (this.dragGhost) {
@@ -737,8 +738,28 @@ export class UIManager {
             // 只有具備生產清單的建築才能設定集結點
             if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
                 const pos = this.getWorldMousePos(e.clientX, e.clientY);
-                ent.rallyPoint = pos;
-                GameEngine.addLog(`建築集結點已設定。`);
+
+                // 核心改進：檢查點擊位置是否在建築物本身占地範圍內
+                let uw = 1, uh = 1;
+                if (bCfg.size) {
+                    const m = bCfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
+                    if (m) { uw = parseInt(m[1]); uh = parseInt(m[2]); }
+                }
+                const halfW = (uw * GameEngine.TILE_SIZE) / 2;
+                const halfH = (uh * GameEngine.TILE_SIZE) / 2;
+
+                const isInside = pos.x >= ent.x - halfW && pos.x <= ent.x + halfW &&
+                    pos.y >= ent.y - halfH && pos.y <= ent.y + halfH;
+
+                if (isInside) {
+                    ent.rallyPoint = null;
+                    GameEngine.addLog(`已取消建築集結點。`);
+                    this.updateValues(true); // 立即更新渲染
+                } else {
+                    ent.rallyPoint = pos;
+                    GameEngine.addLog(`${bCfg.name} 集結點已設定：(${pos.x}, ${pos.y})`);
+                    this.updateValues(true);
+                }
             } else {
                 this.cancelBuildingMode();
             }
@@ -829,20 +850,29 @@ export class UIManager {
                 filterMenu.style.display = "none";
             }
         }
-        
+
         if (this.dragGhost) return;
         const state = GameEngine.state;
- 
-        // 點擊 UI 區域的判斷
+
+        // 核心邏輯：明確區分「本身指令選單」與「他者 UI/地面」
+        const menuEl = document.getElementById("context_menu");
+        const distBtnEl = document.getElementById("destroy_btn");
+        const isSelfUI = (menuEl && menuEl.contains(e.target)) || (distBtnEl && distBtnEl.contains(e.target));
+        
+        if (!isSelfUI) {
+            this.hideContextMenu();
+        }
+
+        // 點擊 UI 區域後的額外處理
         if (e.target.closest("#ui_layer")) {
-            // 如果點擊的不是設置按鈕也不是設置面板，則關閉設置面板
             if (!e.target.closest("#settings_btn") && !e.target.closest("#settings_panel")) {
                 this.hideSettingsPanel();
             }
-            return;
+            // 如果點到的是具體的 UI 標籤或按鈕 (而非背景層)，則中止後續地圖交互邏輯
+            if (e.target.id !== "ui_layer") return;
         }
         
-        // 點擊大地圖區域，關閉所有選單
+        // 點擊大地圖區域 (點在 0,0 層級或非 UI 區域)
         this.hideSettingsPanel();
 
         // Stamp 模式：點擊地圖直接建造
@@ -1067,7 +1097,7 @@ export class UIManager {
         if (!this.activeMenuEntity) return;
         GameEngine.adjustWarehouseWorkers(this.activeMenuEntity, delta);
     }
- 
+
     static toggleSettingsPanel() {
         const panel = document.getElementById("settings_panel");
         if (!panel) return;
@@ -1081,16 +1111,16 @@ export class UIManager {
             panel.style.display = "none";
         }
     }
- 
+
     static renderSettingsPanel() {
         const panel = document.getElementById("settings_panel");
         const cfg = UI_CONFIG.SettingsPanel;
         const settings = GameEngine.state.settings;
- 
+
         let html = `<div class="title" style="text-align:center; font-size: 20px; border-bottom: 2px solid #8b6e4b; margin-bottom: 20px; padding-bottom: 10px;">${cfg.title}</div>`;
-        
+
         html += `<div style="display:flex; flex-direction:column; gap:16px; padding: 10px;">`;
-        
+
         // 1. 顯示資源資訊 (名稱、等級、數量)
         html += `
             <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="window.UIManager.updateSetting(event, 'showResourceInfo', !window.GAME_STATE.settings.showResourceInfo)">
@@ -1100,9 +1130,9 @@ export class UIManager {
                 </div>
             </div>
         `;
- 
+
         html += `</div>`;
-        
+
         // 關閉按鈕
         html += `
             <div style="margin-top: 30px; border-top: 1px solid rgba(139, 110, 75, 0.3); padding-top: 15px;">
@@ -1111,10 +1141,10 @@ export class UIManager {
                 </button>
             </div>
         `;
- 
+
         panel.innerHTML = html;
     }
- 
+
     static updateSetting(event, key, val) {
         if (event) event.stopPropagation();
         GameEngine.state.settings[key] = val;
@@ -1126,14 +1156,14 @@ export class UIManager {
         const settings = document.getElementById("settings_panel");
         if (settings) settings.style.display = "none";
     }
- 
+
     static hideContextMenu() {
         this.activeMenuEntity = null;
         const menu = document.getElementById("context_menu");
         if (menu) menu.style.display = "none";
         const destroyBtn = document.getElementById("destroy_btn");
         if (destroyBtn) destroyBtn.style.display = "none";
-        
+
         // 注意：這裡不再自動隱藏 settings_panel，避免 toggle 時發生衝突
     }
 
@@ -1146,7 +1176,7 @@ export class UIManager {
         if (lc) {
             const history = state.log;
             const filtered = history.filter(item => this.logFilters[item.category]);
-            
+
             // 建立內容字串並附帶顏色
             const content = filtered.map(item => {
                 const color = item.category === 'PATH' ? '#ffff00' : '#ffffff';
@@ -1189,10 +1219,10 @@ export class UIManager {
         const debugInfo = document.getElementById("unit_debug_info");
         const selId = GameEngine.state.selectedUnitId;
         const v = selId ? GameEngine.state.units.villagers.find(u => u.id === selId) : null;
-        
+
         if (v && debugInfo) {
             debugInfo.style.display = "block";
-            const target = (v.fullPath && v.fullPath[v.pathIndex]) ? 
+            const target = (v.fullPath && v.fullPath[v.pathIndex]) ?
                 `➟ (${v.fullPath[v.pathIndex].x.toFixed(0)}, ${v.fullPath[v.pathIndex].y.toFixed(0)})` : " (待命)";
             debugInfo.innerHTML = `[DEBUG] ${v.configName} (${v.state}): (${v.x.toFixed(0)}, ${v.y.toFixed(0)}) ${target}`;
         } else if (debugInfo) {
@@ -1202,7 +1232,7 @@ export class UIManager {
         const lp = document.getElementById("log_content");
         if (lp) {
             const history = GameEngine.state.log;
-            
+
             // 核心修復：執行真正的過濾邏輯
             const filtered = history.filter(entry => {
                 const cat = (typeof entry === 'object') ? entry.category : 'COMMON';
@@ -1213,19 +1243,19 @@ export class UIManager {
             const content = filtered.map(entry => {
                 let text = (typeof entry === 'object') ? entry.msg : entry;
                 let colorAttr = '';
-                
+
                 if (typeof entry === 'object') {
-                    switch(entry.category) {
-                        case 'PATH': 
+                    switch (entry.category) {
+                        case 'PATH':
                         case 'STUCK': colorAttr = ' style="color: #ffeb3b;"'; break;
                         case 'STATE': colorAttr = ' style="color: #4fc3f7;"'; break;
                         case 'SYSTEM': colorAttr = ' style="color: #f48fb1;"'; break;
                     }
                 }
-                
+
                 return `<div${colorAttr}>> ${text}</div>`;
             }).join("");
-            
+
             if (lp.innerHTML !== content) {
                 // 判斷使用者是否目前正停留在底部
                 const isAtBottom = lp.scrollHeight - lp.scrollTop - lp.clientHeight < 20;
@@ -1349,7 +1379,7 @@ export class UIManager {
                 }
                 const halfW = (uw * GameEngine.TILE_SIZE) / 2;
                 const halfH = (uh * GameEngine.TILE_SIZE) / 2;
-                
+
                 // sx, sy 是建築中心，讓按鈕完全待在內部邊緣
                 dBtn.style.left = `${sx + halfW - 20}px`;
                 dBtn.style.top = `${sy - halfH + 2}px`;
@@ -1366,7 +1396,7 @@ export class UIManager {
 
         const cam = window.PhaserScene.cameras.main;
         const cfg = UI_CONFIG.TownCenterPointer;
-        
+
         // 捲動相機到中心點
         cam.pan(tc.x, tc.y, cfg.panSpeed || 1000, 'Power2');
         GameEngine.addLog("相機移動至城鎮中心");

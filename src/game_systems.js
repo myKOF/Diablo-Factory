@@ -852,6 +852,20 @@ export class GameEngine {
             case 'GATHERING':
                 v.gatherTimer += dt;
                 const harvestTime = v.config.collection_speed || 2; // 採集時間 (秒)
+
+                // 核心安全檢查：若採集目標已失蹤，直接中止
+                // 如果是特殊任務且無目標，則視為任務完成或失效
+                if (!v.targetId) {
+                    if (v.gatherTimer > 1.0) { // 給予 1 秒寬限期
+                        this.addLog(`[調試] 單位 ${v.configName} 採集目標遺失，強制歸位。`, 'COMMON');
+                        v.state = 'IDLE';
+                        v.pathTarget = null;
+                        v.targetId = null;
+                        v.forcedTarget = false;
+                    }
+                    break;
+                }
+
                 if (v.gatherTimer >= harvestTime) {
                     const harvestTotal = v.config.collection_amount || 20; // 每次採集的數量
                     if (v.targetId) {
@@ -871,6 +885,7 @@ export class GameEngine {
                                 v.targetId = null;
                                 v.state = 'IDLE';
                                 v.pathTarget = null;
+                                v.forcedTarget = false;
                             }
                         } else {
                             // 一般資源點，照常運送
@@ -878,14 +893,31 @@ export class GameEngine {
                             if (v.targetId.amount <= 0) {
                                 this.state.mapEntities = this.state.mapEntities.filter(e => e !== v.targetId);
                                 v.targetId = null;
+                                v.forcedTarget = false;
                             }
                             v.state = 'MOVING_TO_BASE';
                             v.pathTarget = null;
                         }
+                    } else {
+                        // 當採集時間到，目標卻失蹤（保險邏輯）
+                        v.state = 'IDLE';
+                        v.pathTarget = null;
                     }
                 }
                 break;
             case 'MOVING_TO_BASE':
+                // 安全檢查：若基地已失蹤（如被拆除），尋找下一個最近基地或歸位
+                if (!v.targetBase) {
+                    const nearestTC = this.state.mapEntities.find(e => e.type === 'town_center' || e.type === 'village');
+                    if (nearestTC) {
+                        v.targetBase = nearestTC;
+                        v.pathTarget = null; // 重尋路
+                    } else {
+                        v.state = 'IDLE'; v.pathTarget = null;
+                    }
+                    break;
+                }
+
                 const cfgB = this.state.buildingConfigs[v.targetBase.type];
                 let depositDist = 60;
                 if (cfgB && cfgB.size) {
