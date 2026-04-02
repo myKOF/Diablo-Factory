@@ -5,5 +5,5 @@ id,name,model,type,camp,population,need_resource,collection_speed,collection_res
 3,swordsman,swordsman,swordsman,player,2,"{food=50,gold=10}",,,1,100,8,3,10,1,3,,劍士，近戰物理單位
 4,mage,mage,mage,player,2,"{food=30,gold=30}",,,1,40,15,3,10,0.25,20,,法師，遠程魔法單位
 5,archer,archer,archer,player,2,"{food=20,wood=20,gold=10}",,,1,60,5,3,10,0.5,20,,弓箭手，遠程物理單位
-6,wolf,wolf,wolf,enemy,2,,,,1,200,10,3,20,0.5,3,10,狼
-7,bear,bear,bear,enemy,3,,,,1,500,30,3,15,0.25,3,10,熊
+6,狼,wolf,wolf,enemy,2,,,,1,200,10,3,20,0.5,3,10,狼
+7,熊,bear,bear,enemy,3,,,,1,500,30,3,15,0.25,3,10,熊

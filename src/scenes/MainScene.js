@@ -1095,6 +1095,12 @@ export class MainScene extends Phaser.Scene {
                 sprite.clear();
                 sprite.setDepth(20);
                 CharacterRenderer.render(sprite, v.renderX, v.renderY, v, this.time.now);
+                
+                // 更新單位的姓名與等級標籤 (Phaser Text 方案)
+                this.updateUnitLabel(v.id, v, v.renderX, v.renderY);
+            } else {
+                // 如果不可見，也隱藏標籤
+                this.hideUnitLabel(v.id);
             }
         });
 
@@ -1102,7 +1108,47 @@ export class MainScene extends Phaser.Scene {
             if (!currentIds.has(id)) {
                 sprite.destroy();
                 this.units.delete(id);
+                this.cleanupUnitLabels(id);
             }
+        }
+    }
+
+    updateUnitLabel(id, unit, x, y) {
+        if (!unit.config || unit.config.camp !== 'enemy') return;
+
+        const cfg = UI_CONFIG.NPCLabel || { fontSize: "bold 14px Arial", enemyColor: "#ff4444", offsetY: -65 };
+        const labelStr = `${unit.config.name || '敵人'} (Lv. ${unit.config.lv || 1})`;
+        
+        let label = this.nameLabels.get(id);
+        if (!label) {
+            label = this.add.text(x, y + cfg.offsetY, labelStr, {
+                font: cfg.fontSize,
+                fill: cfg.enemyColor,
+                align: 'center'
+            }).setOrigin(0.5, 0.5);
+            
+            label.setStroke('#000000', 3);
+            label.setShadow(1, 1, 'rgba(0,0,0,0.6)', 2);
+            label.setDepth(100);
+            this.nameLabels.set(id, label);
+        }
+
+        // 徹底穩定化：直接使用整數座標，不添加任何 breathing 偏移
+        label.setPosition(Math.round(x), Math.round(y + cfg.offsetY));
+        if (label.text !== labelStr) label.setText(labelStr);
+        if (!label.visible) label.setVisible(true);
+    }
+
+    hideUnitLabel(id) {
+        if (this.nameLabels.has(id)) {
+            this.nameLabels.get(id).setVisible(false);
+        }
+    }
+
+    cleanupUnitLabels(id) {
+        if (this.nameLabels.has(id)) {
+            this.nameLabels.get(id).destroy();
+            this.nameLabels.delete(id);
         }
     }
 
@@ -1128,6 +1174,8 @@ export class MainScene extends Phaser.Scene {
             });
         }
     }
+
+
 
     // 新增支援位移的繪製方法
     drawEntityAt(g, x, y, ent, alpha) {

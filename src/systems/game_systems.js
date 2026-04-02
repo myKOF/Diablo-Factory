@@ -255,7 +255,9 @@ export class GameEngine {
             const { rows, headerIdx, headers } = data;
             const idxId = headers.indexOf('id'),
                 idxName = headers.indexOf('name'),
-                idxSpeed = headers.indexOf('speed'),
+                idxModel = headers.indexOf('model'),
+                idxFightingSpeed = headers.indexOf('speed'),
+                idxIdleSpeed = headers.indexOf('idle_speed'),
                 idxColSpeed = headers.indexOf('collection_speed'),
                 idxColAmt = headers.indexOf('collection_resource'),
                 idxNeed = headers.indexOf('need_resource'),
@@ -281,10 +283,12 @@ export class GameEngine {
                 this.state.npcConfigs[name] = {
                     id: id,
                     name: name,
+                    model: row[idxModel] ? row[idxModel].trim() : 'villager',
                     type: row[idxType] ? row[idxType].trim() : 'other',
                     camp: (row[idxCamp] && row[idxCamp].trim()) || 'player',
                     population: parseInt(row[idxPop]) || 1,
-                    speed: parseFloat(row[idxSpeed]) || 5.5,
+                    fighting_speed: parseFloat(row[idxFightingSpeed]) || 5.5,
+                    idle_speed: parseFloat(row[idxIdleSpeed]) || 2.5,
                     collection_speed: parseFloat(row[idxColSpeed]) || 10,
                     collection_amount: parseFloat(row[idxColAmt]) || 20,
                     costs: this.parseResourceObject(row[idxNeed]),
@@ -847,14 +851,30 @@ export class GameEngine {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
         if (v.config.type !== 'villagers') {
             const oldX = v.x, oldY = v.y;
-            const moveSpeed = (v.config.speed || 5.5) * 13;
+            // 決定移動速度 (閒置閒逛用 idle_speed, 其餘用 fighting_speed)
+            const moveBaseSpeed = (v.state === 'IDLE') ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
+            const moveSpeed = moveBaseSpeed * 13;
             if (v.idleTarget) {
                 v.state = 'MOVING';
                 this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
                 if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                     v.idleTarget = null;
                     v.state = 'IDLE';
-                    v.waitTimer = 2 + Math.random() * 3; // 待機更久一點
+                    
+                    // 解析巡邏間隔配置 {min,max}，例如 {5,10}
+                    let minWait = 3, maxWait = 6;
+                    const cfg = this.state.systemConfig.enemy_patrol_time;
+                    if (cfg && typeof cfg === 'string') {
+                        const match = cfg.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
+                        if (match) {
+                            minWait = parseFloat(match[1]);
+                            maxWait = parseFloat(match[2]);
+                        }
+                    } else if (typeof cfg === 'number') {
+                        minWait = cfg; maxWait = cfg * 1.5;
+                    }
+                    
+                    v.waitTimer = minWait + Math.random() * (maxWait - minWait); 
                 }
             } else if (v.state === 'IDLE' && v.config.patrolRange > 0) {
                 // 動物或敵人的巡邏邏輯
@@ -890,9 +910,9 @@ export class GameEngine {
             v.targetBase = this.findNearestDepositPoint(v.x, v.y, v.type) || { x: 960, y: 560 };
         }
         const oldX = v.x, oldY = v.y;
-        const baseSpeed = v.config.speed || 5.5;
-        const configSpeed = (v.state === 'IDLE' ? (this.state.systemConfig.village_standby_speed || 3) : Math.max(baseSpeed, 6.0));
-        const moveSpeed = configSpeed * 13; // 統一係數，工作狀態基礎速度稍微由 5.5 提升至 6.0
+        // 決定移動速度 (閒置閒逛用 idle_speed, 其餘用 fighting_speed)
+        const configSpeed = (v.state === 'IDLE') ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
+        const moveSpeed = configSpeed * 13; 
 
         // [TEST] 紀錄狀態變遷 (僅限選中單位)
         if (v.id === GameEngine.state.selectedUnitId && v._lastRecordedState !== v.state) {
@@ -1389,7 +1409,7 @@ export class GameEngine {
                         GameEngine.addLog(`   ┗ 前往下一點: (${nextNode.x.toFixed(0)}, ${nextNode.y.toFixed(0)})`, 'PATH');
                     }
                 } else if (dist > 0.01) {
-                    // 尚未到達下一個節點，移動剩餘距離並結束
+                    // [速度正規化 Velocity Normalization] 防止斜向移動比直線移動快 (1.414 -> 1.0)
                     const ratio = moveDist / dist;
                     v.x += dx * ratio;
                     v.y += dy * ratio;

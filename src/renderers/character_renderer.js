@@ -8,14 +8,14 @@ export class CharacterRenderer {
     /**
      * 繪製角色主入口
      * @param {CanvasRenderingContext2D|Phaser.GameObjects.Graphics} ctx 
-     * @param {number x
+     * @param {number} x
      * @param {number} y
      * @param {object} unitData
      * @param {number} time
      */
     static render(ctx, x, y, unitData, time) {
-        const name = (unitData.configName || "").toLowerCase();
-        if (name === 'wolf' || name === 'bear') {
+        const model = unitData.config ? unitData.config.model : "";
+        if (model === 'wolf' || model === 'bear') {
             return this.renderAnimal(ctx, x, y, unitData, time);
         }
 
@@ -57,11 +57,6 @@ export class CharacterRenderer {
 
         // 5. 繪製手臂與工具
         this.renderArmsAndTools(ctx, x, bodyY, unitData, t);
-
-        // 6. 繪製名稱與等級 (極致安全性加固：檢查 unitData 及其 config)
-        if (unitData && unitData.config && unitData.config.camp === 'enemy') {
-            this.renderNPCLabel(ctx, x, y, unitData, time);
-        }
     }
 
     static drawSelectionRing(ctx, x, y, time) {
@@ -229,10 +224,10 @@ export class CharacterRenderer {
     }
 
     static renderAnimal(ctx, x, y, unitData, time) {
-        const name = (unitData.configName || "").toLowerCase();
+        if (!unitData || !unitData.config) return;
+        const model = unitData.config.model;
+        const isMoving = (unitData.state || 'IDLE').includes('MOVING');
         const t = time * 0.01;
-        const state = unitData.state || 'IDLE';
-        const isMoving = state.includes('MOVING');
 
         // 1. 繪製選中光圈
         if (window.GAME_STATE && window.GAME_STATE.selectedUnitId === unitData.id) {
@@ -242,48 +237,11 @@ export class CharacterRenderer {
         // 2. 繪製陰影
         this.drawShadow(ctx, x, y);
 
-        if (name === 'wolf') {
+        if (model === 'wolf') {
             this.renderWolf(ctx, x, y, t, isMoving);
-        } else if (name === 'bear') {
+        } else if (model === 'bear') {
             this.renderBear(ctx, x, y, t, isMoving);
         }
-
-        // 3. 繪製名稱與等級 (動物敵人，極致安全性加固：檢查 unitData 及其 config)
-        if (unitData && unitData.config && unitData.config.camp === 'enemy') {
-            this.renderNPCLabel(ctx, x, y, unitData, time);
-        }
-    }
-
-    static renderNPCLabel(ctx, x, y, unitData, time) {
-        if (!unitData || !unitData.config || !UI_CONFIG.NPCLabel) return;
-        
-        const config = UI_CONFIG.NPCLabel;
-        const npcConfig = unitData.config;
-        const name = npcConfig.name || "敵人";
-        const lv = npcConfig.lv || 1;
-        const label = `${name} (Lv. ${lv})`;
-
-        // 呼吸動畫跟隨
-        const isMoving = (unitData.state || 'IDLE').includes('MOVING');
-        const t = time * 0.01;
-        const breathing = isMoving ? 0 : Math.sin(t * 3) * 3; 
-
-        if (ctx.fillText === undefined) {
-             // Phaser Graphics 不支援直接畫 Text，Phaser 控制器會負責建立獨立的 Text 物件
-             // 不過在純 Canvas 模式下我們希望直接繪製
-             return;
-        }
-
-        ctx.font = config.fontSize;
-        ctx.textAlign = 'center';
-
-        // 繪製陰影
-        ctx.fillStyle = config.shadowColor;
-        ctx.fillText(label, x + 1, y + config.offsetY + breathing + 1);
-
-        // 繪製主文字 (鮮紅色)
-        ctx.fillStyle = config.enemyColor;
-        ctx.fillText(label, x, y + config.offsetY + breathing);
     }
 
     static renderWolf(ctx, x, y, t, isMoving) {

@@ -5,8 +5,8 @@ console.log("--- Diablo-Factory Build Verification ---");
 
 const filesToCheck = [
     'src/systems/PathfindingSystem.js',
-    'src/game_systems.js',
-    'src/character_renderer.js'
+    'src/systems/game_systems.js',
+    'src/renderers/character_renderer.js'
 ];
 
 let allOk = true;
