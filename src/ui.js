@@ -410,6 +410,27 @@ export class UIManager {
         menu.className = "panel";
         menu.style.cssText = `position: absolute; display: none; width: 220px; padding: 15px; z-index: 1000; pointer-events: auto;`;
         this.uiLayer.appendChild(menu);
+
+        // 9. 獨立的銷毀按鈕 (右上角的小 X)
+        const destroyBtn = document.createElement("div");
+        destroyBtn.id = "destroy_btn";
+        destroyBtn.innerHTML = "×";
+        destroyBtn.title = "銷毀建築";
+        destroyBtn.style.cssText = `
+            position: absolute; display: none; width: 18px; height: 18px;
+            background: rgba(244, 67, 54, 0.9); color: white; border: 1px solid #fff;
+            border-radius: 3px; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 14px; font-weight: bold; z-index: 1100;
+            pointer-events: auto; box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            transition: transform 0.1s;
+        `;
+        destroyBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.confirmDestroy(e);
+        };
+        destroyBtn.onmouseover = () => destroyBtn.style.transform = "scale(1.2)";
+        destroyBtn.onmouseout = () => destroyBtn.style.transform = "scale(1)";
+        this.uiLayer.appendChild(destroyBtn);
     }
 
     /**
@@ -513,29 +534,65 @@ export class UIManager {
         const btn = document.createElement("div");
         btn.className = "building-item";
         btn.setAttribute("data-type", item.id);
+        
+        // 使用 Flexbox 佈局以適應不同高度
         btn.style.cssText = `
-            position: relative; height: ${bp.itemHeight}px; border: 1px solid #555;
-            margin: 5px 0; padding: 10px; background: rgba(0,0,0,0.3);
-            color: ${bp.textColor}; font-size: ${bp.fontSize};
-            cursor: pointer; transition: all 0.2s;
-        `;
-        btn.innerHTML = `
-            <strong style="color: ${bp.titleColor}">${item.name}</strong><br>
-            <small style="color: ${this.hexToRgba(bp.descColor, bp.descAlpha)}">${item.desc}</small>
+            position: relative; 
+            height: ${bp.itemHeight}px; 
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            margin: 4px 0; 
+            padding: 0 12px; 
+            background: rgba(45, 45, 45, 0.6);
+            color: ${bp.textColor}; 
+            cursor: pointer; 
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            overflow: hidden;
+            box-sizing: border-box;
+            border-radius: 4px;
         `;
 
+        // 內部文字容器
+        const content = document.createElement("div");
+        content.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            pointer-events: none;
+            width: calc(100% - 45px);
+        `;
+
+        content.innerHTML = `
+            <div style="color: ${bp.titleColor}; font-size: ${bp.fontSize}; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.name}</div>
+            <div style="color: ${this.hexToRgba(bp.descColor, bp.descAlpha)}; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.desc}</div>
+        `;
+
+        // 圖示容器
+        const iconSize = Math.min(40, bp.itemHeight - 16);
         const icon = document.createElement("div");
         icon.className = "building-icon";
         icon.style.cssText = `
-            position: absolute; right: 10px; bottom: 10px;
-            width: 40px; height: 40px; border: 2px solid #ff5722;
-            background: rgba(255, 87, 34, 0.2);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 24px; pointer-events: none; /* 圖示僅作視覺展示 */
+            position: absolute; 
+            right: 12px; 
+            top: 50%;
+            transform: translateY(-50%);
+            width: ${iconSize}px; 
+            height: ${iconSize}px; 
+            border: 1.5px solid #ff5722;
+            background: rgba(255, 87, 34, 0.15);
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            font-size: ${iconSize * 0.6}px; 
+            pointer-events: none;
+            border-radius: 4px;
+            box-shadow: inset 0 0 10px rgba(255, 87, 34, 0.2);
         `;
         icon.innerHTML = item.icon || "🏗️";
 
-        // 統一拖曳與點擊邏輯
+        // 事件綁定
         btn.onmousedown = (e) => {
             if (e.button !== 0) return;
             this.mouseDownPos = { x: e.clientX, y: e.clientY };
@@ -545,10 +602,7 @@ export class UIManager {
 
         btn.onclick = (e) => {
             e.stopPropagation();
-            // 如果發生過拖曳，則 onclick 不處理 (由 handleWorldMouseUp 處理建造)
             if (this.dragGhost) return;
-
-            // 如果點擊時間太長，也不視為純點擊
             if (Date.now() - this.mouseDownTime > 300) return;
 
             if (GameEngine.state.placingType === item.id) {
@@ -558,6 +612,7 @@ export class UIManager {
             }
         };
 
+        btn.appendChild(content);
         btn.appendChild(icon);
         container.appendChild(btn);
     }
@@ -897,7 +952,7 @@ export class UIManager {
             if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0 && !entity.isUnderConstruction) {
                 const iconMap = {
                     'villagers': '👤', 'female villagers': '👩', 'mage': '🧙', 'swordsman': '⚔️', 'archer': '🏹',
-                    '1': '👤', '2': '👩', '3': '🧙', '4': '⚔️', '5': '🏹'
+                    '1': '👤', '2': '👩', '3': '⚔️', '4': '🧙', '5': '🏹'
                 };
 
                 if (bCfg.productionMode === 'rand') {
@@ -943,26 +998,30 @@ export class UIManager {
                     </div>
                 `;
             }
-
-            // 限制：如果是最後一間「村莊中心」，不顯示銷毀選項
-            const villageCount = GameEngine.state.mapEntities.filter(e => e.type === 'town_center' || e.type === 'village').length;
-            const isLastVillage = (entity.type === 'town_center' || entity.type === 'village') && villageCount <= 1;
-
-            if (!isLastVillage) {
-                html += `
-                    <button class="action-btn danger" onclick="window.UIManager.confirmDestroy(event)">
-                        <span class="icon">💣</span><span class="label">銷毀</span>
-                    </button>
-                `;
-            }
         }
 
         html += `</div>`;
 
-        menu.innerHTML = html;
-        // 先把選單移出可視區域，等 DOM 渲染一幀取得真實尺寸後再定位，避免首幀跳動
-        menu.style.left = "-9999px";
-        menu.style.top = "-9999px";
+        // 判斷是否隱藏選單：如果除了標題外沒有任何操作按鈕，且非銷毀確認模式，則隱藏選單
+        const hasActions = html.includes('action-btn') || html.includes('warehouse-controls');
+        if (!hasActions && !isConfirming) {
+            menu.style.display = "none";
+        } else {
+            menu.style.display = "flex"; // 確保恢復顯示
+            menu.innerHTML = html;
+            // 先把選單移出可視區域，等 DOM 渲染一幀取得真實尺寸後再定位，避免首幀跳動
+            menu.style.left = "-9999px";
+            menu.style.top = "-9999px";
+        }
+
+        // 顯示銷毀按鈕 (只有在非確認模式下才顯示右上角的 X)
+        const destroyBtn = document.getElementById("destroy_btn");
+        if (destroyBtn) {
+            const villageCount = GameEngine.state.mapEntities.filter(e => e.type === 'town_center' || e.type === 'village').length;
+            const isLastVillage = (entity.type === 'town_center' || entity.type === 'village') && villageCount <= 1;
+            destroyBtn.style.display = (!isConfirming && !isLastVillage) ? "flex" : "none";
+        }
+
         this.updateValues();
         requestAnimationFrame(() => this.updateStickyPositions());
     }
@@ -1072,6 +1131,8 @@ export class UIManager {
         this.activeMenuEntity = null;
         const menu = document.getElementById("context_menu");
         if (menu) menu.style.display = "none";
+        const destroyBtn = document.getElementById("destroy_btn");
+        if (destroyBtn) destroyBtn.style.display = "none";
         
         // 注意：這裡不再自動隱藏 settings_panel，避免 toggle 時發生衝突
     }
@@ -1276,6 +1337,23 @@ export class UIManager {
 
             menu.style.left = `${finalX}px`;
             menu.style.top = `${finalY}px`;
+
+            // 更新銷毀按鈕位置 (右上角)
+            const dBtn = document.getElementById("destroy_btn");
+            if (dBtn && dBtn.style.display !== 'none') {
+                const bCfg = GameEngine.getEntityConfig(this.activeMenuEntity.type);
+                let uw = 1, uh = 1;
+                if (bCfg && bCfg.size) {
+                    const match = bCfg.size.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
+                    if (match) { uw = parseFloat(match[1]); uh = parseFloat(match[2]); }
+                }
+                const halfW = (uw * GameEngine.TILE_SIZE) / 2;
+                const halfH = (uh * GameEngine.TILE_SIZE) / 2;
+                
+                // sx, sy 是建築中心，讓按鈕完全待在內部邊緣
+                dBtn.style.left = `${sx + halfW - 20}px`;
+                dBtn.style.top = `${sy - halfH + 2}px`;
+            }
         }
     }
     /**

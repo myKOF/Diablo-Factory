@@ -44,8 +44,8 @@ export const UI_CONFIG = {
         anchor: "TOP_LEFT",               // 錨點：左上角
         offsetX: 30,                       // 距左側邊界的距離（像素）
         offsetY: 100,                      // 距頂部的距離（像素）
-        width: 320, height: "calc(100% - 160px)",  // 寬高（高度動態計算）
-        itemHeight: 90,                    // 每個建築項目列的高度
+        width: 280, height: "calc(90% - 160px)",  // 寬高（高度動態計算）
+        itemHeight: 60,                    // 每個建築項目列的高度
         titleSize: "24px",
         fontSize: "14px",
         title: "🛡️ 末日設施建造",

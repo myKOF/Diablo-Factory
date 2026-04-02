@@ -146,7 +146,10 @@ export class GameEngine {
 
         this.state.units.villagers.forEach(v => {
             // 閒置村民隨時檢查是否有工作可做，大幅提升反應速度
-            if (v.state === 'IDLE') this.assignNextTask(v);
+            if (v.state === 'IDLE') {
+                this.assignNextTask(v);
+                v.workOffset = null; // 閒置時重置工作偏移
+            }
             this.updateVillagerMovement(v, deltaTime);
         });
 
@@ -827,12 +830,24 @@ export class GameEngine {
                 }
                 const target = this.findNearestResource(searchX, searchY, v.type, v.id);
                 if (target) {
-                    const dist = Math.hypot(target.x - v.x, target.y - v.y);
+                    // 針對農田與樹木田，隨機化目標位置以使其待在田內部而非停在邊緣
+                    if (!v.workOffset) v.workOffset = { x: 0, y: 0 };
+                    if ((target.type === 'farmland' || target.type === 'tree_plantation') && v.workOffset.x === 0) {
+                        v.workOffset = { 
+                            x: (Math.random() - 0.5) * 50, 
+                            y: (Math.random() - 0.5) * 50 
+                        };
+                    }
+
+                    const tx = target.x + (v.workOffset.x || 0);
+                    const ty = target.y + (v.workOffset.y || 0);
+                    const dist = Math.hypot(tx - v.x, ty - v.y);
+
                     if (dist < 15) {
                         v.state = 'GATHERING'; v.targetId = target; v.gatherTimer = 0; v.pathTarget = null;
                     }
-                    else { this.moveDetailed(v, target.x, target.y, moveSpeed, dt); }
-                } else { v.state = 'IDLE'; v.pathTarget = null; }
+                    else { this.moveDetailed(v, tx, ty, moveSpeed, dt); }
+                } else { v.state = 'IDLE'; v.pathTarget = null; v.workOffset = null; }
                 break;
             case 'GATHERING':
                 v.gatherTimer += dt;
@@ -979,8 +994,9 @@ export class GameEngine {
                         this.addLog(`建造者已自動轉為 ${finishedBuilding.name} 的專職員工。`);
                     } else if (type === 'farmland' || type === 'tree_plantation') {
                         v.type = (type === 'farmland' ? 'FOOD' : 'WOOD');
-                        v.state = 'GATHERING'; v.targetId = finishedBuilding; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
-                        this.addLog(`建造者開始原地${type === 'farmland' ? '耕作' : '伐木'}。`);
+                        v.state = 'MOVING_TO_RESOURCE'; v.targetId = finishedBuilding; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
+                        v.workOffset = { x: (Math.random() - 0.5) * 50, y: (Math.random() - 0.5) * 50 }; // 立即設定偏移量，確保進入內部
+                        this.addLog(`建造者前往${type === 'farmland' ? '農田' : '樹木田'}內部開始工作。`);
                     } else {
                         this.restoreVillagerTask(v);
                         v.constructionTarget = null; // 恢復舊任務後清空工程目標
@@ -1219,33 +1235,48 @@ export class GameEngine {
             });
         }
 
-        // 如果有路徑，沿著節點移動
-        if (v.fullPath && v.pathIndex < v.fullPath.length) {
-            const node = v.fullPath[v.pathIndex];
-            const dx = node.x - v.x;
-            const dy = node.y - v.y;
-            const dist = Math.hypot(dx, dy);
-            const moveDist = speed * dt;
+        // 核心優化：殘餘距離遞延 (Movement Carry-over)
+        // 確保在同一幀內若能走過多個路徑點，不會在點與點之間停頓
+        let remainingDt = dt;
+        let safetyCounter = 0; // 防止無窮迴圈
 
-            if (dist <= moveDist) {
-                v.x = node.x;
-                v.y = node.y;
-                v.pathIndex++;
-                
-                // [TEST] 當走到下一個節點時，於 UI 日誌顯示新目標點
-                if (v.id === GameEngine.state.selectedUnitId && v.fullPath && v.pathIndex < v.fullPath.length) {
-                    const nextNode = v.fullPath[v.pathIndex];
-                    GameEngine.addLog(`   ┗ 前往下一點: (${nextNode.x.toFixed(0)}, ${nextNode.y.toFixed(0)})`, 'PATH');
+        while (remainingDt > 0 && safetyCounter < 10) {
+            safetyCounter++;
+            const moveDist = speed * remainingDt;
+
+            if (v.fullPath && v.pathIndex < v.fullPath.length) {
+                const node = v.fullPath[v.pathIndex];
+                const dx = node.x - v.x;
+                const dy = node.y - v.y;
+                const dist = Math.hypot(dx, dy);
+
+                if (dist <= moveDist) {
+                    // 到達當前節點，扣除消耗的時間並前往下一個
+                    v.x = node.x;
+                    v.y = node.y;
+                    v.pathIndex++;
+                    remainingDt -= dist / speed;
+
+                    // [TEST] 當走到下一個節點時，於 UI 日誌顯示新目標點
+                    if (v.id === GameEngine.state.selectedUnitId && v.fullPath && v.pathIndex < v.fullPath.length) {
+                        const nextNode = v.fullPath[v.pathIndex];
+                        GameEngine.addLog(`   ┗ 前往下一點: (${nextNode.x.toFixed(0)}, ${nextNode.y.toFixed(0)})`, 'PATH');
+                    }
+                } else if (dist > 0.01) {
+                    // 尚未到達下一個節點，移動剩餘距離並結束
+                    const ratio = moveDist / dist;
+                    v.x += dx * ratio;
+                    v.y += dy * ratio;
+                    remainingDt = 0;
+                } else {
+                    // 距離過小，直接跳過該點
+                    v.pathIndex++;
                 }
             } else {
-                // 修正位移速度 (Velocity Normalization): Vx^2 + Vy^2 = Speed^2
-                // dx/dist 是方向向量的餘弦, dy/dist 是正弦, 確保斜向移動不加速 (1.41x)
-                v.x += (dx / dist) * moveDist;
-                v.y += (dy / dist) * moveDist;
+                // 沒有路徑或已消耗完節點，直接逼近最終目標
+                this.moveTowards(v, tx, ty, speed, remainingDt);
+                remainingDt = 0;
             }
-        } else {
-            // 沒有路徑或已到終點，嘗試直接逼近目標 (緩衝處理)
-            this.moveTowards(v, tx, ty, speed, dt);
         }
     }
 
@@ -1492,23 +1523,22 @@ export class GameEngine {
         this.state.units.villagers.forEach(v => {
             if (v.config.type !== 'villagers') return;
 
-            // 指令影響閒置中的工人，或是以村莊中心 (village) 為放置點的工人
+            // 禁止中斷正在建造中或已分配到特殊田地（農田、樹木田）的工人
+            if (v.state === 'CONSTRUCTING' || v.state === 'MOVING_TO_CONSTRUCTION') return;
+            if (v.targetId && (v.targetId.type === 'farmland' || v.targetId.type === 'tree_plantation')) return;
+
+            // 指令優先影響：閒置中的工人、倉庫工人（採集場工人）以及預設以村莊中心為基礎的通用工人
             const isIdle = v.state === 'IDLE';
+            const isWarehouseWorker = !!v.assignedWarehouseId;
             const isVillageWorker = v.targetBase && v.targetBase.type === 'village';
 
-            if (isIdle || isVillageWorker) {
-                // 絕對禁止中斷正在建造中的工人
-                if (v.state === 'CONSTRUCTING' || v.state === 'MOVING_TO_CONSTRUCTION') return;
-                // 排除農田專員
-                if (!isIdle && v.targetId && v.targetId.type === 'farmland') return;
-                // 排除倉庫專員
-                if (v.assignedWarehouseId) return;
-
+            if (isIdle || isWarehouseWorker || isVillageWorker) {
                 v.type = commandType;
                 v.state = 'MOVING_TO_RESOURCE';
                 v.targetId = null;
                 v.isRecalled = false;
                 v.pathTarget = null;
+                v.workOffset = null; // 切換任務時清除偏移量
             }
         });
         if (window.UIManager) window.UIManager.updateValues();

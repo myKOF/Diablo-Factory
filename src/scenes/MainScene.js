@@ -12,6 +12,7 @@ export class MainScene extends Phaser.Scene {
         this.nameLabels = new Map();
         this.levelLabels = new Map();
         this.resourceLabels = new Map();
+        this.unitIconTexts = new Map();
         this.emitters = new Map(); // ID -> ParticleEmitter
         this.gridGraphics = null;
         this.lastRenderVersion = 0;
@@ -72,6 +73,10 @@ export class MainScene extends Phaser.Scene {
         // 動態 HUD 繪圖層 (進度條、生產列)
         this.hudGraphics = this.add.graphics();
         this.hudGraphics.setDepth(60);
+
+        // 選取高亮層
+        this.selectionGraphics = this.add.graphics();
+        this.selectionGraphics.setDepth(55);
 
         // 相機控制
         this.lastCamX = -9999;
@@ -293,6 +298,9 @@ export class MainScene extends Phaser.Scene {
             this.updateTownCenterLocator(cam);
         }
 
+        // 繪製選取高亮 (不受視距裁剪影響，隨時偵測)
+        this.drawSelectionHighlight();
+
         // 2. 判斷是否可以跳過重度的實體渲染計算
         // 如果相機沒動、加載完畢、實體數量沒變，且且渲染版本未更新，跳過繁重計算
         if (!camMoved && !this.pendingVisibleEntities && !entitiesCountChanged && !renderVersionChanged && !state.placingType) {
@@ -443,6 +451,35 @@ export class MainScene extends Phaser.Scene {
         g.fillCircle(ent.rallyPoint.x, ent.rallyPoint.y, radius * 0.6);
     }
 
+    drawSelectionHighlight() {
+        const g = this.selectionGraphics;
+        g.clear();
+        if (!window.UIManager || !window.UIManager.activeMenuEntity) return;
+
+        const ent = window.UIManager.activeMenuEntity;
+        const TS = GameEngine.TILE_SIZE;
+        const cfg = GameEngine.getEntityConfig(ent.type);
+        if (!cfg) return;
+
+        let uw = 1, uh = 1;
+        if (cfg.size) {
+            const cleanSize = cfg.size.toString().replace(/['"]/g, '');
+            const match = cleanSize.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
+            if (match) { uw = parseFloat(match[1]); uh = parseFloat(match[2]); }
+        }
+
+        const w = uw * TS;
+        const h = uh * TS;
+
+        // 繪製高飽和度的選取框 (深橘黃色，無透明度)
+        g.lineStyle(4, 0xff9800, 1); 
+        g.strokeRect(ent.x - w/2 - 2, ent.y - h/2 - 2, w + 4, h + 4);
+        
+        // 內層白色輔助線，增加對比感
+        g.lineStyle(1.5, 0xffffff, 1);
+        g.strokeRect(ent.x - w/2 - 0, ent.y - h/2 - 0, w, h);
+    }
+
     updateEntities(visibleEntities, allEntities) {
         if (!visibleEntities) return;
 
@@ -577,7 +614,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     cleanupEntityLabels(id) {
-        const labels = [this.queueTexts, this.nameLabels, this.levelLabels, this.resourceLabels, this.emitters];
+        const labels = [this.queueTexts, this.nameLabels, this.levelLabels, this.resourceLabels, this.unitIconTexts, this.emitters];
         labels.forEach(map => {
             if (map.has(id)) {
                 map.get(id).destroy();
@@ -942,12 +979,13 @@ export class MainScene extends Phaser.Scene {
     drawProductionHUD(g, ent, uw, uh, TS) {
         const id = ent.id || `${ent.type}_${ent.x}_${ent.y}`;
 
-        // 讀取此城鎮中心自己的隊列
+        // 讀取此建築自己的隊列
         const queue = ent.queue || [];
         const timer = ent.productionTimer || 0;
 
         if (queue.length === 0) {
             if (this.queueTexts.has(id)) this.queueTexts.get(id).setVisible(false);
+            if (this.unitIconTexts.has(id)) this.unitIconTexts.get(id).setVisible(false);
             return;
         }
 
@@ -956,48 +994,73 @@ export class MainScene extends Phaser.Scene {
         const isPopFull = GameEngine.state.units.villagers.length >= maxPop;
         const progress = 1.0 - (timer / 5);
 
-        const bx = ent.x - (uw * TS) / 2 + 15;
-        const by = ent.y + (uh * TS) / 2 - 35;
+        // 智慧型對齊：計算整體 HUD 寬度並居中
+        const iconReserved = 30;
+        const barWidth = Math.max(50, (uw * TS) * 0.6);
+        const totalHudWidth = iconReserved + 15 + barWidth; // 圖示 + 間距 + 進度條
+        
+        const bx = ent.x - totalHudWidth / 2;
+        const by = ent.y + (uh * TS) / 2 - 35; // 稍微往上提一點，避免被底部邊緣切掉
 
+        // 1. 繪製進度條背景
         g.fillStyle(parseInt(cfg.barBg.replace('#', ''), 16), cfg.barAlpha || 0.7);
-        g.fillRect(bx + 45, by + 12, 85, 12);
+        g.fillRect(bx + iconReserved + 5, by + 12, barWidth, 10);
 
+        // 2. 繪製進度內容
         const fillColor = isPopFull ? 0xf44336 : 0x4caf50;
         g.fillStyle(fillColor, 1);
-        g.fillRect(bx + 45, by + 12, 85 * Math.max(0, Math.min(1, progress)), 12);
+        g.fillRect(bx + iconReserved + 5, by + 12, barWidth * Math.max(0, Math.min(1, progress)), 10);
 
-        g.fillStyle(0x311b92, 1);
-        g.fillCircle(bx + 15, by + 15, 15);
-        g.fillStyle(0x5e35b1, 1);
-        g.fillCircle(bx + 15, by + 10, 8);
+        // 3. 繪製底座圖示圓圈
+        g.fillStyle(0x311b92, 0.8);
+        g.fillCircle(bx + 15, by + 17, 15);
 
+        // 4. 更新單位圖示 (Emoji)
+        const iconMap = {
+            'villagers': '👤', 'female villagers': '👩', 'mage': '🧙', 'swordsman': '⚔️', 'archer': '🏹',
+            '1': '👤', '2': '👩', '3': '⚔️', '4': '🧙', '5': '🏹'
+        };
+        const currentUnitId = queue[0];
+        const unitName = GameEngine.state.idToNameMap[currentUnitId] || currentUnitId;
+        const emoji = iconMap[currentUnitId] || iconMap[unitName] || '👤';
+
+        let iconTxt = this.unitIconTexts.get(id);
+        if (!iconTxt) {
+            iconTxt = this.add.text(bx + 15, by + 17, emoji, { fontSize: '18px' }).setOrigin(0.5);
+            iconTxt.setDepth(100);
+            this.unitIconTexts.set(id, iconTxt);
+        }
+        if (iconTxt.text !== emoji) iconTxt.setText(emoji);
+        iconTxt.setPosition(bx + 15, by + 17);
+        iconTxt.setVisible(true);
+
+        // 5. 更新隊列數量角標 (紅色圓圈)
         g.fillStyle(0xc62828, 1);
-        g.fillCircle(bx + 30, by + 5, 8);
+        g.fillCircle(bx + 30, by + 7, 8);
 
-        let txt = this.queueTexts.get(id);
+        let qTxt = this.queueTexts.get(id);
         const queueStr = queue.length.toString();
-        if (!txt) {
-            txt = this.add.text(bx + 30, by + 5, queueStr, {
+        if (!qTxt) {
+            qTxt = this.add.text(bx + 30, by + 7, queueStr, {
                 fontSize: '10px',
                 fontStyle: 'bold',
                 fontFamily: 'Arial',
                 color: '#ffffff'
             }).setOrigin(0.5);
-            this.queueTexts.set(id, txt);
+            qTxt.setDepth(101);
+            this.queueTexts.set(id, qTxt);
         }
-
-        if (txt.text !== queueStr) txt.setText(queueStr);
-        if (txt.x !== bx + 30 || txt.y !== by + 5) txt.setPosition(bx + 30, by + 5);
-        if (!txt.visible) txt.setVisible(true);
-        txt.setDepth(100);
+        if (qTxt.text !== queueStr) qTxt.setText(queueStr);
+        qTxt.setPosition(bx + 30, by + 7);
+        qTxt.setVisible(true);
     }
 
     updateUnits(villagers) {
         if (!villagers) return;
-
+ 
         const currentIds = new Set();
         const cam = this.cameras.main;
-
+ 
         villagers.forEach(v => {
             currentIds.add(v.id);
             let sprite = this.units.get(v.id);
@@ -1005,16 +1068,33 @@ export class MainScene extends Phaser.Scene {
                 sprite = this.add.graphics();
                 this.units.set(v.id, sprite);
                 this.unitGroup.add(sprite);
+                // 初始化渲染位置
+                v.renderX = v.x;
+                v.renderY = v.y;
             }
-
+ 
             const isVisible = (v.x + 50 > cam.scrollX && v.x - 50 < cam.scrollX + cam.width &&
                 v.y + 50 > cam.scrollY && v.y - 50 < cam.scrollY + cam.height);
-
+ 
             sprite.setVisible(isVisible);
             if (isVisible) {
+                // 核心優化：渲染插值 (Lerp)
+                // 邏輯坐標 (v.x, v.y) 每 50ms 更新一次，但渲染每 16ms 執行一次
+                // 透過逼近算法讓視覺座標平滑過渡，消除跳動感
+                if (v.renderX === undefined) { v.renderX = v.x; v.renderY = v.y; }
+                
+                // 使用平滑係數 0.25 (在 60fps 下約 4 幀追上 90% 位移)
+                const lerpFactor = 0.25;
+                v.renderX += (v.x - v.renderX) * lerpFactor;
+                v.renderY += (v.y - v.renderY) * lerpFactor;
+                
+                // 如果差距極小則直接對齊
+                if (Math.abs(v.x - v.renderX) < 0.1) v.renderX = v.x;
+                if (Math.abs(v.y - v.renderY) < 0.1) v.renderY = v.y;
+ 
                 sprite.clear();
                 sprite.setDepth(20);
-                CharacterRenderer.render(sprite, v.x, v.y, v, this.time.now);
+                CharacterRenderer.render(sprite, v.renderX, v.renderY, v, this.time.now);
             }
         });
 
