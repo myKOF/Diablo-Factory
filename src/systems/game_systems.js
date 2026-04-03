@@ -929,10 +929,11 @@ export class GameEngine {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
         if (v.config.type !== 'villagers') {
             const oldX = v.x, oldY = v.y;
-            // 決定移動速度：如果有 targetId (戰鬥目標) 或正在追蹤某處，優先讀取 fighting_speed
-            const isFighting = !!v.targetId || v.state === 'ATTACK' || v.state === 'MOVE';
-            const moveBaseSpeed = isFighting ? (v.config.fighting_speed || 5.5) : (v.config.idle_speed || 2.5);
-            const moveSpeed = moveBaseSpeed * 13;
+            // 決定移動速度：除 IDLE 閒逛外其餘均用跑步
+            // 定義：有移動目標 (idleTarget) 且非手動指令、非戰鬥狀態時判定為閒逛
+            const isManualOrFight = v.isManualCommand || v.state === 'MOVE' || v.state === 'ATTACK' || !!v.targetId;
+            const configSpeed = isManualOrFight ? (v.config.fighting_speed || 5.5) : (v.config.idle_speed || 2.5);
+            const moveSpeed = configSpeed * 13;
             if (v.idleTarget) {
                 v.state = 'MOVING';
                 this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
@@ -997,10 +998,9 @@ export class GameEngine {
         }
 
         // 決定移動速度
-        // 核心要求：手動點擊移動 (isManualCommand)、走向集結點 (MOVE) 或正在戰鬥 (ATTACK/MOVE) 使用 fighting_speed
-        // 其他自動派工行為 (如 MOVING_TO_RESOURCE, MOVING_TO_CONSTRUCTION) 使用 idle_speed
-        const isRunCondition = v.isManualCommand || v.state === 'MOVE' || v.state === 'ATTACK';
-        const configSpeed = isRunCondition ? (v.config.fighting_speed || 5.5) : (v.config.idle_speed || 3);
+        // 只有在狀態為 IDLE 且沒有手動命令時使用閒逛速度。其餘（工作、攻擊、手動移動）一律使用跑步速度。
+        const isActuallyWandering = (v.state === 'IDLE') && !v.isManualCommand;
+        const configSpeed = isActuallyWandering ? (v.config.idle_speed || 3) : (v.config.fighting_speed || 5.5);
         const moveSpeed = configSpeed * 13;
 
         // [TEST] 紀錄速度變遷
