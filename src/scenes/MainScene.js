@@ -16,6 +16,8 @@ export class MainScene extends Phaser.Scene {
         this.unitIconTexts = new Map();
         this.emitters = new Map(); // ID -> ParticleEmitter
         this.gridGraphics = null;
+        this.marqueeGraphics = null; // 框選圖形界面
+        this.selectionStartPos = null; // 框選起始位置 (世界座標)
         this.lastRenderVersion = 0;
     }
 
@@ -78,6 +80,10 @@ export class MainScene extends Phaser.Scene {
         // 選取高亮層
         this.selectionGraphics = this.add.graphics();
         this.selectionGraphics.setDepth(55);
+
+        // 框選 marquee 層
+        this.marqueeGraphics = this.add.graphics();
+        this.marqueeGraphics.setDepth(2000); // 置頂顯示
 
         // 相機控制
         this.lastCamX = -9999;
@@ -174,8 +180,8 @@ export class MainScene extends Phaser.Scene {
             const isMiddleDrag = pointer.middleButtonDown();
             const isRightClick = pointer.rightButtonDown();
 
-            // 1. 左鍵選取邏輯
-            if (pointer.leftButtonDown() && !isPlacement) {
+            // 1. 左鍵點擊/選取邏輯
+            if (pointer.leftButtonDown() && !isPlacement && !isMiddleDrag) {
                 let bestDist = 40;
                 let clickedUnit = null;
                 GameEngine.state.units.villagers.forEach(v => {
@@ -184,31 +190,86 @@ export class MainScene extends Phaser.Scene {
                 });
 
                 if (clickedUnit) {
-                    GameEngine.state.selectedUnitId = clickedUnit.id;
-                    GameEngine.state.lastSelectionTime = Date.now();
+                    const now = Date.now();
+                    const isDoubleClick = (GameEngine.state.lastSelectedUnitId === clickedUnit.id && (now - GameEngine.state.lastSelectionTime < 300));
+                    const isShift = pointer.event.shiftKey;
+
+                    if (isDoubleClick) {
+                        // 雙擊：選取畫面內相同類型的單位 (以 npc_data 中的 type 決定)
+                        const unitType = clickedUnit.config.type;
+                        const cam = this.cameras.main;
+                        
+                        const newlySelected = GameEngine.state.units.villagers
+                            .filter(v => v.config && v.config.type === unitType && 
+                                         v.x >= cam.scrollX && v.x <= cam.scrollX + cam.width &&
+                                         v.y >= cam.scrollY && v.y <= cam.scrollY + cam.height);
+                        
+                        if (isShift) {
+                            newlySelected.forEach(u => {
+                                if (!GameEngine.state.selectedUnitIds.includes(u.id)) GameEngine.state.selectedUnitIds.push(u.id);
+                            });
+                        } else {
+                            GameEngine.state.selectedUnitIds = newlySelected.map(v => v.id);
+                        }
+                        
+                        GameEngine.addLog(`[選取] 相同類型單位共 ${newlySelected.length} 個。`);
+                    } else {
+                        if (isShift) {
+                            if (GameEngine.state.selectedUnitIds.includes(clickedUnit.id)) {
+                                GameEngine.state.selectedUnitIds = GameEngine.state.selectedUnitIds.filter(id => id !== clickedUnit.id);
+                            } else {
+                                GameEngine.state.selectedUnitIds.push(clickedUnit.id);
+                            }
+                        } else {
+                            GameEngine.state.selectedUnitIds = [clickedUnit.id];
+                        }
+                    }
+                    
+                    GameEngine.state.lastSelectionTime = now;
+                    GameEngine.state.lastSelectedUnitId = clickedUnit.id;
                     this.logUnitDetail(clickedUnit);
                     return; // 點中單位就不觸發拖曳
                 } else {
-                    GameEngine.state.selectedUnitId = null;
+                    // 點擊地面：準備框選 (如果沒有 Shift 則清除舊選取)
+                    if (!pointer.event.shiftKey) {
+                        GameEngine.state.selectedUnitIds = [];
+                        GameEngine.state.lastSelectedUnitId = null;
+                        if (window.UIManager) window.UIManager.hideContextMenu(); // 同步關閉 UI 選單
+                    }
+                    this.selectionStartPos = { x: pointer.worldX, y: pointer.worldY };
                 }
             }
 
             // 2. 右鍵指令邏輯
             if (isRightClick) {
-                const selectedId = GameEngine.state.selectedUnitId;
-                if (selectedId) {
-                    const unit = GameEngine.state.units.villagers.find(v => v.id === selectedId);
-                    if (unit) {
-                        this.handleRightClickCommand(unit, pointer);
-                        return;
-                    }
+                const selectedIds = GameEngine.state.selectedUnitIds || [];
+                if (selectedIds.length > 0) {
+                    // RTS 分散隊形邏輯：如果要移動多個單位，讓他們以目標為中心展開
+                    const unitsToMove = selectedIds.map(id => GameEngine.state.units.villagers.find(v => v.id === id)).filter(v => v);
+                    const cols = Math.ceil(Math.sqrt(unitsToMove.length));
+                    const spacing = 40;
+
+                    unitsToMove.forEach((unit, i) => {
+                        const r = Math.floor(i / cols);
+                        const c = i % cols;
+                        const offX = (c - (cols - 1) / 2) * spacing;
+                        const offY = (r - (cols - 1) / 2) * spacing;
+                        
+                        // 模擬一個偏移過的點擊
+                        const fakePointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
+                        this.handleRightClickCommand(unit, fakePointer);
+                    });
+                    return;
                 }
             }
 
             if (isPlacement && !isMiddleDrag) return;
 
-            this.isDragging = true;
-            lastPointer = { x: pointer.x, y: pointer.y };
+            // 2. 只有中鍵拖曳才會觸發相機移動，左鍵保留給框選
+            if (isMiddleDrag) {
+                this.isDragging = true;
+                lastPointer = { x: pointer.x, y: pointer.y };
+            }
         });
 
         this.input.on('pointermove', (pointer) => {
@@ -219,9 +280,44 @@ export class MainScene extends Phaser.Scene {
                 cam.scrollY -= dy;
                 lastPointer = { x: pointer.x, y: pointer.y };
             }
+            
+            // 更新框選預覽
+            if (this.selectionStartPos) {
+                this.drawMarquee(this.selectionStartPos, { x: pointer.worldX, y: pointer.worldY });
+            }
         });
 
-        this.input.on('pointerup', () => {
+        this.input.on('pointerup', (pointer) => {
+            // 結束框選
+            if (this.selectionStartPos) {
+                const start = this.selectionStartPos;
+                const end = { x: pointer.worldX, y: pointer.worldY };
+                
+                const minX = Math.min(start.x, end.x);
+                const maxX = Math.max(start.x, end.x);
+                const minY = Math.min(start.y, end.y);
+                const maxY = Math.max(start.y, end.y);
+
+                // 如果拖曳距離足夠大 (避免微小誤觸)
+                if (Math.abs(maxX - minX) > 5 || Math.abs(maxY - minY) > 5) {
+                    const boxUnits = GameEngine.state.units.villagers.filter(v => 
+                        v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY
+                    );
+
+                    if (pointer.event.shiftKey) {
+                        boxUnits.forEach(u => {
+                            if (!GameEngine.state.selectedUnitIds.includes(u.id)) GameEngine.state.selectedUnitIds.push(u.id);
+                        });
+                    } else {
+                        GameEngine.state.selectedUnitIds = boxUnits.map(v => v.id);
+                    }
+                    if (boxUnits.length > 0) GameEngine.addLog(`[選取] 框選操作選中了 ${boxUnits.length} 個單位。`);
+                }
+                
+                this.selectionStartPos = null;
+                this.marqueeGraphics.clear();
+            }
+
             this.isDragging = false;
         });
     }
@@ -514,9 +610,25 @@ export class MainScene extends Phaser.Scene {
     drawSelectionHighlight() {
         const g = this.selectionGraphics;
         g.clear();
-        if (!window.UIManager || !window.UIManager.activeMenuEntity) return;
 
-        const ent = window.UIManager.activeMenuEntity;
+        // 1. 繪製選中的建築物 (activeMenuEntity)
+        if (window.UIManager && window.UIManager.activeMenuEntity) {
+            const ent = window.UIManager.activeMenuEntity;
+            this.drawSingleSelectionBox(g, ent, 0xff9800); // 橘色
+        }
+
+        // 2. 繪製選中的所有單位 (selectedUnitIds)
+        const selectedIds = GameEngine.state.selectedUnitIds || [];
+        selectedIds.forEach(id => {
+            const unit = GameEngine.state.units.villagers.find(u => u.id === id);
+            if (unit) {
+                // 為單位繪製圓圈或小框
+                this.drawUnitSelectionHighlight(g, unit, 0x4caf50); // 綠色
+            }
+        });
+    }
+
+    drawSingleSelectionBox(g, ent, color) {
         const TS = GameEngine.TILE_SIZE;
         const cfg = GameEngine.getEntityConfig(ent.type);
         if (!cfg) return;
@@ -531,13 +643,37 @@ export class MainScene extends Phaser.Scene {
         const w = uw * TS;
         const h = uh * TS;
 
-        // 繪製高飽和度的選取框 (深橘黃色，無透明度)
-        g.lineStyle(4, 0xff9800, 1);
+        g.lineStyle(4, color, 1);
         g.strokeRect(ent.x - w / 2 - 2, ent.y - h / 2 - 2, w + 4, h + 4);
-
-        // 內層白色輔助線，增加對比感
         g.lineStyle(1.5, 0xffffff, 1);
         g.strokeRect(ent.x - w / 2 - 0, ent.y - h / 2 - 0, w, h);
+    }
+
+    drawUnitSelectionHighlight(g, unit, color) {
+        // 繪製單位底部的選取光圈
+        g.lineStyle(2, color, 0.8);
+        g.strokeCircle(unit.x, unit.y + 10, 20);
+        
+        g.lineStyle(1, 0xffffff, 0.5);
+        g.strokeCircle(unit.x, unit.y + 10, 18);
+    }
+
+    drawMarquee(start, end) {
+        const g = this.marqueeGraphics;
+        g.clear();
+        
+        const x = Math.min(start.x, end.x);
+        const y = Math.min(start.y, end.y);
+        const w = Math.abs(start.x - end.x);
+        const h = Math.abs(start.y - end.y);
+
+        // 框框本體 (綠色透明)
+        g.fillStyle(0x00ff00, 0.15);
+        g.fillRect(x, y, w, h);
+
+        // 框框輪廓 (綠色實線)
+        g.lineStyle(1.5, 0x00ff00, 0.8);
+        g.strokeRect(x, y, w, h);
     }
 
     updateEntities(visibleEntities, allEntities) {

@@ -50,11 +50,6 @@ export class CharacterRenderer {
             bodyBob = Math.sin(t * anim.breathingFreq) * 1.5;
         }
 
-        // 0. 繪製選中光圈 (在最下面) - 不參與縮放鏡像
-        if (window.GAME_STATE && window.GAME_STATE.selectedUnitId === unitData.id) {
-            this.drawSelectionRing(ctx, x, y, time);
-        }
-
         // 0.1 繪製視界圈 (紅色線條) - 座標系修正：CSV 數值為網格數，需乘以 20 像素
         if (window.GAME_STATE && window.GAME_STATE.settings.showVisionRange) {
             const visionRadius = (unitData.field_vision || 150) * 20; 
@@ -100,28 +95,6 @@ export class CharacterRenderer {
         }
     }
 
-    static drawSelectionRing(ctx, x, y, time) {
-        const pulse = (Math.sin(time * 0.01) + 1) / 2; // 0 ~ 1
-        const radius = 20 + pulse * 5;
-        const alpha = 0.5 + pulse * 0.5;
-
-        if (ctx.lineStyle !== undefined) {
-            // Phaser Graphics
-            ctx.lineStyle(2, 0x00ffff, alpha);
-            ctx.strokeCircle(x, y + 15, radius);
-            ctx.fillStyle(0x00ffff, alpha * 0.3);
-            ctx.fillCircle(x, y + 15, radius - 2);
-        } else {
-            // Canvas Context
-            ctx.strokeStyle = `rgba(0, 255, 255, ${alpha})`;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.ellipse(x, y + 15, radius, radius * 0.4, 0, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.fillStyle = `rgba(0, 255, 255, ${alpha * 0.3})`;
-            ctx.fill();
-        }
-    }
 
     static drawVisionRange(ctx, x, y, radius) {
         const cfg = UI_CONFIG.VisionRange || { lineColor: "#ff0000", lineAlpha: 0.8, lineWidth: 1.5 };
@@ -318,8 +291,9 @@ export class CharacterRenderer {
         const anim = UI_CONFIG.Animation || { runningFreq: 15, wanderingFreq: 5, breathingFreq: 1.33 };
         const t = time * 0.01;
 
-        // 1. 繪製選中光圈 - 不參與縮放鏡像
-        if (window.GAME_STATE && window.GAME_STATE.selectedUnitId === unitData.id) {
+        // [渲染核心 5: 選取圈繪製] (支持多選Ids列表)
+        const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
+        if (isSelected) {
             this.drawSelectionRing(ctx, x, y, time);
         }
 

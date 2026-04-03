@@ -96,8 +96,7 @@ export class PathfindingSystem {
         }
 
         this.easystar.findPath(finalGx1, finalGy1, gx2, gy2, (path) => {
-            const isSelected = (GameEngine.state.selectedUnitId && Date.now() - GameEngine.state.lastSelectionTime < 10000); // 這裡需要一個過濾方式，或者傳入 ID
-            // 為了方便，我們預設印出所有關於選中單位的路徑請求
+            // 這裡不再進行 unitId 檢查，因為 findPath 本身不知道是哪個單位的，回傳路徑後由 GameEngine 決定是否輸出日誌
             if (path) {
                 // 將格網座標轉回像素座標 (中心點)
                 const pixelPath = path.map(p => ({

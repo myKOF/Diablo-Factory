@@ -915,21 +915,8 @@ export class UIManager {
             return mx > ent.x - w / 2 + 5 && mx < ent.x + w / 2 - 5 && my > ent.y - h / 2 + 5 && my < ent.y + h / 2 - 5;
         });
 
-        // 單位點擊檢查 (優先級可自行調整)
-        const mx = local.x - cam.x, my = local.y - cam.y;
-        const clickedUnit = GameEngine.state.units.villagers.find(v => Math.hypot(v.x - mx, v.y - my) < 25);
-
-        if (clickedUnit) {
-            GameEngine.state.selectedUnitId = clickedUnit.id;
-            // 單位點擊不顯示右鍵選單，保持選中狀態即可
-            return;
-        }
-
         if (clicked) {
             this.showContextMenu(clicked);
-        } else {
-            // 點擊空白處，取消單位選中
-            GameEngine.state.selectedUnitId = null;
         }
     }
 
@@ -1237,10 +1224,10 @@ export class UIManager {
     }
 
     static updateLogPanel() {
-        // [TEST] 更新選中單位即時座標與狀態
+        // [TEST] 更新選中單位即時座標與狀態 (若選取多個，僅顯示第一個)
         const debugInfo = document.getElementById("unit_debug_info");
-        const selId = GameEngine.state.selectedUnitId;
-        const v = selId ? GameEngine.state.units.villagers.find(u => u.id === selId) : null;
+        const selIds = GameEngine.state.selectedUnitIds || [];
+        const v = selIds.length > 0 ? GameEngine.state.units.villagers.find(u => u.id === selIds[0]) : null;
 
         if (v && debugInfo) {
             debugInfo.style.display = "block";

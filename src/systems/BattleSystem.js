@@ -169,12 +169,15 @@ export class BattleSystem {
      */
     static cleanupDeadUnits() {
         const units = GameEngine.state.units.villagers;
-        const deadIndices = [];
         for (let i = units.length - 1; i >= 0; i--) {
             if (units[i].hp <= 0) {
-                // 如果是玩家選中的，取消選取
-                if (GameEngine.state.selectedUnitId === units[i].id) {
-                    GameEngine.state.selectedUnitId = null;
+                const deadId = units[i].id;
+                // 如果在選中列表中，將其移除
+                if (GameEngine.state.selectedUnitIds) {
+                    const idx = GameEngine.state.selectedUnitIds.indexOf(deadId);
+                    if (idx !== -1) {
+                        GameEngine.state.selectedUnitIds.splice(idx, 1);
+                    }
                 }
                 units.splice(i, 1);
             }

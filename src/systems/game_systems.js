@@ -1,6 +1,5 @@
 import { UI_CONFIG } from "../ui/ui_config.js";
 import { PathfindingSystem } from "./PathfindingSystem.js?v=3";
-import { BattleSystem } from "./BattleSystem.js";
 
 
 
@@ -42,7 +41,9 @@ export class GameEngine {
         idToNameMap: {}, // NPC ID -> NPC Name (用於從 buildings.csv 定義的 ID 找配置)
         renderVersion: 0, // 用於通知渲染器強行刷新
         pathfinding: null, // 尋路系統實例
-        selectedUnitId: null // 目前選中的單位 ID (用於調試)
+        selectedUnitIds: [], // 目前選中的單位 ID 列表
+        lastSelectedUnitId: null, // 上一次選中的單位 ID (用於雙擊檢測)
+        lastSelectionTime: 0 // 上一次選中的時間 (用於雙擊檢測)
     };
 
 
@@ -81,9 +82,9 @@ export class GameEngine {
         const by = tc ? tc.y : 560;
 
         // 核心設定：一開始出生的三個市民由城鎮中心下方的三個合適點位出生，避免重疊
-        this.spawnNPC('villagers', null, { x: bx - 40, y: by + 60 });
-        this.spawnNPC('female villagers', null, { x: bx, y: by + 60 });
-        this.spawnNPC('villagers', null, { x: bx + 40, y: by + 60 });
+        this.spawnNPC('villagers', null, { x: bx - 40, y: by + 110 });
+        this.spawnNPC('female villagers', null, { x: bx, y: by + 110 });
+        this.spawnNPC('villagers', null, { x: bx + 40, y: by + 110 });
 
         this.lastTickTime = Date.now();
         this.initBackgroundWorker();
@@ -167,9 +168,6 @@ export class GameEngine {
             this.updateSpatialGrid(); // 週期性全量刷新空間格網 (保險起見)
             this.state.assignmentTimer = 0;
         }
-
-        // 執行戰鬥子系統 Alpha (Battle System update loop)
-        BattleSystem.update(deltaTime);
     }
 
     static updateSpatialGrid() {
@@ -279,8 +277,7 @@ export class GameEngine {
                 idxCamp = headers.indexOf('camp'),
                 idxPop = headers.indexOf('population'),
                 idxPatrol = headers.indexOf('patrol_range'),
-                idxVision = headers.indexOf('field_vision'),
-                idxInitiative = headers.indexOf('initiative_attack');
+                idxVision = headers.indexOf('field_vision');
 
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -309,8 +306,7 @@ export class GameEngine {
                     attackSpeed: parseFloat(row[idxAtkSpeed]) || 1,
                     range: parseInt(row[idxRange]) || 10,
                     patrol_range: parseFloat(row[idxPatrol]) || 0,
-                    field_vision: parseFloat(row[idxVision]) || 15,
-                    initiative_attack: parseInt(row[idxInitiative]) || 0
+                    field_vision: parseFloat(row[idxVision]) || 15
                 };
             }
         } catch (e) { }
@@ -618,23 +614,15 @@ export class GameEngine {
             attackSpeed: config.attackSpeed || 1,
             range: config.range || 10,
             field_vision: (config.field_vision !== undefined) ? config.field_vision : 15,
-            initiative_attack: (config.initiative_attack !== undefined) ? config.initiative_attack : 0,
             facing: 1 // 1: 右, -1: 左
         };
 
         this.state.units.villagers.push(v);
-        
-        if (v.config.type === 'villagers') {
-            this.assignNextTask(v);
-        }
+        if (v.config.type === 'villagers') this.assignNextTask(v);
 
-        if (building && building.rallyPoint) {
-            // 命令單位前往集結點，預設使用跑步速度 (MOVE 狀態)
-            v.state = 'MOVE';
-            v.isManualCommand = true;
-            
+        if (v.state === 'IDLE' && building && building.rallyPoint) {
             // 為集結點計算偏移量，讓單位以 5xN 的方塊形式排列，相隔 1 格 (20px)
-            const idx = building.spawnIdx - 1; 
+            const idx = building.spawnIdx - 1; // 剛才已經 ++ 過了
             const spacing = 20;
             const gridW = 5;
             const offsetX = (idx % gridW - Math.floor(gridW / 2)) * spacing;
@@ -929,11 +917,9 @@ export class GameEngine {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
         if (v.config.type !== 'villagers') {
             const oldX = v.x, oldY = v.y;
-            // 決定移動速度：除 IDLE 閒逛外其餘均用跑步
-            // 定義：有移動目標 (idleTarget) 且非手動指令、非戰鬥狀態時判定為閒逛
-            const isManualOrFight = v.isManualCommand || v.state === 'MOVE' || v.state === 'ATTACK' || !!v.targetId;
-            const configSpeed = isManualOrFight ? (v.config.fighting_speed || 5.5) : (v.config.idle_speed || 2.5);
-            const moveSpeed = configSpeed * 13;
+            // 決定移動速度：如果有 idleTarget (巡邏目標)，優先讀取 idle_speed 避免跑得太快
+            const moveBaseSpeed = (v.idleTarget) ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
+            const moveSpeed = moveBaseSpeed * 13;
             if (v.idleTarget) {
                 v.state = 'MOVING';
                 this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
@@ -991,26 +977,18 @@ export class GameEngine {
         }
         const oldX = v.x, oldY = v.y;
 
-        // 安全機制：如果正在執行特定任務（非閒置且非戰鬥），則清除閒逛目標
-        const isCombatState = v.state === 'MOVE' || v.state === 'ATTACK';
-        if (v.state !== 'IDLE' && !isCombatState && v.idleTarget) {
+        // 安全機制：如果正在執行特定任務（非閒置），則清除閒逛目標，避免動畫頻率錯誤 (Point 2)
+        if (v.state !== 'IDLE' && v.idleTarget) {
             v.idleTarget = null;
         }
 
-        // 決定移動速度
-        // 只有在狀態為 IDLE 且沒有手動命令時使用閒逛速度。其餘（工作、攻擊、手動移動）一律使用跑步速度。
-        const isActuallyWandering = (v.state === 'IDLE') && !v.isManualCommand;
-        const configSpeed = isActuallyWandering ? (v.config.idle_speed || 3) : (v.config.fighting_speed || 5.5);
+        // 決定移動速度 (閒置閒逛用 idle_speed, 其餘用 fighting_speed)
+        const configSpeed = (v.state === 'IDLE') ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
         const moveSpeed = configSpeed * 13;
 
-        // [TEST] 紀錄速度變遷
-        if (v.id === GameEngine.state.selectedUnitId && v._lastRecordedSpeed !== configSpeed) {
-            console.log(`[速度切換] ${v.configName}: ${v._lastRecordedSpeed || 'N/A'} -> ${configSpeed} (狀態: ${v.state}, 手動: ${!!v.isManualCommand})`);
-            v._lastRecordedSpeed = configSpeed;
-        }
-
         // [TEST] 紀錄狀態變遷 (僅限選中單位)
-        if (v.id === GameEngine.state.selectedUnitId && v._lastRecordedState !== v.state) {
+        const isSelected = GameEngine.state.selectedUnitIds && GameEngine.state.selectedUnitIds.includes(v.id);
+        if (isSelected && v._lastRecordedState !== v.state) {
             const msg = `[狀態轉進] ${v.configName}: ${v._lastRecordedState || 'IDLE'} -> ${v.state} (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`;
             console.log(`%c${msg}`, "color: #4fc3f7; font-weight: bold;");
             GameEngine.addLog(msg, 'STATE');
@@ -1019,37 +997,15 @@ export class GameEngine {
 
         switch (v.state) {
             case 'IDLE':
-                const idleRange = this.state.systemConfig.village_standby_range || 150;
-                if (!v.idleTarget) {
-                    if (v.waitTimer > 0) { v.waitTimer -= dt; return; }
-                    const angle = Math.random() * Math.PI * 2, r = Math.random() * idleRange + 120;
-                    v.idleTarget = { x: v.targetBase.x + Math.cos(angle) * r, y: v.targetBase.y + Math.sin(angle) * r };
-                    v.pathTarget = null;
-                }
-                this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
-                if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
-                    v.idleTarget = null; v.waitTimer = 1 + Math.random() * 2; v.pathTarget = null;
-                    v.isManualCommand = false; // 到達手動目標後釋放標記，允許自動任務
-                }
-                break;
-            case 'MOVE':
+                // 取消工人閒逛設定：若已有目標 (如集結點) 則移動，到達後不再隨機找下一個點
                 if (v.idleTarget) {
                     this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
                     if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                         v.idleTarget = null;
-                        v.state = 'IDLE';
-                        v.isManualCommand = false; // 抵達目的地，解除手動狀態限制
+                        v.waitTimer = 1 + Math.random() * 2;
                         v.pathTarget = null;
-                        // 抵達目的地後立即嘗試尋找附近工作 (如果是村民)
-                        if (v.config.type === 'villagers') this.assignNextTask(v);
                     }
-                } else if (!v.targetId) {
-                    v.state = 'IDLE';
-                    v.isManualCommand = false;
                 }
-                break;
-            case 'ATTACK':
-                v.pathTarget = null; // 攻擊時保持靜止
                 break;
             case 'MOVING_TO_RESOURCE':
                 let searchX = v.x, searchY = v.y;
@@ -1348,12 +1304,8 @@ export class GameEngine {
 
     static assignNextTask(v) {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集工作能力
-        // 如果處於手動命令狀態 (isManualCommand) 或已撤回，則不自動派工
-        if (v.config.type !== 'villagers' || v.isRecalled || v.isManualCommand) {
-            // 如果是手動移動中，保持現有狀態 (MOVE)，否則才設為 IDLE
-            if (!v.isManualCommand) {
-                v.state = 'IDLE';
-            }
+        if (v.config.type !== 'villagers' || v.isRecalled) {
+            v.state = 'IDLE';
             return;
         }
 
@@ -1490,7 +1442,8 @@ export class GameEngine {
 
         // 如果目前沒有路徑且也沒在尋路中，發起非同步尋路請求
         if (!v.fullPath && !v.isFindingPath && this.state.pathfinding) {
-            if (v.id === GameEngine.state.selectedUnitId) {
+            const isSelected = GameEngine.state.selectedUnitIds && GameEngine.state.selectedUnitIds.includes(v.id);
+            if (isSelected) {
                 const msg = `[尋路請求] (${v.x.toFixed(0)}, ${v.y.toFixed(0)}) -> (${tx.toFixed(0)}, ${ty.toFixed(0)})`;
                 console.log(`%c${msg}`, "color: #ffeb3b; font-weight: bold;");
                 GameEngine.addLog(msg, 'PATH');
@@ -1501,13 +1454,13 @@ export class GameEngine {
                 if (path && path.length > 1) {
                     v.fullPath = path;
                     v.pathIndex = 1; // 跳過起點
-                    if (v.id === GameEngine.state.selectedUnitId) {
+                    if (isSelected) {
                         GameEngine.addLog(`[尋路成功] 路徑長度: ${path.length}`, 'PATH');
                     }
                 } else {
                     // 尋路失敗，設為空避免重複頻繁請求
                     v.fullPath = [];
-                    if (v.id === GameEngine.state.selectedUnitId) {
+                    if (isSelected) {
                         GameEngine.addLog(`[尋路失敗!] 無法到達 (${tx.toFixed(0)}, ${ty.toFixed(0)})`, 'PATH');
                     }
                 }
@@ -1541,7 +1494,8 @@ export class GameEngine {
                     remainingDt -= dist / speed;
 
                     // [TEST] 當走到下一個節點時，於 UI 日誌顯示新目標點
-                    if (v.id === GameEngine.state.selectedUnitId && v.fullPath && v.pathIndex < v.fullPath.length) {
+                    const isSelected = GameEngine.state.selectedUnitIds && GameEngine.state.selectedUnitIds.includes(v.id);
+                    if (isSelected && v.fullPath && v.pathIndex < v.fullPath.length) {
                         const nextNode = v.fullPath[v.pathIndex];
                         GameEngine.addLog(`   ┗ 前往下一點: (${nextNode.x.toFixed(0)}, ${nextNode.y.toFixed(0)})`, 'PATH');
                     }
@@ -1575,7 +1529,7 @@ export class GameEngine {
     static resolveStuck(v) {
         if (!this.state.pathfinding) return;
 
-        const isSelected = v.id === GameEngine.state.selectedUnitId;
+        const isSelected = GameEngine.state.selectedUnitIds && GameEngine.state.selectedUnitIds.includes(v.id);
         const oldX = v.x, oldY = v.y;
 
         // 計算當前所在格線座標 (絕對座標)

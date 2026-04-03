@@ -73,8 +73,8 @@ export class BattleRenderer {
         const scene = this.scene;
         const pointer = scene.input.activePointer;
 
-        // 從全域狀態獲取目前選取 ID
-        const selectedId = window.GAME_STATE ? window.GAME_STATE.selectedUnitId : null;
+        // 從全域狀態獲取目前選取 ID 列表
+        const selectedIds = window.GAME_STATE ? (window.GAME_STATE.selectedUnitIds || []) : [];
 
         units.forEach(unit => {
             // 受擊計時器
@@ -84,7 +84,7 @@ export class BattleRenderer {
             // 1. 判斷顯示條件：受擊中 OR 滑鼠懸停 OR 目前選中
             const distToPointer = Math.hypot(unit.x - pointer.worldX, unit.y - pointer.worldY);
             const isHovered = distToPointer < 40; 
-            const isSelected = unit.id === selectedId;
+            const isSelected = selectedIds.includes(unit.id);
 
             // 如果符合任一條件，渲染血條
             if (unit.hitTimer > 0 || isHovered || isSelected) {
