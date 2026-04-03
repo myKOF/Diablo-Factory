@@ -294,6 +294,12 @@ export class CharacterRenderer {
             // 負重搬運時的籃子晃動
             const cargoFreq = isRunning ? anim.runningFreq : (isActuallyMoving ? anim.wanderingFreq : anim.breathingFreq);
             ctx.fillRect(x - 8, y + 10 + Math.sin(t * cargoFreq) * 2, 16, 12);
+        } else if (state === 'ATTACK') {
+            // 通用攻擊動作（針對村民或其他無特定武器單位）
+            const swing = Math.sin(t * anim.workFreq * 1.5) * 10;
+            const armAngle = Math.sin(t * anim.workFreq * 2) * 0.5;
+            ctx.fillRect(x + 10 + swing, y + 5 + armAngle, 4, 18); // 右手前衝
+            ctx.fillRect(x - 14, y + 5 - armAngle, 4, 18);
         } else {
             // IDLE 或 步行狀態的雙臂晃動
             const swingFreq = isActuallyMoving ? armFreq : breatheFreq;
@@ -380,12 +386,20 @@ export class CharacterRenderer {
         // 呼吸效果 (待機時縮放身體)
         const breathing = (isMoving || isAttacking) ? 0 : Math.sin(t * breatheFreq * 1.2) * 1.2;
 
+        // 身體前傾效果 (攻擊時向右衝)
+        const attackDash = isAttacking ? Math.abs(Math.sin(t * 15)) * 8 : 0;
+
         // 頭部
         const headBob = isAttacking ? Math.sin(t * 15) * 4 : (isMoving ? Math.sin(t * headBobFreq) * 2 : Math.sin(t * breatheFreq * 0.8) * 1);
-        const headX = x + 8;
+        const headX = x + 8 + attackDash;
         const headY = y - 12 + headBob + breathing;
 
         ctx.fillRect(headX, headY, 12, 10); // 狼頭向右
+        
+        // 嘴巴 (攻擊時張開)
+        if (isAttacking && Math.sin(t * 15) > 0) {
+            ctx.fillRect(headX + 8, headY + 6, 6, 4); 
+        }
 
         // 耳朵
         ctx.fillRect(headX + 2, headY - 4, 3, 5);
@@ -415,14 +429,23 @@ export class CharacterRenderer {
         // 呼吸效果 (熊比較壯碩，呼吸更慢)
         const breathing = (isMoving || isAttacking) ? 0 : Math.sin(t * breatheFreq * 0.8) * 1.5;
 
+        // 身體前傾效果
+        const attackDash = isAttacking ? Math.abs(Math.sin(t * 12)) * 6 : 0;
+
         // 身體 (壯碩)
-        ctx.fillRect(x - 15, y - 10 - (breathing / 2), 30, 20 + breathing);
+        ctx.fillRect(x - 15 + attackDash, y - 10 - (breathing / 2), 30, 20 + breathing);
 
         // 頭 (圓大)
         const headBob = isAttacking ? Math.sin(t * 12) * 3 : (isMoving ? Math.sin(t * headBobFreq) * 1 : Math.cos(t * breatheFreq * 0.6) * 1.5);
-        const headX = x + 10;
+        const headX = x + 10 + attackDash;
         const headY = y - 15 + headBob;
         ctx.fillRect(headX, headY, 15, 15);
+        
+        // 熊掌擊打動作 (攻擊時)
+        if (isAttacking) {
+            this.setCtxStyle(ctx, color, 1);
+            ctx.fillRect(headX + 10, headY + 10 + Math.sin(t * 12) * 5, 8, 8);
+        }
 
         // 耳朵 (小而圓)
         ctx.fillRect(headX + 2, headY - 3, 4, 4);

@@ -43,9 +43,12 @@ export class BattleSystem {
         // 讀取主動攻擊設定：0 = 被動，1 = 主動
         const isInitiative = Number(unit.initiative_attack) === 1;
         
-        // 如果是被動單位且目前沒有目標，則不主動索敵
-        if (!isInitiative && !unit.targetId) {
-            return;
+        // 如果是被動單位，只有在當前「正在攻擊敵人」時才允許重新掃描（為了切換更佳目標）
+        // 如果目前沒在打仗（目標是資源或根本沒目標），則禁止主動掃描敵人
+        if (!isInitiative) {
+            const currentTarget = this.findEntityById(unit.targetId);
+            const isTargetEnemy = currentTarget && ((currentTarget.config && currentTarget.config.camp === 'enemy') || currentTarget.camp === 'enemy');
+            if (!isTargetEnemy) return; 
         }
 
         // 如果已經有目標且目標還活著，則不需要重新索敵
@@ -86,9 +89,12 @@ export class BattleSystem {
      * 處理攻擊循環與尋路追擊
      */
     static processCombat(unit, dt) {
-        if (!unit.targetId) {
-            // 如果沒目標且在攻擊狀態，重置回閒置
-            if (unit.state === 'ATTACK') unit.state = 'IDLE';
+        // 如果 targetId 是物件形式 (資源) 而非字串 ID (戰鬥單位)，則是傳統採集/建築系統在使用，戰鬥系統應直接跳過
+        if (!unit.targetId || typeof unit.targetId === 'object') {
+            // 如果目前是在特定戰鬥狀態則需重置，但 GATHERING/CONSTRUCTING 則跳過
+            if (unit.state === 'ATTACK' || unit.state === 'MOVE') {
+                unit.state = 'IDLE';
+            }
             return;
         }
 
@@ -182,6 +188,7 @@ export class BattleSystem {
 
     static findEntityById(id) {
         if (!id) return null;
+        if (typeof id === 'object') return id; // 如果已經是物件則直接回傳 (相容舊採集系統)
         return GameEngine.state.units.villagers.find(u => u.id === id) ||
                GameEngine.state.mapEntities.find(e => e.id === id);
     }
