@@ -40,7 +40,15 @@ export class BattleSystem {
      * 自動索敵：根據陣營偵測視野內最近的敵人
      */
     static autoSeeking(unit) {
-        // 如果已經有目標且目標還活著，則不需要重新索敵 (除非需要切換更近的優先目標)
+        // 讀取主動攻擊設定：0 = 被動，1 = 主動
+        const isInitiative = Number(unit.initiative_attack) === 1;
+        
+        // 如果是被動單位且目前沒有目標，則不主動索敵
+        if (!isInitiative && !unit.targetId) {
+            return;
+        }
+
+        // 如果已經有目標且目標還活著，則不需要重新索敵
         let currentTarget = this.findEntityById(unit.targetId);
         if (currentTarget && currentTarget.hp > 0 && this.getDist(unit, currentTarget) <= unit.field_vision * GameEngine.TILE_SIZE) {
             return; 
@@ -140,6 +148,11 @@ export class BattleSystem {
         // 觸發傷害跳字
         if (window.BattleRenderer) {
             window.BattleRenderer.addDamagePopup(target.x, target.y, dmg);
+        }
+
+        // 反擊邏輯 (Retaliation)：受擊者若無目標且具備戰鬥屬性，自動鎖定攻擊者
+        if (target.hp > 0 && !target.targetId && target.initiative_attack !== undefined) {
+            target.targetId = attacker.id;
         }
 
         // console.log(`[Battle] ${attacker.id} 攻擊 ${target.id}, 造成 ${dmg} 傷害, 剩餘 HP: ${target.hp}`);

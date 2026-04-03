@@ -279,7 +279,8 @@ export class GameEngine {
                 idxCamp = headers.indexOf('camp'),
                 idxPop = headers.indexOf('population'),
                 idxPatrol = headers.indexOf('patrol_range'),
-                idxVision = headers.indexOf('field_vision');
+                idxVision = headers.indexOf('field_vision'),
+                idxInitiative = headers.indexOf('initiative_attack');
 
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -308,7 +309,8 @@ export class GameEngine {
                     attackSpeed: parseFloat(row[idxAtkSpeed]) || 1,
                     range: parseInt(row[idxRange]) || 10,
                     patrol_range: parseFloat(row[idxPatrol]) || 0,
-                    field_vision: parseFloat(row[idxVision]) || 15
+                    field_vision: parseFloat(row[idxVision]) || 15,
+                    initiative_attack: parseInt(row[idxInitiative]) || 0
                 };
             }
         } catch (e) { }
@@ -616,6 +618,7 @@ export class GameEngine {
             attackSpeed: config.attackSpeed || 1,
             range: config.range || 10,
             field_vision: (config.field_vision !== undefined) ? config.field_vision : 15,
+            initiative_attack: (config.initiative_attack !== undefined) ? config.initiative_attack : 0,
             facing: 1 // 1: 右, -1: 左
         };
 

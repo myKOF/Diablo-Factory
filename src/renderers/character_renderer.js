@@ -246,7 +246,7 @@ export class CharacterRenderer {
     }
 
     static renderArmsAndTools(ctx, x, y, data, t) {
-        const state = data.state;
+        const state = data.state || 'IDLE';
         const name = (data.configName || "").toLowerCase();
         this.setCtxStyle(ctx, 0xffcc8c, 1);
 
