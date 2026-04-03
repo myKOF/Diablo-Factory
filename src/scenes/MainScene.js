@@ -240,36 +240,14 @@ export class MainScene extends Phaser.Scene {
                 }
             }
 
-            // 2. 右鍵指令邏輯
-            if (isRightClick) {
-                const selectedIds = GameEngine.state.selectedUnitIds || [];
-                if (selectedIds.length > 0) {
-                    // RTS 分散隊形邏輯：如果要移動多個單位，讓他們以目標為中心展開
-                    const unitsToMove = selectedIds.map(id => GameEngine.state.units.villagers.find(v => v.id === id)).filter(v => v);
-                    const cols = Math.ceil(Math.sqrt(unitsToMove.length));
-                    const spacing = 40;
-
-                    unitsToMove.forEach((unit, i) => {
-                        const r = Math.floor(i / cols);
-                        const c = i % cols;
-                        const offX = (c - (cols - 1) / 2) * spacing;
-                        const offY = (r - (cols - 1) / 2) * spacing;
-                        
-                        // 模擬一個偏移過的點擊
-                        const fakePointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
-                        this.handleRightClickCommand(unit, fakePointer);
-                    });
-                    return;
-                }
+            // 2. 右鍵與中鍵皆可用於相機拖曳
+            if (isRightClick || isMiddleDrag) {
+                this.isDragging = true;
+                this.dragStartPos = { x: pointer.x, y: pointer.y };
+                lastPointer = { x: pointer.x, y: pointer.y };
             }
 
             if (isPlacement && !isMiddleDrag) return;
-
-            // 2. 只有中鍵拖曳才會觸發相機移動，左鍵保留給框選
-            if (isMiddleDrag) {
-                this.isDragging = true;
-                lastPointer = { x: pointer.x, y: pointer.y };
-            }
         });
 
         this.input.on('pointermove', (pointer) => {
@@ -288,6 +266,29 @@ export class MainScene extends Phaser.Scene {
         });
 
         this.input.on('pointerup', (pointer) => {
+            // 如果是右鍵釋放，根據拖動距離判斷：是「移動指令」還是「相機拖動結束」
+            if (pointer.button === 2) {
+                const dragDist = this.dragStartPos ? Math.hypot(pointer.x - this.dragStartPos.x, pointer.y - this.dragStartPos.y) : 0;
+                // 位移小於 10px 視為單擊指令
+                if (dragDist < 10) {
+                    const selectedIds = GameEngine.state.selectedUnitIds || [];
+                    if (selectedIds.length > 0) {
+                        const unitsToMove = selectedIds.map(id => GameEngine.state.units.villagers.find(v => v.id === id)).filter(v => v);
+                        const colsNum = Math.ceil(Math.sqrt(unitsToMove.length));
+                        const spacing = 40;
+
+                        unitsToMove.forEach((unit, i) => {
+                            const r = Math.floor(i / colsNum);
+                            const c = i % colsNum;
+                            const offX = (c - (colsNum - 1) / 2) * spacing;
+                            const offY = (r - (colsNum - 1) / 2) * spacing;
+                            const fakePointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
+                            this.handleRightClickCommand(unit, fakePointer);
+                        });
+                    }
+                }
+            }
+
             // 結束框選
             if (this.selectionStartPos) {
                 const start = this.selectionStartPos;
@@ -319,6 +320,7 @@ export class MainScene extends Phaser.Scene {
             }
 
             this.isDragging = false;
+            this.dragStartPos = null;
         });
     }
 
