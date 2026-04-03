@@ -375,6 +375,19 @@ export const UI_CONFIG = {
         lineColor: "#ff0000",          // 紅色線條
         lineAlpha: 0.8,                // 線條透明度
         lineWidth: 1.5,                // 線條寬度
+    },
+    // ── 單位血條 (UnitHealthBar) ──────────────────────────────────
+    // 戰鬥單位或受傷單位在底部顯示的血條。
+    UnitHealthBar: {
+        width: 40,                     // 血條寬度
+        height: 6,                     // 血條高度
+        offsetY: 30,                   // 垂直偏移（正值向下，原本為 -45 向上）
+        bgColor: "#000000",            // 底槽背景色
+        bgAlpha: 0.7,                  // 背景透明度
+        fillColor: "#ff5252",          // 血量填充顏色 (鮮紅色)
+        borderColor: "#ffffff",        // 外框顏色
+        borderAlpha: 0.5,              // 外框透明度
+        showTimer: 1.5                 // 受擊後顯示的持續時間（秒）
     }
 };
 
