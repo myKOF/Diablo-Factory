@@ -623,11 +623,18 @@ export class GameEngine {
         };
 
         this.state.units.villagers.push(v);
-        if (v.config.type === 'villagers') this.assignNextTask(v);
+        
+        if (v.config.type === 'villagers') {
+            this.assignNextTask(v);
+        }
 
-        if (v.state === 'IDLE' && building && building.rallyPoint) {
+        if (building && building.rallyPoint) {
+            // 命令單位前往集結點，預設使用跑步速度 (MOVE 狀態)
+            v.state = 'MOVE';
+            v.isManualCommand = true;
+            
             // 為集結點計算偏移量，讓單位以 5xN 的方塊形式排列，相隔 1 格 (20px)
-            const idx = building.spawnIdx - 1; // 剛才已經 ++ 過了
+            const idx = building.spawnIdx - 1; 
             const spacing = 20;
             const gridW = 5;
             const offsetX = (idx % gridW - Math.floor(gridW / 2)) * spacing;
@@ -989,9 +996,18 @@ export class GameEngine {
             v.idleTarget = null;
         }
 
-        // 決定移動速度 (閒置閒逛用 idle_speed, 其餘用 fighting_speed)
-        const configSpeed = (v.state === 'IDLE') ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
+        // 決定移動速度
+        // 核心要求：手動點擊移動 (isManualCommand)、走向集結點 (MOVE) 或正在戰鬥 (ATTACK/MOVE) 使用 fighting_speed
+        // 其他自動派工行為 (如 MOVING_TO_RESOURCE, MOVING_TO_CONSTRUCTION) 使用 idle_speed
+        const isRunCondition = v.isManualCommand || v.state === 'MOVE' || v.state === 'ATTACK';
+        const configSpeed = isRunCondition ? (v.config.fighting_speed || 5.5) : (v.config.idle_speed || 3);
         const moveSpeed = configSpeed * 13;
+
+        // [TEST] 紀錄速度變遷
+        if (v.id === GameEngine.state.selectedUnitId && v._lastRecordedSpeed !== configSpeed) {
+            console.log(`[速度切換] ${v.configName}: ${v._lastRecordedSpeed || 'N/A'} -> ${configSpeed} (狀態: ${v.state}, 手動: ${!!v.isManualCommand})`);
+            v._lastRecordedSpeed = configSpeed;
+        }
 
         // [TEST] 紀錄狀態變遷 (僅限選中單位)
         if (v.id === GameEngine.state.selectedUnitId && v._lastRecordedState !== v.state) {
@@ -1013,13 +1029,23 @@ export class GameEngine {
                 this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
                 if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                     v.idleTarget = null; v.waitTimer = 1 + Math.random() * 2; v.pathTarget = null;
+                    v.isManualCommand = false; // 到達手動目標後釋放標記，允許自動任務
                 }
                 break;
             case 'MOVE':
                 if (v.idleTarget) {
                     this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
-                } else {
+                    if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
+                        v.idleTarget = null;
+                        v.state = 'IDLE';
+                        v.isManualCommand = false; // 抵達目的地，解除手動狀態限制
+                        v.pathTarget = null;
+                        // 抵達目的地後立即嘗試尋找附近工作 (如果是村民)
+                        if (v.config.type === 'villagers') this.assignNextTask(v);
+                    }
+                } else if (!v.targetId) {
                     v.state = 'IDLE';
+                    v.isManualCommand = false;
                 }
                 break;
             case 'ATTACK':
@@ -1322,8 +1348,12 @@ export class GameEngine {
 
     static assignNextTask(v) {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集工作能力
-        if (v.config.type !== 'villagers' || v.isRecalled) {
-            v.state = 'IDLE';
+        // 如果處於手動命令狀態 (isManualCommand) 或已撤回，則不自動派工
+        if (v.config.type !== 'villagers' || v.isRecalled || v.isManualCommand) {
+            // 如果是手動移動中，保持現有狀態 (MOVE)，否則才設為 IDLE
+            if (!v.isManualCommand) {
+                v.state = 'IDLE';
+            }
             return;
         }
 

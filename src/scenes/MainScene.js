@@ -90,6 +90,11 @@ export class MainScene extends Phaser.Scene {
         // 設置全局引用
         window.PhaserScene = this;
         BattleRenderer.init(this);
+
+        // RTS 核心設定：禁用右鍵選單
+        if (this.input && this.input.mouse) {
+            this.input.mouse.disableContextMenu();
+        }
     }
 
     generateTextures() {
@@ -162,43 +167,42 @@ export class MainScene extends Phaser.Scene {
         this.isDragging = false;
 
         this.input.on('pointerdown', (pointer) => {
-            const isPlacement = !!GameEngine.state.placingType;
-            const isMiddleDrag = pointer.middleButtonDown();
-
-            // 排除 UI 拖曳干擾
+            // 排除 UI 點擊干擾
             if (window.UIManager && window.UIManager.dragGhost) return;
 
-            // 單位點擊檢查 (調試用，40px 容錯)
-            // 不管是否在建造模式，點擊單位都應該觸發 Log
-            let bestDist = 40;
-            let clickedUnit = null;
-            GameEngine.state.units.villagers.forEach(v => {
-                const d = Math.hypot(v.x - pointer.worldX, v.y - pointer.worldY);
-                if (d < bestDist) { bestDist = d; clickedUnit = v; }
-            });
+            const isPlacement = !!GameEngine.state.placingType;
+            const isMiddleDrag = pointer.middleButtonDown();
+            const isRightClick = pointer.rightButtonDown();
 
-            if (clickedUnit) {
-                GameEngine.state.selectedUnitId = clickedUnit.id;
-                GameEngine.state.lastSelectionTime = Date.now();
+            // 1. 左鍵選取邏輯
+            if (pointer.leftButtonDown() && !isPlacement) {
+                let bestDist = 40;
+                let clickedUnit = null;
+                GameEngine.state.units.villagers.forEach(v => {
+                    const d = Math.hypot(v.x - pointer.worldX, v.y - pointer.worldY);
+                    if (d < bestDist) { bestDist = d; clickedUnit = v; }
+                });
 
-                console.group(`[選取單位詳細資訊] ${clickedUnit.configName} (${clickedUnit.id})`);
-                console.log(`%c狀態: ${clickedUnit.state}`, "color: #ffeb3b; font-weight: bold; background: #212121; padding: 2px 5px;");
-                console.log(`坐標: (${clickedUnit.x.toFixed(1)}, ${clickedUnit.y.toFixed(1)})`);
-                console.log(`目標: `, clickedUnit.targetId || clickedUnit.targetBase || clickedUnit.constructionTarget || clickedUnit.idleTarget || "無");
-
-                const pf = GameEngine.state.pathfinding;
-                if (pf) {
-                    const gx = Math.floor(clickedUnit.x / GameEngine.TILE_SIZE);
-                    const gy = Math.floor(clickedUnit.y / GameEngine.TILE_SIZE);
-                    const isWalkable = pf.grid[gy] && pf.grid[gy][gx] === 0;
-                    console.log(`尋路網格狀態: ${isWalkable ? "✅ 可通行" : "❌ 障礙物中 (卡死!)"} (${gx}, ${gy})`);
-                    console.log(`當前路徑: ${clickedUnit.fullPath ? (clickedUnit.fullPath.length + " 節點, 當前進度: " + clickedUnit.pathIndex) : "無"}`);
-                    console.log(`尋路中: ${clickedUnit.isFindingPath}`);
+                if (clickedUnit) {
+                    GameEngine.state.selectedUnitId = clickedUnit.id;
+                    GameEngine.state.lastSelectionTime = Date.now();
+                    this.logUnitDetail(clickedUnit);
+                    return; // 點中單位就不觸發拖曳
+                } else {
+                    GameEngine.state.selectedUnitId = null;
                 }
-                console.groupEnd();
-                return; // 點中單位就不觸發拖曳
-            } else {
-                GameEngine.state.selectedUnitId = null;
+            }
+
+            // 2. 右鍵指令邏輯
+            if (isRightClick) {
+                const selectedId = GameEngine.state.selectedUnitId;
+                if (selectedId) {
+                    const unit = GameEngine.state.units.villagers.find(v => v.id === selectedId);
+                    if (unit) {
+                        this.handleRightClickCommand(unit, pointer);
+                        return;
+                    }
+                }
             }
 
             if (isPlacement && !isMiddleDrag) return;
@@ -220,6 +224,54 @@ export class MainScene extends Phaser.Scene {
         this.input.on('pointerup', () => {
             this.isDragging = false;
         });
+    }
+
+    /**
+     * 處理單位的右鍵指令（移動或攻擊）
+     */
+    handleRightClickCommand(unit, pointer) {
+        const wx = pointer.worldX, wy = pointer.worldY;
+
+        // 1. 識別目標
+        let clickedEnemy = null;
+        let minDist = 40;
+        GameEngine.state.units.villagers.forEach(v => {
+            if (v.id === unit.id) return;
+            const camp = (v.config && v.config.camp) || v.camp || 'neutral';
+            if (camp === 'enemy') {
+                const d = Math.hypot(v.x - wx, v.y - wy);
+                if (d < minDist) { minDist = d; clickedEnemy = v; }
+            }
+        });
+
+        // 2. 執行命令
+        if (clickedEnemy) {
+            unit.targetId = clickedEnemy.id;
+            unit.state = 'MOVE';
+            unit.idleTarget = null;
+            unit.isManualCommand = true;
+            GameEngine.addLog(`[命令] ${unit.configName} 追擊並攻擊敵軍。`);
+        } else {
+            unit.targetId = null;
+            unit.idleTarget = { x: wx, y: wy };
+            unit.state = 'IDLE';
+            unit.isManualCommand = true;
+            GameEngine.addLog(`[命令] ${unit.configName} 移動至目的並待命。`);
+        }
+    }
+
+    logUnitDetail(unit) {
+        console.group(`[選取單位詳細資訊] ${unit.configName} (${unit.id})`);
+        console.log(`%c狀態: ${unit.state}`, "color: #ffeb3b; font-weight: bold; background: #212121; padding: 2px 5px;");
+        console.log(`座標: (${unit.x.toFixed(1)}, ${unit.y.toFixed(1)})`);
+        console.log(`目標: `, unit.targetId || unit.idleTarget || "無");
+        const pf = GameEngine.state.pathfinding;
+        if (pf) {
+            const gx = Math.floor(unit.x / GameEngine.TILE_SIZE);
+            const gy = Math.floor(unit.y / GameEngine.TILE_SIZE);
+            console.log(`網格座標: (${gx}, ${gy}), 可通行: ${pf.grid[gy] && pf.grid[gy][gx] === 0}`);
+        }
+        console.groupEnd();
     }
 
     drawGrid() {
