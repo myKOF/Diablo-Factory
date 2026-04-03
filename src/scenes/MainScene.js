@@ -2,6 +2,7 @@ import { GameEngine } from "../systems/game_systems.js";
 import { UI_CONFIG } from "../ui/ui_config.js";
 import { CharacterRenderer } from "../renderers/character_renderer.js";
 import { ResourceRenderer } from "../renderers/resource_renderer.js";
+import { BattleRenderer } from "../renderers/battle_renderer.js";
 
 export class MainScene extends Phaser.Scene {
     constructor() {
@@ -88,6 +89,7 @@ export class MainScene extends Phaser.Scene {
 
         // 設置全局引用
         window.PhaserScene = this;
+        BattleRenderer.init(this);
     }
 
     generateTextures() {
@@ -260,7 +262,8 @@ export class MainScene extends Phaser.Scene {
         }
     }
 
-    update() {
+    update(time, delta) {
+        const deltaTime = delta / 1000;
         const state = window.GAME_STATE;
         if (!state) return;
 
@@ -306,6 +309,8 @@ export class MainScene extends Phaser.Scene {
         if (!camMoved && !this.pendingVisibleEntities && !entitiesCountChanged && !renderVersionChanged && !state.placingType) {
             this.updateUnits(state.units.villagers);
             this.updateDynamicHUD(this.lastVisibleEntities);
+            // 渲染戰鬥視覺 (HP Bars - 即使沒動也需更新動畫與剩餘時間)
+            BattleRenderer.renderHPBars(this.hudGraphics, state.units.villagers, deltaTime);
             return;
         }
 
@@ -316,6 +321,9 @@ export class MainScene extends Phaser.Scene {
         this.updateEntities(visibleEntities, state.mapEntities);
         this.updateUnits(state.units.villagers);
         this.updateDynamicHUD(visibleEntities);
+
+        // 渲染戰鬥視覺 (HP Bars)
+        BattleRenderer.renderHPBars(this.hudGraphics, state.units.villagers, deltaTime);
     }
 
     updateTownCenterLocator(cam) {

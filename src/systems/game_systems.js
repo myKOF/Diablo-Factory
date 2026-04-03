@@ -1,5 +1,6 @@
 import { UI_CONFIG } from "../ui/ui_config.js";
 import { PathfindingSystem } from "./PathfindingSystem.js?v=3";
+import { BattleSystem } from "./BattleSystem.js";
 
 
 
@@ -166,6 +167,9 @@ export class GameEngine {
             this.updateSpatialGrid(); // 週期性全量刷新空間格網 (保險起見)
             this.state.assignmentTimer = 0;
         }
+
+        // 執行戰鬥子系統 Alpha (Battle System update loop)
+        BattleSystem.update(deltaTime);
     }
 
     static updateSpatialGrid() {
@@ -621,14 +625,14 @@ export class GameEngine {
         if (v.state === 'IDLE' && building && building.rallyPoint) {
             // 為集結點計算偏移量，讓單位以 5xN 的方塊形式排列，相隔 1 格 (20px)
             const idx = building.spawnIdx - 1; // 剛才已經 ++ 過了
-            const spacing = 20; 
+            const spacing = 20;
             const gridW = 5;
             const offsetX = (idx % gridW - Math.floor(gridW / 2)) * spacing;
             const offsetY = (Math.floor(idx / gridW)) * spacing;
-            
-            v.idleTarget = { 
-                x: building.rallyPoint.x + offsetX, 
-                y: building.rallyPoint.y + offsetY 
+
+            v.idleTarget = {
+                x: building.rallyPoint.x + offsetX,
+                y: building.rallyPoint.y + offsetY
             };
         }
         return true;
@@ -915,8 +919,9 @@ export class GameEngine {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
         if (v.config.type !== 'villagers') {
             const oldX = v.x, oldY = v.y;
-            // 決定移動速度：如果有 idleTarget (巡邏目標)，優先讀取 idle_speed 避免跑得太快
-            const moveBaseSpeed = (v.idleTarget) ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
+            // 決定移動速度：如果有 targetId (戰鬥目標) 或正在追蹤某處，優先讀取 fighting_speed
+            const isFighting = !!v.targetId || v.state === 'ATTACK' || v.state === 'MOVE';
+            const moveBaseSpeed = isFighting ? (v.config.fighting_speed || 5.5) : (v.config.idle_speed || 2.5);
             const moveSpeed = moveBaseSpeed * 13;
             if (v.idleTarget) {
                 v.state = 'MOVING';
@@ -975,8 +980,9 @@ export class GameEngine {
         }
         const oldX = v.x, oldY = v.y;
 
-        // 安全機制：如果正在執行特定任務（非閒置），則清除閒逛目標，避免動畫頻率錯誤 (Point 2)
-        if (v.state !== 'IDLE' && v.idleTarget) {
+        // 安全機制：如果正在執行特定任務（非閒置且非戰鬥），則清除閒逛目標
+        const isCombatState = v.state === 'MOVE' || v.state === 'ATTACK';
+        if (v.state !== 'IDLE' && !isCombatState && v.idleTarget) {
             v.idleTarget = null;
         }
 
@@ -1005,6 +1011,16 @@ export class GameEngine {
                 if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                     v.idleTarget = null; v.waitTimer = 1 + Math.random() * 2; v.pathTarget = null;
                 }
+                break;
+            case 'MOVE':
+                if (v.idleTarget) {
+                    this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
+                } else {
+                    v.state = 'IDLE';
+                }
+                break;
+            case 'ATTACK':
+                v.pathTarget = null; // 攻擊時保持靜止
                 break;
             case 'MOVING_TO_RESOURCE':
                 let searchX = v.x, searchY = v.y;
@@ -1314,15 +1330,15 @@ export class GameEngine {
 
         const nextConstruction = this.state.mapEntities.find(e => {
             if (!e || !e.isUnderConstruction) return false;
-            
+
             // 距離檢查
             const dist = Math.hypot(e.x - v.x, e.y - v.y);
             if (dist > visionPx) return false;
 
             // 互斥檢查修復：只有當正在有人「前往或正在施工中」才放手
-            const hasActiveWorker = this.state.units.villagers.some(vi => 
-                vi.id !== v.id && 
-                vi.constructionTarget && 
+            const hasActiveWorker = this.state.units.villagers.some(vi =>
+                vi.id !== v.id &&
+                vi.constructionTarget &&
                 (vi.constructionTarget === e || vi.constructionTarget.id === e.id) &&
                 ['MOVING_TO_CONSTRUCTION', 'CONSTRUCTING'].includes(vi.state)
             );
@@ -1532,15 +1548,15 @@ export class GameEngine {
         // 計算當前所在格線座標 (絕對座標)
         const gx = Math.floor(v.x / this.TILE_SIZE);
         const gy = Math.floor(v.y / this.TILE_SIZE);
-        
+
         // 搜尋最近的空地 (格網索引)
         const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100, true);
-        
+
         if (nearest) {
             // 傳送至該格的像素中心
             const targetX = nearest.x * this.TILE_SIZE + this.TILE_SIZE / 2;
             const targetY = nearest.y * this.TILE_SIZE + this.TILE_SIZE / 2;
-            
+
             // 如果位移非常小 (小於 1px)，表示 getNearest 找到的就是目前位置，但可能因為精度問題微卡
             // 此時稍微隨機偏移一下，協助物理引擎跳出
             if (Math.hypot(targetX - oldX, targetY - oldY) < 1) {
@@ -1704,7 +1720,7 @@ export class GameEngine {
         this.state.units.villagers.forEach(v => {
             // 核心修復：核心邏輯僅限於我方村民，非我方或非建築工之單位不應持有倉庫 ID
             if (!v.config || v.config.type !== 'villagers' || v.config.camp !== 'player') {
-                v.assignedWarehouseId = null; 
+                v.assignedWarehouseId = null;
                 return;
             }
             if (v.assignedWarehouseId) {
@@ -1720,7 +1736,7 @@ export class GameEngine {
         });
 
         // 2. 處理每個倉庫的溢出與缺額
-        let allIdle = this.state.units.villagers.filter(v => 
+        let allIdle = this.state.units.villagers.filter(v =>
             v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
             v.state === 'IDLE' && !v.assignedWarehouseId && !v.isRecalled
         );
