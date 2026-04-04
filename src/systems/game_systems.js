@@ -1456,7 +1456,7 @@ export class GameEngine {
             v.isFindingPath = false;
         }
 
-        // 如果目前沒有路徑且也沒在尋路中，發起非同步尋路請求
+        // 核心修正 1：如果目前沒有路徑且也沒在尋路中，發起非同步尋路請求
         if (!v.fullPath && !v.isFindingPath && this.state.pathfinding) {
             const isSelected = GameEngine.state.selectedUnitIds && GameEngine.state.selectedUnitIds.includes(v.id);
             if (isSelected) {
@@ -1483,8 +1483,7 @@ export class GameEngine {
             });
         }
 
-        // 核心優化：殘餘距離遞延 (Movement Carry-over)
-        // 確保在同一幀內若能走過多個路徑點，不會在點與點之間停頓
+        // 核心優化 2：殘餘距離遞延 (Movement Carry-over)
         let remainingDt = dt;
         let safetyCounter = 0; // 防止無窮迴圈
 
@@ -1499,41 +1498,28 @@ export class GameEngine {
                 const dist = Math.hypot(dx, dy);
 
                 if (dist <= moveDist) {
-                    // 到達當前節點，扣除消耗的時間並前往下一個
                     const deltaX = node.x - v.x;
-                    if (Math.abs(deltaX) > 0.01) {
-                        v.facing = deltaX > 0 ? 1 : -1;
-                    }
+                    if (Math.abs(deltaX) > 0.01) v.facing = deltaX > 0 ? 1 : -1;
                     v.x = node.x;
                     v.y = node.y;
                     v.pathIndex++;
                     remainingDt -= dist / speed;
-
-                    // [TEST] 當走到下一個節點時，於 UI 日誌顯示新目標點
-                    const isSelected = GameEngine.state.selectedUnitIds && GameEngine.state.selectedUnitIds.includes(v.id);
-                    if (isSelected && v.fullPath && v.pathIndex < v.fullPath.length) {
-                        const nextNode = v.fullPath[v.pathIndex];
-                        GameEngine.addLog(`   ┗ 前往下一點: (${nextNode.x.toFixed(0)}, ${nextNode.y.toFixed(0)})`, 'PATH');
-                    }
                 } else if (dist > 0.01) {
-                    // [速度正規化 Velocity Normalization] 防止斜向移動比直線移動快 (1.414 -> 1.0)
                     const ratio = moveDist / dist;
                     const deltaX = dx * ratio;
                     v.x += deltaX;
                     v.y += dy * ratio;
-
-                    if (Math.abs(deltaX) > 0.01) {
-                        v.facing = deltaX > 0 ? 1 : -1;
-                    }
+                    if (Math.abs(deltaX) > 0.01) v.facing = deltaX > 0 ? 1 : -1;
                     remainingDt = 0;
                 } else {
-                    // 距離過小，直接跳過該點
                     v.pathIndex++;
                 }
-            } else {
-                // 沒有路徑或已消耗完節點，直接逼近最終目標
+            } else if (!v.isFindingPath) {
+                // 只有在非尋路中，才允許最後的直線逼近，避免尋路空窗期滲透進建築
                 this.moveTowards(v, tx, ty, speed, remainingDt);
                 remainingDt = 0;
+            } else {
+                remainingDt = 0; // 尋路中禁止移動，保持原地等待
             }
         }
     }
