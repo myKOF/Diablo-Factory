@@ -917,8 +917,9 @@ export class GameEngine {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
         if (v.config.type !== 'villagers') {
             const oldX = v.x, oldY = v.y;
-            // 決定移動速度：如果有 idleTarget (巡邏目標)，優先讀取 idle_speed 避免跑得太快
-            const moveBaseSpeed = (v.idleTarget) ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
+            // 決定移動速度：只有敵人閒逛時使用 idle_speed，其餘情況（如追擊、執行指令）均使用 fighting_speed
+            const isEnemyWandering = (v.config.camp === 'enemy' && v.idleTarget);
+            const moveBaseSpeed = isEnemyWandering ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
             const moveSpeed = moveBaseSpeed * 13;
             if (v.idleTarget) {
                 v.state = 'MOVING';
@@ -982,8 +983,9 @@ export class GameEngine {
             v.idleTarget = null;
         }
 
-        // 決定移動速度 (閒置閒逛用 idle_speed, 其餘用 fighting_speed)
-        const configSpeed = (v.state === 'IDLE') ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
+        // 決定移動速度：只有敵人閒逛時使用 idle_speed，其餘所有單位與狀態（包含我方工人、戰鬥單位）均使用 fighting_speed
+        const isEnemyWandering = (v.config.camp === 'enemy' && v.state === 'IDLE');
+        const configSpeed = isEnemyWandering ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
         const moveSpeed = configSpeed * 13;
 
         // [TEST] 紀錄狀態變遷 (僅限選中單位)

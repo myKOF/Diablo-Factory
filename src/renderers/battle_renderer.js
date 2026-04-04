@@ -12,7 +12,7 @@ export class BattleRenderer {
     static init(scene) {
         this.scene = scene;
         this.popupGroup = this.scene.add.group();
-        
+
         // 從配置中心讀取顯示計時器
         const cfg = UI_CONFIG.UnitHealthBar || {};
         this.hpBarTimer = cfg.showTimer || 1.5;
@@ -77,23 +77,27 @@ export class BattleRenderer {
         const selectedIds = window.GAME_STATE ? (window.GAME_STATE.selectedUnitIds || []) : [];
 
         units.forEach(unit => {
+            // 使用渲染座標進行視覺計算 (rx, ry)，確保血條始終貼合視覺模型
+            const rx = unit.renderX !== undefined ? unit.renderX : unit.x;
+            const ry = unit.renderY !== undefined ? unit.renderY : unit.y;
+
             // 受擊計時器
             if (unit.hitTimer === undefined) unit.hitTimer = 0;
             if (unit.hitTimer > 0) unit.hitTimer -= dt;
 
             // 1. 判斷顯示條件：受擊中 OR 滑鼠懸停 OR 目前選中
-            const distToPointer = Math.hypot(unit.x - pointer.worldX, unit.y - pointer.worldY);
+            const distToPointer = Math.hypot(rx - pointer.worldX, ry - pointer.worldY);
             const isHovered = distToPointer < 40; 
             const isSelected = selectedIds.includes(unit.id);
 
             // 如果符合任一條件，渲染血條
             if (unit.hitTimer > 0 || isHovered || isSelected) {
-                this.drawHPBar(g, unit);
+                this.drawHPBar(g, unit, rx, ry);
 
                 // 受擊閃爍紅白框 (受傷回饋，僅在受擊當下瞬間)
                 if (unit.hitTimer > (this.hpBarTimer - 0.7)) {
                     g.lineStyle(2, 0xffffff, 0.8);
-                    g.strokeCircle(unit.x, unit.y, 25);
+                    g.strokeCircle(rx, ry, 25);
                 }
             }
         });
@@ -102,12 +106,12 @@ export class BattleRenderer {
     /**
      * 繪製單個血條
      */
-    static drawHPBar(g, unit) {
+    static drawHPBar(g, unit, rx, ry) {
         const cfg = UI_CONFIG.UnitHealthBar || { width: 40, height: 6, offsetY: 30 };
         const barWidth = cfg.width;
         const barHeight = cfg.height;
-        const x = unit.x - barWidth / 2;
-        const y = unit.y + cfg.offsetY; // 使用配置偏移，通常為正值 (下方)
+        const x = rx - barWidth / 2;
+        const y = ry + cfg.offsetY; // 使用配置偏移，通常為正值 (下方)
 
         const hpPercent = Math.max(0, unit.hp / (unit.maxHp || 100));
 
@@ -120,7 +124,7 @@ export class BattleRenderer {
         let color = 0x4caf50; // Green
         if (hpPercent < 0.3) color = 0xf44336; // Red
         else if (hpPercent < 0.6) color = 0xff9800; // Orange
-        
+
         g.fillStyle(color, 1);
         g.fillRect(x, y, barWidth * hpPercent, barHeight);
 

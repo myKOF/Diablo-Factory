@@ -20,9 +20,14 @@ export class CharacterRenderer {
         }
 
         const state = unitData.state || 'IDLE';
+        const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
         const isCombatMove = state === 'MOVE';
         const isMoving = state.includes('MOVING') || isCombatMove; // 精確判斷是否正在移動
         const isWandering = !!unitData.idleTarget && !isCombatMove; // 判斷是否正在閒晃 (排除戰鬥衝刺)
+
+        if (isSelected) {
+            this.drawSelectionRing(ctx, x, y, time);
+        }
 
         // 計算動畫頻率與振幅
         const animationSpeed = 0.01;
@@ -497,6 +502,38 @@ export class CharacterRenderer {
             ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
         } else if (ctx.fillStyle) {
             ctx.fillStyle(color, alpha);
+        }
+    }
+
+    static drawSelectionRing(ctx, x, y, time) {
+        const color = 0x4caf50; // 綠色
+        const alpha = 0.8;
+        const radius = 22;
+        // 加入輕微的呼吸律動感，提升質感
+        const pulse = Math.sin(time * 0.005) * 2;
+
+        if (ctx.lineStyle !== undefined) {
+            // Phaser Graphics 渲染模式
+            ctx.lineStyle(2, color, alpha);
+            ctx.strokeCircle(x, y + 10, radius + pulse);
+            ctx.lineStyle(1, 0xffffff, 0.4);
+            ctx.strokeCircle(x, y + 10, radius - 2 + pulse);
+        } else {
+            // Canvas Context 渲染模式
+            const r = (color >> 16) & 255;
+            const g = (color >> 8) & 255;
+            const b = color & 255;
+            ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(x, y + 10, radius + pulse, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            ctx.strokeStyle = `rgba(255, 255, 255, 0.4)`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(x, y + 10, radius - 2 + pulse, 0, Math.PI * 2);
+            ctx.stroke();
         }
     }
 }

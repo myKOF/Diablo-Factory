@@ -198,12 +198,12 @@ export class MainScene extends Phaser.Scene {
                         // 雙擊：選取畫面內相同類型的單位 (以 npc_data 中的 type 決定)
                         const unitType = clickedUnit.config.type;
                         const cam = this.cameras.main;
-                        
+
                         const newlySelected = GameEngine.state.units.villagers
-                            .filter(v => v.config && v.config.type === unitType && 
-                                         v.x >= cam.scrollX && v.x <= cam.scrollX + cam.width &&
-                                         v.y >= cam.scrollY && v.y <= cam.scrollY + cam.height);
-                        
+                            .filter(v => v.config && v.config.type === unitType &&
+                                v.x >= cam.scrollX && v.x <= cam.scrollX + cam.width &&
+                                v.y >= cam.scrollY && v.y <= cam.scrollY + cam.height);
+
                         if (isShift) {
                             newlySelected.forEach(u => {
                                 if (!GameEngine.state.selectedUnitIds.includes(u.id)) GameEngine.state.selectedUnitIds.push(u.id);
@@ -211,7 +211,7 @@ export class MainScene extends Phaser.Scene {
                         } else {
                             GameEngine.state.selectedUnitIds = newlySelected.map(v => v.id);
                         }
-                        
+
                         GameEngine.addLog(`[選取] 相同類型單位共 ${newlySelected.length} 個。`);
                     } else {
                         if (isShift) {
@@ -224,7 +224,7 @@ export class MainScene extends Phaser.Scene {
                             GameEngine.state.selectedUnitIds = [clickedUnit.id];
                         }
                     }
-                    
+
                     GameEngine.state.lastSelectionTime = now;
                     GameEngine.state.lastSelectedUnitId = clickedUnit.id;
                     this.logUnitDetail(clickedUnit);
@@ -258,7 +258,7 @@ export class MainScene extends Phaser.Scene {
                 cam.scrollY -= dy;
                 lastPointer = { x: pointer.x, y: pointer.y };
             }
-            
+
             // 更新框選預覽
             if (this.selectionStartPos) {
                 this.drawMarquee(this.selectionStartPos, { x: pointer.worldX, y: pointer.worldY });
@@ -293,7 +293,7 @@ export class MainScene extends Phaser.Scene {
             if (this.selectionStartPos) {
                 const start = this.selectionStartPos;
                 const end = { x: pointer.worldX, y: pointer.worldY };
-                
+
                 const minX = Math.min(start.x, end.x);
                 const maxX = Math.max(start.x, end.x);
                 const minY = Math.min(start.y, end.y);
@@ -301,7 +301,7 @@ export class MainScene extends Phaser.Scene {
 
                 // 如果拖曳距離足夠大 (避免微小誤觸)
                 if (Math.abs(maxX - minX) > 5 || Math.abs(maxY - minY) > 5) {
-                    const boxUnits = GameEngine.state.units.villagers.filter(v => 
+                    const boxUnits = GameEngine.state.units.villagers.filter(v =>
                         v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY
                     );
 
@@ -314,7 +314,7 @@ export class MainScene extends Phaser.Scene {
                     }
                     if (boxUnits.length > 0) GameEngine.addLog(`[選取] 框選操作選中了 ${boxUnits.length} 個單位。`);
                 }
-                
+
                 this.selectionStartPos = null;
                 this.marqueeGraphics.clear();
             }
@@ -451,7 +451,7 @@ export class MainScene extends Phaser.Scene {
             this.updateTownCenterLocator(cam);
         }
 
-        // 繪製選取高亮 (不受視距裁剪影響，隨時偵測)
+        // 繪製選取高亮 (建築選取箱)
         this.drawSelectionHighlight();
 
         // 2. 判斷是否可以跳過重度的實體渲染計算
@@ -613,21 +613,11 @@ export class MainScene extends Phaser.Scene {
         const g = this.selectionGraphics;
         g.clear();
 
-        // 1. 繪製選中的建築物 (activeMenuEntity)
+        // 僅處理建築選取框。單位選取圈已移至 CharacterRenderer.js 以達成 100% 同步
         if (window.UIManager && window.UIManager.activeMenuEntity) {
             const ent = window.UIManager.activeMenuEntity;
             this.drawSingleSelectionBox(g, ent, 0xff9800); // 橘色
         }
-
-        // 2. 繪製選中的所有單位 (selectedUnitIds)
-        const selectedIds = GameEngine.state.selectedUnitIds || [];
-        selectedIds.forEach(id => {
-            const unit = GameEngine.state.units.villagers.find(u => u.id === id);
-            if (unit) {
-                // 為單位繪製圓圈或小框
-                this.drawUnitSelectionHighlight(g, unit, 0x4caf50); // 綠色
-            }
-        });
     }
 
     drawSingleSelectionBox(g, ent, color) {
@@ -651,19 +641,11 @@ export class MainScene extends Phaser.Scene {
         g.strokeRect(ent.x - w / 2 - 0, ent.y - h / 2 - 0, w, h);
     }
 
-    drawUnitSelectionHighlight(g, unit, color) {
-        // 繪製單位底部的選取光圈
-        g.lineStyle(2, color, 0.8);
-        g.strokeCircle(unit.x, unit.y + 10, 20);
-        
-        g.lineStyle(1, 0xffffff, 0.5);
-        g.strokeCircle(unit.x, unit.y + 10, 18);
-    }
 
     drawMarquee(start, end) {
         const g = this.marqueeGraphics;
         g.clear();
-        
+
         const x = Math.min(start.x, end.x);
         const y = Math.min(start.y, end.y);
         const w = Math.abs(start.x - end.x);

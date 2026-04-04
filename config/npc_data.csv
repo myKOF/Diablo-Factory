@@ -2,8 +2,8 @@
 id,name,model,type,camp,population,need_resource,collection_speed,collection_resource,lv,hp,attack,idle_speed,fighting_speed,attack_speed,range,patrol_range,field_vision,initiative_attack,annotation
 1,villagers,meles,villagers,player,1,{food=20},3,5,,50,5,3,15,0.5,3,0,30,0,村民NPC
 2,female villagers,female,villagers,player,1,{food=20},3,5,,50,5,3,15,0.5,3,0,30,0,村民NPC
-3,swordsman,swordsman,swordsman,player,2,"{food=50,gold=10}",,,1,120,15,3,10,1,1,0,8,1,劍士，近戰物理單位
-4,mage,mage,mage,player,2,"{food=30,gold=30}",,,1,60,30,3,10,0.25,10,0,12,1,法師，遠程魔法單位
-5,archer,archer,archer,player,2,"{food=20,wood=20,gold=10}",,,1,90,15,3,10,0.5,10,0,12,1,弓箭手，遠程物理單位
-6,狼,wolf,wolf,enemy,2,,,,1,100,10,3,20,0.5,3,10,8,1,狼
+3,swordsman,swordsman,swordsman,player,2,"{food=50,gold=10}",,,1,120,15,3,10,2,1,0,8,1,劍士，近戰物理單位
+4,mage,mage,mage,player,2,"{food=30,gold=30}",,,1,60,25,3,10,0.5,10,0,12,1,法師，遠程魔法單位
+5,archer,archer,archer,player,2,"{food=20,wood=20,gold=10}",,,1,90,20,3,10,1,10,0,12,1,弓箭手，遠程物理單位
+6,狼,wolf,wolf,enemy,2,,,,1,120,10,3,20,0.5,3,10,8,1,狼
 7,熊,bear,bear,enemy,3,,,,1,250,30,3,15,0.25,3,10,8,1,熊
