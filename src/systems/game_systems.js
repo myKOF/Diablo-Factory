@@ -877,14 +877,16 @@ export class GameEngine {
 
                 // 計算左上角座標
                 // 正確計算：封鎖建築物理邊界所碰觸到的「所有」格位
-                const bWidth = uw * TS, bHeight = uh * TS;
+                // 核心優化：從 UI_CONFIG 讀取緩衝值，避免單位中心點停在邊緣時視覺重疊
+                const collCfg = UI_CONFIG.BuildingCollision || { buffer: 20, feetOffset: 18 };
+                const bWidth = uw * TS + collCfg.buffer, bHeight = uh * TS + collCfg.buffer;
                 const minX = ent.x - bWidth / 2, minY = ent.y - bHeight / 2;
                 const maxX = ent.x + bWidth / 2, maxY = ent.y + bHeight / 2;
 
                 const offset = this.state.mapOffset || { x: 0, y: 0 };
                 // 使用 floor/ceil 獲取邊界網格索引
-                // 核心修復：為了讓單位看起來是靠「腳部」碰撞，將建築阻礙格網向上偏移 18px (單位中心到腳底距離)
-                const FOOT_OFFSET = 18;
+                // 核心修復：為了讓單位看起來是靠「腳部」碰撞，將建築阻礙格網向上偏移
+                const FOOT_OFFSET = collCfg.feetOffset;
                 const gx1 = Math.floor(minX / TS) - offset.x;
                 const gy1 = Math.floor((minY - FOOT_OFFSET) / TS) - offset.y;
                 const gx2 = Math.floor((maxX - 0.1) / TS) - offset.x;
@@ -1636,11 +1638,12 @@ export class GameEngine {
                             const match = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
                             const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
                             ent._collisionW = uw * this.TILE_SIZE;
-                            ent._collisionH = uh * this.TILE_SIZE;
                         }
 
-                        const w = ent._collisionW, h = ent._collisionH;
-                        const FOOT_OFFSET = 18;
+                        // 從 UI_CONFIG 讀取碰撞調整參數
+                        const collCfg = UI_CONFIG.BuildingCollision || { buffer: 20, feetOffset: 18 };
+                        const w = ent._collisionW + collCfg.buffer, h = ent._collisionH + collCfg.buffer;
+                        const FOOT_OFFSET = collCfg.feetOffset;
                         const logicY = ent.y - FOOT_OFFSET; // 碰撞邏輯中心向上偏移，對齊單位腳部
 
                         // 精確碰撞矩形檢查 (誤差補償 +/- 1px 避免邊緣抖動)

@@ -393,6 +393,12 @@ export const UI_CONFIG = {
         borderColor: "#ffffff",        // 外框顏色
         borderAlpha: 0.5,              // 外框透明度
         showTimer: 1.5                 // 受擊後顯示的持續時間（秒）
+    },
+    // ── 建築碰撞與對齊設置 (BuildingCollision) ─────────────────────────
+    // 用於調整單位在靠近建築時的阻擋距離與視覺對齊效果。
+    BuildingCollision: {
+        buffer: 5,             // 碰撞緩衝範圍 (像素，建議為單位直徑，用於防止身體重疊)
+        feetOffset: 4          // 單位腳部視覺偏移量 (像素，將單位中心與建築底線對齊)
     }
 };
 
