@@ -404,11 +404,13 @@ export class UIManager {
         tcPtr.onmouseout = () => tcPtr.style.transform = "scale(1)";
         this.uiLayer.appendChild(tcPtr);
 
-        // 8. 指令選單 (智慧定位，暫不使用固定錨點)
-        const menu = document.createElement("div");
+        // 8. 指令選單 (智慧定位，支援固定錨點)
+        const menu = document.getElementById("context_menu") || document.createElement("div");
         menu.id = "context_menu";
         menu.className = "panel";
-        menu.style.cssText = `position: absolute; display: none; width: 220px; padding: 15px; z-index: 1000; pointer-events: auto;`;
+        const menuCfg = UI_CONFIG.ActionMenu;
+        menu.style.cssText = `position: absolute; display: none; z-index: 1000; pointer-events: auto;`;
+        if (menuCfg.anchor) this.applyAnchorStyle(menu, menuCfg);
         this.uiLayer.appendChild(menu);
 
         // 9. 獨立的銷毀按鈕 (右上角的小 X)
@@ -884,7 +886,7 @@ export class UIManager {
         const menuEl = document.getElementById("context_menu");
         const distBtnEl = document.getElementById("destroy_btn");
         const isSelfUI = (menuEl && menuEl.contains(e.target)) || (distBtnEl && distBtnEl.contains(e.target));
-        
+
         if (!isSelfUI) {
             this.hideContextMenu();
         }
@@ -897,7 +899,7 @@ export class UIManager {
             // 如果點到的是具體的 UI 標籤或按鈕 (而非背景層)，則中止後續地圖交互邏輯
             if (e.target.id !== "ui_layer") return;
         }
-        
+
         // 點擊大地圖區域 (點在 0,0 層級或非 UI 區域)
         this.hideSettingsPanel();
 
@@ -939,12 +941,15 @@ export class UIManager {
         const menu = document.getElementById("context_menu");
         const cfg = UI_CONFIG.ActionMenu;
 
+        // 若配置有錨點設定則套用
+        if (cfg.anchor) {
+            this.applyAnchorStyle(menu, cfg);
+        }
+
         menu.style.display = "flex";
         menu.style.flexDirection = "column";
-        menu.style.width = "auto";
-        menu.style.minWidth = "200px";
-        menu.style.height = "auto";
         menu.style.padding = "15px";
+        if (cfg.minWidth) menu.style.minWidth = typeof cfg.minWidth === 'number' ? `${cfg.minWidth}px` : cfg.minWidth;
 
         // ... (中間內容不變)
 
@@ -1028,7 +1033,7 @@ export class UIManager {
             // 倉庫自動化管理介面
             const isWarehouse = ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(entity.type);
             if (isWarehouse && !entity.isUnderConstruction) {
-                const currentAssigned = GameEngine.state.units.villagers.filter(v => 
+                const currentAssigned = GameEngine.state.units.villagers.filter(v =>
                     v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
                     v.assignedWarehouseId === eid
                 ).length;
@@ -1055,9 +1060,11 @@ export class UIManager {
         } else {
             menu.style.display = "flex"; // 確保恢復顯示
             menu.innerHTML = html;
-            // 先把選單移出可視區域，等 DOM 渲染一幀取得真實尺寸後再定位，避免首幀跳動
-            menu.style.left = "-9999px";
-            menu.style.top = "-9999px";
+            if (!cfg.anchor) {
+                // 先把選單移出可視區域，等 DOM 渲染一幀取得真實尺寸後再定位，避免首幀跳動
+                menu.style.left = "-9999px";
+                menu.style.top = "-9999px";
+            }
         }
 
         // 顯示銷毀按鈕 (只有在非確認模式下才顯示右上角的 X)
@@ -1322,7 +1329,7 @@ export class UIManager {
         const statusHint = document.querySelector(".status-hint");
         if (countDisplay && statusHint && this.activeMenuEntity) {
             const ent = this.activeMenuEntity;
-            const current = GameEngine.state.units.villagers.filter(v => 
+            const current = GameEngine.state.units.villagers.filter(v =>
                 v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
                 v.assignedWarehouseId === (ent.id || `${ent.type}_${ent.x}_${ent.y}`)
             ).length;
@@ -1370,29 +1377,34 @@ export class UIManager {
             const virtualWidth = 1920;
             const virtualHeight = 1080;
 
-            // 智慧偏置計算 (相對於物體中心的位移)
-            // 選單水平居中於建築下方：X 向左偏 menuWidth/2，Y 向下偏 offsetY
-            let finalX = sx - menuWidth / 2 + (cfg.offsetX || 0);
-            let finalY = sy + (cfg.offsetY || 100);
+            // --- 判斷是智慧定位還是固定錨點 ---
+            if (cfg.anchor) {
+                // 固定位置不在此更新，由 applyAnchorStyle 處理
+            } else {
+                // 智慧偏置計算 (相對於物體中心的位移)
+                // 選單水平居中於建築下方：X 向左偏 menuWidth/2，Y 向下偏 offsetY
+                let finalX = sx - menuWidth / 2 + (cfg.offsetX || 0);
+                let finalY = sy + (cfg.offsetY || 100);
 
-            // --- 邊界檢查與反向邏輯 (針對 1920x1080) ---
+                // --- 邊界檢查與反向邏輯 (針對 1920x1080) ---
 
-            // 1. 水平檢查：如果右側超出虛擬邊界，改往左顯示
-            if (finalX + menuWidth > virtualWidth - 20) {
-                finalX = sx - menuWidth - (cfg.offsetX || 15);
+                // 1. 水平檢查：如果右側超出虛擬邊界，改往左顯示
+                if (finalX + menuWidth > virtualWidth - 20) {
+                    finalX = sx - menuWidth - (cfg.offsetX || 15);
+                }
+
+                // 2. 垂直檢查：如果底部超出虛擬邊界，改往上顯示
+                if (finalY + menuHeight > virtualHeight - 20) {
+                    finalY = sy - menuHeight - (cfg.offsetY || 100);
+                }
+
+                // 3. 全域安全區域確保 (防止跑出 1920x1080 範圍)
+                finalX = Math.max(20, Math.min(finalX, virtualWidth - menuWidth - 20));
+                finalY = Math.max(20, Math.min(finalY, virtualHeight - menuHeight - 20));
+
+                menu.style.left = `${finalX}px`;
+                menu.style.top = `${finalY}px`;
             }
-
-            // 2. 垂直檢查：如果底部超出虛擬邊界，改往上顯示
-            if (finalY + menuHeight > virtualHeight - 20) {
-                finalY = sy - menuHeight - (cfg.offsetY || 100);
-            }
-
-            // 3. 全域安全區域確保 (防止跑出 1920x1080 範圍)
-            finalX = Math.max(20, Math.min(finalX, virtualWidth - menuWidth - 20));
-            finalY = Math.max(20, Math.min(finalY, virtualHeight - menuHeight - 20));
-
-            menu.style.left = `${finalX}px`;
-            menu.style.top = `${finalY}px`;
 
             // 更新銷毀按鈕位置 (右上角)
             const dBtn = document.getElementById("destroy_btn");

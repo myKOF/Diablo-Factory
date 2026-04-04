@@ -73,10 +73,15 @@ export const UI_CONFIG = {
     // 此面板採用「智慧定位」，由 UIManager 根據建築的螢幕座標
     // 自動決定彈出位置，offsetX/Y 是相對於建築底部的微調偏移量。
     ActionMenu: {
-        width: 380,    // 面板寬度（像素）
-        height: 95,   // 面板高度（像素）
-        offsetX: 15,  // 相對於建築底部中心的水平微調
-        offsetY: 100  // 相對於建築底部中心的垂直微調
+        anchor: "BOTTOM_CENTER",          // 指令列改為畫面下方置中
+        offsetX: 0,
+        offsetY: 30,                       // 距離底部邊距
+        width: "auto",
+        minWidth: 400,
+        height: "auto",
+        glass: true,
+        shadowColor: "#000000",
+        shadowAlpha: 0.8
     },
     // ── 右下角日誌通知欄 ─────────────────────────────────────────
     // 顯示遊戲事件訊息的滾動日誌面板（如：「村民完成建造」、「資源耗盡」）。

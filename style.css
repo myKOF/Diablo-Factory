@@ -95,14 +95,17 @@ html {
 
 /* 建築動作面板：顯示在建築物下方 */
 #context_menu {
-    display: none; /* 預設隱藏，由 JS 控制顯示 */
+    display: none;
+    /* 預設隱藏，由 JS 控制顯示 */
     flex-direction: column;
     gap: 10px;
     padding: 15px;
     /* 不加 transform: translateX(-50%)，JS 的定位邏輯自行居中計算 */
-    overflow: hidden; /* 防止內容溢出導致容器變形 */
+    overflow: hidden;
+    /* 防止內容溢出導致容器變形 */
     /* 不加 transition，讓每幀定位立即生效，避免跟隨相機漂移 */
-    will-change: left, top; /* 提示瀏覽器用 GPU 加速位置更新 */
+    will-change: left, top;
+    /* 提示瀏覽器用 GPU 加速位置更新 */
 }
 
 .action-btn {
@@ -280,4 +283,4 @@ html {
     border: 3px solid var(--aoe-gold) !important;
     background: rgba(139, 110, 75, 0.3) !important;
     box-shadow: 0 0 20px rgba(251, 192, 45, 0.4);
-}
+}
