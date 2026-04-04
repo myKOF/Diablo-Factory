@@ -743,38 +743,9 @@ export class UIManager {
     static handleWorldMouseDown(e) {
         if (e.target.closest("#ui_layer")) return;
 
-        // 右鍵邏輯：設定集結點或取消建造模式
+        // 記錄按下的座標，用於在 MouseUp 時判斷是否為「點擊」還是「拖動畫面」
         if (e.button === 2) {
-            const ent = this.activeMenuEntity;
-            const bCfg = ent ? GameEngine.state.buildingConfigs[ent.type] : null;
-            // 只有具備生產清單的建築才能設定集結點
-            if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
-                const pos = this.getWorldMousePos(e.clientX, e.clientY);
-
-                // 核心改進：檢查點擊位置是否在建築物本身占地範圍內
-                let uw = 1, uh = 1;
-                if (bCfg.size) {
-                    const m = bCfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
-                    if (m) { uw = parseInt(m[1]); uh = parseInt(m[2]); }
-                }
-                const halfW = (uw * GameEngine.TILE_SIZE) / 2;
-                const halfH = (uh * GameEngine.TILE_SIZE) / 2;
-
-                const isInside = pos.x >= ent.x - halfW && pos.x <= ent.x + halfW &&
-                    pos.y >= ent.y - halfH && pos.y <= ent.y + halfH;
-
-                if (isInside) {
-                    ent.rallyPoint = null;
-                    GameEngine.addLog(`已取消建築集結點。`);
-                    this.updateValues(true); // 立即更新渲染
-                } else {
-                    ent.rallyPoint = pos;
-                    GameEngine.addLog(`${bCfg.name} 集結點已設定：(${pos.x}, ${pos.y})`);
-                    this.updateValues(true);
-                }
-            } else {
-                this.cancelBuildingMode();
-            }
+            this.rightMouseDownPos = { x: e.clientX, y: e.clientY };
             return;
         }
 
@@ -817,7 +788,50 @@ export class UIManager {
     }
 
     static handleWorldMouseUp(e) {
-        // 僅處理左鍵放開來確定建造。右鍵放開不應觸發建造。
+        // [右鍵邏輯專區]
+        if (e.button === 2) {
+            if (this.rightMouseDownPos) {
+                const drift = Math.hypot(e.clientX - this.rightMouseDownPos.x, e.clientY - this.rightMouseDownPos.y);
+                this.rightMouseDownPos = null;
+
+                // 只有當位移極小時 (Drift < 10)，才視為有效的點擊指令，而非相機拖拽
+                if (drift < 10) {
+                    const ent = this.activeMenuEntity;
+                    const bCfg = ent ? GameEngine.state.buildingConfigs[ent.type] : null;
+
+                    // 1. 設定/取消集結點
+                    if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
+                        const pos = this.getWorldMousePos(e.clientX, e.clientY);
+                        let uw = 1, uh = 1;
+                        if (bCfg.size) {
+                            const m = bCfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
+                            if (m) { uw = parseInt(m[1]); uh = parseInt(m[2]); }
+                        }
+                        const halfW = (uw * GameEngine.TILE_SIZE) / 2;
+                        const halfH = (uh * GameEngine.TILE_SIZE) / 2;
+
+                        const isInside = pos.x >= ent.x - halfW && pos.x <= ent.x + halfW &&
+                            pos.y >= ent.y - halfH && pos.y <= ent.y + halfH;
+
+                        if (isInside) {
+                            ent.rallyPoint = null;
+                            GameEngine.addLog(`已取消建築集結點。`);
+                            this.updateValues(true);
+                        } else {
+                            ent.rallyPoint = pos;
+                            GameEngine.addLog(`${bCfg.name} 集結點已設定：(${pos.x.toFixed(0)}, ${pos.y.toFixed(0)})`);
+                            this.updateValues(true);
+                        }
+                    } else if (GameEngine.state.placingType) {
+                        // 2. 取消當前的建造預覽
+                        this.cancelBuildingMode();
+                    }
+                }
+            }
+            return;
+        }
+
+        // [左鍵邏輯專區]
         if (e.button !== 0) return;
 
         const state = GameEngine.state;
