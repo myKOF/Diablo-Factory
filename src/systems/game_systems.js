@@ -1004,6 +1004,7 @@ export class GameEngine {
                     this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
                     if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                         v.idleTarget = null;
+                        v.isManualCommand = false; // 手動到達預定地後才解除鎖定
                         v.waitTimer = 1 + Math.random() * 2;
                         v.pathTarget = null;
                     }
@@ -1306,7 +1307,8 @@ export class GameEngine {
 
     static assignNextTask(v) {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集工作能力
-        if (v.config.type !== 'villagers' || v.isRecalled) {
+        // 手動指令優先：若處於手動命令期間，完全不主動接取新任務
+        if (v.config.type !== 'villagers' || v.isRecalled || v.isManualCommand) {
             v.state = 'IDLE';
             return;
         }
@@ -1727,7 +1729,7 @@ export class GameEngine {
         // 2. 處理每個倉庫的溢出與缺額
         let allIdle = this.state.units.villagers.filter(v =>
             v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
-            v.state === 'IDLE' && !v.assignedWarehouseId && !v.isRecalled
+            v.state === 'IDLE' && !v.assignedWarehouseId && !v.isRecalled && !v.isManualCommand
         );
 
         // 先釋放溢出的人手，回歸閒置池

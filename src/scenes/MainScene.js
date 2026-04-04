@@ -350,7 +350,12 @@ export class MainScene extends Phaser.Scene {
             unit.isManualCommand = true;
             GameEngine.addLog(`[命令] ${unit.configName} 追擊並攻擊敵軍。`);
         } else {
+            // 移動指令：完全清除所有任務內容，防止系統重新分配回去做老本行
             unit.targetId = null;
+            unit.constructionTarget = null;
+            unit.assignedWarehouseId = null;
+            unit.pathTarget = null;
+            unit.fullPath = null;
             unit.idleTarget = { x: wx, y: wy };
             unit.state = 'IDLE';
             unit.isManualCommand = true;
