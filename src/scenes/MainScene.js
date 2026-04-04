@@ -356,7 +356,22 @@ export class MainScene extends Phaser.Scene {
             unit.assignedWarehouseId = null;
             unit.pathTarget = null;
             unit.fullPath = null;
-            unit.idleTarget = { x: wx, y: wy };
+            
+            // 安全檢查：若目標點不可行走(在建築內)，導航至週邊最近可用點
+            let finalTx = wx, finalTy = wy;
+            const pf = GameEngine.state.pathfinding;
+            if (pf && !pf.isValidAndWalkable(wx, wy, true)) {
+                const TS = GameEngine.TILE_SIZE;
+                const gx = Math.floor(wx / TS);
+                const gy = Math.floor(wy / TS);
+                const nearest = pf.getNearestWalkableTile(gx, gy, 50, true);
+                if (nearest) {
+                    finalTx = nearest.x * TS + TS / 2;
+                    finalTy = nearest.y * TS + TS / 2;
+                }
+            }
+
+            unit.idleTarget = { x: finalTx, y: finalTy };
             unit.state = 'IDLE';
             unit.isManualCommand = true;
             GameEngine.addLog(`[命令] ${unit.configName} 移動至目的並待命。`);

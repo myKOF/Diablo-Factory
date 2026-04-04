@@ -1225,7 +1225,11 @@ export class GameEngine {
                 break;
         }
 
-        const ignoreEnts = [v.targetId, v.targetBase, v.constructionTarget].filter(Boolean);
+        // 核心碰撞防護：只有在採集或建造「進行中」時才可忽略目標，防止走路穿模進入建築物
+        let ignoreEnts = [];
+        if (v.state === 'GATHERING' && v.targetId) ignoreEnts.push(v.targetId);
+        if (v.state === 'CONSTRUCTING' && v.constructionTarget) ignoreEnts.push(v.constructionTarget);
+        
         const collidingEnt = this.isColliding(v.x, v.y, ignoreEnts);
 
         if (collidingEnt) {
