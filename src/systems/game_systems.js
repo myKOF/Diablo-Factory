@@ -876,17 +876,23 @@ export class GameEngine {
                 const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;
 
                 // 計算左上角座標
+                // 正確計算：封鎖建築物理邊界所碰觸到的「所有」格位
                 const bWidth = uw * TS, bHeight = uh * TS;
                 const minX = ent.x - bWidth / 2, minY = ent.y - bHeight / 2;
-                const gx = Math.round(minX / TS), gy = Math.round(minY / TS);
+                const maxX = ent.x + bWidth / 2, maxY = ent.y + bHeight / 2;
 
                 const offset = this.state.mapOffset || { x: 0, y: 0 };
-                for (let i = 0; i < uw; i++) {
-                    for (let j = 0; j < uh; j++) {
-                        const targetX = (gx + i) - offset.x, targetY = (gy + j) - offset.y;
-                        if (targetY >= 0 && targetY < rows && targetX >= 0 && targetX < cols) {
-                            matrix[targetY][targetX] = 1; // 障礙物
-                        }
+                // 使用 floor/ceil 獲取邊界網格索引
+                // 核心修復：為了讓單位看起來是靠「腳部」碰撞，將建築阻礙格網向上偏移 18px (單位中心到腳底距離)
+                const FOOT_OFFSET = 18;
+                const gx1 = Math.floor(minX / TS) - offset.x;
+                const gy1 = Math.floor((minY - FOOT_OFFSET) / TS) - offset.y;
+                const gx2 = Math.floor((maxX - 0.1) / TS) - offset.x;
+                const gy2 = Math.floor((maxY - FOOT_OFFSET - 0.1) / TS) - offset.y;
+
+                for (let tx = gx1; tx <= gx2; tx++) {
+                    for (let ty = gy1; ty <= gy2; ty++) {
+                        if (ty >= 0 && ty < rows && tx >= 0 && tx < cols) matrix[ty][tx] = 1;
                     }
                 }
             }
@@ -1229,7 +1235,7 @@ export class GameEngine {
         let ignoreEnts = [];
         if (v.state === 'GATHERING' && v.targetId) ignoreEnts.push(v.targetId);
         if (v.state === 'CONSTRUCTING' && v.constructionTarget) ignoreEnts.push(v.constructionTarget);
-        
+
         const collidingEnt = this.isColliding(v.x, v.y, ignoreEnts);
 
         if (collidingEnt) {
@@ -1634,8 +1640,11 @@ export class GameEngine {
                         }
 
                         const w = ent._collisionW, h = ent._collisionH;
+                        const FOOT_OFFSET = 18;
+                        const logicY = ent.y - FOOT_OFFSET; // 碰撞邏輯中心向上偏移，對齊單位腳部
+
                         // 精確碰撞矩形檢查 (誤差補償 +/- 1px 避免邊緣抖動)
-                        if (x > ent.x - w / 2 + 1 && x < ent.x + w / 2 - 1 && y > ent.y - h / 2 + 1 && y < ent.y + h / 2 - 1) {
+                        if (x > ent.x - w / 2 + 1 && x < ent.x + w / 2 - 1 && y > logicY - h / 2 + 1 && y < logicY + h / 2 - 1) {
                             return ent;
                         }
                     }
