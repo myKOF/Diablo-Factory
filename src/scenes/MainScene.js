@@ -274,16 +274,34 @@ export class MainScene extends Phaser.Scene {
                     const selectedIds = GameEngine.state.selectedUnitIds || [];
                     if (selectedIds.length > 0) {
                         const unitsToMove = selectedIds.map(id => GameEngine.state.units.villagers.find(v => v.id === id)).filter(v => v);
+
+                        // 1. 識別點擊目標 (碰撞檢測)
+                        let clickedEnemy = null;
+                        let bestDist = 40;
+                        GameEngine.state.units.villagers.forEach(v => {
+                            const camp = (v.config && v.config.camp) || v.camp || 'neutral';
+                            if (camp === 'enemy') {
+                                const d = Math.hypot(v.x - pointer.worldX, v.y - pointer.worldY);
+                                if (d < bestDist) { bestDist = d; clickedEnemy = v; }
+                            }
+                        });
+
                         const colsNum = Math.ceil(Math.sqrt(unitsToMove.length));
                         const spacing = 40;
 
                         unitsToMove.forEach((unit, i) => {
-                            const r = Math.floor(i / colsNum);
-                            const c = i % colsNum;
-                            const offX = (c - (colsNum - 1) / 2) * spacing;
-                            const offY = (r - (colsNum - 1) / 2) * spacing;
-                            const fakePointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
-                            this.handleRightClickCommand(unit, fakePointer);
+                            if (clickedEnemy) {
+                                // 追擊指令：直接設定目標
+                                this.handleRightClickCommand(unit, pointer, clickedEnemy);
+                            } else {
+                                // 移動指令：計算陣型偏移
+                                const r = Math.floor(i / colsNum);
+                                const c = i % colsNum;
+                                const offX = (c - (colsNum - 1) / 2) * spacing;
+                                const offY = (r - (colsNum - 1) / 2) * spacing;
+                                const fakePointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
+                                this.handleRightClickCommand(unit, fakePointer);
+                            }
                         });
                     }
                 }
@@ -327,36 +345,26 @@ export class MainScene extends Phaser.Scene {
     /**
      * 處理單位的右鍵指令（移動或攻擊）
      */
-    handleRightClickCommand(unit, pointer) {
+    handleRightClickCommand(unit, pointer, clickedTarget = null) {
         const wx = pointer.worldX, wy = pointer.worldY;
 
-        // 1. 識別目標
-        let clickedEnemy = null;
-        let minDist = 40;
-        GameEngine.state.units.villagers.forEach(v => {
-            if (v.id === unit.id) return;
-            const camp = (v.config && v.config.camp) || v.camp || 'neutral';
-            if (camp === 'enemy') {
-                const d = Math.hypot(v.x - wx, v.y - wy);
-                if (d < minDist) { minDist = d; clickedEnemy = v; }
-            }
-        });
-
-        // 2. 執行命令
-        if (clickedEnemy) {
-            unit.targetId = clickedEnemy.id;
-            unit.state = 'MOVE';
-            unit.idleTarget = null;
+        // 1. 執行命令
+        if (clickedTarget) {
+            unit.targetId = clickedTarget.id;
+            unit.state = 'CHASE'; // 切換至 CHASE 狀態
+            unit.idleTarget = { x: clickedTarget.x, y: clickedTarget.y }; // 立即起始移動，如同點擊地板
             unit.isManualCommand = true;
-            GameEngine.addLog(`[命令] ${unit.configName} 追擊並攻擊敵軍。`);
+            unit.chaseFrame = 999; // 強制引發 BattleSystem 的即時偏移量計算
+            GameEngine.addLog(`[命令] ${unit.configName} 正在追擊敵軍 ${clickedTarget.configName || '目標'}。`);
         } else {
+            // 移動指令：完全清除所有任務內容，防止系統重新分配回去做老本行
             // 移動指令：完全清除所有任務內容，防止系統重新分配回去做老本行
             unit.targetId = null;
             unit.constructionTarget = null;
             unit.assignedWarehouseId = null;
             unit.pathTarget = null;
             unit.fullPath = null;
-            
+
             // 安全檢查：若目標點不可行走(在建築內)，導航至週邊最近可用點
             let finalTx = wx, finalTy = wy;
             const pf = GameEngine.state.pathfinding;

@@ -1,5 +1,6 @@
 import { UI_CONFIG } from "../ui/ui_config.js";
 import { PathfindingSystem } from "./PathfindingSystem.js?v=3";
+import { BattleSystem } from "./BattleSystem.js";
 
 
 
@@ -107,11 +108,17 @@ export class GameEngine {
     }
 
     static logicTick() {
-        if (this.state.pathfinding) this.state.pathfinding.update();
-        const now = Date.now();
+        try {
+            if (this.state.pathfinding) this.state.pathfinding.update();
+            const now = Date.now();
 
-        const deltaTime = Math.min((now - this.lastTickTime) / 1000, 0.2);
-        this.lastTickTime = now;
+            const deltaTime = Math.min((now - this.lastTickTime) / 1000, 0.2);
+            this.lastTickTime = now;
+
+            // 核心戰鬥系統更新
+            if (typeof BattleSystem !== 'undefined') {
+                BattleSystem.update(this.state, deltaTime, this.TILE_SIZE);
+            }
 
         // 處理每間城鎮中心各自的獨立生產隊列
         const maxPop = this.getMaxPopulation();
@@ -168,7 +175,10 @@ export class GameEngine {
             this.updateSpatialGrid(); // 週期性全量刷新空間格網 (保險起見)
             this.state.assignmentTimer = 0;
         }
+    } catch (err) {
+        console.error("Logic Loop Error:", err);
     }
+}
 
     static updateSpatialGrid() {
         const grid = this.state.spatialGrid;
@@ -277,7 +287,8 @@ export class GameEngine {
                 idxCamp = headers.indexOf('camp'),
                 idxPop = headers.indexOf('population'),
                 idxPatrol = headers.indexOf('patrol_range'),
-                idxVision = headers.indexOf('field_vision');
+                idxVision = headers.indexOf('field_vision'),
+                idxInitiative = headers.indexOf('initiative_attack');
 
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -306,7 +317,8 @@ export class GameEngine {
                     attackSpeed: parseFloat(row[idxAtkSpeed]) || 1,
                     range: parseInt(row[idxRange]) || 10,
                     patrol_range: parseFloat(row[idxPatrol]) || 0,
-                    field_vision: parseFloat(row[idxVision]) || 15
+                    field_vision: parseFloat(row[idxVision]) || 15,
+                    initiative_attack: parseInt(row[idxInitiative]) !== undefined ? parseInt(row[idxInitiative]) : 1
                 };
             }
         } catch (e) { }
@@ -614,6 +626,7 @@ export class GameEngine {
             attackSpeed: config.attackSpeed || 1,
             range: config.range || 10,
             field_vision: (config.field_vision !== undefined) ? config.field_vision : 15,
+            initiative_attack: (config.initiative_attack !== undefined) ? config.initiative_attack : 1,
             facing: 1 // 1: 右, -1: 左
         };
 
@@ -930,11 +943,12 @@ export class GameEngine {
             const moveBaseSpeed = isEnemyWandering ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
             const moveSpeed = moveBaseSpeed * 13;
             if (v.idleTarget) {
-                v.state = 'MOVING';
+                // 只有在非戰鬥狀態下才切換為 MOVING，防止覆蓋 CHASE/ATTACK
+                if (v.state !== 'CHASE' && v.state !== 'ATTACK' && v.state !== 'GATHERING') v.state = 'MOVING';
                 this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
                 if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                     v.idleTarget = null;
-                    v.state = 'IDLE';
+                    if (v.state === 'MOVING') v.state = 'IDLE';
 
                     // 解析巡邏間隔配置 {min,max}，例如 {5,10}
                     let minWait = 3, maxWait = 6;
@@ -986,8 +1000,8 @@ export class GameEngine {
         }
         const oldX = v.x, oldY = v.y;
 
-        // 安全機制：如果正在執行特定任務（非閒置），則清除閒逛目標，避免動畫頻率錯誤 (Point 2)
-        if (v.state !== 'IDLE' && v.idleTarget) {
+        // 安全機制：如果正在執行特定任務（非閒置且非追擊），則清除閒逛目標，避免動畫頻率錯誤 (Point 2)
+        if (v.state !== 'IDLE' && v.state !== 'CHASE' && v.idleTarget) {
             v.idleTarget = null;
         }
 
@@ -1007,16 +1021,24 @@ export class GameEngine {
 
         switch (v.state) {
             case 'IDLE':
-                // 取消工人閒逛設定：若已有目標 (如集結點) 則移動，到達後不再隨機找下一個點
                 if (v.idleTarget) {
                     this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
                     if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                         v.idleTarget = null;
-                        v.isManualCommand = false; // 手動到達預定地後才解除鎖定
+                        v.isManualCommand = false; 
                         v.waitTimer = 1 + Math.random() * 2;
                         v.pathTarget = null;
                     }
                 }
+                break;
+            case 'CHASE':
+                if (v.idleTarget) {
+                    this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
+                }
+                break;
+            case 'ATTACK':
+                v.pathTarget = null;
+                v.fullPath = null;
                 break;
             case 'MOVING_TO_RESOURCE':
                 let searchX = v.x, searchY = v.y;
