@@ -57,7 +57,7 @@ export class CharacterRenderer {
 
         // 0.1 繪製視界圈 (紅色線條) - 座標系修正：CSV 數值為網格數，需乘以 20 像素
         if (window.GAME_STATE && window.GAME_STATE.settings.showVisionRange) {
-            const visionRadius = (unitData.field_vision || 150) * 20; 
+            const visionRadius = (unitData.field_vision || 150) * 20;
             this.drawVisionRange(ctx, x, y, visionRadius);
         }
 
@@ -230,7 +230,7 @@ export class CharacterRenderer {
 
         const isMoving = state.includes('MOVING');
         const isWandering = !!data.idleTarget;
-        
+
         // 分類判定：如果是工作或攻擊狀態，不計入移動動畫
         const isWorking = (state === 'CONSTRUCTING' || state === 'GATHERING' || state === 'ATTACK');
         const isActuallyMoving = !isWorking && (isMoving || isWandering);
@@ -374,10 +374,10 @@ export class CharacterRenderer {
         const headY = y - 12 + headBob + breathing;
 
         ctx.fillRect(headX, headY, 12, 10); // 狼頭向右
-        
+
         // 嘴巴 (攻擊時張開)
         if (isAttacking && Math.sin(t * 15) > 0) {
-            ctx.fillRect(headX + 8, headY + 6, 6, 4); 
+            ctx.fillRect(headX + 8, headY + 6, 6, 4);
         }
 
         // 耳朵
@@ -419,7 +419,7 @@ export class CharacterRenderer {
         const headX = x + 10 + attackDash;
         const headY = y - 15 + headBob;
         ctx.fillRect(headX, headY, 15, 15);
-        
+
         // 熊掌擊打動作 (攻擊時)
         if (isAttacking) {
             this.setCtxStyle(ctx, color, 1);
@@ -528,7 +528,7 @@ export class CharacterRenderer {
             ctx.beginPath();
             ctx.arc(x, y + 10, radius + pulse, 0, Math.PI * 2);
             ctx.stroke();
-            
+
             ctx.strokeStyle = `rgba(255, 255, 255, 0.4)`;
             ctx.lineWidth = 1;
             ctx.beginPath();

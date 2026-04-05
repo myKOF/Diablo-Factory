@@ -26,27 +26,29 @@ export class BattleSystem {
     }
 
     static processCombat(unit, dt, state, TILE_SIZE, shouldScan) {
-        // 1. 自動索敵
+        // 1. 自動索敵 (如果是手動強制集火，除非目標死亡否則不換目標)
         if (shouldScan || !unit.targetId) {
             this.autoSeeking(unit, state, TILE_SIZE);
         }
 
         if (!unit.targetId || typeof unit.targetId === 'object') {
             if (unit.state === 'ATTACK' || unit.state === 'CHASE') unit.state = 'IDLE';
+            unit.forceFocus = false;
             return;
         }
 
         const target = this.findEntityById(unit.targetId, state);
         if (!target || target.hp <= 0) {
             unit.targetId = null;
+            unit.forceFocus = false;
             if (unit.state === 'ATTACK' || unit.state === 'CHASE') unit.state = 'IDLE';
             return;
         }
 
         const dist = this.getDist(unit, target);
-        // 優化射程：如果是近戰 (range < 2)，提供約單位體積一半的緩衝，防止擠壓重疊
+        // 優化射程：近戰時增加體積緩衝，讓雙方不擠入同一格子
         const baseRange = (unit.range || (unit.config && unit.config.range) || 1.5);
-        const rangeBuffer = (baseRange < 2) ? TILE_SIZE * 0.9 : 0; // 近戰增加約 1 格的緩衝，讓他們站在邊緣
+        const rangeBuffer = (baseRange < 2) ? TILE_SIZE * 0.9 : 0; 
         const range = baseRange * TILE_SIZE + rangeBuffer;
 
         if (unit.state === 'CHASE') {
@@ -59,18 +61,24 @@ export class BattleSystem {
                 unit.pathTarget = null;
                 unit.chaseFrame = 0;
             } else if (unit.chaseFrame >= 10 || !unit.idleTarget) {
-                // 追擊目標：稍微繞開中心點，防止路徑重疊衝突
-                const idNum = parseInt(unit.id.replace(/[^0-9]/g, '')) || 0;
-                const angle = (idNum % 12) * (Math.PI / 6); 
-                const offsetDist = range * 0.9; // 改為 90% 的射程，停在邊緣，不擠入中心
+                // [核心優化] 分散式追擊點計算：利用 ID 攪動與黃金分割角度，確保多個單位不重疊
+                const idNum = parseInt((unit.id || "0").replace(/[^0-9]/g, '')) || (Math.floor(Math.random() * 100));
+                
+                // 1. 基本環繞角度：利用大質數 137 (接近黃金角度) 確散分佈
+                const baseAngle = ((idNum * 137) % 360); 
+                const angleRad = (baseAngle * Math.PI) / 180;
+                
+                // 2. 距離攪動：讓單位在攻擊距離邊緣 (60%~95% 射程) 隨機分佈，形成多排包圍圈效果
+                const jitterFactor = ((idNum % 7) / 7); 
+                const offsetDist = range * (0.7 + jitterFactor * 0.2); 
+                
                 unit.idleTarget = {
-                    x: target.x + Math.cos(angle) * offsetDist,
-                    y: target.y + Math.sin(angle) * offsetDist
+                    x: target.x + Math.cos(angleRad) * offsetDist,
+                    y: target.y + Math.sin(angleRad) * offsetDist
                 };
                 unit.chaseFrame = 0;
             }
         } else if (unit.state === 'ATTACK') {
-            // 追逐緩衝區 (Hysteresis Buffer): 離開射程 1.5 倍以上才重新變回 CHASE，防止閃頻
             if (dist > range * 1.5) {
                 unit.state = 'CHASE';
                 unit.chaseFrame = 10;
@@ -84,7 +92,6 @@ export class BattleSystem {
                 }
             }
         } else if (unit.targetId) {
-            // 基礎狀態判斷，確保一旦有了目標就啟動追擊
             if (dist > range) {
                 unit.state = 'CHASE';
                 unit.chaseFrame = 10;
@@ -96,13 +103,19 @@ export class BattleSystem {
 
     static autoSeeking(unit, state, TILE_SIZE) {
         if (!unit.config) return;
+
+        // 【核心優化】對玩家手動目標實例集火保護
+        if (unit.forceFocus && unit.targetId) {
+            const currentManualTarget = this.findEntityById(unit.targetId, state);
+            if (currentManualTarget && currentManualTarget.hp > 0) return; // 除非目標消失，否則不切換
+        }
+
         const isInitiative = unit.initiative_attack !== undefined ? Number(unit.initiative_attack) === 1 : (unit.config.camp === 'enemy');
 
-        // 非主動攻擊單位：只有在「原本目標已消失且現在處於戰鬥狀態下」才重新鎖定最近敵人
         if (!isInitiative) {
             const currentTarget = this.findEntityById(unit.targetId, state);
             const isTargetEnemy = currentTarget && ((currentTarget.config && currentTarget.config.camp === 'enemy') || currentTarget.camp === 'enemy');
-            if (!isTargetEnemy) return; // 沒受到威脅就不掃描
+            if (!isTargetEnemy) return; 
         }
 
         let currentTarget = this.findEntityById(unit.targetId, state);
@@ -131,10 +144,10 @@ export class BattleSystem {
 
         if (nearestEnemy) {
             unit.targetId = nearestEnemy.id;
-            // 核心修復：一旦鎖定新目標，立即切換至 CHASE 狀態，讓 GameEngine 發動移動邏輯
             unit.state = 'CHASE';
             unit.chaseFrame = 10; 
-            this.logToScreen(state, `[戰鬥] ${unit.configName}(${unit.id.substr(-3)}) 鎖定目標: ${nearestEnemy.configName || nearestEnemy.id}`);
+            unit.forceFocus = false; // 自動索敵拿到的目標不具備強制鎖定屬性，可隨距離變換
+            this.logToScreen(state, `[戰鬥] ${unit.configName} 鎖定目標: ${nearestEnemy.configName || nearestEnemy.id}`);
         }
     }
 
@@ -147,7 +160,6 @@ export class BattleSystem {
             window.BattleRenderer.addDamagePopup(target.x, target.y, dmg);
         }
 
-        // 被打的一方若無目標且非中立陣營，則自動反擊 (Retaliate)
         if (target.hp > 0 && !target.targetId) {
             const targetCamp = (target.config && target.config.camp) || target.camp || 'neutral';
             if (targetCamp !== 'neutral') {

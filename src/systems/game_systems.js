@@ -120,65 +120,65 @@ export class GameEngine {
                 BattleSystem.update(this.state, deltaTime, this.TILE_SIZE);
             }
 
-        // 處理每間城鎮中心各自的獨立生產隊列
-        const maxPop = this.getMaxPopulation();
-        const currentPop = this.getCurrentPopulation();
-        const isPopFull = currentPop >= maxPop;
+            // 處理每間城鎮中心各自的獨立生產隊列
+            const maxPop = this.getMaxPopulation();
+            const currentPop = this.getCurrentPopulation();
+            const isPopFull = currentPop >= maxPop;
 
-        // 偵測人口上限變動（全域一次即可）
-        if (this.state.lastMaxPop > 0 && maxPop > this.state.lastMaxPop) {
-            this.triggerWarning("3", [maxPop]);
-        }
-        this.state.lastMaxPop = maxPop;
+            // 偵測人口上限變動（全域一次即可）
+            if (this.state.lastMaxPop > 0 && maxPop > this.state.lastMaxPop) {
+                this.triggerWarning("3", [maxPop]);
+            }
+            this.state.lastMaxPop = maxPop;
 
-        // 1.2 建築生產邏輯 (所有具備生產隊列的建築)
-        this.state.mapEntities.forEach(ent => {
-            if (ent.isUnderConstruction || !ent.queue || ent.queue.length === 0) return;
+            // 1.2 建築生產邏輯 (所有具備生產隊列的建築)
+            this.state.mapEntities.forEach(ent => {
+                if (ent.isUnderConstruction || !ent.queue || ent.queue.length === 0) return;
 
-            // 處理生產計時
-            if (ent.productionTimer === undefined) ent.productionTimer = 0;
+                // 處理生產計時
+                if (ent.productionTimer === undefined) ent.productionTimer = 0;
 
-            if (!isPopFull) {
-                ent.productionTimer -= deltaTime;
-                this.state.hasHitPopLimit = false;
-            } else if (ent.productionTimer <= 0.1) {
-                ent.productionTimer = 0;
-                if (!this.state.hasHitPopLimit) {
-                    this.triggerWarning("2");
-                    this.state.hasHitPopLimit = true;
+                if (!isPopFull) {
+                    ent.productionTimer -= deltaTime;
+                    this.state.hasHitPopLimit = false;
+                } else if (ent.productionTimer <= 0.1) {
+                    ent.productionTimer = 0;
+                    if (!this.state.hasHitPopLimit) {
+                        this.triggerWarning("2");
+                        this.state.hasHitPopLimit = true;
+                    }
+                } else {
+                    ent.productionTimer -= deltaTime;
                 }
-            } else {
-                ent.productionTimer -= deltaTime;
-            }
 
-            if (ent.productionTimer <= 0 && !isPopFull) {
-                const configName = ent.queue.shift();
-                const success = GameEngine.spawnNPC(configName, ent);
-                // 更新 HUD 進度條與數字
-                ent.productionTimer = ent.queue.length > 0 ? 5 : 0;
-            }
-        });
+                if (ent.productionTimer <= 0 && !isPopFull) {
+                    const configName = ent.queue.shift();
+                    const success = GameEngine.spawnNPC(configName, ent);
+                    // 更新 HUD 進度條與數字
+                    ent.productionTimer = ent.queue.length > 0 ? 5 : 0;
+                }
+            });
 
-        this.state.units.villagers.forEach(v => {
-            // 閒置村民隨時檢查是否有工作可做，大幅提升反應速度
-            if (v.state === 'IDLE') {
-                this.assignNextTask(v);
-                v.workOffset = null; // 閒置時重置工作偏移
-            }
-            this.updateVillagerMovement(v, deltaTime);
-        });
+            this.state.units.villagers.forEach(v => {
+                // 閒置村民隨時檢查是否有工作可做，大幅提升反應速度
+                if (v.state === 'IDLE') {
+                    this.assignNextTask(v);
+                    v.workOffset = null; // 閒置時重置工作偏移
+                }
+                this.updateVillagerMovement(v, deltaTime);
+            });
 
-        // 每秒執行一次工人分配邏輯
-        this.state.assignmentTimer += deltaTime;
-        if (this.state.assignmentTimer >= 1.0) {
-            this.updateWorkerAssignments();
-            this.updateSpatialGrid(); // 週期性全量刷新空間格網 (保險起見)
-            this.state.assignmentTimer = 0;
+            // 每秒執行一次工人分配邏輯
+            this.state.assignmentTimer += deltaTime;
+            if (this.state.assignmentTimer >= 1.0) {
+                this.updateWorkerAssignments();
+                this.updateSpatialGrid(); // 週期性全量刷新空間格網 (保險起見)
+                this.state.assignmentTimer = 0;
+            }
+        } catch (err) {
+            console.error("Logic Loop Error:", err);
         }
-    } catch (err) {
-        console.error("Logic Loop Error:", err);
     }
-}
 
     static updateSpatialGrid() {
         const grid = this.state.spatialGrid;
@@ -938,8 +938,8 @@ export class GameEngine {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
         if (v.config.type !== 'villagers') {
             const oldX = v.x, oldY = v.y;
-            // 決定移動速度：只有敵人閒逛時使用 idle_speed，其餘情況（如追擊、執行指令）均使用 fighting_speed
-            const isEnemyWandering = (v.config.camp === 'enemy' && v.idleTarget);
+            // 決定移動速度：只有敵人閒逛（IDLE/MOVING 狀態）時使用 idle_speed，追擊或對戰時均使用 fighting_speed
+            const isEnemyWandering = (v.config.camp === 'enemy' && (v.state === 'IDLE' || v.state === 'MOVING'));
             const moveBaseSpeed = isEnemyWandering ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
             const moveSpeed = moveBaseSpeed * 13;
             if (v.idleTarget) {
@@ -1006,7 +1006,7 @@ export class GameEngine {
         }
 
         // 決定移動速度：只有敵人閒逛時使用 idle_speed，其餘所有單位與狀態（包含我方工人、戰鬥單位）均使用 fighting_speed
-        const isEnemyWandering = (v.config.camp === 'enemy' && v.state === 'IDLE');
+        const isEnemyWandering = (v.config.camp === 'enemy' && (v.state === 'IDLE' || v.state === 'MOVING'));
         const configSpeed = isEnemyWandering ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
         const moveSpeed = configSpeed * 13;
 
@@ -1025,7 +1025,7 @@ export class GameEngine {
                     this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
                     if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                         v.idleTarget = null;
-                        v.isManualCommand = false; 
+                        v.isManualCommand = false;
                         v.waitTimer = 1 + Math.random() * 2;
                         v.pathTarget = null;
                     }
@@ -1470,37 +1470,25 @@ export class GameEngine {
      * 根據核心協議：效能優化與穩定優先，避免每幀重複 new 物件
      */
     static moveDetailed(v, tx, ty, speed, dt) {
-        // 如果目標座標發生顯著變化，重置路徑
-        if (!v._lastTargetPos || Math.hypot(v._lastTargetPos.x - tx, v._lastTargetPos.y - ty) > 20) {
-            v._lastTargetPos = { x: tx, y: ty };
-            v.fullPath = null;
-            v.pathIndex = 0;
-            v.isFindingPath = false;
-        }
+        // 核心優化：平滑尋路偵測 (不立即清空舊路徑以防止抖動)
+        const targetDist = !v._lastRequestedTarget ? 999 : Math.hypot(v._lastRequestedTarget.x - tx, v._lastRequestedTarget.y - ty);
 
-        // 核心修正 1：如果目前沒有路徑且也沒在尋路中，發起非同步尋路請求
-        if (!v.fullPath && !v.isFindingPath && this.state.pathfinding) {
+        if (targetDist > 15 && !v.isFindingPath && this.state.pathfinding) {
+            v._lastRequestedTarget = { x: tx, y: ty };
+            v.isFindingPath = true;
+
             const isSelected = GameEngine.state.selectedUnitIds && GameEngine.state.selectedUnitIds.includes(v.id);
             if (isSelected) {
-                const msg = `[尋路請求] (${v.x.toFixed(0)}, ${v.y.toFixed(0)}) -> (${tx.toFixed(0)}, ${ty.toFixed(0)})`;
-                console.log(`%c${msg}`, "color: #ffeb3b; font-weight: bold;");
-                GameEngine.addLog(msg, 'PATH');
+                GameEngine.addLog(`[重新尋路] 距離目標: ${targetDist.toFixed(0)}`, 'PATH');
             }
-            v.isFindingPath = true;
+
             this.state.pathfinding.findPath(v.x, v.y, tx, ty, (path) => {
                 v.isFindingPath = false;
                 if (path && path.length > 1) {
                     v.fullPath = path;
-                    v.pathIndex = 1; // 跳過起點
-                    if (isSelected) {
-                        GameEngine.addLog(`[尋路成功] 路徑長度: ${path.length}`, 'PATH');
-                    }
-                } else {
-                    // 尋路失敗，設為空避免重複頻繁請求
-                    v.fullPath = [];
-                    if (isSelected) {
-                        GameEngine.addLog(`[尋路失敗!] 無法到達 (${tx.toFixed(0)}, ${ty.toFixed(0)})`, 'PATH');
-                    }
+                    v.pathIndex = 1; // 已拿到新路徑，此處才真正替換
+                } else if (!v.fullPath) {
+                    v.fullPath = []; // 徹底失敗且原本就沒路徑時才完全停止
                 }
             });
         }
@@ -1528,20 +1516,28 @@ export class GameEngine {
                     remainingDt -= dist / speed;
                 } else if (dist > 0.01) {
                     const ratio = moveDist / dist;
-                    const deltaX = dx * ratio;
-                    v.x += deltaX;
-                    v.y += dy * ratio;
-                    if (Math.abs(deltaX) > 0.01) v.facing = deltaX > 0 ? 1 : -1;
+                    const nextX = v.x + dx * ratio;
+                    const nextY = v.y + dy * ratio;
+                    
+                    // 物理安全性要求：路徑段落中也加入碰撞檢查，防止在新舊尋路交替時穿牆
+                    if (!this.isColliding(nextX, nextY, [v])) {
+                        v.x = nextX;
+                        v.y = nextY;
+                        if (Math.abs(dx) > 0.01) v.facing = dx > 0 ? 1 : -1;
+                    } else {
+                        // 若段落也被意外阻礙，中止路徑，等待下一個 re-path 循環
+                        v.fullPath = null;
+                        v.isFindingPath = false;
+                        v._lastRequestedTarget = null;
+                    }
                     remainingDt = 0;
                 } else {
                     v.pathIndex++;
                 }
-            } else if (!v.isFindingPath) {
-                // 只有在非尋路中，才允許最後的直線逼近，避免尋路空窗期滲透進建築
+            } else {
+                // 如果沒有路徑或是正在尋路中，執行直線逼近 (moveTowards 本身帶有碰撞檢查)
                 this.moveTowards(v, tx, ty, speed, remainingDt);
                 remainingDt = 0;
-            } else {
-                remainingDt = 0; // 尋路中禁止移動，保持原地等待
             }
         }
     }
@@ -1597,21 +1593,22 @@ export class GameEngine {
         const dx = tx - v.x, dy = ty - v.y;
         const dist = Math.hypot(dx, dy);
         const moveDist = speed * dt;
-        if (dist > moveDist) {
-            const deltaX = (dx / dist) * moveDist;
-            const nextX = v.x + deltaX;
-            const nextY = v.y + (dy / dist) * moveDist;
-            if (Math.abs(deltaX) > 0.01) {
-                v.facing = deltaX > 0 ? 1 : -1;
+
+        if (dist > 0.1) {
+            const ratio = Math.min(1, moveDist / dist);
+            const nextX = v.x + dx * ratio;
+            const nextY = v.y + dy * ratio;
+
+            // 物理限制：直線移動過程中若遇到碰撞，必須停下，杜絕穿模
+            if (!this.isColliding(nextX, nextY, [v])) {
+                if (Math.abs(dx) > 0.1) v.facing = dx > 0 ? 1 : -1;
+                v.x = nextX;
+                v.y = nextY;
+            } else {
+                // 如果直线走不通，保持在障碍物边缘并重置路径，等待尋路繞道
+                v.fullPath = null;
+                v.isFindingPath = false;
             }
-            v.x = nextX;
-            v.y = nextY;
-        } else if (dist > 0.1) {
-            const deltaX = tx - v.x;
-            if (Math.abs(deltaX) > 0.01) {
-                v.facing = deltaX > 0 ? 1 : -1;
-            }
-            v.x = tx; v.y = ty;
         }
     }
 
@@ -1646,16 +1643,17 @@ export class GameEngine {
                             const match = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
                             const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
                             ent._collisionW = uw * this.TILE_SIZE;
+                            ent._collisionH = uh * this.TILE_SIZE;
                         }
 
                         // 從 UI_CONFIG 讀取碰撞調整參數
                         const collCfg = UI_CONFIG.BuildingCollision || { buffer: 20, feetOffset: 18 };
-                        const w = ent._collisionW + collCfg.buffer, h = ent._collisionH + collCfg.buffer;
-                        const FOOT_OFFSET = collCfg.feetOffset;
+                        const w = ent._collisionW + (collCfg.buffer || 0), h = ent._collisionH + (collCfg.buffer || 0);
+                        const FOOT_OFFSET = collCfg.feetOffset || 18;
                         const logicY = ent.y - FOOT_OFFSET; // 碰撞邏輯中心向上偏移，對齊單位腳部
 
                         // 精確碰撞矩形檢查 (誤差補償 +/- 1px 避免邊緣抖動)
-                        if (x > ent.x - w / 2 + 1 && x < ent.x + w / 2 - 1 && y > logicY - h / 2 + 1 && y < logicY + h / 2 - 1) {
+                        if (x > ent.x - w / 2 + 0.5 && x < ent.x + w / 2 - 0.5 && y > logicY - h / 2 + 0.5 && y < logicY + h / 2 - 0.5) {
                             return ent;
                         }
                     }

@@ -90,8 +90,9 @@ export class BattleRenderer {
             const isHovered = distToPointer < 40; 
             const isSelected = selectedIds.includes(unit.id);
 
-            // 如果符合任一條件，渲染血條
-            if (unit.hitTimer > 0 || isHovered || isSelected) {
+            // 如果符合任一條件（受擊、懸停、選中、正在戰鬥），渲染血條
+            const isInCombat = (unit.state === 'CHASE' || unit.state === 'ATTACK');
+            if (unit.hitTimer > 0 || isHovered || isSelected || isInCombat) {
                 this.drawHPBar(g, unit, rx, ry);
 
                 // 受擊閃爍紅白框 (受傷回饋，僅在受擊當下瞬間)

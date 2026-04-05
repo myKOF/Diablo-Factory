@@ -346,11 +346,16 @@ export class MainScene extends Phaser.Scene {
      * 處理單位的右鍵指令（移動或攻擊）
      */
     handleRightClickCommand(unit, pointer, clickedTarget = null) {
+        // 先判斷 npc 的 type，若為敵方則不執行指令
+        const type = unit.config ? unit.config.type : '';
+        if (type === 'wolf' || type === 'bear') return;
+
         const wx = pointer.worldX, wy = pointer.worldY;
 
         // 1. 執行命令
         if (clickedTarget) {
             unit.targetId = clickedTarget.id;
+            unit.forceFocus = true; // 強制鎖定玩家指定目標，防止自動索敵偏離
             unit.state = 'CHASE'; // 切換至 CHASE 狀態
             unit.idleTarget = { x: clickedTarget.x, y: clickedTarget.y }; // 立即起始移動，如同點擊地板
             unit.isManualCommand = true;
@@ -358,25 +363,33 @@ export class MainScene extends Phaser.Scene {
             GameEngine.addLog(`[命令] ${unit.configName} 正在追擊敵軍 ${clickedTarget.configName || '目標'}。`);
         } else {
             // 移動指令：完全清除所有任務內容，防止系統重新分配回去做老本行
-            // 移動指令：完全清除所有任務內容，防止系統重新分配回去做老本行
             unit.targetId = null;
+            unit.forceFocus = false; // 點擊地面重置強制鎖定
             unit.constructionTarget = null;
             unit.assignedWarehouseId = null;
-            unit.pathTarget = null;
-            unit.fullPath = null;
 
             // 安全檢查：若目標點不可行走(在建築內)，導航至週邊最近可用點
+            const TS = GameEngine.TILE_SIZE;
+            const gx = Math.floor(wx / TS);
+            const gy = Math.floor(wy / TS);
             let finalTx = wx, finalTy = wy;
             const pf = GameEngine.state.pathfinding;
-            if (pf && !pf.isValidAndWalkable(wx, wy, true)) {
-                const TS = GameEngine.TILE_SIZE;
-                const gx = Math.floor(wx / TS);
-                const gy = Math.floor(wy / TS);
-                const nearest = pf.getNearestWalkableTile(gx, gy, 50, true);
-                if (nearest) {
-                    finalTx = nearest.x * TS + TS / 2;
-                    finalTy = nearest.y * TS + TS / 2;
+
+            // 修正：必須將像素坐標轉為格網索引，否則判定永遠失效
+            if (pf && !pf.isValidAndWalkable(gx, gy, true)) {
+                const nearestArr = pf.getNearestWalkableTile(gx, gy, 50, true);
+                if (nearestArr) {
+                    finalTx = nearestArr.x * TS + TS / 2;
+                    finalTy = nearestArr.y * TS + TS / 2;
                 }
+            }
+
+            // 核心修復：只有當新目標與舊目標距離大於一定閾值時，才清除舊路徑。
+            // 這能防止快速雙擊右鍵時，第二下無意中清除了第一下剛計算好的尋路路徑，導致單位變回「直線前進」。
+            const distToExisting = unit.idleTarget ? Math.hypot(unit.idleTarget.x - finalTx, unit.idleTarget.y - finalTy) : 999;
+            if (distToExisting > 10) {
+                unit.pathTarget = null;
+                unit.fullPath = null;
             }
 
             unit.idleTarget = { x: finalTx, y: finalTy };
