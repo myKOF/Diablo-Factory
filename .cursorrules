@@ -74,6 +74,25 @@
    - 測試腳本需驗證：1. Atlas 加載成功。2. 動畫播放無 Console 報錯。3. 循環播放時無記憶體異常增長。
 6. 進程自毀：測試結束後必須關閉 Headless 瀏覽器並清理 tmp/。
 
+[戰鬥系統開發計劃]
+第一階段：命令中繼器 (Command Resolver)
+目標：解決點擊敵方單位無反應的問題。
+邏輯：在 InputController 判斷點擊目標。
+If (Enemy): 發送 ATTACK_TARGET 指令與目標 ID。
+Else: 發送 MOVE_TO 指令與座標。
+座標修正：尋路目標點應設為敵人中心點，但需允許在 Range 距離內停止，避免 A* 因敵人占據網格而報錯。
+
+第二階段：動態追擊狀態機 (Dynamic Chase State)
+目標：解決敵人移動後單位發呆的問題。
+行為：
+Tick 監控：單位在 CHASE 狀態下，每 500ms 重新校驗一次目標座標。
+路徑刷新：若目標移動超過 1 格，重新觸發 findPath。
+射程鎖定：一旦 Distance(Self, Target) <= Range，立即強行中斷尋路 (easystar.cancelPath)。
+
+第三階段：多選衝突處理 (Flocking & Offset)
+目標：解決多個單位重疊在同一個點的問題。
+行為：為每個選中單位計算一個隨機的偏移量 (Offset)，讓它們圍繞敵人形成「半圓包圍網」，而非全部疊在敵人腳下。
+
 [靜默檢索協定]
 1. 禁令：嚴禁使用 PowerShell (Get-ChildItem/Select-String) 進行檔案搜尋或內容檢索。
 2. 代替：必須改寫 .cjs 腳本利用 fs 模組執行遍歷與過濾。
