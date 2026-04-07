@@ -458,8 +458,11 @@ export class MainScene extends Phaser.Scene {
                         if (clickedEnemy) {
                             // 追擊指令：直接設定目標
                             this.handleRightClickCommand(unit, pointer, clickedEnemy);
+                        } else if (clickedEntity) {
+                            // 物件/資源交互指令：直接設定目標且不套用陣型 (避免分散至採不到點的地方)
+                            this.handleRightClickCommand(unit, pointer, clickedEntity);
                         } else {
-                            // 移動指令：計算陣型偏移
+                            // 地表移動指令：計算陣型偏移
                             const r = Math.floor(i / colsNum);
                             const c = i % colsNum;
                             const offX = (c - (colsNum - 1) / 2) * spacing;

@@ -1207,7 +1207,7 @@ export class GameEngine {
                     const ty = target.y + (v.workOffset.y || 0);
                     const dist = Math.hypot(tx - v.x, ty - v.y);
 
-                    if (dist < 15) {
+                    if (dist < 25) {
                         v.state = 'GATHERING'; v.targetId = target; v.gatherTimer = 0; v.pathTarget = null;
                     }
                     else { this.moveDetailed(v, tx, ty, moveSpeed, dt, ignoreEnts); }
@@ -1887,7 +1887,7 @@ export class GameEngine {
         const gy = Math.floor(y / TS);
 
         // 螺旋搜尋 (使用 MapDataSystem)
-        for (let r = 1; r <= 80; r++) { // 擴大搜尋半徑至 80 格
+        for (let r = 0; r <= 80; r++) { // 從 0 核心格點開始搜尋，避免漏掉足下資源
             // 這裡為了效能，我們簡化搜尋，直接在 MapDataSystem 的格網中遍歷周邊
             for (let dy = -r; dy <= r; dy++) {
                 const ny = gy + dy;
