@@ -165,31 +165,15 @@ export class GameEngine {
             });
 
             const selectedIds = new Set(this.state.selectedUnitIds || []);
-            const sortedVillagers = [...this.state.units.villagers].sort((a,b) => {
+            const sortedVillagers = [...this.state.units.villagers].sort((a, b) => {
                 const aS = selectedIds.has(a.id) ? 1 : 0;
                 const bS = selectedIds.has(b.id) ? 1 : 0;
                 return bS - aS; // 選中的在前
             });
 
             sortedVillagers.forEach(v => {
-                const isSelected = selectedIds.has(v.id);
-                // [新協定] 玩家指令 (isPlayerLocked) 絕對優先。只有在未鎖定或閒置時，系統才可介入。
-                if (!v.isRecalled) {
-                    const isBusyConstructing = (v.state === 'MOVING_TO_CONSTRUCTION' || v.state === 'CONSTRUCTING');
-                    
-                    // 核心修正：即便被選中，如果玩家已下達指令 (isPlayerLocked)，系統不得中斷。
-                    // 除非玩家指令正好就是去建造 (isBusyConstructing)，否則只要鎖定了，就跳過自動分配。
-                    if (!v.isPlayerLocked) {
-                        const isAutoWorking = ['GATHERING', 'MOVING_TO_RESOURCE', 'MOVING_TO_RESOURCE_BASE'].includes(v.state);
-                        
-                        // 選中優先：選中者即便在自動工作也會響應建設；非選中者僅在閒置時響應。
-                        if (v.state === 'IDLE' || (isSelected && isAutoWorking)) {
-                            this.assignNextTask(v, isAutoWorking);
-                        }
-                    } else if (isBusyConstructing) {
-                        // 如果已經在建造中且鎖定了，則繼續執行當前動作，不進行重複分配
-                    }
-                }
+                // [新協定] 本循環不再自動呼叫工人去建築。所有建築任務必須由玩家點擊觸發。
+                // 這裡僅負責更新移動位置等物理行為。
                 this.updateVillagerMovement(v, deltaTime);
             });
 
@@ -1428,12 +1412,14 @@ export class GameEngine {
                     v.constructionTarget = null;
                     return;
                 }
-                
+
+                // [狀態更名] 只要開始施工，名稱改為「施工中」
+                v.constructionTarget.name = "施工中";
                 v.constructionTarget.buildProgress += dt;
-                
+
                 // [核心修復] 直接提供 fallback 並預留計算有效性
                 const targetBuildTime = Math.max(0.1, v.constructionTarget.buildTime || 5);
-                
+
                 if (v.constructionTarget.buildProgress >= targetBuildTime) {
                     const finishedBuilding = v.constructionTarget; // 鎖定當前完工建築引用
                     finishedBuilding.isUnderConstruction = false;
@@ -1464,24 +1450,8 @@ export class GameEngine {
                     // 3. 建造完成後刷新尋路格網數據 (重要!)
                     this.updatePathfindingGrid();
 
-                    // 自動指派後續工作
-                    let nextConstruction = null;
-                    let minCDist = Infinity;
-                    this.state.mapEntities.forEach(e => {
-                        if (e.isUnderConstruction && e !== finishedBuilding) {
-                            const isClaimed = this.state.units.villagers.some(vi => vi !== v && vi.constructionTarget === e);
-                            if (isClaimed) return;
-                            const d = Math.hypot(e.x - v.x, e.y - v.y);
-                            if (d < minCDist) { minCDist = d; nextConstruction = e; }
-                        }
-                    });
-
-                    if (nextConstruction) {
-                        v.state = 'MOVING_TO_CONSTRUCTION';
-                        v.constructionTarget = nextConstruction;
-                        v.pathTarget = null;
-                        this.addLog(`工人前往建設下一個目標：${nextConstruction.name || nextConstruction.type}。`);
-                    } else if (['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(type)) {
+                    // [新協定] 建造完成後不再自動尋找下一個工地。工人應進入閒置或恢復舊任務。
+                    if (['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(type)) {
                         v.assignedWarehouseId = (finishedBuilding.id || `${finishedBuilding.type}_${finishedBuilding.x}_${finishedBuilding.y}`);
                         v.type = (type === 'timber_factory' ? 'WOOD' : (type === 'stone_factory' ? 'STONE' : (type === 'barn' ? 'FOOD' : 'GOLD')));
                         v.state = 'MOVING_TO_RESOURCE';
@@ -1490,44 +1460,58 @@ export class GameEngine {
                     } else if (type === 'farmland' || type === 'tree_plantation') {
                         v.type = (type === 'farmland' ? 'FOOD' : 'WOOD');
                         v.state = 'MOVING_TO_RESOURCE'; v.targetId = finishedBuilding; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
-                        v.workOffset = { x: (Math.random() - 0.5) * 50, y: (Math.random() - 0.5) * 50 }; // 立即設定偏移量，確保進入內部
+                        v.workOffset = { x: (Math.random() - 0.5) * 50, y: (Math.random() - 0.5) * 50 };
                         this.addLog(`建造者前往${type === 'farmland' ? '農田' : '樹木田'}內部開始工作。`);
                     } else {
-                        this.restoreVillagerTask(v);
-                        v.constructionTarget = null; // 恢復舊任務後清空工程目標
-                        v.isPlayerLocked = false; // [新協定] 建造指令執行完畢，重置玩家鎖定
+                        // [新協定] 依照優先度（P: 大 -> 小）續建
+                        const sortedProjects = this.state.mapEntities
+                            .filter(e => e && e.isUnderConstruction)
+                            .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+                        // 1. 優先尋找無人負責的工地 (高優先度優先)
+                        let nextTarget = sortedProjects.find(e => {
+                            const hasAnyone = this.state.units.villagers.some(other => other.constructionTarget === e);
+                            return !hasAnyone;
+                        });
+
+                        // 2. 若全都有人，則去跟其他人一起蓋最高優先級的那間
+                        if (!nextTarget) nextTarget = sortedProjects[0];
+
+                        if (nextTarget) {
+                            v.constructionTarget = nextTarget;
+                            v.state = 'MOVING_TO_CONSTRUCTION';
+                            this.addLog(`工人 ${v.id} 轉往優先級 P:${nextTarget.priority} 的工地支援。`);
+                        } else {
+                            this.restoreVillagerTask(v);
+                            v.constructionTarget = null;
+                            v.isPlayerLocked = false;
+                            this.addLog(`建造清單已清空，回歸原位。`);
+                        }
                     }
                 }
                 break;
         }
 
-        // 核心碰撞防護：檢查是否撞到非忽略清單中的建築
+        // 核心碰撞防護
         const collidingEnt = this.isColliding(v.x, v.y, ignoreEnts, v.width, v.height);
 
         if (collidingEnt) {
-            // 檢查舊位置是否也在此建築中
             const wasColliding = this.isColliding(oldX, oldY, ignoreEnts);
             if (wasColliding !== collidingEnt) {
-                // 如果原本不在這個建築裡面（或是剛從別處撞進來），阻擋
                 v.x = oldX; v.y = oldY; v.pathTarget = null;
-
-                // [防卡死強化] 如果被物理碰撞反覆阻擋超過一定次數，視同卡死，強制脫困 (20Hz: 12次 = 0.6秒)
                 v._stuckFrames = (v._stuckFrames || 0) + 1;
                 if (v._stuckFrames > 12) {
                     this.resolveStuck(v);
                     v._stuckFrames = 0;
                 }
             } else {
-                // 連動脫困邏輯：原就在建築內，可能因為剛蓋好建築被壓住，啟動 8 方向螺旋搜尋脫困
                 this.resolveStuck(v);
                 v._stuckFrames = 0;
             }
         } else {
-            // 沒撞到，重設計數器
             if (Math.hypot(v.x - oldX, v.y - oldY) > 0.1) {
                 v._stuckFrames = 0;
             } else if (v.state.startsWith('MOVING')) {
-                // 有在動但坐標完全沒變 (可能是被其他邏輯擋到) (20Hz: 15次 = 0.75秒)
                 v._stuckFrames = (v._stuckFrames || 0) + 1;
                 if (v._stuckFrames > 15) {
                     this.resolveStuck(v);
@@ -1542,7 +1526,7 @@ export class GameEngine {
         }
 
         // 附近基地即便撞牆也算存款 (加寬範圍至 150)
-        if (v.state === 'MOVING_TO_BASE') {
+        if (v.state === 'MOVING_TO_BASE' && v.targetBase) {
             const cfgB = this.state.buildingConfigs[v.targetBase.type];
             let depositDist = 60;
             if (cfgB && cfgB.size) {
@@ -1560,29 +1544,12 @@ export class GameEngine {
                     v.state = v.nextStateAfterDeposit;
                     v.nextStateAfterDeposit = null;
                 } else if (v.isRecalled) {
-                    v.state = 'IDLE';
-                    v.isRecalled = false;
-                    this.assignNextTask(v);
+                    v.state = 'IDLE'; v.isRecalled = false; this.assignNextTask(v);
                 } else {
-                    // 預設回歸採集
                     v.state = 'MOVING_TO_RESOURCE';
-
-                    // 手動指令連動修復：如果是手動指派的採集，跳過 assignNextTask 以免被強制中斷或變為 IDLE
-                    if (v.isPlayerLocked) {
-                        // 檢查手動目標是否還有效
-                        if (v.targetId && v.targetId.gx !== undefined) {
-                            const stillExists = this.state.mapData.getResource(v.targetId.gx, v.targetId.gy);
-                            if (stillExists && stillExists.amount > 0) {
-                                // 目標還在，不再重新分配，保持 MOVING_TO_RESOURCE 狀態回去採
-                                v.pathTarget = null;
-                                return;
-                            }
-                        }
-                        // 手動目標已無或資源已空，重置手動旗標並進入一般分配
-                        v.isPlayerLocked = false;
-                        v.targetId = null;
-                    }
-
+                    // 手動指令保護
+                    if (v.isPlayerLocked && v.targetId) { v.pathTarget = null; return; }
+                    v.isPlayerLocked = false;
                     this.assignNextTask(v);
                 }
             }
@@ -1616,36 +1583,28 @@ export class GameEngine {
             return;
         }
 
-        // 1. 優先找「視野內」的待施工建築 (過濾掉已有人在蓋的工地)
-        // [呼叫優化] 若單位被選中，則視野視為「全區域」，優先被呼叫至任何工地。
-        const visionPx = isSelected ? 5000 : (((v.field_vision || 15) * 20) + 80);
+        // [新協定] 選中者依照優先度 (10, 9, 8... -1, -2) 自動偵測任務
+        if (isSelected && !v.constructionTarget && !v.isRecalled) {
+            const sortedProjects = this.state.mapEntities
+                .filter(e => e && e.isUnderConstruction)
+                .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+                
+            const nextConstruction = sortedProjects[0];
 
-        const nextConstruction = this.state.mapEntities.find(e => {
-            if (!e || !e.isUnderConstruction) return false;
-
-            // 距離檢查
-            const dist = Math.hypot(e.x - v.x, e.y - v.y);
-            if (dist > visionPx) return false;
-
-            // 互斥檢查修復：回歸一人蓋一間的原則，防止多名工人擠在同個建築物
-            const hasActiveWorker = this.state.units.villagers.some(vi =>
-                vi.id !== v.id &&
-                vi.constructionTarget &&
-                (vi.constructionTarget === e || vi.constructionTarget.id === e.id) &&
-                ['MOVING_TO_CONSTRUCTION', 'CONSTRUCTING'].includes(vi.state)
-            );
-            return !hasActiveWorker;
-        });
-
-        if (nextConstruction) {
-            v.state = 'MOVING_TO_CONSTRUCTION';
-            v.constructionTarget = nextConstruction;
-            v.targetId = null; v.pathTarget = null;
-            v.assignedWarehouseId = null;
-            return;
+            if (nextConstruction) {
+                v.state = 'MOVING_TO_CONSTRUCTION';
+                v.constructionTarget = nextConstruction;
+                v.targetId = null; v.pathTarget = null;
+                v.assignedWarehouseId = null;
+                return;
+            }
         }
 
-        // 若只是為了「嘗試尋找建設任務」而被呼叫，且沒找到，則保持原狀返回
+        // [新協定] 本函數其餘部分不再參與非選中者的建築任務自動分配。
+        // 建築任務主要依賴：(1) 放置時的選中指派 (2) 右鍵手動點擊指派 (3) 工人完工後的續建邏輯。
+        // 原本在此處的非選中者查找邏輯已全數移除。
+
+        // 若只是為了「嘗試尋找建設任務」而被呼叫 (keepCurrentIfNoneFound 註記)，且此處已無建設邏輯，則直接返回
         if (keepCurrentIfNoneFound) return;
 
         // 2. 各倉庫滿員情況 (優先補滿專職位)
@@ -2302,8 +2261,8 @@ export class GameEngine {
 
         const newBuilding = {
             id: `build_${type}_${x}_${y}_${Date.now()}`,
-            type: type, x: x, y: y, name: "施工中",
-            isUnderConstruction: true, buildProgress: 0, 
+            type: type, x: x, y: y, name: "待施工",
+            isUnderConstruction: true, buildProgress: 0,
             buildTime: Math.max(1, cfg.buildTime || 5), // 防止 0 或 NaN
             targetWorkerCount: ['timber_factory', 'stone_factory', 'barn', 'quarry', 'gold_mining_factory'].includes(type) ? 1 : 0,
             ...(cfg.npcProduction && cfg.npcProduction.length > 0 ? { queue: [], productionTimer: 0 } : {})
@@ -2320,12 +2279,37 @@ export class GameEngine {
 
         // 已移除舊有的 findSafePos (防卡死系統) 邏輯
 
-        // ------------------------------------------------------------
+        // [新協定] 既然是「先選人再蓋房」，放置後不應彈出選取框 (保持選取工人而非建築)
+        const selIds = this.state.selectedUnitIds || [];
+        const selectedVillagers = this.state.units.villagers.filter(v => selIds.includes(v.id));
 
-        // 已修復：由村民在 assignNextTask 中依紅圈視野自行「領取」任務
-        // 這能解決「遠方村民霸佔任務」導致「身邊村民不蓋房」且「無視紅圈內建築」的問題
-        this.addLog(`批次配置成功：${cfg.name} 已加入建造清單。`, 'COMMON');
+        // [優先級初始化]
+        if (this._nextP === undefined) this._nextP = 1;
+        if (this._nextLP === undefined) this._nextLP = -1;
 
+        if (selectedVillagers.length > 0) {
+            newBuilding.priority = this._nextP++;
+            // 分配邏輯：1人1間優先
+            const freeVillager = selectedVillagers.find(v => !v.constructionTarget);
+            let assignedWorker = null;
+
+            if (freeVillager) {
+                assignedWorker = freeVillager;
+                this.addLog(`[分配] 工人 ${assignedWorker.id} 負責本高優先級建築 (P:${newBuilding.priority})。`);
+            } else {
+                assignedWorker = selectedVillagers[0];
+                this.addLog(`[支援] 協助本高優先級建築 (P:${newBuilding.priority})。`);
+            }
+
+            assignedWorker.state = 'MOVING_TO_CONSTRUCTION';
+            assignedWorker.constructionTarget = newBuilding;
+            assignedWorker.targetId = null; assignedWorker.pathTarget = null; assignedWorker.isPlayerLocked = true;
+        } else {
+            newBuilding.priority = this._nextLP--;
+            this.addLog(`${cfg.name} 已放置 (背景優先級 P:${newBuilding.priority})。`, 'COMMON');
+        }
+
+        this.state.selectedBuildingId = null;
         this.updatePathfindingGrid(); // 建造完成後刷新格網數據
         this.updateSpatialGrid();
         return true;
@@ -2434,7 +2418,8 @@ export class GameEngine {
         // 1. 返還資源 (50%)
         let refundLog = [];
         for (let r in cfg.costs) {
-            const amount = Math.floor(cfg.costs[r] / 2);
+            const refundRate = ent.isUnderConstruction ? 1.0 : 0.5;
+            const amount = Math.floor(cfg.costs[r] * refundRate);
             if (amount > 0) {
                 this.state.resources[r] += amount;
                 refundLog.push(`${amount} 單位 ${this.RESOURCE_NAMES[r] || r}`);
@@ -2454,7 +2439,8 @@ export class GameEngine {
         this.state.renderVersion++; // 通知渲染器刷新
 
         // 4. 通知日誌
-        this.addLog(`銷毀了 ${cfg.name}。返還：${refundLog.join(', ') || '無'}`);
+        const actionName = ent.isUnderConstruction ? "取消施工" : "銷毀";
+        this.addLog(`${actionName}了 ${cfg.name}。返還：${refundLog.join(', ') || '無'}`);
 
         // 5. 如果有村民正要去這建設/採集，需重置
         this.state.units.villagers.forEach(v => {

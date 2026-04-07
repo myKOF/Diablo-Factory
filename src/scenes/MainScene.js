@@ -280,10 +280,31 @@ export class MainScene extends Phaser.Scene {
                         if (foundRes && !pointer.event.shiftKey) {
                             GameEngine.state.selectedResourceId = `${foundRes.gx}_${foundRes.gy}`;
                             GameEngine.state.selectedUnitIds = [];
+                            GameEngine.state.selectedBuildingId = null; // 清除建築選取
                             if (window.UIManager) window.UIManager.hideContextMenu();
                             GameEngine.addLog(`[選取] 資源：${foundRes.res.type} (Lv.${foundRes.res.level})`);
                             return;
                         }
+                    }
+
+                    // 偵測建築點擊 (左鍵單選) - 支援待施工建築的選取
+                    let clickedBuilding = null;
+                    let bestBDist = 40;
+                    GameEngine.state.mapEntities.forEach(e => {
+                        const d = Math.hypot(e.x - pointer.worldX, e.y - pointer.worldY);
+                        if (d < bestBDist) {
+                            bestBDist = d;
+                            clickedBuilding = e;
+                        }
+                    });
+
+                    if (clickedBuilding && !pointer.event.shiftKey) {
+                        GameEngine.state.selectedBuildingId = clickedBuilding.id;
+                        GameEngine.state.selectedUnitIds = [];
+                        GameEngine.state.selectedResourceId = null;
+                        if (window.UIManager) window.UIManager.hideContextMenu();
+                        GameEngine.addLog(`[選取] 建築：${clickedBuilding.name || clickedBuilding.type} ${clickedBuilding.isUnderConstruction ? '(施工中)' : ''}`);
+                        return;
                     }
 
                     // 點擊地面：準備框選 (如果沒有 Shift 則清除舊選取)
@@ -452,6 +473,17 @@ export class MainScene extends Phaser.Scene {
                 if (selectedIds.length > 0) {
                     const unitsToMove = selectedIds.map(id => GameEngine.state.units.villagers.find(v => v.id === id)).filter(v => v);
 
+                    // [重要] 合作施工規範：右鍵點擊工地時，指派「所有選中」的工人一併前往，支援多人同時建造。
+                    if (clickedEntity && clickedEntity.isUnderConstruction) {
+                        const vCandidates = unitsToMove.filter(v => v.config?.type === 'villagers');
+                        if (vCandidates.length > 0) {
+                            vCandidates.forEach(v => {
+                                this.handleRightClickCommand(v, pointer, clickedEntity);
+                            });
+                            return; // 攔截指令，確保選中的工人群組全部投入建設
+                        }
+                    }
+
                     const colsNum = Math.ceil(Math.sqrt(unitsToMove.length));
                     const spacing = 40;
 
@@ -548,6 +580,19 @@ export class MainScene extends Phaser.Scene {
                 unit.isPlayerLocked = true;
                 unit.chaseFrame = 999;
                 GameEngine.addLog(`[命令] ${unit.configName} 鎖定目標 ${clickedTarget.configName || '敵人'} 並進入追擊。`);
+            } else if (clickedTarget.isUnderConstruction && unit.config.type === 'villagers') {
+                // 我方工人右鍵點施工中建築：開始建造 (一人一間配給邏輯由外層 dispatcher 處理)
+                unit.state = 'MOVING_TO_CONSTRUCTION';
+                unit.constructionTarget = clickedTarget;
+                unit.targetId = null;
+                unit.pathTarget = null;
+                unit.isPlayerLocked = true;
+                
+                // [視覺優化] 同步選取該建築，顯示選取框與取消按鈕
+                if (window.UIManager) window.UIManager.showContextMenu(clickedTarget);
+                
+                GameEngine.addLog(`[命令] 工人 ${unit.id} 前往建設 ${clickedTarget.name || clickedTarget.type}。`, 'COMMON');
+                return;
             } else if (isResource && unit.config.type === 'villagers') {
                 // 我方工人右鍵點資源：採集該資源
                 unit.state = 'MOVING_TO_RESOURCE';

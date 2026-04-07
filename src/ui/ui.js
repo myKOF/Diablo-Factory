@@ -996,8 +996,10 @@ export class UIManager {
 
         // ... (中間內容不變)
 
-        let name = entity.isUnderConstruction ? "施工中的建築" : (entity.name || entity.type);
-        let headerText = isConfirming ? `確定銷毀 ${name} 並退還 50%？` : name;
+        let name = entity.isUnderConstruction ? (GameEngine.state.buildingConfigs[entity.type]?.name || "施工中的建築") : (entity.name || entity.type);
+        let headerText = isConfirming ? 
+            (entity.isUnderConstruction ? `確定取消建設 ${name} 並全額退還？` : `確定銷毀 ${name} 並退還 50%？`) 
+            : name;
         let titleStyle = isConfirming ? `style="text-align:center; font-size: 20px; color:#ff8a80; border-bottom-color:#c62828;"` : `style="text-align:center; font-size: 20px;"`;
 
         let html = `<div class="title" ${titleStyle}>${headerText}</div>`;
