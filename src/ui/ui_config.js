@@ -132,7 +132,7 @@ export const UI_CONFIG = {
             fontSize: "bold 13px Arial",
             color: "#ffffff",
             offsetX: 0,                // 水平偏移 (正值右移, 負值左移)
-            offsetY: -45,              // 資源標籤往上偏移 45px
+            offsetY: 35,              // 資源標籤往上偏移 45px
             buildingOffsetY: -15,      // 建築標籤統一在中心偏上 15px
             align: 'center',           // 強制文字內部居中
             outlineColor: "#000000",
@@ -144,7 +144,7 @@ export const UI_CONFIG = {
             fontSize: "bold 12px Arial",
             color: "#fff176",
             offsetX: 0,                // 水平偏移
-            offsetY: -65,              // 資源標籤往上偏移 65px
+            offsetY: -40,              // 資源標籤往上偏移 65px
             buildingLevelOffsetY: -35, // 建築標籤往上偏移 35px
             align: 'center',
             outlineColor: "#000000",
@@ -156,7 +156,7 @@ export const UI_CONFIG = {
             fontSize: "bold 13px Arial",
             color: "#81d4fa",
             offsetX: 0,                // 水平偏移
-            offsetY: 35,               // 往下偏移 35px
+            offsetY: 0,               // 往下偏移 35px
             align: 'center',
             outlineColor: "#000000",
             outlineAlpha: 0.8,

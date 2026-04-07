@@ -19,7 +19,10 @@ export class MapDataSystem {
         // 3. 視覺變量網格 (Uint32Array: 儲存 [Tint: 24bit, ScaleIndex: 8bit])
         this.variationGrid = new Uint32Array(this.totalTiles);
 
-        // 4. 重繪標記 (Dirty Flags) - 以 Chunk 為單位 (32x32)
+        // 4. 等級網格 (Uint8Array)
+        this.levelGrid = new Uint8Array(this.totalTiles);
+
+        // 5. 重繪標記 (Dirty Flags) - 以 Chunk 為單位 (32x32)
         this.chunkSize = 32;
         this.chunkCols = Math.ceil(cols / this.chunkSize);
         this.chunkRows = Math.ceil(rows / this.chunkSize);
@@ -41,12 +44,13 @@ export class MapDataSystem {
     /**
      * 設置資源
      */
-    setResource(gx, gy, type, amount) {
+    setResource(gx, gy, type, amount, level = 1) {
         const idx = this.getIndex(gx, gy);
         if (idx === -1) return;
 
         this.typeGrid[idx] = type;
         this.amountGrid[idx] = amount;
+        this.levelGrid[idx] = level;
         
         this.markChunkDirty(gx, gy);
     }
@@ -63,7 +67,8 @@ export class MapDataSystem {
 
         return {
             type: type,
-            amount: this.amountGrid[idx]
+            amount: this.amountGrid[idx],
+            level: this.levelGrid[idx]
         };
     }
 
@@ -122,7 +127,8 @@ export class MapDataSystem {
                         gx: gx,
                         gy: gy,
                         type: this.typeGrid[idx],
-                        amount: this.amountGrid[idx]
+                        amount: this.amountGrid[idx],
+                        level: this.levelGrid[idx] || 1
                     });
                 }
             }

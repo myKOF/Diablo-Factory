@@ -840,7 +840,7 @@ export class GameEngine {
                     if (Math.abs(x - villagePos.x) < safeCfg.w / 2 && Math.abs(y - villagePos.y) < safeCfg.h / 2) continue;
 
                     // 記錄資源至 MapDataSystem (取代 mapEntities 物件)
-                    this.state.mapData.setResource(gx, gy, typeNum, cfg.amount);
+                    this.state.mapData.setResource(gx, gy, typeNum, cfg.amount, cfg.lv || 1);
 
                     // 儲存視覺變差 (Tint/ScaleIndex)
                     let vTint = 0xffffff;
@@ -1099,6 +1099,11 @@ export class GameEngine {
             console.log(`%c${msg}`, "color: #4fc3f7; font-weight: bold;");
             GameEngine.addLog(msg, 'STATE');
             v._lastRecordedState = v.state;
+        }
+
+        // 核心防卡死補強：如果累積卡死幀數過多 (約 1.5 - 2 秒)，強制執行脫困
+        if (v._stuckFrames > 100) {
+            this.resolveStuck(v);
         }
 
         switch (v.state) {
@@ -1601,8 +1606,10 @@ export class GameEngine {
                         v.x = nextX;
                         v.y = nextY;
                         if (Math.abs(dx) > 0.01) v.facing = dx > 0 ? 1 : -1;
+                        v._stuckFrames = 0; // 移動成功，重置計數
                     } else {
-                        // 若段落也被意外阻礙，中止路徑，等待下一個 re-path 循環
+                        // 若段落也被意外阻礙，跳過一步並增加卡死計數
+                        v._stuckFrames = (v._stuckFrames || 0) + 1;
                         v.fullPath = null;
                         v.isFindingPath = false;
                         v._lastRequestedTarget = null;
@@ -1674,8 +1681,10 @@ export class GameEngine {
                 if (Math.abs(dx) > 0.1) v.facing = dx > 0 ? 1 : -1;
                 v.x = nextX;
                 v.y = nextY;
+                v._stuckFrames = 0; // 移動成功，重置
             } else {
-                // 如果直线走不通，保持在障碍物边缘并重置路径，等待尋路繞道
+                // 如果直线走不通，增加卡死計數並重置路徑
+                v._stuckFrames = (v._stuckFrames || 0) + 1;
                 v.fullPath = null;
                 v.isFindingPath = false;
             }

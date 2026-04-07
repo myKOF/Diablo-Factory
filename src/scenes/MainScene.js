@@ -181,11 +181,14 @@ export class MainScene extends Phaser.Scene {
         this.isDragging = false;
 
         this.input.on('pointerdown', (pointer) => {
+            // 核心功能：不論是否被 UI 阻擋，第一時間捕捉目前的建築狀態快照
+            const isPlacement = !!GameEngine.state.placingType;
+            this.rightClickWasPlacement = isPlacement; 
+            // 記錄本次按下的初始狀態，防止 contextmenu 事件先一步清除了標記
+            GameEngine.state.rightClickStartedInPlacementMode = isPlacement;
+
             // 排除 UI 點擊干擾
             if (window.UIManager && window.UIManager.dragGhost) return;
-
-            const isPlacement = !!GameEngine.state.placingType;
-            this.rightClickWasPlacement = isPlacement; // 記錄本次按下的初始狀態，防止 contextmenu 事件先一步清除了標記
 
             const isMiddleDrag = pointer.middleButtonDown();
             const isRightClick = pointer.rightButtonDown();
@@ -259,6 +262,14 @@ export class MainScene extends Phaser.Scene {
             }
 
             if (isPlacement && !isMiddleDrag) return;
+        });
+
+        // 核心修補：註冊全域 mouseup 事件，確保鼠標移出視窗外放開時，仍能正確終止拖動狀態
+        window.addEventListener('mouseup', () => {
+            if (this.isDragging) {
+                this.isDragging = false;
+                this.dragStartPos = null;
+            }
         });
 
         this.input.on('pointermove', (pointer) => {
@@ -1030,7 +1041,7 @@ export class MainScene extends Phaser.Scene {
         // 類型映射 (1: tree, 2: stone, 3: food, 4: gold)
         const typeMap = { 1: 'tree', 2: 'stone', 3: 'food', 4: 'gold' };
 
-        // 1. 放置/更新資源 Bob
+        // 1. 放置/更新資源 Bob 與 標籤
         for (let i = 0; i < resources.length; i++) {
             const res = resources[i];
             const key = `${res.gx}_${res.gy}`;
@@ -1043,8 +1054,9 @@ export class MainScene extends Phaser.Scene {
                 // 從池中獲取或新建 Bob
                 const bob = this.getBobFromPool(typeStr);
                 if (bob) {
-                    bob.x = res.gx * TS + TS / 2;
-                    bob.y = res.gy * TS + TS / 2;
+                    const TEX_OFF = 60; // 120 / 2
+                    bob.x = (res.gx * TS + TS / 2) - TEX_OFF;
+                    bob.y = (res.gy * TS + TS / 2) - TEX_OFF;
                     bob.setVisible(true);
                     
                     // 套用視覺變量 (如 Tint)
@@ -1059,19 +1071,32 @@ export class MainScene extends Phaser.Scene {
                 // 類型改變 (較少見，可能是地圖編輯)
                 this.returnBobToPool(bobInfo.type, bobInfo.bob);
                 const newBob = this.getBobFromPool(typeStr);
-                newBob.x = res.gx * TS + TS / 2;
-                newBob.y = res.gy * TS + TS / 2;
+                const TEX_OFF = 60; // 120 / 2
+                newBob.x = (res.gx * TS + TS / 2) - TEX_OFF;
+                newBob.y = (res.gy * TS + TS / 2) - TEX_OFF;
                 newBob.setVisible(true);
                 bobInfo.type = typeStr;
                 bobInfo.bob = newBob;
             }
+
+            // 更新資源標籤 (基於 MapDataSystem)
+            const dummyEnt = {
+                id: key,
+                x: res.gx * TS + TS / 2,
+                y: res.gy * TS + TS / 2,
+                type: typeStr,
+                amount: res.amount,
+                level: res.level
+            };
+            this.updateEntityLabel(key, dummyEnt);
         }
 
-        // 2. 回收离开畫面的 Bob
+        // 2. 回收离开畫面的 Bob 與 標籤
         for (const [key, info] of this.resourceBobs.entries()) {
             if (!visibleKeys.has(key)) {
                 this.returnBobToPool(info.type, info.bob);
                 this.resourceBobs.delete(key);
+                this.hideEntityLabel(key);
             }
         }
     }

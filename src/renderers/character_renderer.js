@@ -33,7 +33,7 @@ export class CharacterRenderer {
             this.drawSelectionRing(ctx, x, y, time, circleColor);
         }
 
-        const isCombatMove = state === 'MOVE';
+        const isCombatMove = state === 'MOVE' || state === 'CHASE';
         const isMoving = state.includes('MOVING') || isCombatMove; // 精確判斷是否正在移動
         const isWandering = !!unitData.idleTarget && !isCombatMove; // 判斷是否正在閒晃 (排除戰鬥衝刺)
 
@@ -307,8 +307,9 @@ export class CharacterRenderer {
         if (!unitData || !unitData.config) return;
         const model = unitData.config.model;
         const state = (unitData.state || 'IDLE');
-        const isMoving = state.includes('MOVING');
-        const isWandering = !!unitData.idleTarget;
+        const isCombatMove = state === 'CHASE' || state === 'MOVE';
+        const isMoving = (state.includes('MOVING') || isCombatMove) && !(unitData._stuckFrames > 5);
+        const isWandering = !!unitData.idleTarget && !isCombatMove;
         const anim = UI_CONFIG.Animation || { runningFreq: 15, wanderingFreq: 5, breathingFreq: 1.33 };
         const t = time * 0.01;
 
