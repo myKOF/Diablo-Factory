@@ -167,6 +167,11 @@ export class BattleSystem {
         }
 
         if (target.hp > 0 && !target.targetId) {
+            // [核心修正] 如果目標單位正處於「手動位移」中，則被攻擊時不自動反擊轉向，以免打斷玩家的移動指令
+            if (target.isManualCommand && target.state === 'IDLE') {
+                return;
+            }
+
             const targetCamp = (target.config && target.config.camp) || target.camp || 'neutral';
             if (targetCamp !== 'neutral') {
                 target.targetId = attacker.id;

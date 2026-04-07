@@ -22,12 +22,14 @@ export class CharacterRenderer {
         const state = unitData.state || 'IDLE';
         const isEnemy = (unitData.config && unitData.config.camp === 'enemy') || unitData.camp === 'enemy';
         const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
-
         const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
         const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
 
-        if (isSelected || isHovered) {
-            const circleColor = isEnemy ? 0xf44336 : 0x4caf50; 
+        const isTargetedByPlayerArmy = window.GAME_STATE &&
+            window.GAME_STATE.units.villagers.some(u => u.targetId === unitData.id);
+
+        if (isSelected || isHovered || isTargetedByPlayerArmy) {
+            const circleColor = (isEnemy || isTargetedByPlayerArmy) ? 0xf44336 : 0x4caf50;
             this.drawSelectionRing(ctx, x, y, time, circleColor);
         }
 
@@ -310,15 +312,17 @@ export class CharacterRenderer {
         const anim = UI_CONFIG.Animation || { runningFreq: 15, wanderingFreq: 5, breathingFreq: 1.33 };
         const t = time * 0.01;
 
-        // [渲染核心 5: 選取圈繪製] (支持多選Ids列表)
+        // [渲染核心 5: 選取圈繪製]
         const isEnemy = (unitData.config && unitData.config.camp === 'enemy') || unitData.camp === 'enemy';
         const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
-
         const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
         const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
 
-        if (isSelected || isHovered) {
-            const circleColor = isEnemy ? 0xf44336 : 0x4caf50;
+        const isTargetedByPlayerArmy = window.GAME_STATE && 
+            window.GAME_STATE.units.villagers.some(u => u.targetId === unitData.id);
+
+        if (isSelected || isHovered || isTargetedByPlayerArmy) {
+            const circleColor = (isEnemy || isTargetedByPlayerArmy) ? 0xf44336 : 0x4caf50; 
             this.drawSelectionRing(ctx, x, y, time, circleColor);
         }
 

@@ -89,10 +89,12 @@ export class BattleRenderer {
             const distToPointer = Math.hypot(rx - pointer.worldX, ry - pointer.worldY);
             const isHovered = distToPointer < 40; 
             const isSelected = selectedIds.includes(unit.id);
+            const isTargetedByPlayerArmy = window.GAME_STATE && 
+                window.GAME_STATE.units.villagers.some(u => u.targetId === unit.id);
 
-            // 如果符合任一條件（受擊、懸停、選中、正在戰鬥），渲染血條
+            // 如果符合任一條件（受擊、懸停、選中、正在戰鬥、或是我方單位集火目標），渲染血條
             const isInCombat = (unit.state === 'CHASE' || unit.state === 'ATTACK');
-            if (unit.hitTimer > 0 || isHovered || isSelected || isInCombat) {
+            if (unit.hitTimer > 0 || isHovered || isSelected || isInCombat || isTargetedByPlayerArmy) {
                 this.drawHPBar(g, unit, rx, ry);
 
                 // 受擊閃爍紅白框 (受傷回饋，僅在受擊當下瞬間)

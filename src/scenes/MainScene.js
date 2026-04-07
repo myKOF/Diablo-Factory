@@ -585,8 +585,9 @@ export class MainScene extends Phaser.Scene {
         this.updateUnits(state.units.villagers);
         this.updateDynamicHUD(visibleEntities);
 
-        // 渲染戰鬥視覺 (HP Bars)
-        BattleRenderer.renderHPBars(this.hudGraphics, state.units.villagers, deltaTime);
+        // 渲染戰鬥視覺 (HP Bars) - 同時包含單位與具備血量的建築實體
+        const allCombatants = [...state.units.villagers, ...state.mapEntities.filter(e => e.hp !== undefined)];
+        BattleRenderer.renderHPBars(this.hudGraphics, allCombatants, deltaTime);
     }
 
     updateTownCenterLocator(cam) {
@@ -727,9 +728,26 @@ export class MainScene extends Phaser.Scene {
         g.clear();
 
         // 僅處理建築選取框。單位選取圈已移至 CharacterRenderer.js 以達成 100% 同步
+        // 1. [手動選取] 建築選取框 (橘色，由玩家點擊觸發)
         if (window.UIManager && window.UIManager.activeMenuEntity) {
             const ent = window.UIManager.activeMenuEntity;
-            this.drawSingleSelectionBox(g, ent, 0xff9800); // 橘色
+            this.drawSingleSelectionBox(g, ent, 0xff9800);
+        }
+
+        // 2. [戰鬥目標] 建築目標框 (紅色，目前被我方選中單位鎖定攻擊的目標)
+        const selectedIds = GameEngine.state.selectedUnitIds || [];
+        if (selectedIds.length > 0) {
+            const targetedEntities = new Set();
+            GameEngine.state.units.villagers.forEach(u => {
+                if (selectedIds.includes(u.id) && u.targetId) {
+                    const ent = GameEngine.state.mapEntities.find(e => e.id === u.targetId);
+                    if (ent) targetedEntities.add(ent);
+                }
+            });
+
+            targetedEntities.forEach(ent => {
+                this.drawSingleSelectionBox(g, ent, 0xf44336); // 紅色選定框
+            });
         }
     }
 
@@ -802,19 +820,10 @@ export class MainScene extends Phaser.Scene {
                 const isEnemy = (u.config && u.config.camp === 'enemy') || u.camp === 'enemy';
                 if (isEnemy) return;
 
-                // 只有狀態不是 IDLE 或是有目標時才顯示
+                // 2. 只有狀態不是 IDLE 或是有目標時才顯示
                 if (u.targetId) {
-                    const target = GameEngine.state.units.villagers.find(v => v.id === u.targetId) ||
-                        GameEngine.state.mapEntities.find(e => e.id === u.targetId);
-
-                    if (target) {
-                        const targetType = target.config ? 'enemy' : 'ground'; // 單位為 enemy, 建築資源為 ground
-                        const key = `target_${target.id}`;
-                        if (!drawnPos.has(key)) {
-                            this.drawTargetIndicator(g, target.x, target.y, targetType, cfg.alpha || 0.7, now);
-                            drawnPos.add(key);
-                        }
-                    }
+                    // [核心修正] 不再在此處顯示攻擊目標點（縮放紅圈）。
+                    // 根據玩家要求，攻擊目標只需常態顯示自身紅圈與血條，不需要點擊指示器。
                 } else if (u.idleTarget && u.state !== 'IDLE') {
                     const key = `ground_${Math.floor(u.idleTarget.x)}_${Math.floor(u.idleTarget.y)}`;
                     if (!drawnPos.has(key)) {

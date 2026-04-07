@@ -318,7 +318,7 @@ export const UI_CONFIG = {
         title: "⚙️ 系統核心設置",
         glass: true
     },
-    // ── 座標顯示 (CoordsDisplay) ──────────────────────────────────
+    // ── 座標顯示標籤 (CoordsDisplay) ──────────────────────────────────
     // 顯示當前畫面中央的世界座標 (x, y)。
     CoordsDisplay: {
         anchor: "TOP_LEFT",
