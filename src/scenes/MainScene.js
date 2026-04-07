@@ -251,6 +251,7 @@ export class MainScene extends Phaser.Scene {
             // 2. 右鍵與中鍵皆可用於相機拖曳
             if (isRightClick || isMiddleDrag) {
                 this.isDragging = true;
+                this.hasMetDragThreshold = false; // 重置拖動門檻標記
                 this.dragStartPos = { x: pointer.x, y: pointer.y };
                 lastPointer = { x: pointer.x, y: pointer.y };
             }
@@ -260,12 +261,23 @@ export class MainScene extends Phaser.Scene {
 
         this.input.on('pointermove', (pointer) => {
             if (this.isDragging) {
-                const dx = pointer.x - lastPointer.x;
-                const dy = pointer.y - lastPointer.y;
-                if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
-                    cam.scrollX -= dx;
-                    cam.scrollY -= dy;
-                    this.lastDragTime = Date.now(); // 記錄最後一次畫面移動的時間點
+                // 檢查是否已達到設定的最小位移門檻，避免誤觸
+                if (!this.hasMetDragThreshold) {
+                    const dist = Math.hypot(pointer.x - this.dragStartPos.x, pointer.y - this.dragStartPos.y);
+                    const threshold = (UI_CONFIG.Interaction && UI_CONFIG.Interaction.minDragDistance) || 5;
+                    if (dist >= threshold) {
+                        this.hasMetDragThreshold = true;
+                    }
+                }
+
+                if (this.hasMetDragThreshold) {
+                    const dx = pointer.x - lastPointer.x;
+                    const dy = pointer.y - lastPointer.y;
+                    if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
+                        cam.scrollX -= dx;
+                        cam.scrollY -= dy;
+                        this.lastDragTime = Date.now(); // 記錄最後一次畫面移動的時間點
+                    }
                 }
                 lastPointer = { x: pointer.x, y: pointer.y };
             }
@@ -300,8 +312,9 @@ export class MainScene extends Phaser.Scene {
                 GameEngine.state.rightClickStartedInPlacementMode = false;
 
                 const dragDist = this.dragStartPos ? Math.hypot(pointer.x - this.dragStartPos.x, pointer.y - this.dragStartPos.y) : 0;
-                // 3. 即使沒觸發 move 事件，位移超過 2px 仍視為拖動
-                if (dragDist > 2) return;
+                // 3. 即使沒觸發 move 事件，位移超過設定門檻仍視為拖動 (放寬容錯率)
+                const threshold = (UI_CONFIG.Interaction && UI_CONFIG.Interaction.minDragDistance) || 10;
+                if (dragDist > threshold) return;
 
                 // 1. 識別點擊目標 (碰撞檢測)
                 let clickedEnemy = null;

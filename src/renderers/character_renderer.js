@@ -64,10 +64,15 @@ export class CharacterRenderer {
             bodyBob = Math.sin(t * anim.breathingFreq) * 1.5;
         }
 
-        // 0.1 繪製視界圈 (紅色線條) - 座標系修正：CSV 數值為網格數，需乘以 20 像素
-        if (window.GAME_STATE && window.GAME_STATE.settings.showVisionRange) {
-            const visionRadius = (unitData.field_vision || 150) * 20;
-            this.drawVisionRange(ctx, x, y, visionRadius);
+        // 0.1 繪製視界圈 (三段切換邏輯)
+        const visionMode = (window.GAME_STATE && window.GAME_STATE.settings.showVisionRange) || 0;
+        if (visionMode > 0) {
+            const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
+            // 模式 1: 僅顯示選中目標 | 模式 2: 顯示所有單位
+            if (visionMode === 2 || (visionMode === 1 && isSelected)) {
+                const visionRadius = (unitData.field_vision || 150) * 20;
+                this.drawVisionRange(ctx, x, y, visionRadius);
+            }
         }
 
         const facing = unitData.facing || 1;
@@ -317,10 +322,15 @@ export class CharacterRenderer {
             this.drawSelectionRing(ctx, x, y, time, circleColor);
         }
 
-        // 1.1 繪製視界圈 (紅色線條) - 座標系修正
-        if (window.GAME_STATE && window.GAME_STATE.settings.showVisionRange) {
-            const visionRadius = (unitData.field_vision || 150) * 20;
-            this.drawVisionRange(ctx, x, y, visionRadius);
+        // 1.1 繪製視界圈 (三段切換邏輯)
+        const visionMode = (window.GAME_STATE && window.GAME_STATE.settings.showVisionRange) || 0;
+        if (visionMode > 0) {
+            const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
+            // 模式 1: 僅顯示選中目標 | 模式 2: 顯示所有單位
+            if (visionMode === 2 || (visionMode === 1 && isSelected)) {
+                const visionRadius = (unitData.field_vision || 150) * 20;
+                this.drawVisionRange(ctx, x, y, visionRadius);
+            }
         }
 
         const facing = (unitData && unitData.facing) || 1;

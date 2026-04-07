@@ -26,6 +26,12 @@ export class BattleSystem {
     }
 
     static processCombat(unit, dt, state, TILE_SIZE, shouldScan) {
+        // [核心修正] 優先級管理：若單位目前正處於手動移動指令中（例如玩家點擊地面移動，state 為 IDLE 但 isManualCommand 為 true），
+        // 則跳過戰鬥邏輯，確保玩家指令優先，不被自動索敵覆蓋。
+        if (unit.isManualCommand && unit.state === 'IDLE') {
+            return;
+        }
+
         // 1. 自動索敵 (如果是手動強制集火，除非目標死亡否則不換目標)
         if (shouldScan || !unit.targetId) {
             this.autoSeeking(unit, state, TILE_SIZE);

@@ -24,7 +24,11 @@ export class UIManager {
         this.uiLayer = document.getElementById("ui_layer");
         if (!this.uiLayer) return;
 
+        // [核心修正] 將 UIManager 暴露至全域，確保 HTML 字串中的 onclick 能正確呼叫方法
+        window.UIManager = this;
+
         this.renderAll();
+        // ... (其餘事件綁定保持不變)
 
         // 綁定世界級事件
         window.addEventListener("mousedown", (e) => this.handleWorldMouseDown(e));
@@ -813,8 +817,8 @@ export class UIManager {
                 const scene = window.PhaserScene;
                 const wasDragging = scene && scene.lastDragTime && (now - scene.lastDragTime < 100);
 
-                // 如果位移超過 10 或在過去 0.1 秒內發生過畫面拖移，或者點擊持續時間超過 100ms，則判定為拖移而非指令
-                if (drift < 10 && duration < 100 && !wasDragging) {
+                // 如果位移超過 10 或在過去 0.1 秒內發生過畫面拖移，則判定為拖移而非指令
+                if (drift < 10 && !wasDragging) {
                     const ent = this.activeMenuEntity;
                     const bCfg = ent ? GameEngine.state.buildingConfigs[ent.type] : null;
 
@@ -1170,10 +1174,15 @@ export class UIManager {
                 </div>
             </div>
 
-            <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="window.UIManager.updateSetting(event, 'showVisionRange', !window.GAME_STATE.settings.showVisionRange)">
+            <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="window.UIManager.updateSetting(event, 'showVisionRange', (window.GAME_STATE.settings.showVisionRange + 1) % 3)">
                 <span style="font-size: 16px; color: #e0e0e0; font-weight: 600;">單位視界圈顯示</span>
-                <div class="setting-toggle ${settings.showVisionRange ? 'active' : ''}" style="width: 54px; height: 26px; background: ${settings.showVisionRange ? 'var(--aoe-gold)' : '#444'}; border-radius: 13px; position: relative; transition: all 0.3s; box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);">
-                    <div style="width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 3px; ${settings.showVisionRange ? 'right: 3px' : 'left: 3px'}; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
+                <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+                    <div class="setting-toggle" style="width: 70px; height: 26px; background: ${settings.showVisionRange === 0 ? '#444' : (settings.showVisionRange === 1 ? '#5c85d6' : 'var(--aoe-gold)')}; border-radius: 13px; position: relative; transition: all 0.3s; box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);">
+                        <div style="width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 3px; left: ${settings.showVisionRange === 0 ? '3px' : (settings.showVisionRange === 1 ? '25px' : '47px')}; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
+                    </div>
+                    <span style="font-size: 11px; color: ${settings.showVisionRange === 0 ? '#aaa' : '#fff'}; font-weight: bold;">
+                        ${settings.showVisionRange === 0 ? '關閉' : (settings.showVisionRange === 1 ? '僅選中單位' : '全部單位')}
+                    </span>
                 </div>
             </div>
         `;

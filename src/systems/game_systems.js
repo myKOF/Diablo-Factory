@@ -37,7 +37,8 @@ export class GameEngine {
             cells: new Map() // key: "gx,gy", value: Set(entity)
         },
         settings: {
-            showResourceInfo: true // 預設顯示大地圖資源資訊（名稱、等級、數量）
+            showResourceInfo: true, // 預設顯示大地圖資源資訊（名稱、等級、數量）
+            showVisionRange: 0      // 預設關閉視野圈 (0: 關閉, 1: 僅選中, 2: 全部)
         },
         idToNameMap: {}, // NPC ID -> NPC Name (用於從 buildings.csv 定義的 ID 找配置)
         renderVersion: 0, // 用於通知渲染器強行刷新
