@@ -26,19 +26,17 @@ export class BattleSystem {
     }
 
     static processCombat(unit, dt, state, TILE_SIZE, shouldScan) {
-        // [核心修正] 優先級管理：若單位目前正處於手動移動指令中（例如玩家點擊地面移動，state 為 IDLE 但 isManualCommand 為 true），
-        // 則跳過戰鬥邏輯，確保玩家指令優先，不被自動索敵覆蓋。
-        if (unit.isManualCommand && unit.state === 'IDLE') {
-            return;
-        }
-
         // 1. 自動索敵 (如果是手動強制集火，除非目標死亡否則不換目標)
-        if (shouldScan || !unit.targetId) {
+        // [新協定] 系統自動化僅在非玩家鎖定狀態下觸發
+        if (!unit.isPlayerLocked && (shouldScan || !unit.targetId)) {
             this.autoSeeking(unit, state, TILE_SIZE);
         }
 
         if (!unit.targetId || typeof unit.targetId === 'object') {
-            if (unit.state === 'ATTACK' || unit.state === 'CHASE') unit.state = 'IDLE';
+            if (unit.state === 'ATTACK' || unit.state === 'CHASE') {
+                unit.state = 'IDLE';
+                unit.isPlayerLocked = false; // [新協定] 目標消失，重置玩家鎖定
+            }
             unit.forceFocus = false;
             return;
         }
@@ -47,7 +45,10 @@ export class BattleSystem {
         if (!target || target.hp <= 0) {
             unit.targetId = null;
             unit.forceFocus = false;
-            if (unit.state === 'ATTACK' || unit.state === 'CHASE') unit.state = 'IDLE';
+            if (unit.state === 'ATTACK' || unit.state === 'CHASE') {
+                unit.state = 'IDLE';
+                unit.isPlayerLocked = false; // [新協定] 目標已死亡，重置玩家鎖定
+            }
             return;
         }
 
@@ -167,8 +168,8 @@ export class BattleSystem {
         }
 
         if (target.hp > 0 && !target.targetId) {
-            // [核心修正] 如果目標單位正處於「手動位移」中，則被攻擊時不自動反擊轉向，以免打斷玩家的移動指令
-            if (target.isManualCommand && target.state === 'IDLE') {
+            // [新協定] 如果目標單位正處於玩家指令鎖定中，則被攻擊時不自動反擊，以免打斷玩家指令
+            if (target.isPlayerLocked) {
                 return;
             }
 

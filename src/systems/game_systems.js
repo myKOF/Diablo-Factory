@@ -165,8 +165,8 @@ export class GameEngine {
             });
 
             this.state.units.villagers.forEach(v => {
-                // 閒置村民隨時檢查是否有工作可做，大幅提升反應速度
-                if (v.state === 'IDLE') {
+                // [新協定] 只有在 State: Idle 且 isPlayerLocked = false 時，系統才可自動分配任務
+                if (v.state === 'IDLE' && !v.isPlayerLocked) {
                     this.assignNextTask(v);
                     v.workOffset = null; // 閒置時重置工作偏移
                 }
@@ -688,6 +688,7 @@ export class GameEngine {
             field_vision: (config.field_vision !== undefined) ? config.field_vision : 15,
             initiative_attack: (config.initiative_attack !== undefined) ? config.initiative_attack : 1,
             facing: 1, // 1: 右, -1: 左
+            isPlayerLocked: false, // [新協定] 玩家指令鎖定旗標，啟動時屏蔽系統自動化
             // 物理碰撞尺寸 (寬, 高)
             width: config.pixel_size ? config.pixel_size.w : 20,
             height: config.pixel_size ? config.pixel_size.h : 20
@@ -1161,7 +1162,7 @@ export class GameEngine {
                     this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt, ignoreEnts);
                     if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                         v.idleTarget = null;
-                        v.isManualCommand = false;
+                        v.isPlayerLocked = false;
                         v.waitTimer = 1 + Math.random() * 2;
                         v.pathTarget = null;
                     }
@@ -1249,6 +1250,7 @@ export class GameEngine {
                 if (!v.targetId) {
                     v.state = 'IDLE';
                     v.pathTarget = null;
+                    v.isPlayerLocked = false; // [新協定] 目標消失，重置玩家鎖定
                     break;
                 }
 
@@ -1473,6 +1475,7 @@ export class GameEngine {
                     } else {
                         this.restoreVillagerTask(v);
                         v.constructionTarget = null; // 恢復舊任務後清空工程目標
+                        v.isPlayerLocked = false; // [新協定] 建造指令執行完畢，重置玩家鎖定
                     }
                 }
                 break;
@@ -1513,7 +1516,10 @@ export class GameEngine {
             }
         }
 
-        if (v.state === 'IDLE' && collidingEnt) v.idleTarget = null;
+        if (v.state === 'IDLE' && collidingEnt) {
+            v.idleTarget = null;
+            v.isPlayerLocked = false; // [新協定] 撞牆且 IDLE 時釋放鎖定
+        }
 
         // 附近基地即便撞牆也算存款 (加寬範圍至 150)
         if (v.state === 'MOVING_TO_BASE') {
@@ -1542,7 +1548,7 @@ export class GameEngine {
                     v.state = 'MOVING_TO_RESOURCE';
 
                     // 手動指令連動修復：如果是手動指派的採集，跳過 assignNextTask 以免被強制中斷或變為 IDLE
-                    if (v.isManualCommand) {
+                    if (v.isPlayerLocked) {
                         // 檢查手動目標是否還有效
                         if (v.targetId && v.targetId.gx !== undefined) {
                             const stillExists = this.state.mapData.getResource(v.targetId.gx, v.targetId.gy);
@@ -1553,7 +1559,7 @@ export class GameEngine {
                             }
                         }
                         // 手動目標已無或資源已空，重置手動旗標並進入一般分配
-                        v.isManualCommand = false;
+                        v.isPlayerLocked = false;
                         v.targetId = null;
                     }
 
@@ -1583,7 +1589,7 @@ export class GameEngine {
         }
 
         // 手動指令連動保護：若已有手動任務且正在執行中，不要進入自動分配邏輯重置為 IDLE
-        if (v.isManualCommand && (v.state.startsWith('MOVING_TO') || v.state === 'GATHERING' || v.state === 'CONSTRUCTING')) {
+        if (v.isPlayerLocked && (v.state.startsWith('MOVING_TO') || v.state === 'GATHERING' || v.state === 'CONSTRUCTING')) {
             return;
         }
 
@@ -2053,7 +2059,7 @@ export class GameEngine {
         // 2. 處理每個倉庫的溢出與缺額
         let allIdle = this.state.units.villagers.filter(v =>
             v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
-            v.state === 'IDLE' && !v.assignedWarehouseId && !v.isRecalled && !v.isManualCommand
+            v.state === 'IDLE' && !v.assignedWarehouseId && !v.isRecalled && !v.isPlayerLocked
         );
 
         // 先釋放溢出的人手，回歸閒置池

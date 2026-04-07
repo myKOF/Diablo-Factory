@@ -519,92 +519,98 @@ export class MainScene extends Phaser.Scene {
         // [最終防護] 若正處於建造預覽狀態，或按下鼠標時正處於建造預覽狀態，屏蔽所有指令
         if (GameEngine.state.placingType || GameEngine.state.rightClickStartedInPlacementMode) return;
 
-        // 先判斷 npc 的 type，若為敵方則不執行指令
-        const type = unit.config ? unit.config.type : '';
-        if (type === 'wolf' || type === 'bear') return;
+        // 單位狀態檢查
+        const unitType = unit.config ? unit.config.type : '';
+        if (unitType === 'wolf' || unitType === 'bear') return; // 非玩家控制單位不處理
 
         const wx = pointer.worldX, wy = pointer.worldY;
+        const TS = GameEngine.TILE_SIZE;
+        const pf = GameEngine.state.pathfinding;
 
-        // 1. 執行命令
+        let finalTx = wx, finalTy = wy;
+        let isAttackCommand = false;
+
+        // 1. 識別目標類別
         if (clickedTarget) {
-            const isResource = !!clickedTarget.gx;
+            const isResource = !!(clickedTarget.gx !== undefined && clickedTarget.gy !== undefined) || (clickedTarget.resourceType);
+            const isEnemy = (clickedTarget.config && clickedTarget.config.camp === 'enemy') || clickedTarget.camp === 'enemy' || clickedTarget.isEnemy;
 
-            if (isResource) {
-                // 點擊的是資源格 (MapDataSystem)
-                if (unit.config.type === 'villagers') {
-                    // 工人：開始採集
-                    unit.state = 'MOVING_TO_RESOURCE';
-                    unit.type = clickedTarget.resourceType; // 切換採集型別
-                    unit.targetId = clickedTarget;
-                    unit.pathTarget = null;
-                    unit.isManualCommand = true;
-                    GameEngine.addLog(`[命令] ${unit.configName} 前往採集資源 (${clickedTarget.gx}, ${clickedTarget.gy})。`);
-                } else {
-                    // 戰鬥單位：移動至資源附近
-                    unit.state = 'IDLE';
-                    unit.idleTarget = { x: clickedTarget.x, y: clickedTarget.y };
-                    unit.targetId = null;
-                    unit.isManualCommand = true;
-                    unit.pathTarget = null;
-                    GameEngine.addLog(`[命令] 戰鬥單位 ${unit.configName} 移動至資源點附近。`);
-                }
+            finalTx = clickedTarget.x;
+            finalTy = clickedTarget.y;
+
+            if (isEnemy) {
+                // 我方單位右鍵點敵方：移動至攻擊範圍內開始攻擊敵人
+                isAttackCommand = true;
+                unit.targetId = clickedTarget.id;
+                unit.forceFocus = true;
+                unit.state = 'CHASE';
+                unit.idleTarget = { x: finalTx, y: finalTy };
+                unit.isPlayerLocked = true;
+                unit.chaseFrame = 999;
+                GameEngine.addLog(`[命令] ${unit.configName} 鎖定目標 ${clickedTarget.configName || '敵人'} 並進入追擊。`);
+            } else if (isResource && unit.config.type === 'villagers') {
+                // 我方工人右鍵點資源：採集該資源
+                unit.state = 'MOVING_TO_RESOURCE';
+                unit.type = clickedTarget.resourceType || clickedTarget.type;
+                unit.targetId = clickedTarget;
+                unit.pathTarget = null;
+                unit.isPlayerLocked = true;
+                GameEngine.addLog(`[命令] ${unit.configName} 前往採集 ${unit.type}。`);
+                return; // 採集進入獨立流程
             } else {
-                // 點擊的是實體 (敵軍或建築)
-                if (clickedTarget.amount !== undefined && (clickedTarget.type === 'farmland' || clickedTarget.type === 'tree_plantation')) {
-                    if (unit.config.type === 'villagers') {
-                        unit.state = 'MOVING_TO_RESOURCE';
-                        unit.type = clickedTarget.resourceType || (clickedTarget.type === 'farmland' ? 'FOOD' : 'WOOD');
-                        unit.targetId = clickedTarget;
-                        unit.pathTarget = null;
-                        unit.isManualCommand = true;
-                        GameEngine.addLog(`[命令] ${unit.configName} 前往採集田地。`);
+                // 其它情況：點資源(非工人)、障礙、友軍建築
+                // 移動至該目標位置附近合法點位
+                if (pf) {
+                    const gx = Math.floor(finalTx / TS);
+                    const gy = Math.floor(finalTy / TS);
+                    if (!pf.isValidAndWalkable(gx, gy, true)) {
+                        const nearestArr = pf.getNearestWalkableTile(gx, gy, 50, true);
+                        if (nearestArr) {
+                            finalTx = nearestArr.x * TS + TS / 2;
+                            finalTy = nearestArr.y * TS + TS / 2;
+                        }
                     }
-                } else {
-                    unit.targetId = clickedTarget.id;
-                    unit.forceFocus = true;
-                    unit.state = 'CHASE';
-                    unit.idleTarget = { x: clickedTarget.x, y: clickedTarget.y };
-                    unit.isManualCommand = true;
-                    unit.chaseFrame = 999;
-                    GameEngine.addLog(`[命令] ${unit.configName} 正在追擊目標 ${clickedTarget.configName || '目標'}。`);
                 }
+                unit.targetId = null;
+                unit.forceFocus = false;
+                GameEngine.addLog(`[命令] ${unit.configName} 移動至目標附近。`);
             }
         } else {
-            // 移動指令：完全清除所有任務內容，防止系統重新分配回去做老本行
-            unit.targetId = null;
-            unit.forceFocus = false; // 點擊地面重置強制鎖定
-            unit.constructionTarget = null;
-            unit.assignedWarehouseId = null;
-
-            // 安全檢查：若目標點不可行走(在建築內)，導航至週邊最近可用點
-            const TS = GameEngine.TILE_SIZE;
-            const gx = Math.floor(wx / TS);
-            const gy = Math.floor(wy / TS);
-            let finalTx = wx, finalTy = wy;
-            const pf = GameEngine.state.pathfinding;
-
-            // 修正：必須將像素坐標轉為格網索引，否則判定永遠失效
-            if (pf && !pf.isValidAndWalkable(gx, gy, true)) {
-                const nearestArr = pf.getNearestWalkableTile(gx, gy, 50, true);
-                if (nearestArr) {
-                    finalTx = nearestArr.x * TS + TS / 2;
-                    finalTy = nearestArr.y * TS + TS / 2;
+            // 我方單位右鍵點地板：移動至該位置
+            if (pf) {
+                const gx = Math.floor(wx / TS);
+                const gy = Math.floor(wy / TS);
+                if (!pf.isValidAndWalkable(gx, gy, true)) {
+                    const nearestArr = pf.getNearestWalkableTile(gx, gy, 50, true);
+                    if (nearestArr) {
+                        finalTx = nearestArr.x * TS + TS / 2;
+                        finalTy = nearestArr.y * TS + TS / 2;
+                    }
                 }
             }
 
-            // 核心修復：只有當新目標與舊目標距離大於一定閾值時，才清除舊路徑。
-            // 這能防止快速雙擊右鍵時，第二下無意中清除了第一下剛計算好的尋路路徑，導致單位變回「直線前進」。
-            const distToExisting = unit.idleTarget ? Math.hypot(unit.idleTarget.x - finalTx, unit.idleTarget.y - finalTy) : 999;
-            if (distToExisting > 10) {
-                unit.pathTarget = null;
-                unit.fullPath = null;
-            }
-
-            unit.idleTarget = { x: finalTx, y: finalTy };
-            unit.state = 'IDLE';
-            unit.isManualCommand = true;
-            GameEngine.addLog(`[命令] ${unit.configName} 移動至目的並待命。`);
+            unit.targetId = null;
+            unit.forceFocus = false;
+            unit.pathTarget = null;
+            unit.constructionTarget = null;
+            unit.assignedWarehouseId = null;
+            GameEngine.addLog(`[命令] ${unit.configName} 移動至地面。`);
         }
+
+        // 2. 執行通用移動狀態設定
+        if (!isAttackCommand) {
+            unit.state = 'IDLE';
+        }
+
+        // 核心修復：只有當新目標與舊目標距離大於一定閾值時，才清除舊路徑。
+        const distToExisting = unit.idleTarget ? Math.hypot(unit.idleTarget.x - finalTx, unit.idleTarget.y - finalTy) : 999;
+        if (distToExisting > 10) {
+            unit.pathTarget = null;
+            unit.fullPath = null;
+        }
+
+        unit.idleTarget = { x: finalTx, y: finalTy };
+        unit.isPlayerLocked = true;
     }
 
     logUnitDetail(unit) {
