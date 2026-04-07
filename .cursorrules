@@ -18,6 +18,15 @@
 3. 邏輯保險：資源扣除必須有非負檢查。所有 FSM 任務需具備 Try-Catch 隔離，防止單點錯誤導致循環中斷。
 4. 穩定優先：優化時嚴禁改動核心任務隊列(TaskQueue)的 push/pop 順序，確保建築/採集邏輯鏈條完整。
 
+[大地圖渲染與數據分離協議]
+1. 數據層 (Data Layer)：全地圖資源(樹/礦)禁止使用 Object，必須存於 Uint16Array 陣列。
+2. 渲染層 (View Layer)：
+   - 採用 Phaser Tilemap 或 Blitter 物件，嚴禁為萬級資源建立獨立 Sprite。
+   - 僅對相機範圍 (Viewport) 內的數據進行「動態實例化」，離開視野立即回收。
+3. 更新機制 (Chunking)：將地圖分割為 32x32 的區塊 (Chunks)，僅啟動當前與鄰近區塊的邏輯偵測。
+4. 效能指標：萬級資源下，Draw Calls 必須控制在 50 以下，FPS 穩定 60。
+5. 驗證回報：回報任務時需附帶「Debug 渲染耗時 (ms)」與「當前 Draw Calls 數」。
+
 [UI設計規範協議]
 1. **UI設計規範**：(Responsive UI Skill)所有界面在製作時，必需同時寫入ui.config.cjs讓其尺寸、顏色、字體等參數自訂義，且需附帶詳細中文注釋。詳細規範如下：
 2. 介面參數解耦 (UI Config Injection)規範：禁止在邏輯代碼中硬編碼（Hard-coded）任何尺寸、顏色或字體。

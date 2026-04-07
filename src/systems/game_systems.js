@@ -12,7 +12,7 @@ export class GameEngine {
     static TILE_SIZE = 20; // 基礎座標單位
 
     static state = {
-        resources: { healthPotion: 0, soul: 100, gold: 100, wood: 200, stone: 0, food: 0, mana: 0 },
+        resources: { healthpotion: 0, soul: 100, gold: 100, wood: 200, stone: 0, food: 0, mana: 0 },
         buildings: { village: 1, farmhouse: 0 },
         units: { villagers: [], priest: 0, mage: 0, archmage: 0, swordsman: 0, archer: 0 },
         mapEntities: [],
@@ -53,8 +53,9 @@ export class GameEngine {
         wood: "木材",
         stone: "石頭",
         food: "食物",
-        healthPotion: "藥水",
-        soul: "靈魂"
+        healthpotion: "生命藥水",
+        soul: "靈魂碎片",
+        mana: "法力"
     };
 
     static lastTickTime = 0;
@@ -264,31 +265,57 @@ export class GameEngine {
         }
     }
 
+    /**
+     * 解析 "{food=100,wood=200}" 格式為成本對象 {food: 100, wood: 200, ...}
+     */
+    static parseResourceCosts(str) {
+        const costs = { food: 0, wood: 0, stone: 0, gold: 0, soul: 0, mana: 0, healthpotion: 0 };
+        if (!str || typeof str !== 'string' || !str.includes('=')) return costs;
+        const clean = str.replace(/[\{\}"']/g, '').trim();
+        const pairs = clean.split(',');
+        pairs.forEach(p => {
+            const [rk, rv] = p.split('=');
+            if (rk && rv) {
+                const key = rk.trim().toLowerCase();
+                const amount = parseInt(rv.trim());
+                if (!isNaN(amount)) costs[key] = amount;
+            }
+        });
+        return costs;
+    }
+
     static async loadNPCConfig() {
         try {
-            const text = await this.fetchCSVText('/config/npc_data.csv');
+            const text = await this.fetchCSVText('config/npc_data.csv');
             const data = this.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
-            const idxId = headers.indexOf('id'),
-                idxName = headers.indexOf('name'),
-                idxModel = headers.indexOf('model'),
-                idxFightingSpeed = headers.indexOf('fighting_speed'),
-                idxIdleSpeed = headers.indexOf('idle_speed'),
-                idxColSpeed = headers.indexOf('collection_speed'),
-                idxColAmt = headers.indexOf('collection_resource'),
-                idxNeed = headers.indexOf('need_resource'),
-                idxLv = headers.indexOf('lv'),
-                idxHp = headers.indexOf('hp'),
-                idxAtk = headers.indexOf('attack'),
-                idxAtkSpeed = headers.indexOf('attack_speed'),
-                idxRange = headers.indexOf('range'),
-                idxType = headers.indexOf('type'),
-                idxCamp = headers.indexOf('camp'),
-                idxPop = headers.indexOf('population'),
-                idxPatrol = headers.indexOf('patrol_range'),
-                idxVision = headers.indexOf('field_vision'),
-                idxInitiative = headers.indexOf('initiative_attack');
+
+            const hIdx = (key) => headers.findIndex(h => h.toLowerCase().trim() === key.toLowerCase());
+
+            const idxId = hIdx('id'),
+                idxName = hIdx('name'),
+                idxModel = hIdx('model'),
+                idxFightingSpeed = hIdx('fighting_speed'),
+                idxIdleSpeed = hIdx('idle_speed'),
+                idxColSpeed = hIdx('collection_speed'),
+                idxColAmt = hIdx('collection_resource'),
+                idxNeed = hIdx('need_resource'),
+                idxLv = hIdx('lv'),
+                idxHp = hIdx('hp'),
+                idxAtk = hIdx('attack'),
+                idxAtkSpeed = hIdx('attack_speed'),
+                idxRange = hIdx('range'),
+                idxType = hIdx('type'),
+                idxCamp = hIdx('camp'),
+                idxPop = hIdx('population'),
+                idxPatrol = hIdx('patrol_range'),
+                idxVision = hIdx('field_vision'),
+                idxInitiative = hIdx('initiative_attack'),
+                idxPixelSize = hIdx('pixel_size');
+
+            console.log(`[CSV載入] NPC配置欄位索引結果:`, { id: idxId, name: idxName, need: idxNeed, size: idxPixelSize });
+
 
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
@@ -318,19 +345,37 @@ export class GameEngine {
                     range: parseInt(row[idxRange]) || 10,
                     patrol_range: parseFloat(row[idxPatrol]) || 0,
                     field_vision: parseFloat(row[idxVision]) || 15,
-                    initiative_attack: parseInt(row[idxInitiative]) !== undefined ? parseInt(row[idxInitiative]) : 1
+                    initiative_attack: parseInt(row[idxInitiative]) !== undefined ? parseInt(row[idxInitiative]) : 1,
+                    need_resource: row[idxNeed],
+                    costs: this.parseResourceCosts(row[idxNeed])
                 };
+
+                // 解析物理尺寸 {寬,高} 或 {寬*高}
+                if (idxPixelSize !== -1 && row[idxPixelSize]) {
+                    const val = row[idxPixelSize].trim();
+                    const m1 = val.match(/\{[ ]*(\d+)[ ]*[\*,][ ]*(\d+)[ ]*\}/);
+                    if (m1) {
+                        this.state.npcConfigs[name].pixel_size = { w: parseInt(m1[1]), h: parseInt(m1[2]) };
+                    } else {
+                        const m2 = val.match(/\{[ ]*(\d+)[ ]*\}/);
+                        if (m2) {
+                            const n = parseInt(m2[1]);
+                            this.state.npcConfigs[name].pixel_size = { w: n, h: n };
+                        }
+                    }
+                }
             }
         } catch (e) { }
     }
 
     static async loadSystemConfig() {
         try {
-            const text = await this.fetchCSVText('/config/system_config.csv');
+            const text = await this.fetchCSVText('config/system_config.csv');
             const data = this.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
-            const idxType = headers.indexOf('type'), idxValue = headers.indexOf('value');
+            const hIdx = (key) => headers.findIndex(h => h.toLowerCase().trim() === key.toLowerCase());
+            const idxType = hIdx('type'), idxValue = hIdx('value');
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
                 if (!row[idxType]) continue;
@@ -339,13 +384,14 @@ export class GameEngine {
 
                 if (type === 'default_resource') {
                     // 解析 "{food=100,wood=200,stone=100}"
-                    const clean = val.replace(/[\{\}]/g, '');
-                    const pairs = clean.split(',');
+                    const costs = this.parseResourceCosts(val);
                     // 先歸零所有資源
                     for (let r in this.state.resources) this.state.resources[r] = 0;
-                    pairs.forEach(p => {
-                        const [rk, rv] = p.split('=');
-                        if (rk && rv) this.state.resources[rk.trim()] = parseInt(rv.trim());
+                    // 套用初始資源
+                    Object.entries(costs).forEach(([rk, rv]) => {
+                        if (this.state.resources.hasOwnProperty(rk)) {
+                            this.state.resources[rk] = rv;
+                        }
                     });
                 } else if (val.includes('*')) {
                     const clean = val.replace(/[\{\}]/g, '');
@@ -409,13 +455,14 @@ export class GameEngine {
 
     static async loadResourceConfig() {
         try {
-            const text = await this.fetchCSVText('/config/resources_data.csv');
+            const text = await this.fetchCSVText('config/resources_data.csv');
             const data = this.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
-            const idxName = headers.indexOf('name'), idxModel = headers.indexOf('model'), idxType = headers.indexOf('type');
-            const idxYield = headers.indexOf('collection_speed'), idxDensity = headers.indexOf('density');
-            const idxLv = headers.indexOf('lv'), idxSize = headers.indexOf('size'), idxModelSize = headers.indexOf('model_size');
+            const findHIdx = (key) => headers.findIndex(h => h.toLowerCase().trim() === key.toLowerCase());
+            const idxName = findHIdx('name'), idxModel = findHIdx('model'), idxType = findHIdx('type');
+            const idxYield = findHIdx('collection_speed'), idxDensity = findHIdx('density');
+            const idxLv = findHIdx('lv'), idxSize = findHIdx('size'), idxModelSize = findHIdx('model_size');
 
             this.state.resourceConfigs = [];
             for (let i = headerIdx + 1; i < rows.length; i++) {
@@ -464,24 +511,27 @@ export class GameEngine {
 
     static async loadBuildingConfig() {
         try {
-            const text = await this.fetchCSVText('/config/buildings.csv');
+            const text = await this.fetchCSVText('config/buildings.csv');
             const data = this.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
-            const idxModel = headers.indexOf('model'),
-                idxCol = headers.indexOf('collision'),
-                idxSize = headers.indexOf('size'),
-                idxPop = headers.indexOf('population'),
-                idxNeed = headers.indexOf('need_resource'),
-                idxName = headers.find(h => h === 'name' || h === '名稱'),
-                idxDesc = headers.find(h => h === 'desc' || h === '描述'), // 建築描述
-                idxMax = headers.indexOf('max_count'),
-                idxTime = headers.indexOf('building_times'),
-                idxProd = headers.indexOf('npc_production'), // ID 列表，如 "{1,2}"
-                idxProdType = headers.lastIndexOf('npc_production'); // 生產模式，如 "rand"
+            const hIdx = (key) => headers.findIndex(h => h.toLowerCase().trim() === key.toLowerCase());
 
-            // 轉換為 index
-            const hIdx = (h) => headers.indexOf(h);
+            const idxModel = hIdx('model'),
+                idxCol = hIdx('collision'),
+                idxSize = hIdx('size'),
+                idxPop = hIdx('population'),
+                idxNeed = hIdx('need_resource'),
+                idxName = headers.find(h => h === 'name' || h === '名稱'),
+                idxDesc = headers.find(h => h === 'desc' || h === '描述'),
+                idxMax = hIdx('max_count'),
+                idxTime = hIdx('building_times'),
+                idxProd = hIdx('npc_production'), // ID 列表
+                idxProdType = (hIdx('npc_production_type') !== -1) ? hIdx('npc_production_type') : headers.lastIndexOf('npc_production');
+
+            console.log(`[CSV載入] 建築配置欄位索引結果:`, { model: idxModel, need: idxNeed, prod: idxProd, prodType: idxProdType });
+
+            // 轉換為 index (使用上方載入時定義的健壯版 hIdx)
             const nameIdx = headers.indexOf(idxName);
             const descIdx = headers.indexOf(idxDesc);
 
@@ -503,28 +553,18 @@ export class GameEngine {
                     collision: row[idxCol] === '1',
                     size: row[idxSize] || "{1,1}",
                     population: parseInt(row[idxPop]) || 0,
-                    costs: this.parseResourceObject(row[idxNeed]),
+                    costs: this.parseResourceCosts(row[idxNeed]),
                     maxCount: parseInt(row[idxMax]) || 999,
                     buildTime: parseFloat(row[idxTime]) || 5,
                     resourceValue: parseInt(row[headers.indexOf('resource_value')]) || 0,
                     npcProduction: prodList,
-                    productionMode: row[idxProdType] || 'normal'
+                    productionMode: (row[idxProdType] || 'normal').toLowerCase().trim()
                 };
             }
             this.addLog("建築配置表加載成功。");
         } catch (e) { console.error(e); }
     }
 
-    static parseResourceObject(str) {
-        const costs = { food: 0, wood: 0, stone: 0, gold: 0 };
-        if (!str) return costs;
-        const matches = str.matchAll(/(\w+)=(\d+)/g);
-        for (const match of matches) {
-            const key = match[1].toLowerCase();
-            if (costs.hasOwnProperty(key)) costs[key] = parseInt(match[2]);
-        }
-        return costs;
-    }
 
     static setFallbackConfig() {
         this.state.npcConfigs['villagers'] = { speed: 5.5, collection_speed: 10 };
@@ -627,7 +667,10 @@ export class GameEngine {
             range: config.range || 10,
             field_vision: (config.field_vision !== undefined) ? config.field_vision : 15,
             initiative_attack: (config.initiative_attack !== undefined) ? config.initiative_attack : 1,
-            facing: 1 // 1: 右, -1: 左
+            facing: 1, // 1: 右, -1: 左
+            // 物理碰撞尺寸 (寬, 高)
+            width: config.pixel_size ? config.pixel_size.w : 20,
+            height: config.pixel_size ? config.pixel_size.h : 20
         };
 
         this.state.units.villagers.push(v);
@@ -891,19 +934,23 @@ export class GameEngine {
                 // 計算左上角座標
                 // 正確計算：封鎖建築物理邊界所碰觸到的「所有」格位
                 // 核心優化：從 UI_CONFIG 讀取緩衝值，避免單位中心點停在邊緣時視覺重疊
-                const collCfg = UI_CONFIG.BuildingCollision || { buffer: 20, feetOffset: 18 };
-                const bWidth = uw * TS + collCfg.buffer, bHeight = uh * TS + collCfg.buffer;
+                const collCfg = UI_CONFIG.BuildingCollision || { buffer: 10, feetOffset: 8 };
+                // 核心同步：確保尋路格網的封鎖範圍與物理碰撞 (isColliding) 一致
+                // 物理碰撞使用 effBuffer = unitW / 2 (預設 10)，所以總寬度增加 20
+                const unitWidthDefault = 20;
+                const effBuffer = Math.max(unitWidthDefault / 2, (collCfg.buffer || 0) / 2);
+                const bWidth = uw * TS + effBuffer * 2, bHeight = uh * TS + effBuffer * 2;
+
                 const minX = ent.x - bWidth / 2, minY = ent.y - bHeight / 2;
                 const maxX = ent.x + bWidth / 2, maxY = ent.y + bHeight / 2;
 
                 const offset = this.state.mapOffset || { x: 0, y: 0 };
-                // 使用 floor/ceil 獲取邊界網格索引
-                // 核心修復：為了讓單位看起來是靠「腳部」碰撞，將建築阻礙格網向上偏移
-                const FOOT_OFFSET = collCfg.feetOffset;
-                const gx1 = Math.floor(minX / TS) - offset.x;
-                const gy1 = Math.floor((minY - FOOT_OFFSET) / TS) - offset.y;
-                const gx2 = Math.floor((maxX - 0.1) / TS) - offset.x;
-                const gy2 = Math.floor((maxY - FOOT_OFFSET - 0.1) / TS) - offset.y;
+                const FOOT_OFFSET = collCfg.feetOffset || 8;
+                const shrink = 4;
+                const gx1 = Math.max(0, Math.floor((minX + shrink) / TS) - offset.x);
+                const gy1 = Math.max(0, Math.floor((minY - FOOT_OFFSET + shrink) / TS) - offset.y);
+                const gx2 = Math.min(cols - 1, Math.floor((maxX - shrink - 0.1) / TS) - offset.x);
+                const gy2 = Math.min(rows - 1, Math.floor((maxY - FOOT_OFFSET - shrink - 0.1) / TS) - offset.y);
 
                 for (let tx = gx1; tx <= gx2; tx++) {
                     for (let ty = gy1; ty <= gy2; ty++) {
@@ -1000,6 +1047,14 @@ export class GameEngine {
         }
         const oldX = v.x, oldY = v.y;
 
+        // 核心碰撞防護：只有在採集或建造「進行中」時才可忽略目標，防止走路穿模進入建築物
+        // 核心修復：必須在 switch 之前定義，否則 moveDetailed 調用時會 ReferenceError
+        let ignoreEnts = [v];
+        if ((v.state === 'GATHERING' || v.state === 'MOVING_TO_RESOURCE') && v.targetId) ignoreEnts.push(v.targetId);
+        if ((v.state === 'CONSTRUCTING' || v.state === 'MOVING_TO_CONSTRUCTION') && v.constructionTarget) ignoreEnts.push(v.constructionTarget);
+        if (v.state === 'MOVING_TO_BASE' && v.targetBase) ignoreEnts.push(v.targetBase);
+
+
         // 安全機制：如果正在執行特定任務（非閒置且非追擊），則清除閒逛目標，避免動畫頻率錯誤 (Point 2)
         if (v.state !== 'IDLE' && v.state !== 'CHASE' && v.idleTarget) {
             v.idleTarget = null;
@@ -1022,7 +1077,7 @@ export class GameEngine {
         switch (v.state) {
             case 'IDLE':
                 if (v.idleTarget) {
-                    this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
+                    this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt, ignoreEnts);
                     if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                         v.idleTarget = null;
                         v.isManualCommand = false;
@@ -1033,7 +1088,7 @@ export class GameEngine {
                 break;
             case 'CHASE':
                 if (v.idleTarget) {
-                    this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
+                    this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt, ignoreEnts);
                 }
                 break;
             case 'ATTACK':
@@ -1064,7 +1119,7 @@ export class GameEngine {
                     if (dist < 15) {
                         v.state = 'GATHERING'; v.targetId = target; v.gatherTimer = 0; v.pathTarget = null;
                     }
-                    else { this.moveDetailed(v, tx, ty, moveSpeed, dt); }
+                    else { this.moveDetailed(v, tx, ty, moveSpeed, dt, ignoreEnts); }
                 } else { v.state = 'IDLE'; v.pathTarget = null; v.workOffset = null; }
                 break;
             case 'GATHERING':
@@ -1158,7 +1213,7 @@ export class GameEngine {
                         v.state = 'MOVING_TO_RESOURCE';
                     }
                 } else {
-                    this.moveDetailed(v, v.targetBase.x, v.targetBase.y, moveSpeed, dt);
+                    this.moveDetailed(v, v.targetBase.x, v.targetBase.y, moveSpeed, dt, ignoreEnts);
                 }
                 break;
             case 'MOVING_TO_CONSTRUCTION':
@@ -1180,7 +1235,7 @@ export class GameEngine {
                     v.state = 'CONSTRUCTING';
                     v.pathTarget = null;
                 } else {
-                    this.moveDetailed(v, v.constructionTarget.x, v.constructionTarget.y, moveSpeed, dt);
+                    this.moveDetailed(v, v.constructionTarget.x, v.constructionTarget.y, moveSpeed, dt, ignoreEnts);
                 }
                 break;
             case 'CONSTRUCTING':
@@ -1255,12 +1310,8 @@ export class GameEngine {
                 break;
         }
 
-        // 核心碰撞防護：只有在採集或建造「進行中」時才可忽略目標，防止走路穿模進入建築物
-        let ignoreEnts = [];
-        if (v.state === 'GATHERING' && v.targetId) ignoreEnts.push(v.targetId);
-        if (v.state === 'CONSTRUCTING' && v.constructionTarget) ignoreEnts.push(v.constructionTarget);
-
-        const collidingEnt = this.isColliding(v.x, v.y, ignoreEnts);
+        // 核心碰撞防護：檢查是否撞到非忽略清單中的建築
+        const collidingEnt = this.isColliding(v.x, v.y, ignoreEnts, v.width, v.height);
 
         if (collidingEnt) {
             // 檢查舊位置是否也在此建築中
@@ -1269,9 +1320,9 @@ export class GameEngine {
                 // 如果原本不在這個建築裡面（或是剛從別處撞進來），阻擋
                 v.x = oldX; v.y = oldY; v.pathTarget = null;
 
-                // [防卡死強化] 如果被物理碰撞反覆阻擋超過一定次數，視同卡死，強制脫困
+                // [防卡死強化] 如果被物理碰撞反覆阻擋超過一定次數，視同卡死，強制脫困 (20Hz: 12次 = 0.6秒)
                 v._stuckFrames = (v._stuckFrames || 0) + 1;
-                if (v._stuckFrames > 30) {
+                if (v._stuckFrames > 12) {
                     this.resolveStuck(v);
                     v._stuckFrames = 0;
                 }
@@ -1285,9 +1336,9 @@ export class GameEngine {
             if (Math.hypot(v.x - oldX, v.y - oldY) > 0.1) {
                 v._stuckFrames = 0;
             } else if (v.state.startsWith('MOVING')) {
-                // 有在動但坐標完全沒變 (可能是被其他邏輯擋到)
+                // 有在動但坐標完全沒變 (可能是被其他邏輯擋到) (20Hz: 15次 = 0.75秒)
                 v._stuckFrames = (v._stuckFrames || 0) + 1;
-                if (v._stuckFrames > 60) {
+                if (v._stuckFrames > 15) {
                     this.resolveStuck(v);
                     v._stuckFrames = 0;
                 }
@@ -1518,7 +1569,7 @@ export class GameEngine {
                     const ratio = moveDist / dist;
                     const nextX = v.x + dx * ratio;
                     const nextY = v.y + dy * ratio;
-                    
+
                     // 物理安全性要求：路徑段落中也加入碰撞檢查，防止在新舊尋路交替時穿牆
                     if (!this.isColliding(nextX, nextY, [v])) {
                         v.x = nextX;
@@ -1560,27 +1611,20 @@ export class GameEngine {
         const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100, true);
 
         if (nearest) {
-            // 傳送至該格的像素中心
-            const targetX = nearest.x * this.TILE_SIZE + this.TILE_SIZE / 2;
-            const targetY = nearest.y * this.TILE_SIZE + this.TILE_SIZE / 2;
+            // 傳送至該格的像素中心，並加入微小隨機量打破路徑循環
+            v.x = nearest.x * this.TILE_SIZE + this.TILE_SIZE / 2 + (Math.random() - 0.5) * 4;
+            v.y = nearest.y * this.TILE_SIZE + this.TILE_SIZE / 2 + (Math.random() - 0.5) * 4;
 
-            // 如果位移非常小 (小於 1px)，表示 getNearest 找到的就是目前位置，但可能因為精度問題微卡
-            // 此時稍微隨機偏移一下，協助物理引擎跳出
-            if (Math.hypot(targetX - oldX, targetY - oldY) < 1) {
-                v.x += (Math.random() - 0.5) * 5;
-                v.y += (Math.random() - 0.5) * 5;
-            } else {
-                v.x = targetX;
-                v.y = targetY;
-            }
-
+            // 重要：脫困時重設所有移動指令與緩存，強迫重新思考
             v.fullPath = null;
             v.pathIndex = 0;
             v.pathTarget = null;
+            v._lastRequestedTarget = null;
+            v.isFindingPath = false;
             v._stuckFrames = 0; // 重置計數
 
             if (isSelected) {
-                GameEngine.addLog(`[防卡死修復] 已由 (${oldX.toFixed(0)},${oldY.toFixed(0)}) 移至 (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`, 'PATH');
+                GameEngine.addLog(`[防卡死修復] 已由 (${oldX.toFixed(0)},${oldY.toFixed(0)}) 移至 (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`, "PATH");
             }
         } else {
             if (isSelected) {
@@ -1618,7 +1662,15 @@ export class GameEngine {
     // 已刪除原有的 getObstacleGrid
 
 
-    static isColliding(x, y, ignoreEnts = []) {
+    /**
+     * 精確碰撞偵測 (Physics Collision Check)
+     * @param {number} x
+     * @param {number} y
+     * @param {Array} ignoreEnts
+     * @param {number} unitW 單位寬度 (像素)
+     * @param {number} unitH 單位高度 (像素)
+     */
+    static isColliding(x, y, ignoreEnts = [], unitW = 0, unitH = 0) {
         const grid = this.state.spatialGrid;
         if (!grid || !grid.cells) return null;
 
@@ -1646,14 +1698,19 @@ export class GameEngine {
                             ent._collisionH = uh * this.TILE_SIZE;
                         }
 
-                        // 從 UI_CONFIG 讀取碰撞調整參數
-                        const collCfg = UI_CONFIG.BuildingCollision || { buffer: 20, feetOffset: 18 };
-                        const w = ent._collisionW + (collCfg.buffer || 0), h = ent._collisionH + (collCfg.buffer || 0);
-                        const FOOT_OFFSET = collCfg.feetOffset || 18;
+                        // 從 UI_CONFIG 讀取碰撞調整參數，並結合單位自身的 pixel_size
+                        const collCfg = UI_CONFIG.BuildingCollision || { buffer: 10, feetOffset: 8 };
+
+                        // 最終碰撞半徑：取「單位自身寬的一半」與「全局緩衝」的較大者
+                        const effBufferW = Math.max(unitW / 2, (collCfg.buffer || 0) / 2);
+                        const effBufferH = Math.max(unitH / 2, (collCfg.buffer || 0) / 2);
+
+                        const w = ent._collisionW + effBufferW * 2, h = ent._collisionH + effBufferH * 2;
+                        const FOOT_OFFSET = collCfg.feetOffset || 8;
                         const logicY = ent.y - FOOT_OFFSET; // 碰撞邏輯中心向上偏移，對齊單位腳部
 
-                        // 精確碰撞矩形檢查 (誤差補償 +/- 1px 避免邊緣抖動)
-                        if (x > ent.x - w / 2 + 0.5 && x < ent.x + w / 2 - 0.5 && y > logicY - h / 2 + 0.5 && y < logicY + h / 2 - 0.5) {
+                        // 精確碰撞矩形檢查 (誤差補償 +/- 0.1px 避免邊緣跳動)
+                        if (x > ent.x - w / 2 + 0.1 && x < ent.x + w / 2 - 0.1 && y > logicY - h / 2 + 0.1 && y < logicY + h / 2 - 0.1) {
                             return ent;
                         }
                     }
@@ -1886,23 +1943,45 @@ export class GameEngine {
 
         // 檢查資源成本
         // 隨機生產模式：成本取列表中的第一個，或可以定義一個平均成本
-        // 這裡我們先預設以 configName 直接尋找
-        let cfg = this.state.npcConfigs[configName];
+        let costConfigName = configName;
+        if (configName === 'RANDOM' && building) {
+            const bCfg = this.state.buildingConfigs[building.type];
+            if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
+                costConfigName = bCfg.npcProduction[0];
+            }
+        }
+
+        let cfg = this.state.npcConfigs[costConfigName];
         if (!cfg) {
-            // 如果是 ID (來自 buildings.csv)
-            const name = this.state.idToNameMap[configName];
+            const name = this.state.idToNameMap[costConfigName];
             if (name) cfg = this.state.npcConfigs[name];
         }
 
-        if (cfg && cfg.costs) {
+        if (!cfg) {
+            console.error(`[生產] 找不到配置 (用於計費): ${costConfigName}`);
+            return;
+        }
+
+        if (cfg.costs) {
+            console.log(`[生產預檢] 項目: ${cfg.name}, 成本物件:`, cfg.costs);
             for (let r in cfg.costs) {
-                if (this.state.resources[r] < cfg.costs[r]) {
-                    this.triggerWarning("1", [r.toUpperCase()]);
-                    return;
+                const cost = cfg.costs[r];
+                if (cost > 0) {
+                    const current = this.state.resources[r.toLowerCase()] || 0;
+                    if (current < cost) {
+                        console.warn(`[生產攔截] 資源不足: ${r}, 需要 ${cost}, 目前 ${current}`);
+                        this.triggerWarning("1", [r.toUpperCase()]);
+                        return;
+                    }
                 }
             }
+            // 扣額 (必須先通過上方的全部檢查)
             for (let r in cfg.costs) {
-                this.state.resources[r] -= cfg.costs[r];
+                const cost = cfg.costs[r];
+                if (cost > 0) {
+                    this.state.resources[r.toLowerCase()] -= cost;
+                    console.log(`[生產扣費] ${r}: -${cost}, 剩餘: ${this.state.resources[r.toLowerCase()]}`);
+                }
             }
         }
 
@@ -1912,7 +1991,7 @@ export class GameEngine {
         }
         this.addLog(`${building.name} 加入生產隊列：${configName} (${building.queue.length}/10)`);
 
-        if (window.UIManager) window.UIManager.updateValues();
+        if (window.UIManager) window.UIManager.updateValues(true);
     }
 
     static addLog(msg, category = 'COMMON') {
@@ -1930,14 +2009,19 @@ export class GameEngine {
         }
         // 檢查資源
         for (let r in cfg.costs) {
-            if (this.state.resources[r] < cfg.costs[r]) {
+            if ((this.state.resources[r] || 0) < cfg.costs[r]) {
                 this.triggerWarning("1", [r.toUpperCase()]);
                 return false;
             }
         }
-        const costs = cfg.costs; const res = this.state.resources;
         if (!this.isAreaClear(x, y, type)) { this.addLog("位置受阻！"); return false; }
-        res.food -= costs.food; res.wood -= costs.wood; res.stone -= costs.stone; res.gold -= costs.gold;
+
+        // 扣額
+        for (let r in cfg.costs) {
+            if (this.state.resources.hasOwnProperty(r)) {
+                this.state.resources[r] -= cfg.costs[r];
+            }
+        }
 
         const newBuilding = {
             id: `build_${type}_${x}_${y}_${Date.now()}`,

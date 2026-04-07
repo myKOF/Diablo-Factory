@@ -41,6 +41,9 @@ export class CharacterRenderer {
 
         const anim = UI_CONFIG.Animation || { runningFreq: 15, wanderingFreq: 5, breathingFreq: 1.33, workFreq: 10, armSwingFreqRunning: 10, armSwingFreqWandering: 4 };
 
+        // 核心修正：判斷是否卡死。若連續多幀無法移動，動畫應切回呼吸而非播放跑步/行走
+        const isStuck = unitData._stuckFrames > 5;
+
         // 步行動畫：雙腿交替
         let legOffset = 0;
         let bodyBob = 0;
@@ -49,7 +52,7 @@ export class CharacterRenderer {
             // 工作或攻擊狀態：原地站立，身體微晃，但不准有腳步動畫
             bodyBob = Math.sin(t * anim.workFreq) * 2;
             legOffset = 0;
-        } else if (isMoving || isWandering) {
+        } else if ((isMoving || isWandering) && !isStuck) {
             // 精確判斷：如果狀態是前往某地任務，即為跑步，無視殘留的 idleTarget (Point 2)
             const isMissionMove = state.includes('MOVING_TO') || isCombatMove;
             const isRunning = isMissionMove || (isMoving && !isWandering);
@@ -57,7 +60,7 @@ export class CharacterRenderer {
             legOffset = Math.sin(t * moveFreq) * 8;
             bodyBob = Math.abs(Math.cos(t * moveFreq)) * 4;
         } else {
-            // 預設為呼吸效果
+            // 預設為呼吸效果 (包含卡死狀態)
             bodyBob = Math.sin(t * anim.breathingFreq) * 1.5;
         }
 

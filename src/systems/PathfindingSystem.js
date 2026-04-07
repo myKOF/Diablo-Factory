@@ -66,7 +66,7 @@ export class PathfindingSystem {
     findPath(startX, startY, endX, endY, callback) {
         if (!this.isGridSet) return;
 
-        const offset = (GameEngine.state.mapOffset) || { x: 0, y: 0 };
+        const offset = (window.GAME_STATE && window.GAME_STATE.mapOffset) || { x: 0, y: 0 };
         const gx1 = Math.floor(startX / this.tileSize) - offset.x;
         const gy1 = Math.floor(startY / this.tileSize) - offset.y;
         let gx2 = Math.floor(endX / this.tileSize) - offset.x;
@@ -120,7 +120,7 @@ export class PathfindingSystem {
      */
     getNearestWalkableTile(gx, gy, maxRadius = 10, isAbsolute = true) {
         if (!this.isGridSet || !this.grid) return null;
-        const offset = isAbsolute ? (GameEngine.state.mapOffset || { x: 0, y: 0 }) : { x: 0, y: 0 };
+        const offset = isAbsolute ? (window.GAME_STATE && window.GAME_STATE.mapOffset || { x: 0, y: 0 }) : { x: 0, y: 0 };
         const lgx = gx - offset.x, lgy = gy - offset.y;
 
         // 如果當前點就可行，直接回傳

@@ -747,7 +747,11 @@ export class UIManager {
 
         // 記錄按下的座標，用於在 MouseUp 時判斷是否為「點擊」還是「拖動畫面」
         if (e.button === 2) {
+            // [核心修復] 在操作起始階段，標記本次右鍵是否是「取消建造」
+            // 因為後續 contextmenu 事件可能會提前清空 GameEngine.state.placingType
+            GameEngine.state.rightClickStartedInPlacementMode = !!GameEngine.state.placingType;
             this.rightMouseDownPos = { x: e.clientX, y: e.clientY };
+            this.rightMouseDownTime = Date.now();
             return;
         }
 
@@ -793,11 +797,24 @@ export class UIManager {
         // [右鍵邏輯專區]
         if (e.button === 2) {
             if (this.rightMouseDownPos) {
+                const now = Date.now();
                 const drift = Math.hypot(e.clientX - this.rightMouseDownPos.x, e.clientY - this.rightMouseDownPos.y);
+                const duration = now - (this.rightMouseDownTime || 0);
                 this.rightMouseDownPos = null;
 
-                // 只有當位移極小時 (Drift < 10)，才視為有效的點擊指令，而非相機拖拽
-                if (drift < 10) {
+                // [核心修復] 如果按下時是在建築模式，則不論放開時狀態如何，只能觸發取消
+                if (GameEngine.state.rightClickStartedInPlacementMode) {
+                    this.cancelBuildingMode();
+                    GameEngine.state.rightClickStartedInPlacementMode = false;
+                    return;
+                }
+
+                // 核心同步：判斷 Phaser 相機是否在移動中 (依據 MainScene.js 邏輯)
+                const scene = window.PhaserScene;
+                const wasDragging = scene && scene.lastDragTime && (now - scene.lastDragTime < 100);
+
+                // 如果位移超過 10 或在過去 0.1 秒內發生過畫面拖移，或者點擊持續時間超過 100ms，則判定為拖移而非指令
+                if (drift < 10 && duration < 100 && !wasDragging) {
                     const ent = this.activeMenuEntity;
                     const bCfg = ent ? GameEngine.state.buildingConfigs[ent.type] : null;
 

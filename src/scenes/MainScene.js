@@ -279,23 +279,25 @@ export class MainScene extends Phaser.Scene {
         this.input.on('pointerup', (pointer) => {
             if (pointer.button === 2) {
                 this.isDragging = false; // 核心修復：在判斷早期即結束拖拽狀態，防止狀態卡死導致畫面持續跟隨
-                
+
                 // 如果是右鍵釋放，根據拖動距離判斷：是「移動指令」還是「相機拖動結束」
-                // 1. 如果在過去 0.2 秒內發生過畫面拖動，則不執行移動指令 (防止操作衝突)
+                // 1. 如果在過去 0.1 秒內發生過畫面拖動，則不執行移動指令 (防止操作衝突)
                 const now = Date.now();
-                const dragDecay = 200; // 0.2秒緩衝
+                const dragDecay = 100; // 0.1秒緩衝
                 if (this.lastDragTime && (now - this.lastDragTime < dragDecay)) {
                     this.rightClickWasPlacement = false;
                     GameEngine.addLog("[指令] 拖動畫面中，已自動過濾寻路指令。", "PATH");
                     return;
                 }
 
-                // 2. 優先檢查本次點擊開始時是否處於建築模式
-                if (this.rightClickWasPlacement) {
+                // 2. 優先檢查本次點擊開始時是否處於建築模式 (同步 UIManager 的全局旗標)
+                if (this.rightClickWasPlacement || GameEngine.state.rightClickStartedInPlacementMode) {
                     this.rightClickWasPlacement = false;
+                    GameEngine.state.rightClickStartedInPlacementMode = false;
                     return;
                 }
                 this.rightClickWasPlacement = false; // 以防萬一的重置
+                GameEngine.state.rightClickStartedInPlacementMode = false;
 
                 const dragDist = this.dragStartPos ? Math.hypot(pointer.x - this.dragStartPos.x, pointer.y - this.dragStartPos.y) : 0;
                 // 3. 即使沒觸發 move 事件，位移超過 2px 仍視為拖動
@@ -397,6 +399,9 @@ export class MainScene extends Phaser.Scene {
      * 處理單位的右鍵指令（移動或攻擊）
      */
     handleRightClickCommand(unit, pointer, clickedTarget = null) {
+        // [最終防護] 若正處於建造預覽狀態，或按下鼠標時正處於建造預覽狀態，屏蔽所有指令
+        if (GameEngine.state.placingType || GameEngine.state.rightClickStartedInPlacementMode) return;
+
         // 先判斷 npc 的 type，若為敵方則不執行指令
         const type = unit.config ? unit.config.type : '';
         if (type === 'wolf' || type === 'bear') return;

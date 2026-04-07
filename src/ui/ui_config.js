@@ -397,8 +397,8 @@ export const UI_CONFIG = {
     // ── 建築碰撞與對齊設置 (BuildingCollision) ─────────────────────────
     // 用於調整單位在靠近建築時的阻擋距離與視覺對齊效果。
     BuildingCollision: {
-        buffer: 10,             // 碰撞緩衝範圍 (像素，建議為單位直徑，用於防止身體重疊)
-        feetOffset: 8          // 單位腳部視覺偏移量 (像素，將單位中心與建築底線對齊)
+        buffer: 20,             // 碰撞緩衝範圍 (像素，建議為單位直徑，用於防止身體重疊)
+        feetOffset: 18          // 單位腳部視覺偏移量 (像素，將單位中心與建築底線對齊)
     },
     // ── 尋路目標提示 (PathfindingTarget) ──────────────────────────
     PathfindingTarget: {
