@@ -343,8 +343,8 @@ export const UI_CONFIG = {
     },
     // ── 建築碰撞與對齊設置 (BuildingCollision) ─────────────────────────
     BuildingCollision: {
-        buffer: 20,
-        feetOffset: 18
+        buffer: 5,
+        feetOffset: 5
     },
     // ── 尋路目標提示 (PathfindingTarget) ──────────────────────────
     PathfindingTarget: {

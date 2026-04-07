@@ -41,6 +41,7 @@ export class GameEngine {
             showResourceInfo: true, // 預設顯示大地圖資源資訊（名稱、等級、數量）
             showVisionRange: 0      // 預設關閉視野圈 (0: 關閉, 1: 僅選中, 2: 全部)
         },
+        globalConstructionOrder: 1, // [新協定] 建築施工序列號，從小到大依次建造
         idToNameMap: {}, // NPC ID -> NPC Name (用於從 buildings.csv 定義的 ID 找配置)
         renderVersion: 0, // 用於通知渲染器強行刷新
         pathfinding: null, // 尋路系統實例
@@ -1463,24 +1464,19 @@ export class GameEngine {
                         v.workOffset = { x: (Math.random() - 0.5) * 50, y: (Math.random() - 0.5) * 50 };
                         this.addLog(`建造者前往${type === 'farmland' ? '農田' : '樹木田'}內部開始工作。`);
                     } else {
-                        // [新協定] 依照優先度（P: 大 -> 小）續建
+                        // [新協定] 依照序號續建，但僅限視野內 (Vision Range)
+                        const visionRadius = (v.field_vision || 15) * this.TILE_SIZE;
                         const sortedProjects = this.state.mapEntities
-                            .filter(e => e && e.isUnderConstruction)
-                            .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+                            .filter(e => e && e.isUnderConstruction && Math.hypot(v.x - e.x, v.y - e.y) <= visionRadius)
+                            .sort((a, b) => (a.priority || 0) - (b.priority || 0));
 
-                        // 1. 優先尋找無人負責的工地 (高優先度優先)
-                        let nextTarget = sortedProjects.find(e => {
-                            const hasAnyone = this.state.units.villagers.some(other => other.constructionTarget === e);
-                            return !hasAnyone;
-                        });
-
-                        // 2. 若全都有人，則去跟其他人一起蓋最高優先級的那間
-                        if (!nextTarget) nextTarget = sortedProjects[0];
+                        // [核心修復] 採用多人協作分配邏輯：優先找位點，其次分攤剩餘人手
+                        const nextTarget = GameEngine.findBestConstructionProject(v, sortedProjects);
 
                         if (nextTarget) {
                             v.constructionTarget = nextTarget;
                             v.state = 'MOVING_TO_CONSTRUCTION';
-                            this.addLog(`工人 ${v.id} 轉往優先級 P:${nextTarget.priority} 的工地支援。`);
+                            this.addLog(`工人 ${v.id} 轉往支援工地 ${nextTarget.name || nextTarget.type} (P:${nextTarget.priority})。`);
                         } else {
                             this.restoreVillagerTask(v);
                             v.constructionTarget = null;
@@ -1557,12 +1553,14 @@ export class GameEngine {
     }
 
     static restoreVillagerTask(v) {
+        v.isPlayerLocked = false; // [核心修復] 任務歸位時應解除玩家鎖定
         if (v.prevTask) {
             v.state = v.prevTask.state;
             v.targetId = v.prevTask.targetId;
             v.type = v.prevTask.type;
             v.prevTask = null;
         } else {
+            v.state = 'IDLE'; // [核心修復] 先強制歸位到 IDLE，確保通過 assignNextTask 的 busy 檢查
             this.assignNextTask(v);
         }
         v.pathTarget = null;
@@ -1583,29 +1581,27 @@ export class GameEngine {
             return;
         }
 
-        // [新協定] 選中者依照優先度 (10, 9, 8... -1, -2) 自動偵測任務
-        if (isSelected && !v.constructionTarget && !v.isRecalled) {
+        // [新協定] 選中者偵測視野內 (Vision Range) 的待建序列
+        // 此處即便 v 已有狀態 (如 GATHERING)，若他是選中狀態且沒有建築目標，也會轉去幫忙蓋
+        const isIdleOrGathering = v.state === 'IDLE' || v.state === 'GATHERING' || v.state === 'MOVING_TO_RESOURCE' || v.state === 'MOVING_TO_BASE';
+        if (isSelected && !v.constructionTarget && !v.isRecalled && isIdleOrGathering) {
+            const visionRadius = (v.field_vision || 15) * this.TILE_SIZE;
             const sortedProjects = this.state.mapEntities
-                .filter(e => e && e.isUnderConstruction)
-                .sort((a, b) => (b.priority || 0) - (a.priority || 0));
+                .filter(e => e && e.isUnderConstruction && Math.hypot(v.x - e.x, v.y - e.y) <= visionRadius)
+                .sort((a, b) => (a.priority || 0) - (b.priority || 0));
                 
-            const nextConstruction = sortedProjects[0];
+            const nextConstruction = GameEngine.findBestConstructionProject(v, sortedProjects);
 
             if (nextConstruction) {
+                const oldState = v.state;
                 v.state = 'MOVING_TO_CONSTRUCTION';
                 v.constructionTarget = nextConstruction;
                 v.targetId = null; v.pathTarget = null;
                 v.assignedWarehouseId = null;
+                console.log(`[自動指派] 選中的工人 ${v.id} 從 ${oldState} 轉為支援 P:${nextConstruction.priority} 工地 (視野 ${visionRadius.toFixed(0)}px)`);
                 return;
             }
         }
-
-        // [新協定] 本函數其餘部分不再參與非選中者的建築任務自動分配。
-        // 建築任務主要依賴：(1) 放置時的選中指派 (2) 右鍵手動點擊指派 (3) 工人完工後的續建邏輯。
-        // 原本在此處的非選中者查找邏輯已全數移除。
-
-        // 若只是為了「嘗試尋找建設任務」而被呼叫 (keepCurrentIfNoneFound 註記)，且此處已無建設邏輯，則直接返回
-        if (keepCurrentIfNoneFound) return;
 
         // 2. 各倉庫滿員情況 (優先補滿專職位)
         const warehouses = this.state.mapEntities.filter(e =>
@@ -2014,6 +2010,41 @@ export class GameEngine {
         return null;
     }
 
+    /**
+     * [核心協定] 尋找最適合的建設工地 (智慧分配系統)
+     * @param {Object} v 單位物件
+     * @param {Array} projects 待建工地列表 (已排序)
+     */
+    static findBestConstructionProject(v, projects) {
+        if (!projects || projects.length === 0) return null;
+        
+        // 1. 優先尋找完全「無人負責」的工地 (按優先級)
+        const unassigned = projects.find(p => !this.state.units.villagers.some(other => other.constructionTarget === p));
+        if (unassigned) return unassigned;
+
+        // 2. 若全都有人，則尋找「參與人數最少」的工地進行支援
+        // 為了確保效率，我們計算每間工地的當前負責人數
+        let bestTarget = projects[0];
+        let minWorkers = Infinity;
+
+        projects.forEach(p => {
+            // 計算目前已被指派到此工地的工傷人數
+            const workerCount = this.state.units.villagers.filter(other => other.constructionTarget === p).length;
+            if (workerCount < minWorkers) {
+                minWorkers = workerCount;
+                bestTarget = p;
+            } else if (workerCount === minWorkers) {
+                // 如果人數相同，則選優先級較高 (priority 較小) 的
+                if ((p.priority || 0) < (bestTarget.priority || 0)) {
+                    bestTarget = p;
+                }
+            }
+        });
+
+        return bestTarget;
+    }
+
+
     static updateWorkerAssignments() {
         const warehouses = this.state.mapEntities.filter(e =>
             ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(e.type) && !e.isUnderConstruction
@@ -2082,6 +2113,16 @@ export class GameEngine {
                     v.pathTarget = null;
                     workers.push(v);
                     needsRefill = true;
+                }
+            });
+        }
+
+        // [核心補強] 確保選中的閒置工人會週期性地檢查是否有遺漏的工地
+        const selIds = this.state.selectedUnitIds || [];
+        if (selIds.length > 0) {
+            this.state.units.villagers.forEach(v => {
+                if (selIds.includes(v.id) && v.state === 'IDLE' && !v.constructionTarget && !v.isRecalled) {
+                    this.assignNextTask(v);
                 }
             });
         }
@@ -2281,32 +2322,53 @@ export class GameEngine {
 
         // [新協定] 既然是「先選人再蓋房」，放置後不應彈出選取框 (保持選取工人而非建築)
         const selIds = this.state.selectedUnitIds || [];
-        const selectedVillagers = this.state.units.villagers.filter(v => selIds.includes(v.id));
+        const selectedVillagers = this.state.units.villagers.filter(v => selIds.includes(v.id) && v.config.type === 'villagers');
 
-        // [優先級初始化]
-        if (this._nextP === undefined) this._nextP = 1;
-        if (this._nextLP === undefined) this._nextLP = -1;
+        // [優先級分配] 依照放置順序遞增分配序列號，工人應由小到大建造
+        newBuilding.priority = this.state.globalConstructionOrder++;
 
         if (selectedVillagers.length > 0) {
-            newBuilding.priority = this._nextP++;
-            // 分配邏輯：1人1間優先
-            const freeVillager = selectedVillagers.find(v => !v.constructionTarget);
-            let assignedWorker = null;
-
-            if (freeVillager) {
-                assignedWorker = freeVillager;
-                this.addLog(`[分配] 工人 ${assignedWorker.id} 負責本高優先級建築 (P:${newBuilding.priority})。`);
+            // [多人協作] 指派中選中的工人前往此工地。
+            // 為了達成「人多於房全上」的要求：
+            // 如果只有一個工地（即非 LINE 模式），所有選中的工人（不論是否忙碌）都應前往支援，
+            // 除非他們正背著重物（MOVING_TO_BASE）則完成後再去。
+            
+            const isLineMode = this.state.buildingMode === 'LINE';
+            
+            if (isLineMode) {
+                // 批次模式下，為了分配均勻，我們只挑選「完全沒事」的人去負責這棟
+                const candidate = selectedVillagers.find(v => !v.constructionTarget);
+                if (candidate) {
+                    candidate.state = 'MOVING_TO_CONSTRUCTION';
+                    candidate.constructionTarget = newBuilding;
+                    candidate.targetId = null; 
+                    candidate.pathTarget = null; 
+                    candidate.isPlayerLocked = true;
+                    this.addLog(`[分配] 工人 ${candidate.id.substr(-4)} 負責 P:${newBuilding.priority} 單點施工。`);
+                }
             } else {
-                assignedWorker = selectedVillagers[0];
-                this.addLog(`[支援] 協助本高優先級建築 (P:${newBuilding.priority})。`);
+                // 單一建築模式下，所有選取的工人一併前往，支援多人同時建造
+                let count = 0;
+                selectedVillagers.forEach(v => {
+                    // 如果不是在回城的命脈任務中，直接切換到建築狀態
+                    if (v.state !== 'MOVING_TO_BASE') {
+                        v.state = 'MOVING_TO_CONSTRUCTION';
+                        v.constructionTarget = newBuilding;
+                        v.targetId = null; 
+                        v.pathTarget = null; 
+                        v.isPlayerLocked = true;
+                        count++;
+                    } else {
+                        // 正在回城的，就把下次任務設為此建築
+                        v.nextStateAfterDeposit = 'MOVING_TO_CONSTRUCTION';
+                        v.nextTargetAfterDeposit = newBuilding;
+                    }
+                });
+                this.addLog(`[協作] ${count} 位工人前往支援 P:${newBuilding.priority} 建築。`);
+                console.log(`[協作派發] 指派了 ${count}/${selectedVillagers.length} 位單元前往建築。`);
             }
-
-            assignedWorker.state = 'MOVING_TO_CONSTRUCTION';
-            assignedWorker.constructionTarget = newBuilding;
-            assignedWorker.targetId = null; assignedWorker.pathTarget = null; assignedWorker.isPlayerLocked = true;
         } else {
-            newBuilding.priority = this._nextLP--;
-            this.addLog(`${cfg.name} 已放置 (背景優先級 P:${newBuilding.priority})。`, 'COMMON');
+            this.addLog(`${cfg.name} 已放置 (待建序列 P:${newBuilding.priority})。`, 'COMMON');
         }
 
         this.state.selectedBuildingId = null;
@@ -2347,7 +2409,25 @@ export class GameEngine {
         possibleBuildings.forEach(pos => {
             if (this.placeBuilding(type, pos.x, pos.y)) count++;
         });
-        if (count > 0) this.addLog(`批次建造：${cfg.name} x${count}。`);
+        if (count > 0) {
+            this.addLog(`批次建造：${cfg.name} x${count}。`);
+            // [多人協作] 批次放置後，讓所有「依然空閒」的選中工人尋找最適合的工地支援 (分攤剩餘勞動力)
+            const selIds = this.state.selectedUnitIds || [];
+            const remainingFree = this.state.units.villagers.filter(v => selIds.includes(v.id) && !v.constructionTarget && v.config?.type === 'villagers');
+            if (remainingFree.length > 0) {
+                const projects = this.state.mapEntities.filter(e => e && e.isUnderConstruction).sort((a,b) => (a.priority||0) - (b.priority||0));
+                remainingFree.forEach(v => {
+                    const best = GameEngine.findBestConstructionProject(v, projects);
+                    if (best) {
+                        v.state = 'MOVING_TO_CONSTRUCTION';
+                        v.constructionTarget = best;
+                        v.targetId = null; v.pathTarget = null;
+                        v.isPlayerLocked = true;
+                    }
+                });
+                this.addLog(`[協作] ${remainingFree.length} 位剩餘工人已分派至待建工地。`);
+            }
+        }
     }
 
     static getLinePositions(type, startX, startY, endX, endY) {
