@@ -160,7 +160,10 @@ export class CharacterRenderer {
     static renderBody(ctx, x, y, data) {
         const colors = UI_CONFIG.VillagerColors;
         const parseColor = (c) => {
-            const val = parseInt(c.replace('#', '0x').substring(0, 8));
+            if (!c) return 0x1e88e5;
+            // 重要：配置檔使用 #RRGGBBAA，若是 8 位則截斷 AA 部分，避免 32bit 位移出錯
+            const cleaned = c.replace('#', '0x');
+            const val = parseInt(cleaned.length > 8 ? cleaned.substring(0, 8) : cleaned);
             return isNaN(val) ? 0x1e88e5 : val;
         };
 
@@ -288,7 +291,8 @@ export class CharacterRenderer {
             const cargoType = data.cargoType || data.type;
             const parseColor = (c) => {
                 if (!c) return 0x795548;
-                const val = parseInt(c.replace('#', '0x'));
+                const cleaned = c.replace('#', '0x');
+                const val = parseInt(cleaned.length > 8 ? cleaned.substring(0, 8) : cleaned);
                 return isNaN(val) ? 0x795548 : val;
             };
 

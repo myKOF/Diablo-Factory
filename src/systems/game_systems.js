@@ -164,11 +164,31 @@ export class GameEngine {
                 }
             });
 
-            this.state.units.villagers.forEach(v => {
-                // [新協定] 只有在 State: Idle 且 isPlayerLocked = false 時，系統才可自動分配任務
-                if (v.state === 'IDLE' && !v.isPlayerLocked) {
-                    this.assignNextTask(v);
-                    v.workOffset = null; // 閒置時重置工作偏移
+            const selectedIds = new Set(this.state.selectedUnitIds || []);
+            const sortedVillagers = [...this.state.units.villagers].sort((a,b) => {
+                const aS = selectedIds.has(a.id) ? 1 : 0;
+                const bS = selectedIds.has(b.id) ? 1 : 0;
+                return bS - aS; // 選中的在前
+            });
+
+            sortedVillagers.forEach(v => {
+                const isSelected = selectedIds.has(v.id);
+                // [新協定] 玩家指令 (isPlayerLocked) 絕對優先。只有在未鎖定或閒置時，系統才可介入。
+                if (!v.isRecalled) {
+                    const isBusyConstructing = (v.state === 'MOVING_TO_CONSTRUCTION' || v.state === 'CONSTRUCTING');
+                    
+                    // 核心修正：即便被選中，如果玩家已下達指令 (isPlayerLocked)，系統不得中斷。
+                    // 除非玩家指令正好就是去建造 (isBusyConstructing)，否則只要鎖定了，就跳過自動分配。
+                    if (!v.isPlayerLocked) {
+                        const isAutoWorking = ['GATHERING', 'MOVING_TO_RESOURCE', 'MOVING_TO_RESOURCE_BASE'].includes(v.state);
+                        
+                        // 選中優先：選中者即便在自動工作也會響應建設；非選中者僅在閒置時響應。
+                        if (v.state === 'IDLE' || (isSelected && isAutoWorking)) {
+                            this.assignNextTask(v, isAutoWorking);
+                        }
+                    } else if (isBusyConstructing) {
+                        // 如果已經在建造中且鎖定了，則繼續執行當前動作，不進行重複分配
+                    }
                 }
                 this.updateVillagerMovement(v, deltaTime);
             });
@@ -1581,21 +1601,24 @@ export class GameEngine {
         v.pathTarget = null;
     }
 
-    static assignNextTask(v) {
+    static assignNextTask(v, keepCurrentIfNoneFound = false) {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集工作能力
         if (v.config.type !== 'villagers' || v.isRecalled) {
             v.state = 'IDLE';
             return;
         }
 
+        const isSelected = (this.state.selectedUnitIds || []).includes(v.id);
+
         // 手動指令連動保護：若已有手動任務且正在執行中，不要進入自動分配邏輯重置為 IDLE
-        if (v.isPlayerLocked && (v.state.startsWith('MOVING_TO') || v.state === 'GATHERING' || v.state === 'CONSTRUCTING')) {
+        // [呼叫優化] 選中者無視此保護，強制檢查是否有建設任務需求
+        if (!isSelected && v.isPlayerLocked && (v.state.startsWith('MOVING_TO') || v.state === 'GATHERING' || v.state === 'CONSTRUCTING')) {
             return;
         }
 
         // 1. 優先找「視野內」的待施工建築 (過濾掉已有人在蓋的工地)
-        // 視野換算：網格數 * 20 像素 + 80 像素寬容度 (更激進的搜尋)
-        const visionPx = ((v.field_vision || 15) * 20) + 80;
+        // [呼叫優化] 若單位被選中，則視野視為「全區域」，優先被呼叫至任何工地。
+        const visionPx = isSelected ? 5000 : (((v.field_vision || 15) * 20) + 80);
 
         const nextConstruction = this.state.mapEntities.find(e => {
             if (!e || !e.isUnderConstruction) return false;
@@ -1621,6 +1644,9 @@ export class GameEngine {
             v.assignedWarehouseId = null;
             return;
         }
+
+        // 若只是為了「嘗試尋找建設任務」而被呼叫，且沒找到，則保持原狀返回
+        if (keepCurrentIfNoneFound) return;
 
         // 2. 各倉庫滿員情況 (優先補滿專職位)
         const warehouses = this.state.mapEntities.filter(e =>

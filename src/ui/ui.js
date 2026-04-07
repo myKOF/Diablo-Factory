@@ -14,6 +14,7 @@ export class UIManager {
     static logFilters = { COMMON: true, PATH: true }; // 日誌篩選器
     static startY = 0;
     static startHeight = 200;
+    static leftMouseDownPos = null; // 記錄左鍵按下位置，用於過濾框選後的誤觸
     static lastUIState = {
         resources: "",
         logHash: "",
@@ -765,6 +766,8 @@ export class UIManager {
         // 僅處理左鍵
         if (e.button !== 0) return;
 
+        this.leftMouseDownPos = { x: e.clientX, y: e.clientY };
+
         const state = GameEngine.state;
         if (state.buildingMode === 'STAMP') {
             state.buildingMode = 'LINE';
@@ -897,18 +900,29 @@ export class UIManager {
     }
 
     static handleWorldClick(e) {
+        // [核心修正] 框選衝突修補：如果滑鼠位移過大 (例如正在框選單位)，則忽略本次點擊，防止建築被「一併選中」。
+        // 此處必須在函數最頂層處理，確保不論點擊何處 (包括 UI) 都能正確消耗掉滑鼠位移狀態。
+        if (this.leftMouseDownPos) {
+            const drift = Math.hypot(e.clientX - this.leftMouseDownPos.x, e.clientY - this.leftMouseDownPos.y);
+            // 核心衝突點：此閾值必須與 MainScene.js 的框選啟動閾值 (5px) 同步。
+            // 只要偵測到超過 5px 的位移，即視為有意圖的「框選」或「拖動」，此時應封鎖建築選單的自動開啟。
+            const threshold = 5; 
+            const wasDrag = drift > threshold;
+            this.leftMouseDownPos = null; // 立即消耗
+            if (wasDrag) return;
+        }
+
         // 全域關閉日誌篩選選單
-        // 指的是除了「篩選按鈕本身」與「選單內部」之外，點擊界面任何處 (包括日誌面板其它區域) 都關閉
         const filterMenu = document.getElementById("log_filter_menu");
         if (filterMenu && filterMenu.style.display === "flex") {
             const filterBtn = document.getElementById("log_filter_btn");
-            // 檢查點擊目標是否不在按鈕內
             if (filterBtn && !filterBtn.contains(e.target)) {
                 filterMenu.style.display = "none";
             }
         }
 
         if (this.dragGhost) return;
+
         const state = GameEngine.state;
 
         // 核心邏輯：明確區分「本身指令選單」與「他者 UI/地面」

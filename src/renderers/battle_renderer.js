@@ -119,8 +119,15 @@ export class BattleRenderer {
         const hpPercent = Math.max(0, unit.hp / (unit.maxHp || 100));
 
         // 1. 繪製背景
-        const bgColor = typeof cfg.bgColor === 'string' ? parseInt(cfg.bgColor.replace('#', ''), 16) : (cfg.bgColor || 0x333333);
-        g.fillStyle(bgColor, cfg.bgAlpha || 0.8);
+        let bgColorNum = 0x333333;
+        if (typeof cfg.bgColor === 'string' && cfg.bgColor.startsWith('#')) {
+            const raw = cfg.bgColor.replace('#', '');
+            const cleaned = raw.length > 6 ? raw.substring(0, 6) : raw;
+            bgColorNum = parseInt(cleaned, 16);
+        } else if (typeof cfg.bgColor === 'number') {
+            bgColorNum = cfg.bgColor;
+        }
+        g.fillStyle(bgColorNum, cfg.bgAlpha || 0.8);
         g.fillRect(x, y, barWidth, barHeight);
 
         // 2. 繪製填充 (優先根據敵我分類，次之根據血量比例)

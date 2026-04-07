@@ -1,4 +1,4 @@
-/**
+﻿/**
  * UI_CONFIG — 界面佈局與文字顯示的統一設定中心
  *
  * 所有與遊戲 HUD、面板、標籤有關的樣式數值都集中在這裡。
@@ -218,8 +218,8 @@ export const UI_CONFIG = {
         CONSTRUCTING: "#b939068e",
         WOOD: "#388e3c",
         STONE: "#757575",
-        FOOD: "#fd6563ff",
-        GOLD: "#ffcd28ea",
+        FOOD: "#fd8763ff",
+        GOLD: "#e4b20dea",
         SWORDSMAN: "#b0bec5",
         MAGE: "#9575cd",
         ARCHER: "#81c784",
@@ -228,10 +228,10 @@ export const UI_CONFIG = {
     },
     // ── 工人背負資源顏色 (CargoColors) ──────────────────────────────────
     CargoColors: {
-        WOOD: "#27ff32ff",
+        WOOD: "#1ce026ff",
         STONE: "#acacacff",
-        FOOD: "#ff3131ff",
-        GOLD: "#bda21bff",
+        FOOD: "#ff5816ff",
+        GOLD: "#ffe047ff",
         DEFAULT: "#ad9191ff" // 預設籃子顏色
     },
     // ── NPC及敵人 文字標籤顯示 (NPCLabel) ──────────────────────────────────

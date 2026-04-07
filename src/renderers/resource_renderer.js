@@ -15,7 +15,12 @@ export class ResourceRenderer {
 
     static toNum(c) {
         if (typeof c === 'number') return c;
-        if (typeof c === 'string' && c.startsWith('#')) return parseInt(c.replace('#', ''), 16);
+        if (typeof c === 'string' && c.startsWith('#')) {
+            const raw = c.replace('#', '');
+            // 如果是 8 位 (#RRGGBBAA)，截斷前 6 位，避免 Phaser 解析出錯
+            const cleaned = raw.length > 6 ? raw.substring(0, 6) : raw;
+            return parseInt(cleaned, 16);
+        }
         return 0xffffff;
     }
 
