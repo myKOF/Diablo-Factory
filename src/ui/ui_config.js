@@ -107,7 +107,7 @@ export const UI_CONFIG = {
         padding: "20px 50px",
         duration: 2000
     },
-    // ── 地圖實體標籤（MapResourceLabels）───────────────────────
+    // ── 地圖資源實體標籤（MapResourceLabels）───────────────────────
     MapResourceLabels: {
         name: {
             fontSize: "bold 13px Arial",
@@ -343,8 +343,8 @@ export const UI_CONFIG = {
     },
     // ── 建築碰撞與對齊設置 (BuildingCollision) ─────────────────────────
     BuildingCollision: {
-        buffer: 5,
-        feetOffset: 5
+        buffer: 10,
+        feetOffset: 8
     },
     // ── 尋路目標提示 (PathfindingTarget) ──────────────────────────
     PathfindingTarget: {
