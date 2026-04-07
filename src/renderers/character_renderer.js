@@ -284,10 +284,27 @@ export class CharacterRenderer {
             this.drawTool(ctx, x + 8, y + 15, 'BOW', angle);
             ctx.fillRect(x - 14, y + 5 + (isActuallyMoving || isAttacking ? 0 : Math.sin(t * breatheFreq) * 1), 4, 18);
         } else if (data.cargo > 0) {
-            this.setCtxStyle(ctx, 0x795548, 1);
+            const colors = UI_CONFIG.CargoColors || UI_CONFIG.VillagerColors;
+            const cargoType = data.cargoType || data.type;
+            const parseColor = (c) => {
+                if (!c) return 0x795548;
+                const val = parseInt(c.replace('#', '0x'));
+                return isNaN(val) ? 0x795548 : val;
+            };
+
+            let resColor = parseColor(colors.DEFAULT || "#795548");
+            if (cargoType === 'WOOD') resColor = parseColor(colors.WOOD);
+            else if (cargoType === 'STONE') resColor = parseColor(colors.STONE);
+            else if (cargoType === 'FOOD') resColor = parseColor(colors.FOOD);
+            else if (cargoType === 'GOLD') resColor = parseColor(colors.GOLD);
+
+            this.setCtxStyle(ctx, resColor, 1);
             // 負重搬運時的籃子晃動
             const cargoFreq = isRunning ? anim.runningFreq : (isActuallyMoving ? anim.wanderingFreq : anim.breathingFreq);
             ctx.fillRect(x - 8, y + 10 + Math.sin(t * cargoFreq) * 2, 16, 12);
+            // 加入頂部亮邊增加立體感
+            this.setCtxStyle(ctx, 0xffffff, 0.3);
+            ctx.fillRect(x - 8, y + 10 + Math.sin(t * cargoFreq) * 2, 16, 3);
         } else if (state === 'ATTACK') {
             // 通用攻擊動作（針對村民或其他無特定武器單位）
             const swing = Math.sin(t * anim.workFreq * 1.5) * 10;

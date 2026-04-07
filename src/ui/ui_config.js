@@ -212,19 +212,27 @@ export const UI_CONFIG = {
         barBlocked: "#f44336",
         badgeBg: "#c62828"
     },
-    // ── 村民狀態顏色（VillagerColors）──────────────────────────
+    // ── 工人村民狀態顏色（VillagerColors）──────────────────────────
     VillagerColors: {
         IDLE: "#42a5f5",
-        CONSTRUCTING: "#945a0491",
-        WOOD: "#0c7e12ff",
-        STONE: "#78909c",
-        FOOD: "#ef5350",
-        GOLD: "#ffca28",
+        CONSTRUCTING: "#b939068e",
+        WOOD: "#388e3c",
+        STONE: "#757575",
+        FOOD: "#fd6563ff",
+        GOLD: "#ffcd28ea",
         SWORDSMAN: "#b0bec5",
         MAGE: "#9575cd",
         ARCHER: "#81c784",
         ENEMY_LABEL: "#ff4444",
         DEFAULT: "#42a5f5"
+    },
+    // ── 工人背負資源顏色 (CargoColors) ──────────────────────────────────
+    CargoColors: {
+        WOOD: "#27ff32ff",
+        STONE: "#acacacff",
+        FOOD: "#ff3131ff",
+        GOLD: "#bda21bff",
+        DEFAULT: "#ad9191ff" // 預設籃子顏色
     },
     // ── NPC及敵人 文字標籤顯示 (NPCLabel) ──────────────────────────────────
     NPCLabel: {

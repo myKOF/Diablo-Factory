@@ -550,13 +550,24 @@ export class MainScene extends Phaser.Scene {
                 }
             } else {
                 // 點擊的是實體 (敵軍或建築)
-                unit.targetId = clickedTarget.id;
-                unit.forceFocus = true;
-                unit.state = 'CHASE';
-                unit.idleTarget = { x: clickedTarget.x, y: clickedTarget.y };
-                unit.isManualCommand = true;
-                unit.chaseFrame = 999;
-                GameEngine.addLog(`[命令] ${unit.configName} 正在追擊目標 ${clickedTarget.configName || '目標'}。`);
+                if (clickedTarget.amount !== undefined && (clickedTarget.type === 'farmland' || clickedTarget.type === 'tree_plantation')) {
+                    if (unit.config.type === 'villagers') {
+                        unit.state = 'MOVING_TO_RESOURCE';
+                        unit.type = clickedTarget.resourceType || (clickedTarget.type === 'farmland' ? 'FOOD' : 'WOOD');
+                        unit.targetId = clickedTarget;
+                        unit.pathTarget = null;
+                        unit.isManualCommand = true;
+                        GameEngine.addLog(`[命令] ${unit.configName} 前往採集田地。`);
+                    }
+                } else {
+                    unit.targetId = clickedTarget.id;
+                    unit.forceFocus = true;
+                    unit.state = 'CHASE';
+                    unit.idleTarget = { x: clickedTarget.x, y: clickedTarget.y };
+                    unit.isManualCommand = true;
+                    unit.chaseFrame = 999;
+                    GameEngine.addLog(`[命令] ${unit.configName} 正在追擊目標 ${clickedTarget.configName || '目標'}。`);
+                }
             }
         } else {
             // 移動指令：完全清除所有任務內容，防止系統重新分配回去做老本行
@@ -887,13 +898,25 @@ export class MainScene extends Phaser.Scene {
 
         const activeIds = new Set();
         const selectedResId = GameEngine.state.selectedResourceId;
-        if (selectedResId) activeIds.add(selectedResId + "_sel");
+        if (selectedResId) {
+            const parts = selectedResId.split('_');
+            const res = GameEngine.state.mapData.getResource(parseInt(parts[0]), parseInt(parts[1]));
+            if (res && res.type !== 0) {
+                activeIds.add(selectedResId + "_sel");
+            } else {
+                // [核心修復] 若資源已枯竭，自動清除全域選取狀態，防止殘留描邊
+                GameEngine.state.selectedResourceId = null;
+            }
+        }
 
         const selectedIds = GameEngine.state.selectedUnitIds || [];
         selectedIds.forEach(uid => {
             const u = GameEngine.state.units.villagers.find(v => v.id === uid);
             if (u && u.targetId && u.targetId.gx !== undefined) {
-                activeIds.add(`${u.targetId.gx}_${u.targetId.gy}_target`);
+                const res = GameEngine.state.mapData.getResource(u.targetId.gx, u.targetId.gy);
+                if (res && res.type !== 0) {
+                    activeIds.add(`${u.targetId.gx}_${u.targetId.gy}_target`);
+                }
             }
         });
 

@@ -1194,24 +1194,52 @@ export class GameEngine {
                 }
 
                 if (target) {
-                    // 針對農田與樹木田，隨機化目標位置以使其待在田內部而非停在邊緣
-                    if (!v.workOffset) v.workOffset = { x: 0, y: 0 };
-                    if ((target.type === 'farmland' || target.type === 'tree_plantation') && v.workOffset.x === 0) {
-                        v.workOffset = {
-                            x: (Math.random() - 0.5) * 50,
-                            y: (Math.random() - 0.5) * 50
-                        };
+                    if (!v.gatherPoint || v._lastTargetId !== (target.id || `${target.gx}_${target.gy}`)) {
+                        v._lastTargetId = (target.id || `${target.gx}_${target.gy}`);
+
+                        if (target.type === 'farmland' || target.type === 'tree_plantation') {
+                            v.gatherPoint = {
+                                x: target.x + (Math.random() - 0.5) * 50,
+                                y: target.y + (Math.random() - 0.5) * 50
+                            };
+                        } else {
+                            // 自然資源：以資源為中心，建立周圍點環繞，並朝工人當時來的方向偏移
+                            let rRadius = 25; // 預設互動半徑
+                            const rCfg = this.state.resourceConfigs.find(c => c.type === (target.resourceType || target.type));
+                            if (rCfg && rCfg.pixel_size) {
+                                rRadius = (Math.max(rCfg.pixel_size.w, rCfg.pixel_size.h) / 2) + 15;
+                            }
+
+                            // 工人相對於資源的角度
+                            let baseAngle = Math.atan2(v.y - target.y, v.x - target.x);
+                            // 讓工人們在 +- 80度 內隨機散開
+                            baseAngle += (Math.random() - 0.5) * 2.8;
+
+                            v.gatherPoint = {
+                                x: target.x + Math.cos(baseAngle) * rRadius,
+                                y: target.y + Math.sin(baseAngle) * rRadius
+                            };
+                        }
                     }
 
-                    const tx = target.x + (v.workOffset.x || 0);
-                    const ty = target.y + (v.workOffset.y || 0);
-                    const dist = Math.hypot(tx - v.x, ty - v.y);
-
-                    if (dist < 25) {
-                        v.state = 'GATHERING'; v.targetId = target; v.gatherTimer = 0; v.pathTarget = null;
+                    const distToGather = Math.hypot(v.gatherPoint.x - v.x, v.gatherPoint.y - v.y);
+                    if (distToGather < 15) {
+                        if (v.cargo > 0) {
+                            // [核心修復] 到達資源點才發現有物資，先回去放，並將當前目標存入快取
+                            v.nextStateAfterDeposit = 'MOVING_TO_RESOURCE';
+                            v.nextTargetAfterDeposit = target;
+                            v.nextTypeAfterDeposit = v.type;
+                            v.state = 'MOVING_TO_BASE';
+                            v.pathTarget = null;
+                            v.gatherPoint = null;
+                        } else {
+                            v.state = 'GATHERING'; v.targetId = target; v.gatherTimer = 0; v.pathTarget = null;
+                            v.gatherPoint = null; // 重置讓下次回來可重新分配位置
+                        }
+                    } else {
+                        this.moveDetailed(v, v.gatherPoint.x, v.gatherPoint.y, moveSpeed, dt, ignoreEnts);
                     }
-                    else { this.moveDetailed(v, tx, ty, moveSpeed, dt, ignoreEnts); }
-                } else { v.state = 'IDLE'; v.pathTarget = null; v.workOffset = null; }
+                } else { v.state = 'IDLE'; v.pathTarget = null; v.gatherPoint = null; v.workOffset = null; }
                 break;
             case 'GATHERING':
                 v.gatherTimer += dt;
@@ -1232,12 +1260,14 @@ export class GameEngine {
                         // 1. 區塊型資源採集 (MapDataSystem)
                         const consumed = this.state.mapData.consumeResource(v.targetId.gx, v.targetId.gy, harvestTotal);
                         v.cargo = consumed;
+                        v.cargoType = v.type; // [修正] 明確記錄身上背的是什麼資源類型
                         this.state.renderVersion++; // [核心修復] 通知渲染層數據已變動，強行刷新標籤與資源狀態
 
                         if (consumed <= 0) {
-                            // 資源已枯竭
+                            // 資源已枯竭(被搶先採完)，自動尋找附近的同類資源
                             v.targetId = null;
-                            v.state = 'IDLE';
+                            v.gatherPoint = null;
+                            v.state = 'MOVING_TO_RESOURCE';
                         } else {
                             v.state = 'MOVING_TO_BASE';
                         }
@@ -1253,12 +1283,14 @@ export class GameEngine {
                         else if (v.targetId.type === 'tree_plantation') this.state.resources.wood += canTake;
 
                         v.cargo = 0;
+                        v.cargoType = null;
                         v.gatherTimer = 0;
                         if (v.targetId.amount <= 0) {
                             this.addLog(`${v.targetId.name || '資源點'} 已枯竭。`);
                             this.state.mapEntities = this.state.mapEntities.filter(e => e !== v.targetId);
                             v.targetId = null;
-                            v.state = 'IDLE';
+                            v.gatherPoint = null;
+                            v.state = 'MOVING_TO_RESOURCE';
                             v.pathTarget = null;
                         }
                     } else {
@@ -1283,28 +1315,61 @@ export class GameEngine {
                 }
 
                 const cfgB = this.state.buildingConfigs[v.targetBase.type];
-                let depositDist = 60;
+                let depositDist = 25; // 使用具體停靠點，互動距離可以縮短
+                let uw = 1, uh = 1;
                 if (cfgB && cfgB.size) {
                     const m = cfgB.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
                     if (m) {
-                        const uw = parseInt(m[1]), uh = parseInt(m[2]);
-                        depositDist = (Math.max(uw, uh) * this.TILE_SIZE / 2) + 20;
+                        uw = parseInt(m[1]);
+                        uh = parseInt(m[2]);
                     }
                 }
-                const distB = Math.hypot(v.targetBase.x - v.x, v.targetBase.y - v.y);
-                if (distB < depositDist) { // 動態交互半徑，確保碰到建築邊緣即可觸發
-                    this.depositResource(v.type, v.cargo);
-                    v.cargo = 0; v.pathTarget = null;
+
+                // 為了讓工人平均分佈在建築周圍的 16 個停靠點
+                const baseId = v.targetBase.id || `${v.targetBase.type}_${v.targetBase.x}_${v.targetBase.y}`;
+                if (!v.depositPoint || v._lastBaseId !== baseId) {
+                    v._lastBaseId = baseId;
+                    const pts = [];
+                    const w = uw * this.TILE_SIZE + 20; // 擴大 10 像素半徑避免判定在牆內
+                    const h = uh * this.TILE_SIZE + 20;
+                    const bx = v.targetBase.x;
+                    const by = v.targetBase.y;
+
+                    const steps = 4;
+                    for (let i = 0; i < steps; i++) pts.push({ x: bx - w / 2 + (w / steps) * i, y: by - h / 2 });
+                    for (let i = 0; i < steps; i++) pts.push({ x: bx + w / 2, y: by - h / 2 + (h / steps) * i });
+                    for (let i = 0; i < steps; i++) pts.push({ x: bx + w / 2 - (w / steps) * i, y: by + h / 2 });
+                    for (let i = 0; i < steps; i++) pts.push({ x: bx - w / 2, y: by + h / 2 - (h / steps) * i });
+
+                    let nearestPt = { x: bx, y: by };
+                    let minDistSq = Infinity;
+                    for (const p of pts) {
+                        const dSq = (p.x - v.x) ** 2 + (p.y - v.y) ** 2;
+                        if (dSq < minDistSq) {
+                            minDistSq = dSq;
+                            nearestPt = p;
+                        }
+                    }
+                    v.depositPoint = nearestPt;
+                }
+
+                const distB = Math.hypot(v.depositPoint.x - v.x, v.depositPoint.y - v.y);
+                if (distB < depositDist) {
+                    this.depositResource(v.cargoType || v.type, v.cargo);
+                    v.cargo = 0; v.cargoType = null; v.pathTarget = null;
+                    v.depositPoint = null; v._lastBaseId = null; // 重置狀態
                     if (v.nextStateAfterDeposit) {
                         v.state = v.nextStateAfterDeposit;
                         v.nextStateAfterDeposit = null;
+                        if (v.nextTypeAfterDeposit) { v.type = v.nextTypeAfterDeposit; v.nextTypeAfterDeposit = null; }
+                        if (v.nextTargetAfterDeposit) { v.targetId = v.nextTargetAfterDeposit; v.nextTargetAfterDeposit = null; }
                     } else if (v.isRecalled) {
                         v.state = 'IDLE'; v.isRecalled = false; v.idleTarget = null;
                     } else {
                         v.state = 'MOVING_TO_RESOURCE';
                     }
                 } else {
-                    this.moveDetailed(v, v.targetBase.x, v.targetBase.y, moveSpeed, dt, ignoreEnts);
+                    this.moveDetailed(v, v.depositPoint.x, v.depositPoint.y, moveSpeed, dt, ignoreEnts);
                 }
                 break;
             case 'MOVING_TO_CONSTRUCTION':
@@ -1323,19 +1388,31 @@ export class GameEngine {
                 }
                 const distC = Math.hypot(v.constructionTarget.x - v.x, v.constructionTarget.y - v.y);
                 if (distC < interactionDist) {
-                    v.state = 'CONSTRUCTING';
-                    v.pathTarget = null;
+                    // 核心檢查：如果到達時已經蓋完了，直接歸位
+                    if (!v.constructionTarget.isUnderConstruction) {
+                        this.restoreVillagerTask(v);
+                        v.constructionTarget = null;
+                    } else {
+                        v.state = 'CONSTRUCTING';
+                        v.pathTarget = null;
+                    }
                 } else {
                     this.moveDetailed(v, v.constructionTarget.x, v.constructionTarget.y, moveSpeed, dt, ignoreEnts);
                 }
                 break;
             case 'CONSTRUCTING':
-                if (!v.constructionTarget || !this.state.mapEntities.includes(v.constructionTarget)) {
+                if (!v.constructionTarget || !this.state.mapEntities.includes(v.constructionTarget) || !v.constructionTarget.isUnderConstruction) {
                     this.restoreVillagerTask(v);
+                    v.constructionTarget = null;
                     return;
                 }
+                
                 v.constructionTarget.buildProgress += dt;
-                if (v.constructionTarget.buildProgress >= v.constructionTarget.buildTime) {
+                
+                // [核心修復] 直接提供 fallback 並預留計算有效性
+                const targetBuildTime = Math.max(0.1, v.constructionTarget.buildTime || 5);
+                
+                if (v.constructionTarget.buildProgress >= targetBuildTime) {
                     const finishedBuilding = v.constructionTarget; // 鎖定當前完工建築引用
                     finishedBuilding.isUnderConstruction = false;
                     this.state.renderVersion++; // 通知渲染器刷新
@@ -1521,7 +1598,7 @@ export class GameEngine {
             const dist = Math.hypot(e.x - v.x, e.y - v.y);
             if (dist > visionPx) return false;
 
-            // 互斥檢查修復：只有當正在有人「前往或正在施工中」才放手
+            // 互斥檢查修復：回歸一人蓋一間的原則，防止多名工人擠在同個建築物
             const hasActiveWorker = this.state.units.villagers.some(vi =>
                 vi.id !== v.id &&
                 vi.constructionTarget &&
@@ -1632,7 +1709,7 @@ export class GameEngine {
      * 執行路徑移動邏輯 (非同步尋路)
      * 根據核心協議：效能優化與穩定優先，避免每幀重複 new 物件
      */
-    static moveDetailed(v, tx, ty, speed, dt) {
+    static moveDetailed(v, tx, ty, speed, dt, ignoreEnts = []) {
         // 核心優化：平滑尋路偵測 (不立即清空舊路徑以防止抖動)
         const targetDist = !v._lastRequestedTarget ? 999 : Math.hypot(v._lastRequestedTarget.x - tx, v._lastRequestedTarget.y - ty);
 
@@ -1683,7 +1760,8 @@ export class GameEngine {
                     const nextY = v.y + dy * ratio;
 
                     // 物理安全性要求：路徑段落中也加入碰撞檢查，防止在新舊尋路交替時穿牆
-                    if (!this.isColliding(nextX, nextY, [v])) {
+                    const fullIgnore = [v, ...ignoreEnts];
+                    if (!this.isColliding(nextX, nextY, fullIgnore)) {
                         v.x = nextX;
                         v.y = nextY;
                         if (Math.abs(dx) > 0.01) v.facing = dx > 0 ? 1 : -1;
@@ -1701,7 +1779,7 @@ export class GameEngine {
                 }
             } else {
                 // 如果沒有路徑或是正在尋路中，執行直線逼近 (moveTowards 本身帶有碰撞檢查)
-                this.moveTowards(v, tx, ty, speed, remainingDt);
+                this.moveTowards(v, tx, ty, speed, remainingDt, ignoreEnts);
                 remainingDt = 0;
             }
         }
@@ -1747,7 +1825,7 @@ export class GameEngine {
         }
     }
 
-    static moveTowards(v, tx, ty, speed, dt) {
+    static moveTowards(v, tx, ty, speed, dt, ignoreEnts = []) {
         const dx = tx - v.x, dy = ty - v.y;
         const dist = Math.hypot(dx, dy);
         const moveDist = speed * dt;
@@ -1758,7 +1836,8 @@ export class GameEngine {
             const nextY = v.y + dy * ratio;
 
             // 物理限制：直線移動過程中若遇到碰撞，必須停下，杜絕穿模
-            if (!this.isColliding(nextX, nextY, [v])) {
+            const fullIgnore = [v, ...ignoreEnts];
+            if (!this.isColliding(nextX, nextY, fullIgnore)) {
                 if (Math.abs(dx) > 0.1) v.facing = dx > 0 ? 1 : -1;
                 v.x = nextX;
                 v.y = nextY;
@@ -2192,7 +2271,8 @@ export class GameEngine {
         const newBuilding = {
             id: `build_${type}_${x}_${y}_${Date.now()}`,
             type: type, x: x, y: y, name: "施工中",
-            isUnderConstruction: true, buildProgress: 0, buildTime: cfg.buildTime,
+            isUnderConstruction: true, buildProgress: 0, 
+            buildTime: Math.max(1, cfg.buildTime || 5), // 防止 0 或 NaN
             targetWorkerCount: ['timber_factory', 'stone_factory', 'barn', 'quarry', 'gold_mining_factory'].includes(type) ? 1 : 0,
             ...(cfg.npcProduction && cfg.npcProduction.length > 0 ? { queue: [], productionTimer: 0 } : {})
         };
