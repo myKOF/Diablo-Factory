@@ -980,8 +980,8 @@ export class GameEngine {
                 // 核心優化：從 UI_CONFIG 讀取緩衝值，避免單位中心點停在邊緣時視覺重疊
                 const collCfg = UI_CONFIG.BuildingCollision || { buffer: 10, feetOffset: 8 };
                 // 核心同步：確保尋路格網的封鎖範圍與物理碰撞 (isColliding) 一致
-                // 物理碰撞使用 effBuffer = unitW / 2 (預設 10)，所以總寬度增加 20
-                const unitWidthDefault = 20;
+                // 使用玩家設置的碰撞寬度 10px (worker 寬度) 作為計算基準
+                const unitWidthDefault = 10;
                 const effBuffer = Math.max(unitWidthDefault / 2, (collCfg.buffer || 0) / 2);
                 const bWidth = uw * TS + effBuffer * 2, bHeight = uh * TS + effBuffer * 2;
 
@@ -990,7 +990,8 @@ export class GameEngine {
 
                 const offset = this.state.mapOffset || { x: 0, y: 0 };
                 const FOOT_OFFSET = collCfg.feetOffset || 8;
-                const shrink = 4;
+                // 寬鬆係數 (shrink)：數值越大，寻路越寬鬆。設為 6 可確保在 10px buffer 下仍能穿過 1 格寬的空隙
+                const shrink = 6;
                 const gx1 = Math.max(0, Math.floor((minX + shrink) / TS) - offset.x);
                 const gy1 = Math.max(0, Math.floor((minY - FOOT_OFFSET + shrink) / TS) - offset.y);
                 const gx2 = Math.min(cols - 1, Math.floor((maxX - shrink - 0.1) / TS) - offset.x);
