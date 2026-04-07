@@ -399,6 +399,16 @@ export const UI_CONFIG = {
     BuildingCollision: {
         buffer: 10,             // 碰撞緩衝範圍 (像素，建議為單位直徑，用於防止身體重疊)
         feetOffset: 8          // 單位腳部視覺偏移量 (像素，將單位中心與建築底線對齊)
+    },
+    // ── 尋路目標提示 (PathfindingTarget) ──────────────────────────
+    PathfindingTarget: {
+        enemyColor: "#ff4444",         // 敵方目標選取框顏色 (紅色)
+        floorColor: "#00e5ff",         // 地板/建築光圈顏色 (青藍色)
+        circleMinRadius: 6,            // 光圈最小半徑
+        circleMaxRadius: 14,           // 光圈最大半徑
+        pulseSpeed: 0.01,              // 縮放速度
+        alpha: 0.7,                    // 透明度
+        clickEffectDuration: 500       // 點擊反饋效果持續時間 (ms)
     }
 };
 

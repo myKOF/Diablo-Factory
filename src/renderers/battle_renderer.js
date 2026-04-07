@@ -121,10 +121,16 @@ export class BattleRenderer {
         g.fillStyle(bgColor, cfg.bgAlpha || 0.8);
         g.fillRect(x, y, barWidth, barHeight);
 
-        // 2. 繪製填充 (根據血量比例切換顏色)
+        // 2. 繪製填充 (優先根據敵我分類，次之根據血量比例)
+        const isEnemy = (unit.config && unit.config.camp === 'enemy') || unit.camp === 'enemy';
         let color = 0x4caf50; // Green
-        if (hpPercent < 0.3) color = 0xf44336; // Red
-        else if (hpPercent < 0.6) color = 0xff9800; // Orange
+
+        if (isEnemy) {
+            color = 0xf44336; // 敵軍統一使用紅色
+        } else {
+            if (hpPercent < 0.3) color = 0xf44336; // 危險
+            else if (hpPercent < 0.6) color = 0xff9800; // 警告
+        }
 
         g.fillStyle(color, 1);
         g.fillRect(x, y, barWidth * hpPercent, barHeight);

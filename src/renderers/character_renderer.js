@@ -20,14 +20,20 @@ export class CharacterRenderer {
         }
 
         const state = unitData.state || 'IDLE';
+        const isEnemy = (unitData.config && unitData.config.camp === 'enemy') || unitData.camp === 'enemy';
         const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
+
+        const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
+        const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
+
+        if (isSelected || isHovered) {
+            const circleColor = isEnemy ? 0xf44336 : 0x4caf50; 
+            this.drawSelectionRing(ctx, x, y, time, circleColor);
+        }
+
         const isCombatMove = state === 'MOVE';
         const isMoving = state.includes('MOVING') || isCombatMove; // 精確判斷是否正在移動
         const isWandering = !!unitData.idleTarget && !isCombatMove; // 判斷是否正在閒晃 (排除戰鬥衝刺)
-
-        if (isSelected) {
-            this.drawSelectionRing(ctx, x, y, time);
-        }
 
         // 計算動畫頻率與振幅
         const animationSpeed = 0.01;
@@ -297,9 +303,15 @@ export class CharacterRenderer {
         const t = time * 0.01;
 
         // [渲染核心 5: 選取圈繪製] (支持多選Ids列表)
+        const isEnemy = (unitData.config && unitData.config.camp === 'enemy') || unitData.camp === 'enemy';
         const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
-        if (isSelected) {
-            this.drawSelectionRing(ctx, x, y, time);
+
+        const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
+        const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
+
+        if (isSelected || isHovered) {
+            const circleColor = isEnemy ? 0xf44336 : 0x4caf50;
+            this.drawSelectionRing(ctx, x, y, time, circleColor);
         }
 
         // 1.1 繪製視界圈 (紅色線條) - 座標系修正
@@ -505,8 +517,7 @@ export class CharacterRenderer {
         }
     }
 
-    static drawSelectionRing(ctx, x, y, time) {
-        const color = 0x4caf50; // 綠色
+    static drawSelectionRing(ctx, x, y, time, color = 0x4caf50) {
         const alpha = 0.8;
         const radius = 22;
         // 加入輕微的呼吸律動感，提升質感

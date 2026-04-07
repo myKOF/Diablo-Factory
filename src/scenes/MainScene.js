@@ -17,7 +17,9 @@ export class MainScene extends Phaser.Scene {
         this.emitters = new Map(); // ID -> ParticleEmitter
         this.gridGraphics = null;
         this.marqueeGraphics = null; // 框選圖形界面
+        this.targetGraphics = null;  // 尋路目標提示層
         this.selectionStartPos = null; // 框選起始位置 (世界座標)
+        this.clickEffects = [];      // 點擊反饋效果列表
         this.lastRenderVersion = 0;
     }
 
@@ -84,6 +86,10 @@ export class MainScene extends Phaser.Scene {
         // 框選 marquee 層
         this.marqueeGraphics = this.add.graphics();
         this.marqueeGraphics.setDepth(2000); // 置頂顯示
+
+        // 尋路目標提示層 (位於單位之下)
+        this.targetGraphics = this.add.graphics();
+        this.targetGraphics.setDepth(5);
 
         // 相機控制
         this.lastCamX = -9999;
@@ -177,6 +183,8 @@ export class MainScene extends Phaser.Scene {
             if (window.UIManager && window.UIManager.dragGhost) return;
 
             const isPlacement = !!GameEngine.state.placingType;
+            this.rightClickWasPlacement = isPlacement; // 記錄本次按下的初始狀態，防止 contextmenu 事件先一步清除了標記
+
             const isMiddleDrag = pointer.middleButtonDown();
             const isRightClick = pointer.rightButtonDown();
 
@@ -254,8 +262,11 @@ export class MainScene extends Phaser.Scene {
             if (this.isDragging) {
                 const dx = pointer.x - lastPointer.x;
                 const dy = pointer.y - lastPointer.y;
-                cam.scrollX -= dx;
-                cam.scrollY -= dy;
+                if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
+                    cam.scrollX -= dx;
+                    cam.scrollY -= dy;
+                    this.lastDragTime = Date.now(); // 記錄最後一次畫面移動的時間點
+                }
                 lastPointer = { x: pointer.x, y: pointer.y };
             }
 
@@ -266,44 +277,82 @@ export class MainScene extends Phaser.Scene {
         });
 
         this.input.on('pointerup', (pointer) => {
-            // 如果是右鍵釋放，根據拖動距離判斷：是「移動指令」還是「相機拖動結束」
             if (pointer.button === 2) {
+                this.isDragging = false; // 核心修復：在判斷早期即結束拖拽狀態，防止狀態卡死導致畫面持續跟隨
+                
+                // 如果是右鍵釋放，根據拖動距離判斷：是「移動指令」還是「相機拖動結束」
+                // 1. 如果在過去 0.2 秒內發生過畫面拖動，則不執行移動指令 (防止操作衝突)
+                const now = Date.now();
+                const dragDecay = 200; // 0.2秒緩衝
+                if (this.lastDragTime && (now - this.lastDragTime < dragDecay)) {
+                    this.rightClickWasPlacement = false;
+                    GameEngine.addLog("[指令] 拖動畫面中，已自動過濾寻路指令。", "PATH");
+                    return;
+                }
+
+                // 2. 優先檢查本次點擊開始時是否處於建築模式
+                if (this.rightClickWasPlacement) {
+                    this.rightClickWasPlacement = false;
+                    return;
+                }
+                this.rightClickWasPlacement = false; // 以防萬一的重置
+
                 const dragDist = this.dragStartPos ? Math.hypot(pointer.x - this.dragStartPos.x, pointer.y - this.dragStartPos.y) : 0;
-                // 位移小於 10px 視為單擊指令
-                if (dragDist < 10) {
-                    const selectedIds = GameEngine.state.selectedUnitIds || [];
-                    if (selectedIds.length > 0) {
-                        const unitsToMove = selectedIds.map(id => GameEngine.state.units.villagers.find(v => v.id === id)).filter(v => v);
+                // 3. 即使沒觸發 move 事件，位移超過 2px 仍視為拖動
+                if (dragDist > 2) return;
 
-                        // 1. 識別點擊目標 (碰撞檢測)
-                        let clickedEnemy = null;
-                        let bestDist = 40;
-                        GameEngine.state.units.villagers.forEach(v => {
-                            const camp = (v.config && v.config.camp) || v.camp || 'neutral';
-                            if (camp === 'enemy') {
-                                const d = Math.hypot(v.x - pointer.worldX, v.y - pointer.worldY);
-                                if (d < bestDist) { bestDist = d; clickedEnemy = v; }
-                            }
-                        });
+                // 1. 識別點擊目標 (碰撞檢測)
+                let clickedEnemy = null;
+                let clickedEntity = null;
+                let bestDist = 40;
 
-                        const colsNum = Math.ceil(Math.sqrt(unitsToMove.length));
-                        const spacing = 40;
-
-                        unitsToMove.forEach((unit, i) => {
-                            if (clickedEnemy) {
-                                // 追擊指令：直接設定目標
-                                this.handleRightClickCommand(unit, pointer, clickedEnemy);
-                            } else {
-                                // 移動指令：計算陣型偏移
-                                const r = Math.floor(i / colsNum);
-                                const c = i % colsNum;
-                                const offX = (c - (colsNum - 1) / 2) * spacing;
-                                const offY = (r - (colsNum - 1) / 2) * spacing;
-                                const fakePointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
-                                this.handleRightClickCommand(unit, fakePointer);
-                            }
-                        });
+                // 優先檢測敵軍
+                GameEngine.state.units.villagers.forEach(v => {
+                    const camp = (v.config && v.config.camp) || v.camp || 'neutral';
+                    if (camp === 'enemy') {
+                        const d = Math.hypot(v.x - pointer.worldX, v.y - pointer.worldY);
+                        if (d < bestDist) { bestDist = d; clickedEnemy = v; }
                     }
+                });
+
+                // 其次檢測建築/資源 (如果沒點到敵軍)
+                if (!clickedEnemy) {
+                    GameEngine.state.mapEntities.forEach(e => {
+                        const d = Math.hypot(e.x - pointer.worldX, e.y - pointer.worldY);
+                        if (d < bestDist) { bestDist = d; clickedEntity = e; }
+                    });
+                }
+
+                // 觸發點擊效果 (無論是否有選中單位)
+                if (clickedEnemy) {
+                    this.addClickEffect(clickedEnemy.x, clickedEnemy.y, 'enemy');
+                } else if (clickedEntity) {
+                    this.addClickEffect(clickedEntity.x, clickedEntity.y, 'ground');
+                } else {
+                    this.addClickEffect(pointer.worldX, pointer.worldY, 'ground');
+                }
+
+                const selectedIds = GameEngine.state.selectedUnitIds || [];
+                if (selectedIds.length > 0) {
+                    const unitsToMove = selectedIds.map(id => GameEngine.state.units.villagers.find(v => v.id === id)).filter(v => v);
+
+                    const colsNum = Math.ceil(Math.sqrt(unitsToMove.length));
+                    const spacing = 40;
+
+                    unitsToMove.forEach((unit, i) => {
+                        if (clickedEnemy) {
+                            // 追擊指令：直接設定目標
+                            this.handleRightClickCommand(unit, pointer, clickedEnemy);
+                        } else {
+                            // 移動指令：計算陣型偏移
+                            const r = Math.floor(i / colsNum);
+                            const c = i % colsNum;
+                            const offX = (c - (colsNum - 1) / 2) * spacing;
+                            const offY = (r - (colsNum - 1) / 2) * spacing;
+                            const fakePointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
+                            this.handleRightClickCommand(unit, fakePointer);
+                        }
+                    });
                 }
             }
 
@@ -337,7 +386,9 @@ export class MainScene extends Phaser.Scene {
                 this.marqueeGraphics.clear();
             }
 
-            this.isDragging = false;
+            if (pointer.button !== 2) {
+                this.isDragging = false;
+            }
             this.dragStartPos = null;
         });
     }
@@ -494,6 +545,9 @@ export class MainScene extends Phaser.Scene {
 
         // 繪製選取高亮 (建築選取箱)
         this.drawSelectionHighlight();
+
+        // 繪製尋路目標指示器
+        this.drawPathfindingIndicators();
 
         // 2. 判斷是否可以跳過重度的實體渲染計算
         // 如果相機沒動、加載完畢、實體數量沒變，且且渲染版本未更新，跳過繁重計算
@@ -680,6 +734,107 @@ export class MainScene extends Phaser.Scene {
         g.strokeRect(ent.x - w / 2 - 2, ent.y - h / 2 - 2, w + 4, h + 4);
         g.lineStyle(1.5, 0xffffff, 1);
         g.strokeRect(ent.x - w / 2 - 0, ent.y - h / 2 - 0, w, h);
+    }
+
+    /**
+     * 加入新的點擊反饋效果
+     */
+    addClickEffect(x, y, type = 'ground') {
+        this.clickEffects.push({
+            x, y,
+            type,
+            startTime: Date.now(),
+            duration: UI_CONFIG.PathfindingTarget.clickEffectDuration || 500
+        });
+    }
+
+    /**
+     * 繪製尋路目標指示器（選中單位的目標 & 點擊反饋）
+     */
+    drawPathfindingIndicators() {
+        const g = this.targetGraphics;
+        g.clear();
+
+        // 1. 拖動畫面時不顯示目標提示
+        if (this.isDragging) return;
+
+        const cfg = UI_CONFIG.PathfindingTarget;
+        if (!cfg) return;
+        const now = Date.now();
+
+        // 1. 處理點擊反饋 (透明度漸變)
+        this.clickEffects = this.clickEffects.filter(eff => {
+            const progress = (now - eff.startTime) / eff.duration;
+            if (progress >= 1) return false;
+
+            const alpha = (1 - progress) * (cfg.alpha || 0.7);
+            this.drawTargetIndicator(g, eff.x, eff.y, eff.type, alpha, now);
+            return true;
+        });
+
+        // 2. 處理選中單位的持久目標 (僅當單位在移動或有目標時)
+        const selectedIds = GameEngine.state.selectedUnitIds || [];
+        if (selectedIds.length > 0) {
+            const drawnPos = new Set();
+            selectedIds.forEach(id => {
+                const u = GameEngine.state.units.villagers.find(v => v.id === id);
+                if (!u) return;
+
+                // 2. 敵人的目標點不顯示 (僅顯示友方單位的移動目的地)
+                const isEnemy = (u.config && u.config.camp === 'enemy') || u.camp === 'enemy';
+                if (isEnemy) return;
+
+                // 只有狀態不是 IDLE 或是有目標時才顯示
+                if (u.targetId) {
+                    const target = GameEngine.state.units.villagers.find(v => v.id === u.targetId) ||
+                        GameEngine.state.mapEntities.find(e => e.id === u.targetId);
+
+                    if (target) {
+                        const targetType = target.config ? 'enemy' : 'ground'; // 單位為 enemy, 建築資源為 ground
+                        const key = `target_${target.id}`;
+                        if (!drawnPos.has(key)) {
+                            this.drawTargetIndicator(g, target.x, target.y, targetType, cfg.alpha || 0.7, now);
+                            drawnPos.add(key);
+                        }
+                    }
+                } else if (u.idleTarget && u.state !== 'IDLE') {
+                    const key = `ground_${Math.floor(u.idleTarget.x)}_${Math.floor(u.idleTarget.y)}`;
+                    if (!drawnPos.has(key)) {
+                        this.drawTargetIndicator(g, u.idleTarget.x, u.idleTarget.y, 'ground', cfg.alpha || 0.7, now);
+                        drawnPos.add(key);
+                    }
+                }
+            });
+        }
+    }
+
+    /**
+     * 繪製單個指示器 (選取框 or 光圈)
+     */
+    drawTargetIndicator(g, x, y, type, alpha, time) {
+        const cfg = UI_CONFIG.PathfindingTarget;
+        const parseColor = (c) => typeof c === 'string' ? parseInt(c.replace('#', ''), 16) : c;
+
+        if (type === 'enemy') {
+            const color = parseColor(cfg.enemyColor || "#ff4444");
+            const pulse = (Math.sin(time * (cfg.pulseSpeed || 0.01)) + 1) / 2; // 0 ~ 1
+            const r = (cfg.circleMinRadius || 18) + ((cfg.circleMaxRadius || 26) - (cfg.circleMinRadius || 18)) * pulse;
+
+            g.lineStyle(3, color, alpha);
+            g.strokeCircle(x, y, r);
+            g.fillStyle(color, alpha * 0.3);
+            g.fillCircle(x, y, r * 0.6);
+        } else {
+            // 地板/建築光圈
+            const color = parseColor(cfg.floorColor || "#00e5ff");
+            const pulse = (Math.sin(time * (cfg.pulseSpeed || 0.01)) + 1) / 2; // 0 ~ 1
+            const r = (cfg.circleMinRadius || 6) + ((cfg.circleMaxRadius || 14) - (cfg.circleMinRadius || 6)) * pulse;
+
+            g.lineStyle(2, color, alpha);
+            g.strokeCircle(x, y, r);
+            g.fillStyle(color, alpha * 0.3);
+            g.fillCircle(x, y, r * 0.6);
+        }
     }
 
 
