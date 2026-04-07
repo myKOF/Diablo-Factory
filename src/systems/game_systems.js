@@ -45,6 +45,7 @@ export class GameEngine {
         renderVersion: 0, // 用於通知渲染器強行刷新
         pathfinding: null, // 尋路系統實例
         selectedUnitIds: [], // 目前選中的單位 ID 列表
+        selectedResourceId: null, // 目前選中的資源 ID (gx_gy)
         lastSelectedUnitId: null, // 上一次選中的單位 ID (用於雙擊檢測)
         lastSelectionTime: 0, // 上一次選中的時間 (用於雙擊檢測)
         mapData: null // 大地圖數據系統實例 (Uint16Array)
@@ -465,7 +466,7 @@ export class GameEngine {
             const findHIdx = (key) => headers.findIndex(h => h.toLowerCase().trim() === key.toLowerCase());
             const idxName = findHIdx('name'), idxModel = findHIdx('model'), idxType = findHIdx('type');
             const idxYield = findHIdx('collection_speed'), idxDensity = findHIdx('density');
-            const idxLv = findHIdx('lv'), idxSize = findHIdx('size'), idxModelSize = findHIdx('model_size');
+            const idxLv = findHIdx('lv'), idxSize = findHIdx('size'), idxModelSize = findHIdx('model_size'), idxPixelSize = findHIdx('pixel_size');
 
             this.state.resourceConfigs = [];
             for (let i = headerIdx + 1; i < rows.length; i++) {
@@ -490,11 +491,27 @@ export class GameEngine {
                     }
                 }
 
+                let pixelSize = { w: 20, h: 20 };
+                if (idxPixelSize !== -1 && row[idxPixelSize]) {
+                    const val = row[idxPixelSize].trim();
+                    const m1 = val.match(/\{[ ]*(\d+)[ ]*[\*,x][ ]*(\d+)[ ]*\}/);
+                    if (m1) {
+                        pixelSize = { w: parseInt(m1[1]), h: parseInt(m1[2]) };
+                    } else {
+                        const m2 = val.match(/\{[ ]*(\d+)[ ]*\}/);
+                        if (m2) {
+                            const n = parseInt(m2[1]);
+                            pixelSize = { w: n, h: n };
+                        }
+                    }
+                }
+
                 this.state.resourceConfigs.push({
                     name: row[idxName].trim(), model: row[idxModel].trim(), type: row[idxType].trim().toUpperCase(),
                     amount: parseInt(row[idxYield]) || 100, density: parseInt(row[idxDensity]) || 5,
                     lv: parseInt(row[idxLv]) || 1, size: (idxSize !== -1 && row[idxSize]) ? row[idxSize].trim() : '{1,1}',
-                    model_size: parsedModelSize
+                    model_size: parsedModelSize,
+                    pixel_size: pixelSize
                 });
             }
         } catch (e) { }
@@ -842,8 +859,9 @@ export class GameEngine {
                     // 記錄資源至 MapDataSystem (取代 mapEntities 物件)
                     this.state.mapData.setResource(gx, gy, typeNum, cfg.amount, cfg.lv || 1);
 
-                    // 儲存視覺變差 (Tint/ScaleIndex)
+                    // 儲存視覺變量 (Tint/ScaleIndex)
                     let vTint = 0xffffff;
+                    let vScale = 100; // 1.0 進位縮放 (用 8bit 存)
                     let varCfg = null;
                     if (cfg.type === 'WOOD') varCfg = resCfg.Tree.visualVariation;
                     else if (cfg.type === 'STONE') varCfg = resCfg.Rock.visualVariation;
@@ -854,12 +872,16 @@ export class GameEngine {
                         const c = Math.floor(255 * brightness);
                         vTint = (c << 16) | (c << 8) | c;
                         
-                        // 讀取隨機縮放並轉為 Index 存入 (這裡簡化，直接將 tint 存入 variationGrid)
-                        const idx = this.state.mapData.getIndex(gx, gy);
-                        if (idx !== -1) {
-                            // 存入 Tint (24bit)
-                            this.state.mapData.variationGrid[idx] = vTint;
-                        }
+                        // 計算隨機縮放 (minScale ~ maxScale)
+                        const randomScale = varCfg.minScale + Math.random() * (varCfg.maxScale - varCfg.minScale);
+                        vScale = Math.floor(randomScale * 100);
+                    }
+                    
+                    const idx = this.state.mapData.getIndex(gx, gy);
+                    if (idx !== -1) {
+                        // 存入 Tint (24bit) 與 ScaleFactor (8bit)
+                        // vScale 最大 255 (即 2.55倍)，一般夠用
+                        this.state.mapData.variationGrid[idx] = (vScale << 24) | vTint;
                     }
 
                     markOccupiedG(gx, gy, fp.uw, fp.uh);
@@ -978,11 +1000,38 @@ export class GameEngine {
 
         // 2. 注入資源碰撞 (MapDataSystem)
         if (this.state.mapData) {
+            const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
             for (let i = 0; i < this.state.mapData.totalTiles; i++) {
-                if (this.state.mapData.typeGrid[i] !== 0) {
-                    const tx = i % this.state.mapData.cols;
-                    const ty = Math.floor(i / this.state.mapData.cols);
-                    matrix[ty][tx] = 1;
+                const typeNum = this.state.mapData.typeGrid[i];
+                if (typeNum !== 0) {
+                    const level = this.state.mapData.levelGrid[i] || 1;
+                    const typeName = typeMap[typeNum];
+                    // 根據型別與等級尋找配置
+                    const cfg = this.state.resourceConfigs.find(c => c.type === typeName && c.lv === level);
+                    
+                    const gx = i % this.state.mapData.cols;
+                    const gy = Math.floor(i / this.state.mapData.cols);
+                    
+                    if (cfg && cfg.pixel_size) {
+                        const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
+                        const pw = cfg.pixel_size.w, ph = cfg.pixel_size.h;
+
+                        // 計算受影響的格位範圍 (基於視覺中心)
+                        const minGx = Math.floor((rx - pw / 2) / TS);
+                        const maxGx = Math.floor((rx + pw / 2 - 0.1) / TS);
+                        const minGy = Math.floor((ry - ph / 2) / TS);
+                        const maxGy = Math.floor((ry + ph / 2 - 0.1) / TS);
+
+                        for (let ty = minGy; ty <= maxGy; ty++) {
+                            for (let tx = minGx; tx <= maxGx; tx++) {
+                                if (ty >= 0 && ty < rows && tx >= 0 && tx < cols) {
+                                    matrix[ty][tx] = 1;
+                                }
+                            }
+                        }
+                    } else {
+                        matrix[gy][gx] = 1;
+                    }
                 }
             }
         }
@@ -1133,7 +1182,17 @@ export class GameEngine {
                     const w = this.state.mapEntities.find(e => (e.id || `${e.type}_${e.x}_${e.y}`) === v.assignedWarehouseId);
                     if (w) { searchX = w.x; searchY = w.y; }
                 }
-                const target = this.findNearestResource(searchX, searchY, v.type, v.id);
+
+                // 核心修復：如果已有指定目標 (手動指令)，優先前往該目標，而非自動搜尋最近
+                let target = v.targetId;
+                if (!target || target.gx === undefined) { 
+                    target = this.findNearestResource(searchX, searchY, v.type, v.id);
+                } else {
+                    // 檢查指定目標是否還有效 (MapData)
+                    const res = this.state.mapData.getResource(target.gx, target.gy);
+                    if (!res || res.amount <= 0) target = this.findNearestResource(searchX, searchY, v.type, v.id);
+                }
+
                 if (target) {
                     // 針對農田與樹木田，隨機化目標位置以使其待在田內部而非停在邊緣
                     if (!v.workOffset) v.workOffset = { x: 0, y: 0 };
@@ -1752,13 +1811,36 @@ export class GameEngine {
         // 2. 檢測資源 (MapDataSystem)
         if (this.state.mapData) {
             const TS = this.TILE_SIZE;
-            const tgx = Math.floor(x / TS);
-            const tgy = Math.floor(y / TS);
-            const res = this.state.mapData.getResource(tgx, tgy);
-            if (res) {
-                // 如果是資源且不是被忽略的採集目標 (比對格線座標)
-                if (!ignoreEnts.some(ign => ign && ign.gx === tgx && ign.gy === tgy)) {
-                    return { type: 'resource', gx: tgx, gy: tgy };
+            const searchGx = Math.floor(x / TS);
+            const searchGy = Math.floor(y / TS);
+            const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+
+            // 搜尋週邊格子，判斷物理尺寸 (pixel_size) 是否碰撞
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const gx = searchGx + dx, gy = searchGy + dy;
+                    const res = this.state.mapData.getResource(gx, gy);
+                    if (res) {
+                        const level = this.state.mapData.levelGrid[this.state.mapData.getIndex(gx, gy)] || 1;
+                        const cfg = this.state.resourceConfigs.find(c => c.type === typeMap[res.type] && c.lv === level);
+                        
+                        if (cfg && cfg.pixel_size) {
+                            const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
+                            const pw = cfg.pixel_size.w, ph = cfg.pixel_size.h;
+                            if (x > rx - pw/2 && x < rx + pw/2 && y > ry - ph/2 && y < ry + ph/2) {
+                                if (!ignoreEnts.some(ign => ign && ign.gx === gx && ign.gy === gy)) {
+                                    return { type: 'resource', gx, gy };
+                                }
+                            }
+                        } else {
+                            // 預設 1x1 碰撞
+                            if (gx === searchGx && gy === searchGy) {
+                                if (!ignoreEnts.some(ign => ign && ign.gx === gx && ign.gy === gy)) {
+                                    return { type: 'resource', gx, gy };
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

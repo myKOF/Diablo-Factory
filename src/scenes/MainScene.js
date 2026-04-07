@@ -62,16 +62,13 @@ export class MainScene extends Phaser.Scene {
         this.entityGroup = this.add.group();
         this.unitGroup = this.add.group();
 
-        // 效能協議：為資源實作物業層級的 Blitter (離屏快取渲染方案)
-        // Blitter 對於數千個相同材質的靜態物件有無與倫比的效能
-        this.resourceBlitters = {
-            'tree': this.add.blitter(0, 0, 'tex_tree').setDepth(8),
-            'stone': this.add.blitter(0, 0, 'tex_stone').setDepth(8),
-            'food': this.add.blitter(0, 0, 'tex_food').setDepth(8),
-            'gold': this.add.blitter(0, 0, 'tex_gold').setDepth(8)
-        };
-        this.resourceBobs = new Map(); // 格網鍵值 (gx_gy) -> { type, bob }
+        // 效能協議：為資源實作物業層級的物件池渲染優化
+        // 考量到資源物件有模型縮放 (model_size) 與視覺變形需求，改用 Image 對象池而非 Blitter。
+        // Phaser 在幾千個 Image 下效能依然強勁。
+        this.resourceBobs = new Map(); // 格網鍵值 (gx_gy) -> { type, bob, lv }
         this.resourcePools = { 'tree': [], 'stone': [], 'food': [], 'gold': [] };
+        // 建立專用群組
+        this.resourceGroup = this.add.group();
 
         // 預覽配置 (用於建築放置)
         this.placementPreview = this.add.graphics();
@@ -183,7 +180,7 @@ export class MainScene extends Phaser.Scene {
         this.input.on('pointerdown', (pointer) => {
             // 核心功能：不論是否被 UI 阻擋，第一時間捕捉目前的建築狀態快照
             const isPlacement = !!GameEngine.state.placingType;
-            this.rightClickWasPlacement = isPlacement; 
+            this.rightClickWasPlacement = isPlacement;
             // 記錄本次按下的初始狀態，防止 contextmenu 事件先一步清除了標記
             GameEngine.state.rightClickStartedInPlacementMode = isPlacement;
 
@@ -241,12 +238,59 @@ export class MainScene extends Phaser.Scene {
                     GameEngine.state.lastSelectionTime = now;
                     GameEngine.state.lastSelectedUnitId = clickedUnit.id;
                     this.logUnitDetail(clickedUnit);
+                    GameEngine.state.selectedResourceId = null; // 清除資源選取
                     return; // 點中單位就不觸發拖曳
                 } else {
+                    // 偵測資源點擊 (左鍵單選)
+                    const TS = GameEngine.TILE_SIZE;
+                    if (GameEngine.state.mapData) {
+                        // 使用 model_size 進行範圍檢測，而非單純的格位
+                        const clickX = pointer.worldX, clickY = pointer.worldY;
+
+                        // 我們需要搜尋滑鼠附近可能有資源覆蓋的格位 (最多 3x3 範圍)
+                        const searchGx = Math.floor(clickX / TS);
+                        const searchGy = Math.floor(clickY / TS);
+                        let foundRes = null;
+
+                        for (let dy = -1; dy <= 1; dy++) {
+                            for (let dx = -1; dx <= 1; dx++) {
+                                const gx = searchGx + dx, gy = searchGy + dy;
+                                const res = GameEngine.state.mapData.getResource(gx, gy);
+                                if (!res) continue;
+
+                                const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+                                const typeName = typeMap[res.type];
+                                const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
+                                if (!cfg) continue;
+
+                                // 模型尺寸 (視覺中心在格位中心)
+                                const ms = cfg.model_size || { x: 1, y: 1 };
+                                const vWidth = 120 * ms.x, vHeight = 120 * ms.y;
+                                const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
+
+                                if (clickX >= rx - vWidth / 2 && clickX <= rx + vWidth / 2 &&
+                                    clickY >= ry - vHeight / 2 && clickY <= ry + vHeight / 2) {
+                                    foundRes = { gx, gy, res };
+                                    break;
+                                }
+                            }
+                            if (foundRes) break;
+                        }
+
+                        if (foundRes && !pointer.event.shiftKey) {
+                            GameEngine.state.selectedResourceId = `${foundRes.gx}_${foundRes.gy}`;
+                            GameEngine.state.selectedUnitIds = [];
+                            if (window.UIManager) window.UIManager.hideContextMenu();
+                            GameEngine.addLog(`[選取] 資源：${foundRes.res.type} (Lv.${foundRes.res.level})`);
+                            return;
+                        }
+                    }
+
                     // 點擊地面：準備框選 (如果沒有 Shift 則清除舊選取)
                     if (!pointer.event.shiftKey) {
                         GameEngine.state.selectedUnitIds = [];
                         GameEngine.state.lastSelectedUnitId = null;
+                        GameEngine.state.selectedResourceId = null;
                         if (window.UIManager) window.UIManager.hideContextMenu(); // 同步關閉 UI 選單
                     }
                     this.selectionStartPos = { x: pointer.worldX, y: pointer.worldY };
@@ -303,7 +347,7 @@ export class MainScene extends Phaser.Scene {
 
         this.input.on('pointerup', (pointer) => {
             if (pointer.button === 2) {
-                this.isDragging = false; 
+                this.isDragging = false;
                 const now = Date.now();
                 const dragDecay = 100;
                 const wasCameraDragging = (this.lastDragTime && (now - this.lastDragTime < dragDecay));
@@ -323,7 +367,7 @@ export class MainScene extends Phaser.Scene {
                     // 注意：此處僅負責攔截指令，具體的「取消虛影」邏輯由 UIManager.handleWorldMouseUp 負責 (因為那邊有精確的 drift 判斷)
                     return;
                 }
-                
+
                 // 重置標記以防萬一
                 this.rightClickWasPlacement = false;
                 GameEngine.state.rightClickStartedInPlacementMode = false;
@@ -358,24 +402,39 @@ export class MainScene extends Phaser.Scene {
                 // 最後檢測資源 (MapDataSystem)
                 if (!clickedEnemy && !clickedEntity && GameEngine.state.mapData) {
                     const TS = GameEngine.TILE_SIZE;
-                    const gx = Math.floor(pointer.worldX / TS);
-                    const gy = Math.floor(pointer.worldY / TS);
-                    const res = GameEngine.state.mapData.getResource(gx, gy);
-                    if (res) {
-                        const rx = gx * TS + TS / 2;
-                        const ry = gy * TS + TS / 2;
-                        const d = Math.hypot(rx - pointer.worldX, ry - pointer.worldY);
-                        if (d < bestDist) {
-                            // 模擬 Entity 物件
-                            clickedEntity = {
-                                id: `tile_${gx}_${gy}`,
-                                gx, gy,
-                                x: rx, y: ry,
-                                type: res.type === 1 ? 'WOOD' : (res.type === 2 ? 'STONE' : (res.type === 3 ? 'FOOD' : 'GOLD')),
-                                resourceType: res.type === 1 ? 'WOOD' : (res.type === 2 ? 'STONE' : (res.type === 3 ? 'FOOD' : 'GOLD')),
-                                amount: res.amount
-                            };
+                    const clickX = pointer.worldX, clickY = pointer.worldY;
+                    const searchGx = Math.floor(clickX / TS);
+                    const searchGy = Math.floor(clickY / TS);
+
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const gx = searchGx + dx, gy = searchGy + dy;
+                            const res = GameEngine.state.mapData.getResource(gx, gy);
+                            if (!res) continue;
+
+                            const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+                            const typeName = typeMap[res.type];
+                            const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
+                            if (!cfg) continue;
+
+                            const ms = cfg.model_size || { x: 1, y: 1 };
+                            const vWidth = 120 * ms.x, vHeight = 120 * ms.y;
+                            const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
+
+                            if (clickX >= rx - vWidth / 2 && clickX <= rx + vWidth / 2 &&
+                                clickY >= ry - vHeight / 2 && clickY <= ry + vHeight / 2) {
+                                clickedEntity = {
+                                    id: `tile_${gx}_${gy}`,
+                                    gx, gy,
+                                    x: rx, y: ry,
+                                    type: res.type === 1 ? 'WOOD' : (res.type === 2 ? 'STONE' : (res.type === 3 ? 'FOOD' : 'GOLD')),
+                                    resourceType: res.type === 1 ? 'WOOD' : (res.type === 2 ? 'STONE' : (res.type === 3 ? 'FOOD' : 'GOLD')),
+                                    amount: res.amount
+                                };
+                                break;
+                            }
                         }
+                        if (clickedEntity) break;
                     }
                 }
 
@@ -465,15 +524,26 @@ export class MainScene extends Phaser.Scene {
         // 1. 執行命令
         if (clickedTarget) {
             const isResource = !!clickedTarget.gx;
-            
+
             if (isResource) {
                 // 點擊的是資源格 (MapDataSystem)
-                unit.state = 'MOVING_TO_RESOURCE';
-                // 暫時重置採集類型 (讓 MOVING_TO_RESOURCE 邏輯接管)
-                unit.targetId = clickedTarget; 
-                unit.pathTarget = null;
-                unit.isManualCommand = true;
-                GameEngine.addLog(`[命令] ${unit.configName} 正在前往採集資源。`);
+                if (unit.config.type === 'villagers') {
+                    // 工人：開始採集
+                    unit.state = 'MOVING_TO_RESOURCE';
+                    unit.type = clickedTarget.resourceType; // 切換採集型別
+                    unit.targetId = clickedTarget;
+                    unit.pathTarget = null;
+                    unit.isManualCommand = true;
+                    GameEngine.addLog(`[命令] ${unit.configName} 前往採集資源 (${clickedTarget.gx}, ${clickedTarget.gy})。`);
+                } else {
+                    // 戰鬥單位：移動至資源附近
+                    unit.state = 'IDLE';
+                    unit.idleTarget = { x: clickedTarget.x, y: clickedTarget.y };
+                    unit.targetId = null;
+                    unit.isManualCommand = true;
+                    unit.pathTarget = null;
+                    GameEngine.addLog(`[命令] 戰鬥單位 ${unit.configName} 移動至資源點附近。`);
+                }
             } else {
                 // 點擊的是實體 (敵軍或建築)
                 unit.targetId = clickedTarget.id;
@@ -794,21 +864,107 @@ export class MainScene extends Phaser.Scene {
             this.drawSingleSelectionBox(g, ent, 0xff9800);
         }
 
-        // 2. [戰鬥目標] 建築目標框 (紅色，目前被我方選中單位鎖定攻擊的目標)
-        const selectedIds = GameEngine.state.selectedUnitIds || [];
-        if (selectedIds.length > 0) {
-            const targetedEntities = new Set();
-            GameEngine.state.units.villagers.forEach(u => {
-                if (selectedIds.includes(u.id) && u.targetId) {
-                    const ent = GameEngine.state.mapEntities.find(e => e.id === u.targetId);
-                    if (ent) targetedEntities.add(ent);
-                }
-            });
+        // 2. [資源與目標] 物件描邊效果 (使用 FX Sprite 管理)
+        this.updateResourceFX();
+    }
 
-            targetedEntities.forEach(ent => {
-                this.drawSingleSelectionBox(g, ent, 0xf44336); // 紅色選定框
-            });
+    /**
+     * 資源物件描邊與發光效果 (CONTROLLING CONTURE OUTLINE)
+     * 使用特殊的 FX Sprite 覆蓋在選中資源上
+     */
+    updateResourceFX() {
+        if (!this.resourceFXMap) this.resourceFXMap = new Map();
+
+        const cfgFX = UI_CONFIG.ResourceSelection || {
+            glowColor: "#ffeb3b", targetColor: "#00e5ff",
+            glowOuterStrength: 2, glowInnerStrength: 0,
+            glowAlpha: 0.1, glowQuality: 12, depth: 15
+        };
+
+        const activeIds = new Set();
+        const selectedResId = GameEngine.state.selectedResourceId;
+        if (selectedResId) activeIds.add(selectedResId + "_sel");
+
+        const selectedIds = GameEngine.state.selectedUnitIds || [];
+        selectedIds.forEach(uid => {
+            const u = GameEngine.state.units.villagers.find(v => v.id === uid);
+            if (u && u.targetId && u.targetId.gx !== undefined) {
+                activeIds.add(`${u.targetId.gx}_${u.targetId.gy}_target`);
+            }
+        });
+
+        // 1. 建立或更新所需的 FX Sprite
+        activeIds.forEach(fullId => {
+            const parts = fullId.split('_');
+            const gx = parseInt(parts[0]), gy = parseInt(parts[1]);
+            const fxType = parts[2]; // "sel" or "target"
+
+            const res = GameEngine.state.mapData.getResource(gx, gy);
+            if (!res) return;
+
+            let fxSprite = this.resourceFXMap.get(fullId);
+            if (!fxSprite) {
+                const textureKey = this.getTextureKeyFromType(res.type);
+                fxSprite = this.add.sprite(0, 0, textureKey);
+                fxSprite.setDepth(cfgFX.depth); // 使用設定的深度
+
+                // 套用描邊或發光效果
+                if (fxSprite.postFX) {
+                    const colorStr = fxType === 'sel' ? cfgFX.glowColor : cfgFX.targetColor;
+                    // 指令修復：處理 8 位元 Hex (RGBA)，只取前 6 位 (RGB)
+                    let cleanColor = colorStr.replace('#', '');
+                    if (cleanColor.length > 6) cleanColor = cleanColor.substring(0, 6);
+                    const color = parseInt(cleanColor, 16);
+
+                    const glow = fxSprite.postFX.addGlow(
+                        color,
+                        cfgFX.glowOuterStrength,
+                        cfgFX.glowInnerStrength,
+                        cfgFX.glowKnockOut !== undefined ? cfgFX.glowKnockOut : true, // [修正] 使用 KnockOut 隱藏發光物件的中心本體
+                        cfgFX.glowAlpha,
+                        cfgFX.glowQuality
+                    );
+                    fxSprite.setData('fx', glow);
+                }
+
+                this.resourceFXMap.set(fullId, fxSprite);
+            }
+
+            // 更新位置與縮放
+            const TS = GameEngine.TILE_SIZE;
+            const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+            const resCfg = GameEngine.state.resourceConfigs.find(c => c.type === typeMap[res.type] && c.lv === (res.level || 1));
+
+            // 讀取視覺變量中的隨機縮放
+            const idx = GameEngine.state.mapData.getIndex(gx, gy);
+            const varInfo = idx !== -1 ? GameEngine.state.mapData.variationGrid[idx] : 0xFFFFFF;
+            const vScale = ((varInfo >> 24) & 0xFF) / 100 || 1.0;
+
+            fxSprite.x = gx * TS + TS / 2;
+            fxSprite.y = gy * TS + TS / 2;
+            if (resCfg && resCfg.model_size) {
+                const s = cfgFX.selectionScale || 1.1;
+                fxSprite.setScale(resCfg.model_size.x * vScale * s, resCfg.model_size.y * vScale * s);
+            }
+            fxSprite.setVisible(true);
+        });
+
+        // 2. 清理不再需要的 FX Sprite
+        for (const [fid, sprite] of this.resourceFXMap.entries()) {
+            if (!activeIds.has(fid)) {
+                sprite.destroy();
+                this.resourceFXMap.delete(fid);
+            }
         }
+    }
+
+    getTextureKeyFromType(typeNum) {
+        const typeMap = { 1: 'tex_tree', 2: 'tex_stone', 3: 'tex_food', 4: 'tex_gold' };
+        return typeMap[typeNum] || 'tex_tree';
+    }
+
+    drawResourceOutline(g, gx, gy, color) {
+        // 此方法已由 updateResourceFX 取代，為保持兼容性保留空函式或轉移邏輯
     }
 
     drawSingleSelectionBox(g, ent, color) {
@@ -1037,11 +1193,12 @@ export class MainScene extends Phaser.Scene {
         const TS = GameEngine.TILE_SIZE;
         const resources = mapData.getVisibleResources(scrollX, scrollY, width, height, TS);
         const visibleKeys = new Set();
-        
-        // 類型映射 (1: tree, 2: stone, 3: food, 4: gold)
-        const typeMap = { 1: 'tree', 2: 'stone', 3: 'food', 4: 'gold' };
 
-        // 1. 放置/更新資源 Bob 與 標籤
+        // 核心映射
+        const typeMap = { 1: 'tree', 2: 'stone', 3: 'food', 4: 'gold' };
+        const typeNameMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+
+        // 1. 放置/更新資源
         for (let i = 0; i < resources.length; i++) {
             const res = resources[i];
             const key = `${res.gx}_${res.gy}`;
@@ -1050,48 +1207,62 @@ export class MainScene extends Phaser.Scene {
             let bobInfo = this.resourceBobs.get(key);
             const typeStr = typeMap[res.type] || 'tree';
 
-            if (!bobInfo) {
-                // 從池中獲取或新建 Bob
-                const bob = this.getBobFromPool(typeStr);
-                if (bob) {
-                    const TEX_OFF = 60; // 120 / 2
-                    bob.x = (res.gx * TS + TS / 2) - TEX_OFF;
-                    bob.y = (res.gy * TS + TS / 2) - TEX_OFF;
-                    bob.setVisible(true);
-                    
-                    // 套用視覺變量 (如 Tint)
-                    const idx = mapData.getIndex(res.gx, res.gy);
-                    const variation = mapData.variationGrid[idx];
-                    if (variation) bob.setTint(variation);
+            // 獲取等級與配置
+            const typeName = typeNameMap[res.type];
+            const resCfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
+            const baseMS = (resCfg && resCfg.model_size) ? resCfg.model_size : { x: 1, y: 1 };
 
-                    bobInfo = { type: typeStr, bob: bob };
-                    this.resourceBobs.set(key, bobInfo);
-                }
-            } else if (bobInfo.type !== typeStr) {
-                // 類型改變 (較少見，可能是地圖編輯)
+            // 讀取變量網格中的 Tint 與 隨機縮放偏移 (8-bit scale index + 24-bit tint)
+            const idx = mapData.getIndex(res.gx, res.gy);
+            const varInfo = idx !== -1 ? mapData.variationGrid[idx] : 0xFFFFFF;
+            const vTint = varInfo & 0xFFFFFF;
+            const vScale = ((varInfo >> 24) & 0xFF) / 100 || 1.0;
+
+            const finalScaleX = baseMS.x * vScale;
+            const finalScaleY = baseMS.y * vScale;
+
+            // 若類型或等級變動 (或模型發生不可評估變化)，回收舊物件
+            if (bobInfo && (bobInfo.type !== typeStr || bobInfo.lv !== res.level)) {
                 this.returnBobToPool(bobInfo.type, bobInfo.bob);
-                const newBob = this.getBobFromPool(typeStr);
-                const TEX_OFF = 60; // 120 / 2
-                newBob.x = (res.gx * TS + TS / 2) - TEX_OFF;
-                newBob.y = (res.gy * TS + TS / 2) - TEX_OFF;
-                newBob.setVisible(true);
-                bobInfo.type = typeStr;
-                bobInfo.bob = newBob;
+                this.resourceBobs.delete(key);
+                bobInfo = null;
             }
 
-            // 更新資源標籤 (基於 MapDataSystem)
+            if (!bobInfo) {
+                const img = this.getBobFromPool(typeStr);
+                if (img) {
+                    // [核心修正] Phaser Image 支援 setScale 實現不同等級的模型縮放 (model_size) 與 隨機變形 (visualVariation)
+                    img.setScale(finalScaleX, finalScaleY);
+                    
+                    // Image 預設 Origin(0.5, 0.5)，直接對齊格網中心
+                    img.setPosition(res.gx * TS + TS / 2, res.gy * TS + TS / 2);
+                    img.setTint(vTint);
+                    img.setVisible(true);
+
+                    bobInfo = { type: typeStr, lv: res.level, bob: img };
+                    this.resourceBobs.set(key, bobInfo);
+                }
+            } else {
+                // 如果已存在但座標發生變化 (雖然地圖一般靜態，仍予以此防護)
+                const img = bobInfo.bob;
+                const tx = res.gx * TS + TS / 2, ty = res.gy * TS + TS / 2;
+                if (img.x !== tx || img.y !== ty) img.setPosition(tx, ty);
+            }
+
+            // 更新資源標籤
             const dummyEnt = {
                 id: key,
                 x: res.gx * TS + TS / 2,
                 y: res.gy * TS + TS / 2,
                 type: typeStr,
+                name: resCfg ? resCfg.name : typeStr,
                 amount: res.amount,
                 level: res.level
             };
             this.updateEntityLabel(key, dummyEnt);
         }
 
-        // 2. 回收离开畫面的 Bob 與 標籤
+        // 2. 回收離開畫面的 物件 與標籤
         for (const [key, info] of this.resourceBobs.entries()) {
             if (!visibleKeys.has(key)) {
                 this.returnBobToPool(info.type, info.bob);
@@ -1106,10 +1277,11 @@ export class MainScene extends Phaser.Scene {
         if (pool && pool.length > 0) {
             return pool.pop();
         }
-        // 若池中無對象，新創一個
-        const blitter = this.resourceBlitters[type];
-        if (blitter) return blitter.create(0, 0);
-        return null;
+        // 若池中無對象，新創一個 Image (資源貼圖皆以 tex_ 為前綴)
+        const img = this.add.image(0, 0, `tex_${type}`);
+        img.setDepth(8);
+        this.resourceGroup.add(img);
+        return img;
     }
 
     returnBobToPool(type, bob) {
