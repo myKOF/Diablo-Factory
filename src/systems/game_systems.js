@@ -871,12 +871,12 @@ export class GameEngine {
                         const brightness = 1.0 - (Math.random() * varCfg.tintRange);
                         const c = Math.floor(255 * brightness);
                         vTint = (c << 16) | (c << 8) | c;
-                        
+
                         // 計算隨機縮放 (minScale ~ maxScale)
                         const randomScale = varCfg.minScale + Math.random() * (varCfg.maxScale - varCfg.minScale);
                         vScale = Math.floor(randomScale * 100);
                     }
-                    
+
                     const idx = this.state.mapData.getIndex(gx, gy);
                     if (idx !== -1) {
                         // 存入 Tint (24bit) 與 ScaleFactor (8bit)
@@ -1008,10 +1008,10 @@ export class GameEngine {
                     const typeName = typeMap[typeNum];
                     // 根據型別與等級尋找配置
                     const cfg = this.state.resourceConfigs.find(c => c.type === typeName && c.lv === level);
-                    
+
                     const gx = i % this.state.mapData.cols;
                     const gy = Math.floor(i / this.state.mapData.cols);
-                    
+
                     if (cfg && cfg.pixel_size) {
                         const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
                         const pw = cfg.pixel_size.w, ph = cfg.pixel_size.h;
@@ -1185,7 +1185,7 @@ export class GameEngine {
 
                 // 核心修復：如果已有指定目標 (手動指令)，優先前往該目標，而非自動搜尋最近
                 let target = v.targetId;
-                if (!target || target.gx === undefined) { 
+                if (!target || target.gx === undefined) {
                     target = this.findNearestResource(searchX, searchY, v.type, v.id);
                 } else {
                     // 檢查指定目標是否還有效 (MapData)
@@ -1226,13 +1226,14 @@ export class GameEngine {
 
                 if (v.gatherTimer >= harvestTime) {
                     const harvestTotal = v.config.collection_resource || 20; // 每次採集的數量 (修正欄位名)
-                    
+
                     // 區分是「區塊型資源 (MapData)」還是「實體型資源 (如農田)」
                     if (v.targetId.gx !== undefined && v.targetId.gy !== undefined) {
                         // 1. 區塊型資源採集 (MapDataSystem)
                         const consumed = this.state.mapData.consumeResource(v.targetId.gx, v.targetId.gy, harvestTotal);
                         v.cargo = consumed;
-                        
+                        this.state.renderVersion++; // [核心修復] 通知渲染層數據已變動，強行刷新標籤與資源狀態
+
                         if (consumed <= 0) {
                             // 資源已枯竭
                             v.targetId = null;
@@ -1460,8 +1461,25 @@ export class GameEngine {
                     v.isRecalled = false;
                     this.assignNextTask(v);
                 } else {
-                    // 預設想回去採集，但先經過優先級檢查 (優先幫忙建造)
+                    // 預設回歸採集
                     v.state = 'MOVING_TO_RESOURCE';
+
+                    // 手動指令連動修復：如果是手動指派的採集，跳過 assignNextTask 以免被強制中斷或變為 IDLE
+                    if (v.isManualCommand) {
+                        // 檢查手動目標是否還有效
+                        if (v.targetId && v.targetId.gx !== undefined) {
+                            const stillExists = this.state.mapData.getResource(v.targetId.gx, v.targetId.gy);
+                            if (stillExists && stillExists.amount > 0) {
+                                // 目標還在，不再重新分配，保持 MOVING_TO_RESOURCE 狀態回去採
+                                v.pathTarget = null;
+                                return;
+                            }
+                        }
+                        // 手動目標已無或資源已空，重置手動旗標並進入一般分配
+                        v.isManualCommand = false;
+                        v.targetId = null;
+                    }
+
                     this.assignNextTask(v);
                 }
             }
@@ -1482,9 +1500,13 @@ export class GameEngine {
 
     static assignNextTask(v) {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集工作能力
-        // 手動指令優先：若處於手動命令期間，完全不主動接取新任務
-        if (v.config.type !== 'villagers' || v.isRecalled || v.isManualCommand) {
+        if (v.config.type !== 'villagers' || v.isRecalled) {
             v.state = 'IDLE';
+            return;
+        }
+
+        // 手動指令連動保護：若已有手動任務且正在執行中，不要進入自動分配邏輯重置為 IDLE
+        if (v.isManualCommand && (v.state.startsWith('MOVING_TO') || v.state === 'GATHERING' || v.state === 'CONSTRUCTING')) {
             return;
         }
 
@@ -1823,19 +1845,27 @@ export class GameEngine {
                     if (res) {
                         const level = this.state.mapData.levelGrid[this.state.mapData.getIndex(gx, gy)] || 1;
                         const cfg = this.state.resourceConfigs.find(c => c.type === typeMap[res.type] && c.lv === level);
-                        
+
                         if (cfg && cfg.pixel_size) {
                             const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
                             const pw = cfg.pixel_size.w, ph = cfg.pixel_size.h;
-                            if (x > rx - pw/2 && x < rx + pw/2 && y > ry - ph/2 && y < ry + ph/2) {
-                                if (!ignoreEnts.some(ign => ign && ign.gx === gx && ign.gy === gy)) {
+                            if (x > rx - pw / 2 && x < rx + pw / 2 && y > ry - ph / 2 && y < ry + ph / 2) {
+                                // 修正：如果此資源格是當前單位的目標，則忽略碰撞，否則會發生「抵達前就撞上自己想採取的資源」而卡死。
+                                const isTarget = ignoreEnts && ignoreEnts.some(ign =>
+                                    ign && (ign.gx === gx && ign.gy === gy) || ign.id === `${gx}_${gy}`
+                                );
+
+                                if (!isTarget) {
                                     return { type: 'resource', gx, gy };
                                 }
                             }
                         } else {
                             // 預設 1x1 碰撞
                             if (gx === searchGx && gy === searchGy) {
-                                if (!ignoreEnts.some(ign => ign && ign.gx === gx && ign.gy === gy)) {
+                                const isTarget = ignoreEnts && ignoreEnts.some(ign =>
+                                    ign && (ign.gx === gx && ign.gy === gy) || ign.id === `${gx}_${gy}`
+                                );
+                                if (!isTarget) {
                                     return { type: 'resource', gx, gy };
                                 }
                             }
@@ -1898,7 +1928,7 @@ export class GameEngine {
                     if (res && res.type === targetType && res.amount > 0) {
                         // 回傳一個模擬物件，兼容舊邏輯中的 targetId / target
                         return {
-                            id: `tile_${nx}_${ny}`,
+                            id: `${nx}_${ny}`, // 修正 ID 格式以匹配 MainScene
                             x: nx * TS + TS / 2,
                             y: ny * TS + TS / 2,
                             gx: nx,

@@ -12,7 +12,7 @@ export class MapDataSystem {
 
         // 1. 資源類型網格 (Uint16Array: 0=無, 1=樹, 2=石, 3=糧, 4=金)
         this.typeGrid = new Uint16Array(this.totalTiles);
-        
+
         // 2. 資源數量網格 (Uint16Array: 儲存剩餘採集量)
         this.amountGrid = new Uint16Array(this.totalTiles);
 
@@ -27,7 +27,7 @@ export class MapDataSystem {
         this.chunkCols = Math.ceil(cols / this.chunkSize);
         this.chunkRows = Math.ceil(rows / this.chunkSize);
         this.dirtyChunks = new Uint8Array(this.chunkCols * this.chunkRows);
-        
+
         console.log(`[MapDataSystem] 初始化完成: ${cols}x${rows} (${this.totalTiles} 總格數)`);
     }
 
@@ -51,7 +51,7 @@ export class MapDataSystem {
         this.typeGrid[idx] = type;
         this.amountGrid[idx] = amount;
         this.levelGrid[idx] = level;
-        
+
         this.markChunkDirty(gx, gy);
     }
 
@@ -82,13 +82,13 @@ export class MapDataSystem {
         const current = this.amountGrid[idx];
         const consumed = Math.min(current, delta);
         const remaining = current - consumed;
-        
+
         this.amountGrid[idx] = remaining;
+        this.markChunkDirty(gx, gy); // 通知渲染層該格數據已變動
 
         // 若資源耗盡，清除類型
         if (remaining <= 0) {
             this.typeGrid[idx] = 0;
-            this.markChunkDirty(gx, gy); // 通知渲染層該格已消失
             return consumed;
         }
 

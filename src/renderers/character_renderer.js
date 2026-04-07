@@ -319,11 +319,11 @@ export class CharacterRenderer {
         const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
         const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
 
-        const isTargetedByPlayerArmy = window.GAME_STATE && 
+        const isTargetedByPlayerArmy = window.GAME_STATE &&
             window.GAME_STATE.units.villagers.some(u => u.targetId === unitData.id);
 
         if (isSelected || isHovered || isTargetedByPlayerArmy) {
-            const circleColor = (isEnemy || isTargetedByPlayerArmy) ? 0xf44336 : 0x4caf50; 
+            const circleColor = (isEnemy || isTargetedByPlayerArmy) ? 0xf44336 : 0x4caf50;
             this.drawSelectionRing(ctx, x, y, time, circleColor);
         }
 

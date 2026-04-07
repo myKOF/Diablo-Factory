@@ -417,6 +417,7 @@ export class MainScene extends Phaser.Scene {
                             const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
                             if (!cfg) continue;
 
+                            // 重要修復：根據 model_size 與 level 縮放動態計算點擊盒，確保大物件能被選中
                             const ms = cfg.model_size || { x: 1, y: 1 };
                             const vWidth = 120 * ms.x, vHeight = 120 * ms.y;
                             const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
@@ -424,11 +425,11 @@ export class MainScene extends Phaser.Scene {
                             if (clickX >= rx - vWidth / 2 && clickX <= rx + vWidth / 2 &&
                                 clickY >= ry - vHeight / 2 && clickY <= ry + vHeight / 2) {
                                 clickedEntity = {
-                                    id: `tile_${gx}_${gy}`,
+                                    id: `${gx}_${gy}`, // 統一格式
                                     gx, gy,
                                     x: rx, y: ry,
-                                    type: res.type === 1 ? 'WOOD' : (res.type === 2 ? 'STONE' : (res.type === 3 ? 'FOOD' : 'GOLD')),
-                                    resourceType: res.type === 1 ? 'WOOD' : (res.type === 2 ? 'STONE' : (res.type === 3 ? 'FOOD' : 'GOLD')),
+                                    type: typeName,
+                                    resourceType: typeName,
                                     amount: res.amount
                                 };
                                 break;
@@ -1236,7 +1237,7 @@ export class MainScene extends Phaser.Scene {
                 if (img) {
                     // [核心修正] Phaser Image 支援 setScale 實現不同等級的模型縮放 (model_size) 與 隨機變形 (visualVariation)
                     img.setScale(finalScaleX, finalScaleY);
-                    
+
                     // Image 預設 Origin(0.5, 0.5)，直接對齊格網中心
                     img.setPosition(res.gx * TS + TS / 2, res.gy * TS + TS / 2);
                     img.setTint(vTint);
