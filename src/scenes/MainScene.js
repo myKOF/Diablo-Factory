@@ -67,9 +67,11 @@ export class MainScene extends Phaser.Scene {
         this.resourceBlitters = {
             'tree': this.add.blitter(0, 0, 'tex_tree').setDepth(8),
             'stone': this.add.blitter(0, 0, 'tex_stone').setDepth(8),
-            'food': this.add.blitter(0, 0, 'tex_food').setDepth(8)
+            'food': this.add.blitter(0, 0, 'tex_food').setDepth(8),
+            'gold': this.add.blitter(0, 0, 'tex_gold').setDepth(8)
         };
-        this.resourceBobs = new Map(); // ID -> Bob
+        this.resourceBobs = new Map(); // 格網鍵值 (gx_gy) -> { type, bob }
+        this.resourcePools = { 'tree': [], 'stone': [], 'food': [], 'gold': [] };
 
         // 預覽配置 (用於建築放置)
         this.placementPreview = this.add.graphics();
@@ -290,25 +292,29 @@ export class MainScene extends Phaser.Scene {
 
         this.input.on('pointerup', (pointer) => {
             if (pointer.button === 2) {
-                this.isDragging = false; // 核心修復：在判斷早期即結束拖拽狀態，防止狀態卡死導致畫面持續跟隨
-
-                // 如果是右鍵釋放，根據拖動距離判斷：是「移動指令」還是「相機拖動結束」
-                // 1. 如果在過去 0.1 秒內發生過畫面拖動，則不執行移動指令 (防止操作衝突)
+                this.isDragging = false; 
                 const now = Date.now();
-                const dragDecay = 100; // 0.1秒緩衝
-                if (this.lastDragTime && (now - this.lastDragTime < dragDecay)) {
-                    this.rightClickWasPlacement = false;
+                const dragDecay = 100;
+                const wasCameraDragging = (this.lastDragTime && (now - this.lastDragTime < dragDecay));
+
+                // 1. 如果是拖動畫面結束，過濾掉任何可能的尋路指令
+                if (wasCameraDragging) {
+                    this.rightClickWasPlacement = false; // 拖動結束，消耗掉本次狀態
                     GameEngine.addLog("[指令] 拖動畫面中，已自動過濾寻路指令。", "PATH");
                     return;
                 }
 
-                // 2. 優先檢查本次點擊開始時是否處於建築模式 (同步 UIManager 的全局旗標)
+                // 2. 核心衝突修復：如果本次右鍵「開始時」處於建築模式，則本次放開只能用於「取消」或「拖動」。
+                // 必須使用本地 snapshots (rightClickWasPlacement) 以防止與 UIManager 全域狀態的清理順序產生競爭。
                 if (this.rightClickWasPlacement || GameEngine.state.rightClickStartedInPlacementMode) {
                     this.rightClickWasPlacement = false;
                     GameEngine.state.rightClickStartedInPlacementMode = false;
+                    // 注意：此處僅負責攔截指令，具體的「取消虛影」邏輯由 UIManager.handleWorldMouseUp 負責 (因為那邊有精確的 drift 判斷)
                     return;
                 }
-                this.rightClickWasPlacement = false; // 以防萬一的重置
+                
+                // 重置標記以防萬一
+                this.rightClickWasPlacement = false;
                 GameEngine.state.rightClickStartedInPlacementMode = false;
 
                 const dragDist = this.dragStartPos ? Math.hypot(pointer.x - this.dragStartPos.x, pointer.y - this.dragStartPos.y) : 0;
@@ -330,12 +336,36 @@ export class MainScene extends Phaser.Scene {
                     }
                 });
 
-                // 其次檢測建築/資源 (如果沒點到敵軍)
+                // 其次檢測建築 (mapEntities)
                 if (!clickedEnemy) {
                     GameEngine.state.mapEntities.forEach(e => {
                         const d = Math.hypot(e.x - pointer.worldX, e.y - pointer.worldY);
                         if (d < bestDist) { bestDist = d; clickedEntity = e; }
                     });
+                }
+
+                // 最後檢測資源 (MapDataSystem)
+                if (!clickedEnemy && !clickedEntity && GameEngine.state.mapData) {
+                    const TS = GameEngine.TILE_SIZE;
+                    const gx = Math.floor(pointer.worldX / TS);
+                    const gy = Math.floor(pointer.worldY / TS);
+                    const res = GameEngine.state.mapData.getResource(gx, gy);
+                    if (res) {
+                        const rx = gx * TS + TS / 2;
+                        const ry = gy * TS + TS / 2;
+                        const d = Math.hypot(rx - pointer.worldX, ry - pointer.worldY);
+                        if (d < bestDist) {
+                            // 模擬 Entity 物件
+                            clickedEntity = {
+                                id: `tile_${gx}_${gy}`,
+                                gx, gy,
+                                x: rx, y: ry,
+                                type: res.type === 1 ? 'WOOD' : (res.type === 2 ? 'STONE' : (res.type === 3 ? 'FOOD' : 'GOLD')),
+                                resourceType: res.type === 1 ? 'WOOD' : (res.type === 2 ? 'STONE' : (res.type === 3 ? 'FOOD' : 'GOLD')),
+                                amount: res.amount
+                            };
+                        }
+                    }
                 }
 
                 // 觸發點擊效果 (無論是否有選中單位)
@@ -423,13 +453,26 @@ export class MainScene extends Phaser.Scene {
 
         // 1. 執行命令
         if (clickedTarget) {
-            unit.targetId = clickedTarget.id;
-            unit.forceFocus = true; // 強制鎖定玩家指定目標，防止自動索敵偏離
-            unit.state = 'CHASE'; // 切換至 CHASE 狀態
-            unit.idleTarget = { x: clickedTarget.x, y: clickedTarget.y }; // 立即起始移動，如同點擊地板
-            unit.isManualCommand = true;
-            unit.chaseFrame = 999; // 強制引發 BattleSystem 的即時偏移量計算
-            GameEngine.addLog(`[命令] ${unit.configName} 正在追擊敵軍 ${clickedTarget.configName || '目標'}。`);
+            const isResource = !!clickedTarget.gx;
+            
+            if (isResource) {
+                // 點擊的是資源格 (MapDataSystem)
+                unit.state = 'MOVING_TO_RESOURCE';
+                // 暫時重置採集類型 (讓 MOVING_TO_RESOURCE 邏輯接管)
+                unit.targetId = clickedTarget; 
+                unit.pathTarget = null;
+                unit.isManualCommand = true;
+                GameEngine.addLog(`[命令] ${unit.configName} 正在前往採集資源。`);
+            } else {
+                // 點擊的是實體 (敵軍或建築)
+                unit.targetId = clickedTarget.id;
+                unit.forceFocus = true;
+                unit.state = 'CHASE';
+                unit.idleTarget = { x: clickedTarget.x, y: clickedTarget.y };
+                unit.isManualCommand = true;
+                unit.chaseFrame = 999;
+                GameEngine.addLog(`[命令] ${unit.configName} 正在追擊目標 ${clickedTarget.configName || '目標'}。`);
+            }
         } else {
             // 移動指令：完全清除所有任務內容，防止系統重新分配回去做老本行
             unit.targetId = null;
@@ -578,10 +621,16 @@ export class MainScene extends Phaser.Scene {
         }
 
         // 3. 執行重度渲染與裁剪
+        // 3a. 更新建築實體 (mapEntities)
         const visibleEntities = GameEngine.getVisibleEntities(cam.scrollX, cam.scrollY, cam.width, cam.height, 200);
         this.lastVisibleEntities = visibleEntities;
-
         this.updateEntities(visibleEntities, state.mapEntities);
+
+        // 3b. 更新大地圖資源 (MapDataSystem)
+        if (state.mapData) {
+            this.updateResources(state.mapData, cam.scrollX, cam.scrollY, cam.width, cam.height);
+        }
+
         this.updateUnits(state.units.villagers);
         this.updateDynamicHUD(visibleEntities);
 
@@ -890,7 +939,7 @@ export class MainScene extends Phaser.Scene {
         const MAX_NEW_PER_FRAME = 20;
         let newlyCreatedCount = 0;
 
-        // 1. 處理可見實體
+        // 1. 處理可見實體 (此處現僅包含 建築物 與 單個實體化資源)
         for (let i = 0; i < visibleEntities.length; i++) {
             const ent = visibleEntities[i];
             const id = ent.id;
@@ -899,22 +948,17 @@ export class MainScene extends Phaser.Scene {
             let displayObj = this.entities.get(id);
 
             if (!displayObj) {
-                // 非同步加載限制
                 if (newlyCreatedCount >= MAX_NEW_PER_FRAME) {
                     this.pendingVisibleEntities = true;
                     continue;
                 }
 
                 const textureKey = this.getTextureKey(ent.type);
-                const isResource = !GameEngine.state.buildingConfigs[ent.type];
-
                 if (textureKey && this.textures.exists(textureKey)) {
-                    // 統一使用 Image，確保支援 setScale 與正確中心點邏輯
                     displayObj = this.add.image(ent.x, ent.y, textureKey);
-                    displayObj.setPipeline && displayObj.setPipeline('TextureTintPipeline');
                     this.entities.set(id, displayObj);
                     this.entityGroup.add(displayObj);
-                    displayObj.setDepth(isResource ? 8 : 10);
+                    displayObj.setDepth(10);
                 } else if (!textureKey && !['campfire'].includes(ent.type)) {
                     displayObj = this.add.graphics();
                     this.drawEntity(displayObj, ent, 1.0);
@@ -925,16 +969,10 @@ export class MainScene extends Phaser.Scene {
                 newlyCreatedCount++;
             }
 
-            // 更新 GameObject (不論是資源還是建築)
             if (displayObj) {
                 if (!displayObj.visible) displayObj.setVisible(true);
+                if (displayObj.x !== ent.x || displayObj.y !== ent.y) displayObj.setPosition(ent.x, ent.y);
 
-                // 設置位置 (同步 ent.x/y)
-                if (displayObj.x !== ent.x || displayObj.y !== ent.y) {
-                    displayObj.setPosition(ent.x, ent.y);
-                }
-
-                // 處理透明度與縮放 (如果是 Image)
                 if (displayObj instanceof Phaser.GameObjects.Image) {
                     const targetAlpha = ent.isUnderConstruction ? 0.6 : 1.0;
                     if (displayObj.alpha !== targetAlpha) displayObj.setAlpha(targetAlpha);
@@ -949,17 +987,9 @@ export class MainScene extends Phaser.Scene {
 
                         const finalSx = sx * (ent.vScaleX || 1);
                         const finalSy = sy * (ent.vScaleY || 1);
-                        if (displayObj.scaleX !== finalSx || displayObj.scaleY !== finalSy) {
-                            displayObj.setScale(finalSx, finalSy);
-                        }
+                        if (displayObj.scaleX !== finalSx || displayObj.scaleY !== finalSy) displayObj.setScale(finalSx, finalSy);
                     }
                     if (ent.vTint !== undefined && displayObj.tintTopLeft !== ent.vTint) displayObj.setTint(ent.vTint);
-                } else if (displayObj instanceof Phaser.GameObjects.Graphics) {
-                    if (displayObj._wasConstruction !== ent.isUnderConstruction) {
-                        displayObj.clear();
-                        this.drawEntity(displayObj, ent, 1.0);
-                        displayObj._wasConstruction = ent.isUnderConstruction;
-                    }
                 }
             }
 
@@ -969,15 +999,9 @@ export class MainScene extends Phaser.Scene {
             }
         }
 
-        if (newlyCreatedCount < MAX_NEW_PER_FRAME) {
-            this.pendingVisibleEntities = false;
-        }
+        if (newlyCreatedCount < MAX_NEW_PER_FRAME) this.pendingVisibleEntities = false;
 
-        // 2. 定期清理與隱藏 (效能關鍵)
-        this.frameCounter = (this.frameCounter || 0) + 1;
-        const isCleanupFrame = (this.frameCounter % 180 === 0);
-
-        // 隱藏在本次渲染中不可見的實體
+        // 2. 清理不可見實體 (隱藏與回收)
         for (const [id, displayObj] of this.entities.entries()) {
             if (!visibleIds.has(id)) {
                 if (displayObj.visible) {
@@ -985,12 +1009,88 @@ export class MainScene extends Phaser.Scene {
                     this.hideEntityLabel(id);
                     if (this.emitters.has(id)) this.emitters.get(id).setVisible(false);
                 }
-                if (isCleanupFrame && !allEntities.some(e => e.id === id)) {
+                // 超出生命週期則銷毀 (如動態產生的特效)
+                if (!allEntities.some(e => e.id === id) && id.startsWith('effect_')) {
                     displayObj.destroy();
                     this.entities.delete(id);
-                    this.cleanupEntityLabels(id);
                 }
             }
+        }
+    }
+
+    /**
+     * 大地圖資源渲染優化 (遵照 [大地圖渲染與數據分離協議])
+     * 使用 Blitter 與 Bob Pool 實現高效渲染與 Viewport Culling
+     */
+    updateResources(mapData, scrollX, scrollY, width, height) {
+        const TS = GameEngine.TILE_SIZE;
+        const resources = mapData.getVisibleResources(scrollX, scrollY, width, height, TS);
+        const visibleKeys = new Set();
+        
+        // 類型映射 (1: tree, 2: stone, 3: food, 4: gold)
+        const typeMap = { 1: 'tree', 2: 'stone', 3: 'food', 4: 'gold' };
+
+        // 1. 放置/更新資源 Bob
+        for (let i = 0; i < resources.length; i++) {
+            const res = resources[i];
+            const key = `${res.gx}_${res.gy}`;
+            visibleKeys.add(key);
+
+            let bobInfo = this.resourceBobs.get(key);
+            const typeStr = typeMap[res.type] || 'tree';
+
+            if (!bobInfo) {
+                // 從池中獲取或新建 Bob
+                const bob = this.getBobFromPool(typeStr);
+                if (bob) {
+                    bob.x = res.gx * TS + TS / 2;
+                    bob.y = res.gy * TS + TS / 2;
+                    bob.setVisible(true);
+                    
+                    // 套用視覺變量 (如 Tint)
+                    const idx = mapData.getIndex(res.gx, res.gy);
+                    const variation = mapData.variationGrid[idx];
+                    if (variation) bob.setTint(variation);
+
+                    bobInfo = { type: typeStr, bob: bob };
+                    this.resourceBobs.set(key, bobInfo);
+                }
+            } else if (bobInfo.type !== typeStr) {
+                // 類型改變 (較少見，可能是地圖編輯)
+                this.returnBobToPool(bobInfo.type, bobInfo.bob);
+                const newBob = this.getBobFromPool(typeStr);
+                newBob.x = res.gx * TS + TS / 2;
+                newBob.y = res.gy * TS + TS / 2;
+                newBob.setVisible(true);
+                bobInfo.type = typeStr;
+                bobInfo.bob = newBob;
+            }
+        }
+
+        // 2. 回收离开畫面的 Bob
+        for (const [key, info] of this.resourceBobs.entries()) {
+            if (!visibleKeys.has(key)) {
+                this.returnBobToPool(info.type, info.bob);
+                this.resourceBobs.delete(key);
+            }
+        }
+    }
+
+    getBobFromPool(type) {
+        const pool = this.resourcePools[type];
+        if (pool && pool.length > 0) {
+            return pool.pop();
+        }
+        // 若池中無對象，新創一個
+        const blitter = this.resourceBlitters[type];
+        if (blitter) return blitter.create(0, 0);
+        return null;
+    }
+
+    returnBobToPool(type, bob) {
+        bob.setVisible(false);
+        if (this.resourcePools[type]) {
+            this.resourcePools[type].push(bob);
         }
     }
 

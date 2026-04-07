@@ -66,7 +66,10 @@ export class UIManager {
         window.addEventListener("contextmenu", (e) => {
             if (GameEngine.state.placingType || this.activeMenuEntity) {
                 e.preventDefault();
-                if (GameEngine.state.placingType) this.cancelBuildingMode();
+                // 如果偵測到剛發生過相機拖動，則不執行取消建築模式的操作
+                const scene = window.PhaserScene;
+                const wasDragging = scene && scene.lastDragTime && (Date.now() - scene.lastDragTime < 100);
+                if (GameEngine.state.placingType && !wasDragging) this.cancelBuildingMode();
             }
         });
 
@@ -806,9 +809,14 @@ export class UIManager {
                 const duration = now - (this.rightMouseDownTime || 0);
                 this.rightMouseDownPos = null;
 
-                // [核心修復] 如果按下時是在建築模式，則不論放開時狀態如何，只能觸發取消
+                // [核心修復] 僅在「右鍵單擊」而非「右鍵移動」(拖動畫框) 時取消建造模式
                 if (GameEngine.state.rightClickStartedInPlacementMode) {
-                    this.cancelBuildingMode();
+                    const scene = window.PhaserScene;
+                    const wasDragging = scene && scene.lastDragTime && (Date.now() - scene.lastDragTime < 100);
+                    
+                    if (drift < 10 && !wasDragging) {
+                        this.cancelBuildingMode();
+                    }
                     GameEngine.state.rightClickStartedInPlacementMode = false;
                     return;
                 }

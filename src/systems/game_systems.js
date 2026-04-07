@@ -1,6 +1,7 @@
 import { UI_CONFIG } from "../ui/ui_config.js";
 import { PathfindingSystem } from "./PathfindingSystem.js?v=3";
 import { BattleSystem } from "./BattleSystem.js";
+import { MapDataSystem } from "./MapDataSystem.js";
 
 
 
@@ -45,7 +46,8 @@ export class GameEngine {
         pathfinding: null, // 尋路系統實例
         selectedUnitIds: [], // 目前選中的單位 ID 列表
         lastSelectedUnitId: null, // 上一次選中的單位 ID (用於雙擊檢測)
-        lastSelectionTime: 0 // 上一次選中的時間 (用於雙擊檢測)
+        lastSelectionTime: 0, // 上一次選中的時間 (用於雙擊檢測)
+        mapData: null // 大地圖數據系統實例 (Uint16Array)
     };
 
 
@@ -738,7 +740,11 @@ export class GameEngine {
         // 將村莊中心 (960, 560) 近似地圖中央
         const minGX = Math.floor(960 / TS) - Math.floor(cols / 2);
         const minGY = Math.floor(560 / TS) - Math.floor(rows / 2);
-        this.state.mapOffset = { x: minGX, y: minGY };
+        const mapOffset = { x: minGX, y: minGY };
+        this.state.mapOffset = mapOffset;
+
+        // 初始化 大地圖數據系統 (Uint16Array)
+        this.state.mapData = new MapDataSystem(cols, rows, mapOffset);
 
         const occupied = new Uint8Array(cols * rows); // 使用 TypedArray 替代 Set，效能大幅提升
 
@@ -808,12 +814,19 @@ export class GameEngine {
             pool[j] = temp;
         }
 
-        // 4. 依序放置各類資源
+        // 4. 依序放置各類資源 (寫入 TypedArray)
         if (this.state.resourceConfigs.length > 0) {
             this.state.resourceConfigs.forEach(cfg => {
                 let count = 0;
                 const fp = getFootprint(cfg.model);
                 const resCfg = UI_CONFIG.ResourceRenderer;
+
+                // 資源模型映射 (1: Tree, 2: Stone, 3: Food, 4: Gold)
+                let typeNum = 0;
+                if (cfg.type === 'WOOD') typeNum = 1;
+                else if (cfg.type === 'STONE') typeNum = 2;
+                else if (cfg.type === 'FOOD') typeNum = 3;
+                else if (cfg.type === 'GOLD') typeNum = 4;
 
                 for (let i = 0; i < pool.length && count < cfg.density; i++) {
                     const { gx, gy } = pool[i];
@@ -826,32 +839,33 @@ export class GameEngine {
                     // 安全區檢查 (根據 no_resources_range 參數)
                     if (Math.abs(x - villagePos.x) < safeCfg.w / 2 && Math.abs(y - villagePos.y) < safeCfg.h / 2) continue;
 
-                    // 隨機視覺差異 (變形與變色)
-                    let vScaleX = 1, vScaleY = 1, vTint = 0xffffff;
+                    // 記錄資源至 MapDataSystem (取代 mapEntities 物件)
+                    this.state.mapData.setResource(gx, gy, typeNum, cfg.amount);
+
+                    // 儲存視覺變差 (Tint/ScaleIndex)
+                    let vTint = 0xffffff;
                     let varCfg = null;
-                    if (cfg.model.startsWith('tree') || cfg.model.startsWith('wood')) varCfg = resCfg.Tree.visualVariation;
-                    else if (cfg.model.startsWith('stone')) varCfg = resCfg.Rock.visualVariation;
-                    else if (cfg.model.startsWith('food')) varCfg = resCfg.BerryBush.visualVariation;
+                    if (cfg.type === 'WOOD') varCfg = resCfg.Tree.visualVariation;
+                    else if (cfg.type === 'STONE') varCfg = resCfg.Rock.visualVariation;
+                    else if (cfg.type === 'FOOD') varCfg = resCfg.BerryBush.visualVariation;
 
                     if (varCfg) {
-                        vScaleX = varCfg.minScale + Math.random() * (varCfg.maxScale - varCfg.minScale);
-                        vScaleY = varCfg.minScale + Math.random() * (varCfg.maxScale - varCfg.minScale);
                         const brightness = 1.0 - (Math.random() * varCfg.tintRange);
                         const c = Math.floor(255 * brightness);
                         vTint = (c << 16) | (c << 8) | c;
+                        
+                        // 讀取隨機縮放並轉為 Index 存入 (這裡簡化，直接將 tint 存入 variationGrid)
+                        const idx = this.state.mapData.getIndex(gx, gy);
+                        if (idx !== -1) {
+                            // 存入 Tint (24bit)
+                            this.state.mapData.variationGrid[idx] = vTint;
+                        }
                     }
-
-                    this.state.mapEntities.push({
-                        id: `res_${cfg.type}_${this.state.mapEntities.length}`, // 分配固定唯一 ID
-                        type: cfg.model, resourceType: cfg.type, x, y,
-                        amount: cfg.amount, level: cfg.lv, name: cfg.name,
-                        vScaleX, vScaleY, vTint
-                    });
 
                     markOccupiedG(gx, gy, fp.uw, fp.uh);
                     count++;
                 }
-                console.log(`地圖生成 - ${cfg.name} 成功放置: ${count}/${cfg.density}`);
+                console.log(`地圖生成 - ${cfg.name} 成功放置: ${count}/${cfg.density} (存入 TypedArray)`);
             });
         }
 
@@ -925,6 +939,7 @@ export class GameEngine {
         // 初始化全 0 (可通行)
         const matrix = Array.from({ length: rows }, () => new Array(cols).fill(0));
 
+        // 1. 注入建築物碰撞 (mapEntities)
         this.state.mapEntities.forEach(ent => {
             if (ent.isUnderConstruction) return;
             const cfg = this.getEntityConfig(ent.type);
@@ -960,6 +975,17 @@ export class GameEngine {
                 }
             }
         });
+
+        // 2. 注入資源碰撞 (MapDataSystem)
+        if (this.state.mapData) {
+            for (let i = 0; i < this.state.mapData.totalTiles; i++) {
+                if (this.state.mapData.typeGrid[i] !== 0) {
+                    const tx = i % this.state.mapData.cols;
+                    const ty = Math.floor(i / this.state.mapData.cols);
+                    matrix[ty][tx] = 1;
+                }
+            }
+        }
 
         this.state.pathfinding.setGrid(matrix);
 
@@ -1128,54 +1154,53 @@ export class GameEngine {
                 const harvestTime = v.config.collection_speed || 2; // 採集時間 (秒)
 
                 // 核心安全檢查：若採集目標已失蹤，直接中止
-                // 如果是特殊任務且無目標，則視為任務完成或失效
                 if (!v.targetId) {
-                    if (v.gatherTimer > 1.0) { // 給予 1 秒寬限期
-                        this.addLog(`[調試] 單位 ${v.configName} 採集目標遺失，強制歸位。`, 'COMMON');
-                        v.state = 'IDLE';
-                        v.pathTarget = null;
-                        v.targetId = null;
-                        v.forcedTarget = false;
-                    }
+                    v.state = 'IDLE';
+                    v.pathTarget = null;
                     break;
                 }
 
                 if (v.gatherTimer >= harvestTime) {
-                    const harvestTotal = v.config.collection_amount || 20; // 每次採集的數量
-                    if (v.targetId) {
+                    const harvestTotal = v.config.collection_resource || 20; // 每次採集的數量 (修正欄位名)
+                    
+                    // 區分是「區塊型資源 (MapData)」還是「實體型資源 (如農田)」
+                    if (v.targetId.gx !== undefined && v.targetId.gy !== undefined) {
+                        // 1. 區塊型資源採集 (MapDataSystem)
+                        const consumed = this.state.mapData.consumeResource(v.targetId.gx, v.targetId.gy, harvestTotal);
+                        v.cargo = consumed;
+                        
+                        if (consumed <= 0) {
+                            // 資源已枯竭
+                            v.targetId = null;
+                            v.state = 'IDLE';
+                        } else {
+                            v.state = 'MOVING_TO_BASE';
+                        }
+                        v.pathTarget = null;
+                        v.gatherTimer = 0;
+                    } else if (this.state.mapEntities.includes(v.targetId)) {
+                        // 2. 實體型資源採集 (如農田/樹木田)
                         const canTake = Math.min(harvestTotal, v.targetId.amount);
                         v.targetId.amount -= canTake;
 
-                        // 如果是農田或樹木田，直接入庫，不增加負重，不回村中心
-                        if (v.targetId.type === 'farmland' || v.targetId.type === 'tree_plantation') {
-                            if (v.targetId.type === 'farmland') this.state.resources.food += canTake;
-                            else if (v.targetId.type === 'tree_plantation') this.state.resources.wood += canTake;
+                        // 農田類直接入庫
+                        if (v.targetId.type === 'farmland') this.state.resources.food += canTake;
+                        else if (v.targetId.type === 'tree_plantation') this.state.resources.wood += canTake;
 
-                            v.cargo = 0;
-                            v.gatherTimer = 0; // 重置計時器，原地繼續採集
-                            if (v.targetId.amount <= 0) {
-                                this.addLog(`${v.targetId.name || '農田'} 已枯竭。`);
-                                this.state.mapEntities = this.state.mapEntities.filter(e => e !== v.targetId);
-                                v.targetId = null;
-                                v.state = 'IDLE';
-                                v.pathTarget = null;
-                                v.forcedTarget = false;
-                            }
-                        } else {
-                            // 一般資源點，照常運送
-                            v.cargo = canTake;
-                            if (v.targetId.amount <= 0) {
-                                this.state.mapEntities = this.state.mapEntities.filter(e => e !== v.targetId);
-                                v.targetId = null;
-                                v.forcedTarget = false;
-                            }
-                            v.state = 'MOVING_TO_BASE';
+                        v.cargo = 0;
+                        v.gatherTimer = 0;
+                        if (v.targetId.amount <= 0) {
+                            this.addLog(`${v.targetId.name || '資源點'} 已枯竭。`);
+                            this.state.mapEntities = this.state.mapEntities.filter(e => e !== v.targetId);
+                            v.targetId = null;
+                            v.state = 'IDLE';
                             v.pathTarget = null;
                         }
                     } else {
-                        // 當採集時間到，目標卻失蹤（保險邏輯）
+                        // 目標無效
                         v.state = 'IDLE';
                         v.pathTarget = null;
+                        v.targetId = null;
                     }
                 }
                 break;
@@ -1680,6 +1705,7 @@ export class GameEngine {
         const gy = Math.floor(y / cellSize);
 
         // 偵測當前格點週邊的 4 個格子即可（因為單位體積比 cellSize 小得多）
+        // 1. 檢測建築 (spatialGrid)
         for (let i = gx - 1; i <= gx + 1; i++) {
             for (let j = gy - 1; j <= gy + 1; j++) {
                 const cell = grid.cells.get(`${i},${j}`);
@@ -1691,7 +1717,6 @@ export class GameEngine {
 
                     const cfg = this.getEntityConfig(ent.type);
                     if (cfg && cfg.collision) {
-                        // 快取或即時解析尺寸 (避免 Regex 迴圈消耗)
                         if (!ent._collisionW) {
                             const match = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
                             const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
@@ -1699,22 +1724,32 @@ export class GameEngine {
                             ent._collisionH = uh * this.TILE_SIZE;
                         }
 
-                        // 從 UI_CONFIG 讀取碰撞調整參數，並結合單位自身的 pixel_size
                         const collCfg = UI_CONFIG.BuildingCollision || { buffer: 10, feetOffset: 8 };
-
-                        // 最終碰撞半徑：取「單位自身寬的一半」與「全局緩衝」的較大者
                         const effBufferW = Math.max(unitW / 2, (collCfg.buffer || 0) / 2);
                         const effBufferH = Math.max(unitH / 2, (collCfg.buffer || 0) / 2);
 
                         const w = ent._collisionW + effBufferW * 2, h = ent._collisionH + effBufferH * 2;
                         const FOOT_OFFSET = collCfg.feetOffset || 8;
-                        const logicY = ent.y - FOOT_OFFSET; // 碰撞邏輯中心向上偏移，對齊單位腳部
+                        const logicY = ent.y - FOOT_OFFSET;
 
-                        // 精確碰撞矩形檢查 (誤差補償 +/- 0.1px 避免邊緣跳動)
                         if (x > ent.x - w / 2 + 0.1 && x < ent.x + w / 2 - 0.1 && y > logicY - h / 2 + 0.1 && y < logicY + h / 2 - 0.1) {
                             return ent;
                         }
                     }
+                }
+            }
+        }
+
+        // 2. 檢測資源 (MapDataSystem)
+        if (this.state.mapData) {
+            const TS = this.TILE_SIZE;
+            const tgx = Math.floor(x / TS);
+            const tgy = Math.floor(y / TS);
+            const res = this.state.mapData.getResource(tgx, tgy);
+            if (res) {
+                // 如果是資源且不是被忽略的採集目標 (比對格線座標)
+                if (!ignoreEnts.some(ign => ign && ign.gx === tgx && ign.gy === tgy)) {
+                    return { type: 'resource', gx: tgx, gy: tgy };
                 }
             }
         }
@@ -1743,38 +1778,47 @@ export class GameEngine {
         return !hitEntity;
     }
 
-    static findNearestResource(x, y, type, villagerId) {
-        const grid = this.state.spatialGrid;
-        const startGx = Math.floor(x / grid.cellSize);
-        const startGy = Math.floor(y / grid.cellSize);
+    static findNearestResource(x, y, typeOrName, villagerId) {
+        if (!this.state.mapData) return null;
 
-        let nearest = null;
-        let minDist = Infinity;
+        // 轉換類型名稱為數字 (1: WOOD, 2: STONE, 3: FOOD, 4: GOLD)
+        let targetType = 0;
+        const upper = typeOrName.toUpperCase();
+        if (upper === 'WOOD') targetType = 1;
+        else if (upper === 'STONE') targetType = 2;
+        else if (upper === 'FOOD') targetType = 3;
+        else if (upper === 'GOLD') targetType = 4;
 
-        // 從中心向外搜尋 8 圈 (約 2000 像素半徑)
-        for (let r = 0; r <= 8; r++) {
-            for (let dx = -r; dx <= r; dx++) {
-                for (let dy = -r; dy <= r; dy++) {
+        if (targetType === 0) return null;
+
+        const TS = this.TILE_SIZE;
+        const gx = Math.floor(x / TS);
+        const gy = Math.floor(y / TS);
+
+        // 螺旋搜尋 (使用 MapDataSystem)
+        for (let r = 1; r <= 80; r++) { // 擴大搜尋半徑至 80 格
+            // 這裡為了效能，我們簡化搜尋，直接在 MapDataSystem 的格網中遍歷周邊
+            for (let dy = -r; dy <= r; dy++) {
+                const ny = gy + dy;
+                for (let dx = -r; dx <= r; dx++) {
                     if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-                    const key = `${startGx + dx},${startGy + dy}`;
-                    const cell = grid.cells.get(key);
-                    if (cell) {
-                        cell.forEach(e => {
-                            if (e.resourceType === type) {
-                                if (e.type === 'farmland' || e.type === 'tree_plantation') {
-                                    const isOccupied = this.state.units.villagers.some(v =>
-                                        v.id !== villagerId && (v.targetId === e || v.constructionTarget === e)
-                                    );
-                                    if (isOccupied) return;
-                                }
-                                const d = Math.hypot(e.x - x, e.y - y);
-                                if (d < minDist) { minDist = d; nearest = e; }
-                            }
-                        });
+                    const nx = gx + dx;
+                    const res = this.state.mapData.getResource(nx, ny);
+                    if (res && res.type === targetType && res.amount > 0) {
+                        // 回傳一個模擬物件，兼容舊邏輯中的 targetId / target
+                        return {
+                            id: `tile_${nx}_${ny}`,
+                            x: nx * TS + TS / 2,
+                            y: ny * TS + TS / 2,
+                            gx: nx,
+                            gy: ny,
+                            type: upper, // 這裡回傳 string 格式
+                            resourceType: upper,
+                            amount: res.amount
+                        };
                     }
                 }
             }
-            if (nearest) return nearest;
         }
         return null;
     }
