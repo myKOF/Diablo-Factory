@@ -168,9 +168,9 @@ export const UI_CONFIG = {
         BerryBush: {
             leafColor: "#ffa000",
             berryColor: "#d50000",
-            outlineColor: "#bf360c",
+            outlineColor: "#dd5f17ec",
             outlineWidth: 2,
-            visualVariation: { minScale: 0.9, maxScale: 1.2, tintRange: 0.5 }
+            visualVariation: { minScale: 0.9, maxScale: 1.2, tintRange: 0.3 }
         },
         GoldMine: {
             colors: ["#ffd700", "#ffa000", "#ffea00"],
@@ -298,11 +298,13 @@ export const UI_CONFIG = {
     TownCenterPointer: {
         width: 76, height: 76,
         fontSize: "38px",
-        bgColor: "#fbc02d",
+        bgColor: "#24f12bff",              // 亮綠色
         bgAlpha: 0.95,
         borderColor: "#ffffff",
         icon: "🏰",
         arrowIcon: "▶",
+        distanceFontSize: "12px",        // 距離文字大小
+        distanceColor: "#ffffff",        // 距離文字顏色
         margin: 80,
         panSpeed: 800
     },

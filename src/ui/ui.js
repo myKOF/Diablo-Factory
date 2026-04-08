@@ -403,6 +403,7 @@ export class UIManager {
         tcPtr.innerHTML = `
             <div style="font-size: ${tcPtrCfg.fontSize}; filter: drop-shadow(0 0 3px rgba(0,0,0,0.5));">${tcPtrCfg.icon}</div>
             <div id="tc_arrow" style="position: absolute; font-size: 28px; color: #ffffff; text-shadow: 0 0 8px rgba(0,0,0,0.9); font-weight: bold;">${tcPtrCfg.arrowIcon}</div>
+            <div id="tc_distance" style="position: absolute; bottom: 4px; font-size: ${tcPtrCfg.distanceFontSize || '12px'}; color: ${tcPtrCfg.distanceColor || '#fff'}; font-weight: bold; background: rgba(0,0,0,0.4); padding: 0 4px; border-radius: 4px;">--m</div>
         `;
         tcPtr.onclick = (e) => {
             e.stopPropagation();
@@ -1485,9 +1486,16 @@ export class UIManager {
         const cam = window.PhaserScene.cameras.main;
         const cfg = UI_CONFIG.TownCenterPointer;
 
-        // 捲動相機到中心點
-        cam.pan(tc.x, tc.y, cfg.panSpeed || 1000, 'Power2');
-        GameEngine.addLog("相機移動至城鎮中心");
+        const centerX = cam.scrollX + cam.width / 2;
+        const centerY = cam.scrollY + cam.height / 2;
+        const dist = Math.hypot(tc.x - centerX, tc.y - centerY);
+
+        // 動態調整 pan 時間：距離越大，時間稍長但速度加快 (以免過卡)
+        // 限制在 400ms ~ 1500ms 之間
+        const duration = Math.min(1500, Math.max(400, dist / 4));
+
+        cam.pan(tc.x, tc.y, duration, 'Cubic.easeInOut');
+        GameEngine.addLog(`相機移動至城鎮中心 (距離: ${Math.round(dist)}px)`);
     }
 }
 
