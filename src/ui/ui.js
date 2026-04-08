@@ -1094,9 +1094,12 @@ export class UIManager {
         `;
 
         // 下方動作按鈕區域
-        html += `<div style="display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; justify-content:center; min-height: 80px; align-content: flex-start; ${entity.isUpgrading ? 'pointer-events: none; filter: grayscale(0.5); opacity: 0.5;' : 'opacity: 1;'}">`;
+        html += `
+            <div id="action_button_grid" style="display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; justify-content:center; min-height: 90px; align-content: flex-start; transition: all 0.3s; box-sizing: border-box;">
+        `;
 
         const eid = entity.id || `${entity.type}_${entity.x}_${entity.y}`;
+        const btnOpacity = entity.isUpgrading ? "opacity: 0.4; filter: grayscale(1); pointer-events: none;" : "opacity: 1;";
 
         if (isConfirming) {
             // 確認銷毀模式
@@ -1109,43 +1112,39 @@ export class UIManager {
                 </button>
             `;
         } else {
-            // 升級按鈕已移至標頭區，此處不再重複顯示
-
             // 一般模式
             if (entity.type === 'town_center' || entity.type === 'village') {
                 html += `
-                    <button class="action-btn" id="cmd_WOOD" onclick="window.GameEngine.setCommand(event, 'WOOD')">
+                    <button class="action-btn" id="cmd_WOOD" onclick="window.GameEngine.setCommand(event, 'WOOD')" style="${btnOpacity}">
                         <span class="icon">🪓</span><span class="label">採集木材</span>
                     </button>
-                    <button class="action-btn" id="cmd_STONE" onclick="window.GameEngine.setCommand(event, 'STONE')">
+                    <button class="action-btn" id="cmd_STONE" onclick="window.GameEngine.setCommand(event, 'STONE')" style="${btnOpacity}">
                         <span class="icon">⛏️</span><span class="label">採集石頭</span>
                     </button>
-                    <button class="action-btn" id="cmd_GOLD" onclick="window.GameEngine.setCommand(event, 'GOLD')">
+                    <button class="action-btn" id="cmd_GOLD" onclick="window.GameEngine.setCommand(event, 'GOLD')" style="${btnOpacity}">
                         <span class="icon">💰</span><span class="label">採集黃金</span>
                     </button>
-                    <button class="action-btn" id="cmd_FOOD" onclick="window.GameEngine.setCommand(event, 'FOOD')">
+                    <button class="action-btn" id="cmd_FOOD" onclick="window.GameEngine.setCommand(event, 'FOOD')" style="${btnOpacity}">
                         <span class="icon">🧺</span><span class="label">採集食物</span>
                     </button>
-                    <button class="action-btn" id="cmd_RETURN" onclick="window.GameEngine.setCommand(event, 'RETURN')">
+                    <button class="action-btn" id="cmd_RETURN" onclick="window.GameEngine.setCommand(event, 'RETURN')" style="${btnOpacity}">
                         <span class="icon">🏘️</span><span class="label">收工</span>
                     </button>
                 `;
             }
 
-            // 動態生成 NPC 生產按鈕 (根據當前等級配置)
+            // 動態生成 NPC 生產按鈕
             const bCfg = GameEngine.getBuildingConfig(entity.type, entity.lv || 1);
             if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0 && !entity.isUnderConstruction) {
                 const iconMap = {
-                    'villagers': '👤', 'female villagers': '👩', 'mage': '🧙', 'swordsman': '⚔️', 'archer': '🏹',
-                    '1': '👤', '2': '👩', '3': '⚔️', '4': '🧙', '5': '🏹'
+                    'villagers': '👤', 'female villagers': '👩', 'mage': '🧙', 'swordsman': '⚔️', 'archer': '🏹'
                 };
 
                 if (bCfg.productionMode === 'rand') {
-                    // 隨機生產模式
                     const firstId = bCfg.npcProduction[0];
                     const icon = iconMap[firstId] || '❓';
                     html += `
-                        <button class="action-btn" onclick="window.GameEngine.addToProductionQueue(event, 'RANDOM', null)">
+                        <button class="action-btn" onclick="window.GameEngine.addToProductionQueue(event, 'RANDOM', null)" style="${btnOpacity}">
                             <span class="icon">${icon}</span><span class="label">隨機招募</span>
                             <div class="queue-badge" style="display:none">0</div>
                             <div class="progress-bar-mini"></div>

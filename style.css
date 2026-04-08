@@ -67,10 +67,9 @@ html {
 
 /* AOE2 風格面板元件樣式 */
 .panel {
-    background: rgba(30, 30, 30, 0.85);
+    background: rgba(20, 20, 20, 0.95);
     border: 2px solid rgba(139, 110, 75, 0.6);
-    backdrop-filter: blur(10px);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), inset 0 0 20px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.8), inset 0 0 15px rgba(0, 0, 0, 0.4);
     padding: 15px;
     pointer-events: auto;
     border-radius: 4px;
