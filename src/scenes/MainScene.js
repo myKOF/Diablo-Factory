@@ -238,9 +238,14 @@ export class MainScene extends Phaser.Scene {
                 lastPointer = { x: pointer.x, y: pointer.y };
             }
 
-            // 更新框選預覽
+            // 更新框選預覽：僅當移動距離超過門檻 (5px) 才顯示，避免點擊時出現綠點殘留
             if (this.selectionStartPos) {
-                this.drawMarquee(this.selectionStartPos, { x: pointer.worldX, y: pointer.worldY });
+                const dist = Math.hypot(pointer.worldX - this.selectionStartPos.x, pointer.worldY - this.selectionStartPos.y);
+                if (dist > 5) {
+                    this.drawMarquee(this.selectionStartPos, { x: pointer.worldX, y: pointer.worldY });
+                } else {
+                    this.marqueeGraphics.clear();
+                }
             }
         });
 
@@ -490,8 +495,9 @@ export class MainScene extends Phaser.Scene {
                         if (window.UIManager) window.UIManager.hideContextMenu();
                     }
                     if (boxUnits.length > 0) GameEngine.addLog(`[選取] 框選操作選中了 ${boxUnits.length} 個我方單位。`);
-                    this.marqueeGraphics.clear();
                 }
+                // [核心修復] 將 clear 移出 else 塊，確保不論單擊或框選，放開鼠標時均確實清除預覽圖形
+                this.marqueeGraphics.clear();
                 this.selectionStartPos = null;
                 this.mouseDownScreenPos = null;
             }

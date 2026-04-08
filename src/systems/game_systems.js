@@ -626,47 +626,34 @@ export class GameEngine {
         let spawnY = building ? building.y : 560 + 120;
 
         if (building) {
-            // 計算環繞位置：從左下開始，逆時針排列
-            const fp = GameEngine.getFootprint(building.type);
-            const uw = fp.uw;
-            const uh = fp.uh;
-            const TS = this.TILE_SIZE;
-
             if (building.spawnIdx === undefined) building.spawnIdx = 0;
-            const idx = building.spawnIdx;
+            const fp = GameEngine.getFootprint(building.type);
+            const perimeter = 2 * (fp.uw + fp.uh) + 4;
+
+            // [核心修復] 動態起始點：若設有集結點，尋找距離集結點最近的周長點作為起始索引
+            let bestIdx = 0;
+            if (building.rallyPoint) {
+                let minDistSq = Infinity;
+                for (let i = 0; i < perimeter; i++) {
+                    const p = GameEngine.getBuildingPerimeterPos(building, i, 1);
+                    const dSq = (p.x - building.rallyPoint.x) ** 2 + (p.y - building.rallyPoint.y) ** 2;
+                    if (dSq < minDistSq) {
+                        minDistSq = dSq;
+                        bestIdx = i;
+                    }
+                }
+            }
+
+            const idx = bestIdx + building.spawnIdx;
             building.spawnIdx++;
 
-            // 周長 (包含四個角落)
-            const perimeter = 2 * (uw + uh) + 4;
             const currentIdx = idx % perimeter;
             const layer = Math.floor(idx / perimeter);
             const R = 1 + layer; // 距離邊緣的層數 (格)
 
-            let tx, ty;
-            // 順序：下邊(左->右)、右邊(下->上)、上邊(右->左)、左邊(上->下)
-            if (currentIdx <= uw + 1) {
-                // 下邊 (包含左右角落)
-                let k = currentIdx;
-                tx = k - (uw + 1) / 2;
-                ty = (uh + 2 * R - 1) / 2;
-            } else if (currentIdx <= (uw + 1) + (uh + 1)) {
-                // 右邊 (包含右上角落，不包含右下角落以免重疊)
-                let k = currentIdx - (uw + 1);
-                tx = (uw + 2 * R - 1) / 2;
-                ty = (uh + 1) / 2 - k;
-            } else if (currentIdx <= (uw + 1) + (uh + 1) + (uw + 1)) {
-                // 上邊 (包含左上角落)
-                let k = currentIdx - (uw + 1 + uh + 1);
-                tx = (uw + 1) / 2 - k;
-                ty = -(uh + 2 * R - 1) / 2;
-            } else {
-                // 左邊 (剩餘部分)
-                let k = currentIdx - (uw + 1 + uh + 1 + uw + 1);
-                tx = -(uw + 2 * R - 1) / 2;
-                ty = -(uh + 1) / 2 + k;
-            }
-            spawnX = building.x + tx * TS;
-            spawnY = building.y + ty * TS;
+            const pos = GameEngine.getBuildingPerimeterPos(building, currentIdx, R);
+            spawnX = pos.x;
+            spawnY = pos.y;
         }
 
         if (options && options.x !== undefined) spawnX = options.x;
@@ -726,6 +713,39 @@ export class GameEngine {
             if (em) { uw = parseInt(em[1]); uh = parseInt(em[2]); }
         }
         return { uw, uh };
+    }
+
+    /**
+     * [核心協議] 獲取建築周邊指定索引的物理座標
+     * @param {Object} building 建築實體
+     * @param {number} currentIdx 周長索引 (0 ~ perimeter-1)
+     * @param {number} R 擴展層數 (1 為緊貼建築邊緣外一圈)
+     */
+    static getBuildingPerimeterPos(building, currentIdx, R = 1) {
+        const fp = GameEngine.getFootprint(building.type);
+        const uw = fp.uw, uh = fp.uh;
+        const TS = this.TILE_SIZE;
+        let tx, ty;
+
+        // 順序：下邊(左->右)、右邊(下->上)、上邊(右->左)、左邊(上->下)
+        if (currentIdx <= uw + 1) {
+            let k = currentIdx;
+            tx = k - (uw + 1) / 2;
+            ty = (uh + 2 * R - 1) / 2;
+        } else if (currentIdx <= (uw + 1) + (uh + 1)) {
+            let k = currentIdx - (uw + 1);
+            tx = (uw + 2 * R - 1) / 2;
+            ty = (uh + 1) / 2 - k;
+        } else if (currentIdx <= (uw + 1) + (uh + 1) + (uw + 1)) {
+            let k = currentIdx - (uw + 1 + uh + 1);
+            tx = (uw + 1) / 2 - k;
+            ty = -(uh + 2 * R - 1) / 2;
+        } else {
+            let k = currentIdx - (uw + 1 + uh + 1 + uw + 1);
+            tx = -(uw + 2 * R - 1) / 2;
+            ty = -(uh + 1) / 2 + k;
+        }
+        return { x: building.x + tx * TS, y: building.y + ty * TS };
     }
 
     static getMaxPopulation() {
