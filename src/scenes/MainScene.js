@@ -190,132 +190,10 @@ export class MainScene extends Phaser.Scene {
             const isMiddleDrag = pointer.middleButtonDown();
             const isRightClick = pointer.rightButtonDown();
 
-            // 1. 左鍵點擊/選取邏輯
+            // 1. 左鍵點擊/選取邏輯 - 僅初始化起始點，具體判斷移至 pointerup
             if (pointer.leftButtonDown() && !isPlacement && !isMiddleDrag) {
-                let bestDist = 40;
-                let clickedUnit = null;
-                GameEngine.state.units.villagers.forEach(v => {
-                    const d = Math.hypot(v.x - pointer.worldX, v.y - pointer.worldY);
-                    if (d < bestDist) { bestDist = d; clickedUnit = v; }
-                });
-
-                if (clickedUnit) {
-                    const now = Date.now();
-                    const isDoubleClick = (GameEngine.state.lastSelectedUnitId === clickedUnit.id && (now - GameEngine.state.lastSelectionTime < 300));
-                    const isShift = pointer.event.shiftKey;
-
-                    if (isDoubleClick) {
-                        // 雙擊：選取畫面內相同類型的單位 (以 npc_data 中的 type 決定)
-                        const unitType = clickedUnit.config.type;
-                        const cam = this.cameras.main;
-
-                        const newlySelected = GameEngine.state.units.villagers
-                            .filter(v => v.config && v.config.type === unitType &&
-                                v.x >= cam.scrollX && v.x <= cam.scrollX + cam.width &&
-                                v.y >= cam.scrollY && v.y <= cam.scrollY + cam.height);
-
-                        if (isShift) {
-                            newlySelected.forEach(u => {
-                                if (!GameEngine.state.selectedUnitIds.includes(u.id)) GameEngine.state.selectedUnitIds.push(u.id);
-                            });
-                        } else {
-                            GameEngine.state.selectedUnitIds = newlySelected.map(v => v.id);
-                        }
-
-                        GameEngine.addLog(`[選取] 相同類型單位共 ${newlySelected.length} 個。`);
-                    } else {
-                        if (isShift) {
-                            if (GameEngine.state.selectedUnitIds.includes(clickedUnit.id)) {
-                                GameEngine.state.selectedUnitIds = GameEngine.state.selectedUnitIds.filter(id => id !== clickedUnit.id);
-                            } else {
-                                GameEngine.state.selectedUnitIds.push(clickedUnit.id);
-                            }
-                        } else {
-                            GameEngine.state.selectedUnitIds = [clickedUnit.id];
-                        }
-                    }
-
-                    GameEngine.state.lastSelectionTime = now;
-                    GameEngine.state.lastSelectedUnitId = clickedUnit.id;
-                    this.logUnitDetail(clickedUnit);
-                    GameEngine.state.selectedResourceId = null; // 清除資源選取
-                    return; // 點中單位就不觸發拖曳
-                } else {
-                    // 偵測資源點擊 (左鍵單選)
-                    const TS = GameEngine.TILE_SIZE;
-                    if (GameEngine.state.mapData) {
-                        // 使用 model_size 進行範圍檢測，而非單純的格位
-                        const clickX = pointer.worldX, clickY = pointer.worldY;
-
-                        // 我們需要搜尋滑鼠附近可能有資源覆蓋的格位 (最多 3x3 範圍)
-                        const searchGx = Math.floor(clickX / TS);
-                        const searchGy = Math.floor(clickY / TS);
-                        let foundRes = null;
-
-                        for (let dy = -1; dy <= 1; dy++) {
-                            for (let dx = -1; dx <= 1; dx++) {
-                                const gx = searchGx + dx, gy = searchGy + dy;
-                                const res = GameEngine.state.mapData.getResource(gx, gy);
-                                if (!res) continue;
-
-                                const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
-                                const typeName = typeMap[res.type];
-                                const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
-                                if (!cfg) continue;
-
-                                // 模型尺寸 (視覺中心在格位中心)
-                                const ms = cfg.model_size || { x: 1, y: 1 };
-                                const vWidth = 120 * ms.x, vHeight = 120 * ms.y;
-                                const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
-
-                                if (clickX >= rx - vWidth / 2 && clickX <= rx + vWidth / 2 &&
-                                    clickY >= ry - vHeight / 2 && clickY <= ry + vHeight / 2) {
-                                    foundRes = { gx, gy, res };
-                                    break;
-                                }
-                            }
-                            if (foundRes) break;
-                        }
-
-                        if (foundRes && !pointer.event.shiftKey) {
-                            GameEngine.state.selectedResourceId = `${foundRes.gx}_${foundRes.gy}`;
-                            GameEngine.state.selectedUnitIds = [];
-                            GameEngine.state.selectedBuildingId = null; // 清除建築選取
-                            if (window.UIManager) window.UIManager.hideContextMenu();
-                            GameEngine.addLog(`[選取] 資源：${foundRes.res.type} (Lv.${foundRes.res.level})`);
-                            return;
-                        }
-                    }
-
-                    // 偵測建築點擊 (左鍵單選) - 支援待施工建築的選取
-                    let clickedBuilding = null;
-                    let bestBDist = 40;
-                    GameEngine.state.mapEntities.forEach(e => {
-                        const d = Math.hypot(e.x - pointer.worldX, e.y - pointer.worldY);
-                        if (d < bestBDist) {
-                            bestBDist = d;
-                            clickedBuilding = e;
-                        }
-                    });
-
-                    if (clickedBuilding && !pointer.event.shiftKey) {
-                        GameEngine.state.selectedBuildingId = clickedBuilding.id;
-                        GameEngine.state.selectedUnitIds = [];
-                        GameEngine.state.selectedResourceId = null;
-                        if (window.UIManager) window.UIManager.hideContextMenu();
-                        GameEngine.addLog(`[選取] 建築：${clickedBuilding.name || clickedBuilding.type} ${clickedBuilding.isUnderConstruction ? '(施工中)' : ''}`);
-                        return;
-                    }
-
-                    // 點擊地面：準備框選 (如果沒有 Shift 則清除舊選取)
-                    if (!pointer.event.shiftKey) {
-                        GameEngine.state.selectedUnitIds = [];
-                        GameEngine.state.lastSelectedUnitId = null;
-                        GameEngine.state.selectedResourceId = null;
-                        if (window.UIManager) window.UIManager.hideContextMenu(); // 同步關閉 UI 選單
-                    }
-                    this.selectionStartPos = { x: pointer.worldX, y: pointer.worldY };
-                }
+                this.selectionStartPos = { x: pointer.worldX, y: pointer.worldY };
+                this.mouseDownScreenPos = { x: pointer.x, y: pointer.y };
             }
 
             // 2. 右鍵與中鍵皆可用於相機拖曳
@@ -367,6 +245,9 @@ export class MainScene extends Phaser.Scene {
         });
 
         this.input.on('pointerup', (pointer) => {
+            const isPlacement = !!GameEngine.state.placingType;
+
+            // [右鍵單擊] 或 [右鍵指令]
             if (pointer.button === 2) {
                 this.isDragging = false;
                 const now = Date.now();
@@ -381,11 +262,9 @@ export class MainScene extends Phaser.Scene {
                 }
 
                 // 2. 核心衝突修復：如果本次右鍵「開始時」處於建築模式，則本次放開只能用於「取消」或「拖動」。
-                // 必須使用本地 snapshots (rightClickWasPlacement) 以防止與 UIManager 全域狀態的清理順序產生競爭。
                 if (this.rightClickWasPlacement || GameEngine.state.rightClickStartedInPlacementMode) {
                     this.rightClickWasPlacement = false;
                     GameEngine.state.rightClickStartedInPlacementMode = false;
-                    // 注意：此處僅負責攔截指令，具體的「取消虛影」邏輯由 UIManager.handleWorldMouseUp 負責 (因為那邊有精確的 drift 判斷)
                     return;
                 }
 
@@ -394,11 +273,10 @@ export class MainScene extends Phaser.Scene {
                 GameEngine.state.rightClickStartedInPlacementMode = false;
 
                 const dragDist = this.dragStartPos ? Math.hypot(pointer.x - this.dragStartPos.x, pointer.y - this.dragStartPos.y) : 0;
-                // 3. 即使沒觸發 move 事件，位移超過設定門檻仍視為拖動 (放寬容錯率)
                 const threshold = (UI_CONFIG.Interaction && UI_CONFIG.Interaction.minDragDistance) || 10;
                 if (dragDist > threshold) return;
 
-                // 1. 識別點擊目標 (碰撞檢測)
+                // 識別點擊目標 (碰撞檢測) - 僅在放開時執行
                 let clickedEnemy = null;
                 let clickedEntity = null;
                 let bestDist = 40;
@@ -412,15 +290,19 @@ export class MainScene extends Phaser.Scene {
                     }
                 });
 
-                // 其次檢測建築 (mapEntities)
                 if (!clickedEnemy) {
+                    const TS = GameEngine.TILE_SIZE;
                     GameEngine.state.mapEntities.forEach(e => {
-                        const d = Math.hypot(e.x - pointer.worldX, e.y - pointer.worldY);
-                        if (d < bestDist) { bestDist = d; clickedEntity = e; }
+                        const fp = GameEngine.getFootprint(e.type);
+                        const w = fp.uw * TS, h = fp.uh * TS;
+                        // AABB 碰撞檢測 (支援大建築邊緣點擊)
+                        if (pointer.worldX >= e.x - w / 2 - 10 && pointer.worldX <= e.x + w / 2 + 10 &&
+                            pointer.worldY >= e.y - h / 2 - 10 && pointer.worldY <= e.y + h / 2 + 10) {
+                            clickedEntity = e;
+                        }
                     });
                 }
 
-                // 最後檢測資源 (MapDataSystem)
                 if (!clickedEnemy && !clickedEntity && GameEngine.state.mapData) {
                     const TS = GameEngine.TILE_SIZE;
                     const clickX = pointer.worldX, clickY = pointer.worldY;
@@ -432,13 +314,11 @@ export class MainScene extends Phaser.Scene {
                             const gx = searchGx + dx, gy = searchGy + dy;
                             const res = GameEngine.state.mapData.getResource(gx, gy);
                             if (!res) continue;
-
                             const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
                             const typeName = typeMap[res.type];
                             const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
                             if (!cfg) continue;
 
-                            // 重要修復：根據 model_size 與 level 縮放動態計算點擊盒，確保大物件能被選中
                             const ms = cfg.model_size || { x: 1, y: 1 };
                             const vWidth = 120 * ms.x, vHeight = 120 * ms.y;
                             const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
@@ -446,12 +326,9 @@ export class MainScene extends Phaser.Scene {
                             if (clickX >= rx - vWidth / 2 && clickX <= rx + vWidth / 2 &&
                                 clickY >= ry - vHeight / 2 && clickY <= ry + vHeight / 2) {
                                 clickedEntity = {
-                                    id: `${gx}_${gy}`, // 統一格式
-                                    gx, gy,
-                                    x: rx, y: ry,
-                                    type: typeName,
-                                    resourceType: typeName,
-                                    amount: res.amount
+                                    id: `${gx}_${gy}`,
+                                    gx, gy, x: rx, y: ry,
+                                    type: typeName, resourceType: typeName, amount: res.amount
                                 };
                                 break;
                             }
@@ -460,86 +337,166 @@ export class MainScene extends Phaser.Scene {
                     }
                 }
 
-                // 觸發點擊效果 (無論是否有選中單位)
-                if (clickedEnemy) {
-                    this.addClickEffect(clickedEnemy.x, clickedEnemy.y, 'enemy');
-                } else if (clickedEntity) {
-                    this.addClickEffect(clickedEntity.x, clickedEntity.y, 'ground');
-                } else {
-                    this.addClickEffect(pointer.worldX, pointer.worldY, 'ground');
-                }
+                // 觸發效果與下達指令
+                if (clickedEnemy) this.addClickEffect(clickedEnemy.x, clickedEnemy.y, 'enemy');
+                else if (clickedEntity) this.addClickEffect(clickedEntity.x, clickedEntity.y, 'ground');
+                else this.addClickEffect(pointer.worldX, pointer.worldY, 'ground');
 
                 const selectedIds = GameEngine.state.selectedUnitIds || [];
                 if (selectedIds.length > 0) {
                     const unitsToMove = selectedIds.map(id => GameEngine.state.units.villagers.find(v => v.id === id)).filter(v => v);
-
-                    // [重要] 合作施工規範：右鍵點擊工地時，指派「所有選中」的工人一併前往，支援多人同時建造。
                     if (clickedEntity && clickedEntity.isUnderConstruction) {
                         const vCandidates = unitsToMove.filter(v => v.config?.type === 'villagers');
                         if (vCandidates.length > 0) {
-                            vCandidates.forEach(v => {
-                                this.handleRightClickCommand(v, pointer, clickedEntity);
-                            });
-                            return; // 攔截指令，確保選中的工人群組全部投入建設
+                            vCandidates.forEach(v => this.handleRightClickCommand(v, pointer, clickedEntity));
+                            return;
                         }
                     }
 
                     const colsNum = Math.ceil(Math.sqrt(unitsToMove.length));
                     const spacing = 40;
-
                     unitsToMove.forEach((unit, i) => {
-                        if (clickedEnemy) {
-                            // 追擊指令：直接設定目標
-                            this.handleRightClickCommand(unit, pointer, clickedEnemy);
-                        } else if (clickedEntity) {
-                            // 物件/資源交互指令：直接設定目標且不套用陣型 (避免分散至採不到點的地方)
-                            this.handleRightClickCommand(unit, pointer, clickedEntity);
-                        } else {
-                            // 地表移動指令：計算陣型偏移
-                            const r = Math.floor(i / colsNum);
-                            const c = i % colsNum;
-                            const offX = (c - (colsNum - 1) / 2) * spacing;
-                            const offY = (r - (colsNum - 1) / 2) * spacing;
-                            const fakePointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
-                            this.handleRightClickCommand(unit, fakePointer);
-                        }
+                        const r = Math.floor(i / colsNum), c = i % colsNum;
+                        const offX = (c - (colsNum - 1) / 2) * spacing, offY = (r - (colsNum - 1) / 2) * spacing;
+                        // 核心協議：即使點擊實體，也帶入相應的偏移座標，確保多個單位不會重疊於同一點
+                        const offsetPointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
+                        this.handleRightClickCommand(unit, offsetPointer, clickedEnemy || clickedEntity);
                     });
                 }
             }
 
-            // 結束框選
-            if (this.selectionStartPos) {
+            // [左鍵單擊] 或 [框選結束]
+            if (pointer.button === 0 && this.selectionStartPos && !isPlacement) {
                 const start = this.selectionStartPos;
                 const end = { x: pointer.worldX, y: pointer.worldY };
+                const dragDist = this.mouseDownScreenPos ? Math.hypot(pointer.x - this.mouseDownScreenPos.x, pointer.y - this.mouseDownScreenPos.y) : 0;
 
-                const minX = Math.min(start.x, end.x);
-                const maxX = Math.max(start.x, end.x);
-                const minY = Math.min(start.y, end.y);
-                const maxY = Math.max(start.y, end.y);
+                // 判斷是單擊還是框選 (門檻設為 5 像素)
+                if (dragDist < 5) {
+                    // --- 單選邏輯 ---
+                    let bestDist = 40;
+                    let clickedUnit = null;
+                    GameEngine.state.units.villagers.forEach(v => {
+                        const d = Math.hypot(v.x - pointer.worldX, v.y - pointer.worldY);
+                        if (d < bestDist) { bestDist = d; clickedUnit = v; }
+                    });
 
-                // 如果拖曳距離足夠大 (避免微小誤觸)
-                if (Math.abs(maxX - minX) > 5 || Math.abs(maxY - minY) > 5) {
+                    if (clickedUnit) {
+                        const now = Date.now();
+                        const isDoubleClick = (GameEngine.state.lastSelectedUnitId === clickedUnit.id && (now - GameEngine.state.lastSelectionTime < 300));
+                        const isShift = pointer.event.shiftKey;
+
+                        if (isDoubleClick) {
+                            const unitType = clickedUnit.config.type;
+                            const cam = this.cameras.main;
+                            const newlySelected = GameEngine.state.units.villagers.filter(v => v.config && v.config.type === unitType &&
+                                v.x >= cam.scrollX && v.x <= cam.scrollX + cam.width &&
+                                v.y >= cam.scrollY && v.y <= cam.scrollY + cam.height);
+
+                            if (isShift) {
+                                newlySelected.forEach(u => { if (!GameEngine.state.selectedUnitIds.includes(u.id)) GameEngine.state.selectedUnitIds.push(u.id); });
+                            } else {
+                                GameEngine.state.selectedUnitIds = newlySelected.map(v => v.id);
+                            }
+                            GameEngine.addLog(`[選取] 相同類型單位共 ${newlySelected.length} 個。`);
+                        } else {
+                            if (isShift) {
+                                if (GameEngine.state.selectedUnitIds.includes(clickedUnit.id)) {
+                                    GameEngine.state.selectedUnitIds = GameEngine.state.selectedUnitIds.filter(id => id !== clickedUnit.id);
+                                } else {
+                                    GameEngine.state.selectedUnitIds.push(clickedUnit.id);
+                                }
+                            } else {
+                                GameEngine.state.selectedUnitIds = [clickedUnit.id];
+                            }
+                        }
+                        GameEngine.state.lastSelectionTime = now;
+                        GameEngine.state.lastSelectedUnitId = clickedUnit.id;
+                        this.logUnitDetail(clickedUnit);
+                        GameEngine.state.selectedResourceId = null;
+                    } else {
+                        // 檢查資源選取
+                        let foundRes = null;
+                        if (GameEngine.state.mapData) {
+                            const TS = GameEngine.TILE_SIZE;
+                            const searchGx = Math.floor(pointer.worldX / TS), searchGy = Math.floor(pointer.worldY / TS);
+                            for (let dy = -1; dy <= 1; dy++) {
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    const gx = searchGx + dx, gy = searchGy + dy;
+                                    const res = GameEngine.state.mapData.getResource(gx, gy);
+                                    if (!res) continue;
+                                    const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+                                    const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeMap[res.type] && c.lv === (res.level || 1));
+                                    if (!cfg) continue;
+                                    const ms = cfg.model_size || { x: 1, y: 1 };
+                                    const vWidth = 120 * ms.x, vHeight = 120 * ms.y;
+                                    const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
+                                    if (pointer.worldX >= rx - vWidth / 2 && pointer.worldX <= rx + vWidth / 2 &&
+                                        pointer.worldY >= ry - vHeight / 2 && pointer.worldY <= ry + vHeight / 2) {
+                                        foundRes = { gx, gy, res }; break;
+                                    }
+                                }
+                                if (foundRes) break;
+                            }
+                        }
+
+                        if (foundRes && !pointer.event.shiftKey) {
+                            GameEngine.state.selectedResourceId = `${foundRes.gx}_${foundRes.gy}`;
+                            GameEngine.state.selectedUnitIds = [];
+                            GameEngine.state.selectedBuildingId = null;
+                            if (window.UIManager) window.UIManager.hideContextMenu();
+                            GameEngine.addLog(`[選取] 資源：${foundRes.res.type} (Lv.${foundRes.res.level})`);
+                        } else {
+                            // 檢查建築選取
+                            let clickedBuilding = null;
+                            let bestBDist = 40;
+                            GameEngine.state.mapEntities.forEach(e => {
+                                const d = Math.hypot(e.x - pointer.worldX, e.y - pointer.worldY);
+                                if (d < bestBDist) { bestBDist = d; clickedBuilding = e; }
+                            });
+
+                            if (clickedBuilding && !pointer.event.shiftKey) {
+                                GameEngine.state.selectedBuildingId = clickedBuilding.id;
+                                GameEngine.state.selectedUnitIds = [];
+                                GameEngine.state.selectedResourceId = null;
+                                if (window.UIManager) window.UIManager.hideContextMenu();
+                                GameEngine.addLog(`[選取] 建築：${clickedBuilding.name || clickedBuilding.type} ${clickedBuilding.isUnderConstruction ? '(施工中)' : ''}`);
+                            } else if (!pointer.event.shiftKey) {
+                                // 點地板清空選取
+                                GameEngine.state.selectedUnitIds = [];
+                                GameEngine.state.lastSelectedUnitId = null;
+                                GameEngine.state.selectedResourceId = null;
+                                if (window.UIManager) window.UIManager.hideContextMenu();
+                            }
+                        }
+                    }
+                } else {
+                    // --- 框選邏輯 ---
+                    const minX = Math.min(start.x, end.x), maxX = Math.max(start.x, end.x);
+                    const minY = Math.min(start.y, end.y), maxY = Math.max(start.y, end.y);
+
+                    // 僅框選我方單位 (camp === 'player')
                     const boxUnits = GameEngine.state.units.villagers.filter(v =>
+                        (v.config?.camp === 'player' || v.camp === 'player' || !v.camp) &&
                         v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY
                     );
 
                     if (pointer.event.shiftKey) {
-                        boxUnits.forEach(u => {
-                            if (!GameEngine.state.selectedUnitIds.includes(u.id)) GameEngine.state.selectedUnitIds.push(u.id);
-                        });
+                        boxUnits.forEach(u => { if (!GameEngine.state.selectedUnitIds.includes(u.id)) GameEngine.state.selectedUnitIds.push(u.id); });
                     } else {
                         GameEngine.state.selectedUnitIds = boxUnits.map(v => v.id);
+                        GameEngine.state.selectedResourceId = null;
+                        GameEngine.state.selectedBuildingId = null;
+                        if (window.UIManager) window.UIManager.hideContextMenu();
                     }
-                    if (boxUnits.length > 0) GameEngine.addLog(`[選取] 框選操作選中了 ${boxUnits.length} 個單位。`);
+                    if (boxUnits.length > 0) GameEngine.addLog(`[選取] 框選操作選中了 ${boxUnits.length} 個我方單位。`);
+                    this.marqueeGraphics.clear();
                 }
-
                 this.selectionStartPos = null;
-                this.marqueeGraphics.clear();
+                this.mouseDownScreenPos = null;
             }
 
-            if (pointer.button !== 2) {
-                this.isDragging = false;
-            }
+            if (pointer.button !== 0) this.isDragging = false;
             this.dragStartPos = null;
         });
     }
@@ -567,8 +524,10 @@ export class MainScene extends Phaser.Scene {
             const isResource = !!(clickedTarget.gx !== undefined && clickedTarget.gy !== undefined) || (clickedTarget.resourceType);
             const isEnemy = (clickedTarget.config && clickedTarget.config.camp === 'enemy') || clickedTarget.camp === 'enemy' || clickedTarget.isEnemy;
 
-            finalTx = clickedTarget.x;
-            finalTy = clickedTarget.y;
+            // [核心修復] 不再強制強制切換為目標中心座標。使用帶有偏移的點擊座標 (wx, wy) 作為基準，
+            // 如此一來即便多個單位同時點擊同一建築，也會因為各自不同的偏移量而散開至合法點位。
+            finalTx = wx;
+            finalTy = wy;
 
             if (isEnemy) {
                 // 我方單位右鍵點敵方：移動至攻擊範圍內開始攻擊敵人
@@ -576,6 +535,7 @@ export class MainScene extends Phaser.Scene {
                 unit.targetId = clickedTarget.id;
                 unit.forceFocus = true;
                 unit.state = 'CHASE';
+                // 追擊目標座標亦可以維持帶偏移，達成環繞攻擊效果
                 unit.idleTarget = { x: finalTx, y: finalTy };
                 unit.isPlayerLocked = true;
                 unit.chaseFrame = 999;
@@ -587,10 +547,10 @@ export class MainScene extends Phaser.Scene {
                 unit.targetId = null;
                 unit.pathTarget = null;
                 unit.isPlayerLocked = true;
-                
+
                 // [視覺優化] 同步選取該建築，顯示選取框與取消按鈕
                 if (window.UIManager) window.UIManager.showContextMenu(clickedTarget);
-                
+
                 GameEngine.addLog(`[命令] 工人 ${unit.id} 前往建設 ${clickedTarget.name || clickedTarget.type}。`, 'COMMON');
                 return;
             } else if (isResource && unit.config.type === 'villagers') {
@@ -1561,7 +1521,8 @@ export class MainScene extends Phaser.Scene {
 
         // 如果是預覽模式，加強視覺引導：外框與高透明度
         if (alpha < 1.0) {
-            g.lineStyle(2, 0x2196f3, 0.8);
+            const previewColor = ent.previewColor || 0x2196f3; // 預設藍色，若受阻則傳入紅色
+            g.lineStyle(2, previewColor, 0.8);
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
         }
 
@@ -1938,17 +1899,24 @@ export class MainScene extends Phaser.Scene {
 
         // 單個預覽 (Drag/Stamp)
         if (state.previewPos && (state.buildingMode === 'DRAG' || state.buildingMode === 'STAMP' || state.buildingMode === 'NONE')) {
+            const isClear = GameEngine.isAreaClear(state.previewPos.x, state.previewPos.y, state.placingType);
             this.drawEntity(g, {
-                type: state.placingType
-            }, 0.5, state.previewPos.x, state.previewPos.y);
+                type: state.placingType,
+                previewColor: isClear ? 0x2196f3 : 0xf44336
+            }, isClear ? 0.5 : 0.7, state.previewPos.x, state.previewPos.y);
         }
 
         // 批量預覽 (Line)
         if (state.buildingMode === 'LINE' && state.linePreviewEntities) {
+            const tempPlaced = [];
             state.linePreviewEntities.forEach(pos => {
+                const isClear = GameEngine.isAreaClear(pos.x, pos.y, state.placingType, tempPlaced);
                 this.drawEntity(g, {
-                    type: state.placingType
-                }, 0.3, pos.x, pos.y); // 拉排預覽稍微淡一點
+                    type: state.placingType,
+                    previewColor: isClear ? 0x2196f3 : 0xf44336
+                }, isClear ? 0.3 : 0.6, pos.x, pos.y);
+
+                if (isClear) tempPlaced.push({ type: state.placingType, x: pos.x, y: pos.y });
             });
         }
     }

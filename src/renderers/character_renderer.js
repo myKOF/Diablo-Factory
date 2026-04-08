@@ -50,9 +50,12 @@ export class CharacterRenderer {
         let legOffset = 0;
         let bodyBob = 0;
 
+        const multiplier = CharacterRenderer.getFreqMultiplier(unitData);
+        const combatFreq = anim.workFreq * multiplier;
+
         if (state === 'CONSTRUCTING' || state === 'GATHERING' || state === 'ATTACK') {
             // 工作或攻擊狀態：原地站立，身體微晃，但不准有腳步動畫
-            bodyBob = Math.sin(t * anim.workFreq) * 2;
+            bodyBob = Math.sin(t * combatFreq) * 2;
             legOffset = 0;
         } else if ((isMoving || isWandering) && !isStuck) {
             // 精確判斷：如果狀態是前往某地任務，即為跑步，無視殘留的 idleTarget (Point 2)
@@ -257,33 +260,36 @@ export class CharacterRenderer {
 
         // 動畫頻率: 閒逛/奔跑/呼吸 (讀取 UI_CONFIG)
         const anim = UI_CONFIG.Animation || { armSwingFreqRunning: 10, armSwingFreqWandering: 4, breathingFreq: 1.33, workFreq: 10, runningFreq: 15, wanderingFreq: 5 };
+        const multiplier = CharacterRenderer.getFreqMultiplier(data);
+        const combatFreq = anim.workFreq * multiplier;
+
         const armFreq = isRunning ? anim.armSwingFreqRunning : (isActuallyMoving ? anim.armSwingFreqWandering : anim.breathingFreq);
         const breatheFreq = anim.breathingFreq;
 
         if (state === 'CONSTRUCTING') {
-            const angle = Math.sin(t * (anim.workFreq * 2)) * 0.8;
+            const angle = Math.sin(t * (combatFreq * 2)) * 0.8;
             this.drawTool(ctx, x + 5, y + 15, 'HAMMER', angle);
             // 繪製另一隻手臂
-            ctx.fillRect(x - 14, y + 5 + Math.sin(t * anim.workFreq) * 2, 4, 18);
+            ctx.fillRect(x - 14, y + 5 + Math.sin(t * combatFreq) * 2, 4, 18);
         } else if (state === 'GATHERING') {
-            const angle = Math.sin(t * (anim.workFreq * 2)) * 0.8;
+            const angle = Math.sin(t * (combatFreq * 2)) * 0.8;
             const toolType = data.type === 'WOOD' ? 'AXE' : (data.type === 'STONE' || data.type === 'GOLD' ? 'PICKAXE' : 'BASKET');
             this.drawTool(ctx, x + 5, y + 15, toolType, angle);
             // 繪製另一隻手臂
-            ctx.fillRect(x - 14, y + 5 + Math.sin(t * anim.workFreq) * 2, 4, 18);
+            ctx.fillRect(x - 14, y + 5 + Math.sin(t * combatFreq) * 2, 4, 18);
         } else if (name === 'swordsman') {
             const isAttacking = (state === 'ATTACK');
-            const angle = isAttacking ? Math.sin(t * anim.workFreq * 2) * 1.2 : (isActuallyMoving ? Math.sin(t * armFreq) * 0.3 : 0.2 + Math.sin(t * breatheFreq) * 0.05);
+            const angle = isAttacking ? Math.sin(t * combatFreq * 2) * 1.2 : (isActuallyMoving ? Math.sin(t * armFreq) * 0.3 : 0.2 + Math.sin(t * breatheFreq) * 0.05);
             this.drawTool(ctx, x + 8, y + 15, 'SWORD', angle);
             ctx.fillRect(x - 14, y + 5 + (isActuallyMoving || isAttacking ? 0 : Math.sin(t * breatheFreq) * 2), 4, 18);
         } else if (name === 'mage') {
             const isAttacking = (state === 'ATTACK');
-            const angle = isAttacking ? Math.sin(t * anim.workFreq) * 0.5 : (isActuallyMoving ? Math.sin(t * armFreq) * 0.1 : Math.sin(t * breatheFreq) * 0.05);
+            const angle = isAttacking ? Math.sin(t * combatFreq) * 0.5 : (isActuallyMoving ? Math.sin(t * armFreq) * 0.1 : Math.sin(t * breatheFreq) * 0.05);
             this.drawTool(ctx, x + 8, y + 15, 'STAFF', angle);
             ctx.fillRect(x - 14, y + 5 + (isActuallyMoving || isAttacking ? 0 : Math.sin(t * breatheFreq) * 2), 4, 18);
         } else if (name === 'archer') {
             const isAttacking = (state === 'ATTACK');
-            const angle = isAttacking ? Math.sin(t * anim.workFreq) * 0.4 : (isActuallyMoving ? Math.sin(t * armFreq) * 0.1 : Math.sin(t * breatheFreq) * 0.03);
+            const angle = isAttacking ? Math.sin(t * combatFreq) * 0.4 : (isActuallyMoving ? Math.sin(t * armFreq) * 0.1 : Math.sin(t * breatheFreq) * 0.03);
             this.drawTool(ctx, x + 8, y + 15, 'BOW', angle);
             ctx.fillRect(x - 14, y + 5 + (isActuallyMoving || isAttacking ? 0 : Math.sin(t * breatheFreq) * 1), 4, 18);
         } else if (data.cargo > 0) {
@@ -311,8 +317,8 @@ export class CharacterRenderer {
             ctx.fillRect(x - 8, y + 10 + Math.sin(t * cargoFreq) * 2, 16, 3);
         } else if (state === 'ATTACK') {
             // 通用攻擊動作（針對村民或其他無特定武器單位）
-            const swing = Math.sin(t * anim.workFreq * 1.5) * 10;
-            const armAngle = Math.sin(t * anim.workFreq * 2) * 0.5;
+            const swing = Math.sin(t * combatFreq * 1.5) * 10;
+            const armAngle = Math.sin(t * combatFreq * 2) * 0.5;
             ctx.fillRect(x + 10 + swing, y + 5 + armAngle, 4, 18); // 右手前衝
             ctx.fillRect(x - 14, y + 5 - armAngle, 4, 18);
         } else {
@@ -416,18 +422,23 @@ export class CharacterRenderer {
         // 呼吸效果 (待機時縮放身體)
         const breathing = (isMoving || isAttacking) ? 0 : Math.sin(t * breatheFreq * 1.2) * 1.2;
 
+        const multiplier = CharacterRenderer.getFreqMultiplier(unitData);
+        // 戰鬥頻率基準 (原本 15 太快了，改用與人類接近的基準再乘上倍率)
+        const animWorkFreq = (UI_CONFIG.Animation ? UI_CONFIG.Animation.workFreq : 2);
+        const atkFreq = animWorkFreq * 4 * multiplier; // 基準提升一點但保持受控
+
         // 身體前傾效果 (攻擊時向右衝)
-        const attackDash = isAttacking ? Math.abs(Math.sin(t * 15)) * 8 : 0;
+        const attackDash = isAttacking ? Math.abs(Math.sin(t * atkFreq)) * 8 : 0;
 
         // 頭部
-        const headBob = isAttacking ? Math.sin(t * 15) * 4 : (isMoving ? Math.sin(t * headBobFreq) * 2 : Math.sin(t * breatheFreq * 0.8) * 1);
+        const headBob = isAttacking ? Math.sin(t * atkFreq) * 4 : (isMoving ? Math.sin(t * headBobFreq) * 2 : Math.sin(t * breatheFreq * 0.8) * 1);
         const headX = x + 8 + attackDash;
         const headY = y - 12 + headBob + breathing;
 
         ctx.fillRect(headX, headY, 12, 10); // 狼頭向右
 
         // 嘴巴 (攻擊時張開)
-        if (isAttacking && Math.sin(t * 15) > 0) {
+        if (isAttacking && Math.sin(t * atkFreq) > 0) {
             ctx.fillRect(headX + 8, headY + 6, 6, 4);
         }
 
@@ -459,14 +470,19 @@ export class CharacterRenderer {
         // 呼吸效果 (熊比較壯碩，呼吸更慢)
         const breathing = (isMoving || isAttacking) ? 0 : Math.sin(t * breatheFreq * 0.8) * 1.5;
 
+        const multiplier = CharacterRenderer.getFreqMultiplier(unitData);
+        // 戰鬥頻率基準
+        const animWorkFreq = (UI_CONFIG.Animation ? UI_CONFIG.Animation.workFreq : 2);
+        const atkFreq = animWorkFreq * 3 * multiplier;
+
         // 身體前傾效果
-        const attackDash = isAttacking ? Math.abs(Math.sin(t * 12)) * 6 : 0;
+        const attackDash = isAttacking ? Math.abs(Math.sin(t * atkFreq)) * 6 : 0;
 
         // 身體 (壯碩)
         ctx.fillRect(x - 15 + attackDash, y - 10 - (breathing / 2), 30, 20 + breathing);
 
         // 頭 (圓大)
-        const headBob = isAttacking ? Math.sin(t * 12) * 3 : (isMoving ? Math.sin(t * headBobFreq) * 1 : Math.cos(t * breatheFreq * 0.6) * 1.5);
+        const headBob = isAttacking ? Math.sin(t * atkFreq) * 3 : (isMoving ? Math.sin(t * headBobFreq) * 1 : Math.cos(t * breatheFreq * 0.6) * 1.5);
         const headX = x + 10 + attackDash;
         const headY = y - 15 + headBob;
         ctx.fillRect(headX, headY, 15, 15);
@@ -474,7 +490,7 @@ export class CharacterRenderer {
         // 熊掌擊打動作 (攻擊時)
         if (isAttacking) {
             this.setCtxStyle(ctx, color, 1);
-            ctx.fillRect(headX + 10, headY + 10 + Math.sin(t * 12) * 5, 8, 8);
+            ctx.fillRect(headX + 10, headY + 10 + Math.sin(t * atkFreq) * 5, 8, 8);
         }
 
         // 耳朵 (小而圓)
@@ -585,5 +601,18 @@ export class CharacterRenderer {
             ctx.arc(x, y + 10, radius - 2 + pulse, 0, Math.PI * 2);
             ctx.stroke();
         }
+    }
+
+    static getFreqMultiplier(unitData) {
+        if (!unitData) return 1.0;
+        const name = (unitData.configName || "").toLowerCase();
+        const isEnemy = (unitData.config && unitData.config.camp === 'enemy') || unitData.camp === 'enemy';
+        
+        if (isEnemy) return 0.25;
+        if (name.includes('villager')) return 0.75;
+        // 戰鬥單位：50%
+        if (name === 'swordsman' || name === 'mage' || name === 'archer') return 0.5;
+        
+        return 1.0;
     }
 }

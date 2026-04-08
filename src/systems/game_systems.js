@@ -1358,7 +1358,16 @@ export class GameEngine {
                             nearestPt = p;
                         }
                     }
-                    v.depositPoint = nearestPt;
+
+                    if (!v.workOffset) {
+                        const idNumInv = parseInt((v.id || "0").replace(/[^0-9]/g, '')) || 0;
+                        const angleInv = (idNumInv * 137.5) * (Math.PI / 180);
+                        v.workOffset = { x: Math.cos(angleInv) * 15, y: Math.sin(angleInv) * 15 };
+                    }
+                    v.depositPoint = {
+                        x: nearestPt.x + v.workOffset.x,
+                        y: nearestPt.y + v.workOffset.y
+                    };
                 }
 
                 const distB = Math.hypot(v.depositPoint.x - v.x, v.depositPoint.y - v.y);
@@ -1392,23 +1401,32 @@ export class GameEngine {
                     return;
                 }
 
-                // 計算到達範圍 (依建築尺寸)
-                const cfgC = this.state.buildingConfigs[v.constructionTarget.type];
-                let interactionDist = 60;
-                if (cfgC && cfgC.size) {
-                    const m = cfgC.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
-                    if (m) {
-                        const uw = parseInt(m[1]), uh = parseInt(m[2]);
-                        interactionDist = (Math.max(uw, uh) * this.TILE_SIZE / 2) + 20;
-                    }
+                // [核心優化] 邊緣分佈邏輯：根據接近方向分配到建築的四條邊上
+                const idNumC = parseInt((v.id || "0").replace(/[^0-9]/g, '')) || 0;
+                const fpC = GameEngine.getFootprint(v.constructionTarget.type);
+                const halfWC = (fpC.uw * this.TILE_SIZE) / 2;
+                const halfHC = (fpC.uh * this.TILE_SIZE) / 2;
+
+                const dxC = v.x - v.constructionTarget.x;
+                const dyC = v.y - v.constructionTarget.y;
+                let txC = v.constructionTarget.x, tyC = v.constructionTarget.y;
+
+                if (Math.abs(dxC) > Math.abs(dyC)) {
+                    txC = dxC > 0 ? (v.constructionTarget.x + halfWC + 10) : (v.constructionTarget.x - halfWC - 10);
+                    const spreadY = (idNumC % 5 - 2) * (halfHC * 0.7);
+                    tyC = v.constructionTarget.y + spreadY;
+                } else {
+                    tyC = dyC > 0 ? (v.constructionTarget.y + halfHC + 10) : (v.constructionTarget.y - halfHC - 10);
+                    const spreadX = (idNumC % 5 - 2) * (halfWC * 0.7);
+                    txC = v.constructionTarget.x + spreadX;
                 }
 
-                const distC = Math.hypot(v.constructionTarget.x - v.x, v.constructionTarget.y - v.y);
-                if (distC < interactionDist) {
+                const distC = Math.hypot(txC - v.x, tyC - v.y);
+                if (distC < 25) {
                     v.state = 'CONSTRUCTING';
                     v.pathTarget = null;
                 } else {
-                    this.moveDetailed(v, v.constructionTarget.x, v.constructionTarget.y, moveSpeed, dt, ignoreEnts);
+                    this.moveDetailed(v, txC, tyC, moveSpeed, dt, ignoreEnts);
                 }
                 break;
             case 'CONSTRUCTING':
@@ -1635,7 +1653,7 @@ export class GameEngine {
 
         // 依照序號續建，擴大至 2 倍視野範圍以增加連動感 (約 600px)
         const visionRadius = (v.field_vision || 15) * this.TILE_SIZE * 2;
-        const projects = this.state.mapEntities.filter(e => 
+        const projects = this.state.mapEntities.filter(e =>
             e && e.isUnderConstruction && Math.hypot(v.x - e.x, v.y - e.y) <= visionRadius
         );
 
@@ -1954,8 +1972,8 @@ export class GameEngine {
         const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
         const w = uw * this.TILE_SIZE, h = uh * this.TILE_SIZE;
 
+        // 1. 檢查建築與實體碰撞
         const allToCheck = [...this.state.mapEntities, ...tempEntities];
-
         const hitEntity = allToCheck.some(ent => {
             const ecfg = this.getEntityConfig(ent.type);
             let ew = this.TILE_SIZE, eh = this.TILE_SIZE;
@@ -1966,7 +1984,41 @@ export class GameEngine {
             }
             return Math.abs(x - ent.x) < (w + ew) / 2 - 5 && Math.abs(y - ent.y) < (h + eh) / 2 - 5;
         });
-        return !hitEntity;
+        if (hitEntity) return false;
+
+        // 2. 檢查資源碰撞 (MapDataSystem)
+        if (this.state.mapData) {
+            const TS = this.TILE_SIZE;
+            const startGX = Math.floor((x - w / 2 + 5) / TS);
+            const endGX = Math.floor((x + w / 2 - 5) / TS);
+            const startGY = Math.floor((y - h / 2 + 5) / TS);
+            const endGY = Math.floor((y + h / 2 - 5) / TS);
+
+            const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+            for (let gy = startGY; gy <= endGY; gy++) {
+                for (let gx = startGX; gx <= endGX; gx++) {
+                    const res = this.state.mapData.getResource(gx, gy);
+                    if (res && res.amount > 0) {
+                        const typeName = typeMap[res.type];
+                        const rcfg = this.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
+
+                        // 如果資源有定義 pixel_size，進行精確碰撞檢查
+                        if (rcfg && rcfg.pixel_size) {
+                            const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
+                            const rw = rcfg.pixel_size.w, rh = rcfg.pixel_size.h;
+                            if (Math.abs(x - rx) < (w + rw) / 2 - 5 && Math.abs(y - ry) < (h + rh) / 2 - 5) {
+                                return false;
+                            }
+                        } else {
+                            // 預設佔用整格格子
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
+        return true;
     }
 
     static findNearestResource(x, y, typeOrName, villagerId) {
