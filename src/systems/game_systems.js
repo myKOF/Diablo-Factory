@@ -97,16 +97,13 @@ export class GameEngine {
         this.initBackgroundWorker();
         setInterval(() => this.productionTick(), 1000);
 
-        // UI 更新循環 (10Hz)
-        setInterval(() => {
-            if (window.UIManager) window.UIManager.updateValues();
-        }, 100);
+        // UI 更新循迴已移至 MainScene.js update() 以達成 60FPS 同步
     }
 
 
     static initBackgroundWorker() {
         const blob = new Blob([`
-            setInterval(() => { self.postMessage('tick'); }, 50); // 降低頻率至 20Hz (50ms)，顯著節省 CPU
+            setInterval(() => { self.postMessage('tick'); }, 20); // 提高頻率至 50Hz (20ms) 以確保動畫平滑
         `], { type: "text/javascript" });
         const worker = new Worker(URL.createObjectURL(blob));
         worker.onmessage = () => { this.logicTick(); };
@@ -137,8 +134,37 @@ export class GameEngine {
             }
             this.state.lastMaxPop = maxPop;
 
-            // 1.2 建築生產邏輯 (所有具備生產隊列的建築)
+            // 1.2 建築生產與升級邏輯
             this.state.mapEntities.forEach(ent => {
+                // 處理升級進度
+                if (ent.isUpgrading) {
+                    if (ent.upgradeProgress === undefined) ent.upgradeProgress = 0;
+                    ent.upgradeProgress += deltaTime / ent.upgradeTime;
+                    if (ent.upgradeProgress >= 1.0) {
+                        ent.isUpgrading = false;
+                        ent.upgradeProgress = 0;
+                        ent.lv = (ent.lv || 1) + 1;
+                        const newCfg = this.getBuildingConfig(ent.type, ent.lv);
+                        if (newCfg) {
+                            ent.name = newCfg.name;
+                            ent.model = newCfg.model;
+                            // 如果有其它需要更新的屬性可以在此更新
+                        }
+                        this.addLog(`${ent.name} 升級成功！目前等級：${ent.lv}`);
+                        this.triggerWarning("upgrade_success", [ent.name, ent.lv]); // 需要在 strings.csv 或程式碼中處理訊息
+                        if (window.UIManager) {
+                            window.UIManager.showWarning(`${ent.name} 升級至 ${ent.lv} 級！`);
+                            window.UIManager.updateValues(true);
+                            // [修復] 升級完成後重新刷新選單以隱藏進度條並恢復生產按鈕
+                            if (window.UIManager.activeMenuEntity === ent) {
+                                window.UIManager.showContextMenu(ent);
+                            }
+                        }
+                        this.state.renderVersion++;
+                    }
+                    return; // 升級中不執行生產
+                }
+
                 if (ent.isUnderConstruction || !ent.queue || ent.queue.length === 0) return;
 
                 // 處理生產計時
@@ -522,8 +548,11 @@ export class GameEngine {
         } catch (e) { }
     }
 
-    static getEntityConfig(type) {
+    static getEntityConfig(type, lv = 1) {
         if (!type) return null;
+        if (this.state.buildingConfigsByType && this.state.buildingConfigsByType[type]) {
+            return this.state.buildingConfigsByType[type][lv] || this.state.buildingConfigsByType[type][1];
+        }
         if (this.state.buildingConfigs && this.state.buildingConfigs[type]) {
             return this.state.buildingConfigs[type];
         }
@@ -543,6 +572,7 @@ export class GameEngine {
             const hIdx = (key) => headers.findIndex(h => h.toLowerCase().trim() === key.toLowerCase());
 
             const idxModel = hIdx('model'),
+                idxType = hIdx('type'),
                 idxCol = hIdx('collision'),
                 idxSize = hIdx('size'),
                 idxPop = hIdx('population'),
@@ -552,17 +582,30 @@ export class GameEngine {
                 idxMax = hIdx('max_count'),
                 idxTime = hIdx('building_times'),
                 idxProd = hIdx('npc_production'), // ID 列表
-                idxProdType = (hIdx('npc_production_type') !== -1) ? hIdx('npc_production_type') : headers.lastIndexOf('npc_production');
+                idxProdType = (hIdx('npc_production_type') !== -1) ? hIdx('npc_production_type') : headers.lastIndexOf('npc_production'),
+                idxResourceValue = hIdx('resource_value');
 
-            console.log(`[CSV載入] 建築配置欄位索引結果:`, { model: idxModel, need: idxNeed, prod: idxProd, prodType: idxProdType });
+            console.log(`[CSV載入] 建築配置欄位索引結果:`, { model: idxModel, type: idxType, need: idxNeed, prod: idxProd, prodType: idxProdType });
 
             // 轉換為 index (使用上方載入時定義的健壯版 hIdx)
             const nameIdx = headers.indexOf(idxName);
             const descIdx = headers.indexOf(idxDesc);
 
+            const idxLv = hIdx('lv'),
+                idxUnlock = hIdx('build_unlock'),
+                idxUpgradeResources = hIdx('upgrade_need_resources'),
+                idxUpgradeTimes = hIdx('upgrade_times');
+
+            this.state.buildingConfigs = {}; // 舊格式相容 (儲存各 modellv1 作為基礎)
+            this.state.buildingConfigsByType = {}; // 新增：按類型與等級分組
+
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
                 if (!row[idxModel]) continue;
+
+                const model = row[idxModel].trim();
+                const type = row[idxType] ? row[idxType].trim() : model;
+                const lv = parseInt(row[idxLv]) || 1;
 
                 // 解析生產清單
                 let prodList = [];
@@ -571,20 +614,35 @@ export class GameEngine {
                     if (clean) prodList = clean.split(',').map(s => s.trim());
                 }
 
-                this.state.buildingConfigs[row[idxModel].trim()] = {
-                    name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : row[idxModel].trim(),
+                const cfg = {
+                    name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : model,
                     desc: (descIdx !== -1 && row[descIdx]) ? row[descIdx].trim() : "",
-                    model: row[idxModel].trim(),
+                    model: model,
+                    type: type,
+                    lv: lv,
                     collision: row[idxCol] === '1',
                     size: row[idxSize] || "{1,1}",
                     population: parseInt(row[idxPop]) || 0,
                     costs: this.parseResourceCosts(row[idxNeed]),
                     maxCount: parseInt(row[idxMax]) || 999,
                     buildTime: parseFloat(row[idxTime]) || 5,
-                    resourceValue: parseInt(row[headers.indexOf('resource_value')]) || 0,
+                    resourceValue: (idxResourceValue !== -1 && row[idxResourceValue]) ? parseInt(row[idxResourceValue]) : 0,
                     npcProduction: prodList,
-                    productionMode: (row[idxProdType] || 'normal').toLowerCase().trim()
+                    productionMode: (row[idxProdType] || 'normal').toLowerCase().trim(),
+                    // 升級相關
+                    buildUnlock: row[idxUnlock] || "{0}",
+                    upgradeResources: this.parseResourceCosts(row[idxUpgradeResources]),
+                    upgradeTime: parseFloat(row[idxUpgradeTimes]) || 0
                 };
+
+                // 按類型等級儲存
+                if (!this.state.buildingConfigsByType[type]) this.state.buildingConfigsByType[type] = {};
+                this.state.buildingConfigsByType[type][lv] = cfg;
+
+                // 為了相容舊邏輯，buildingConfigs 以 model 為 key，但只存 LV1 (用於新蓋建築)
+                if (lv === 1 || !this.state.buildingConfigs[model]) {
+                    this.state.buildingConfigs[model] = cfg;
+                }
             }
             this.addLog("建築配置表加載成功。");
         } catch (e) { console.error(e); }
@@ -602,8 +660,8 @@ export class GameEngine {
         if (this.state.idToNameMap[targetIdOrName]) {
             finalConfigName = this.state.idToNameMap[targetIdOrName];
         } else if (building) {
-            const bCfg = this.state.buildingConfigs[building.type];
-            if (bCfg && bCfg.productionMode === 'rand' && bCfg.npcProduction.length > 0) {
+            const bCfg = this.getBuildingConfig(building.type, building.lv || 1);
+            if (bCfg && bCfg.productionMode === 'rand' && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
                 const randId = bCfg.npcProduction[Math.floor(Math.random() * bCfg.npcProduction.length)];
                 finalConfigName = this.state.idToNameMap[randId] || finalConfigName;
             }
@@ -748,11 +806,82 @@ export class GameEngine {
         return { x: building.x + tx * TS, y: building.y + ty * TS };
     }
 
+    static getBuildingConfig(type, lv) {
+        if (!this.state.buildingConfigsByType || !this.state.buildingConfigsByType[type]) return null;
+        return this.state.buildingConfigsByType[type][lv] || null;
+    }
+
+    static isUpgradeUnlocked(entity, nextCfg) {
+        if (!nextCfg) return { unlocked: false, reason: "已達最高等級" };
+        const unlockStr = nextCfg.buildUnlock;
+        if (!unlockStr || unlockStr === "{0}") return { unlocked: true };
+
+        // 解析 {village.lv=2}
+        const match = unlockStr.match(/\{([^.]+)\.lv=(\d+)\}/);
+        if (match) {
+            const targetType = match[1];
+            const targetLv = parseInt(match[2]);
+            // 檢查我方是否已有該等級的建築
+            const hasRequirement = this.state.mapEntities.some(ent => {
+                const entType = ent.type;
+                // [修復] 只要目前等級夠，不論是否正在升級都算符合條件
+                return entType === targetType && ent.lv >= targetLv && !ent.isUnderConstruction;
+            });
+            if (!hasRequirement) {
+                return { unlocked: false, reason: `需 ${this.state.buildingConfigs[targetType]?.name || targetType} 達到 ${targetLv} 級` };
+            }
+        }
+        return { unlocked: true };
+    }
+
+    static startUpgrade(event, entity) {
+        if (event && event.stopPropagation) event.stopPropagation();
+        if (entity.isUpgrading || entity.isUnderConstruction) return;
+
+        const currentCfg = this.getBuildingConfig(entity.type, entity.lv);
+        const nextCfg = this.getBuildingConfig(entity.type, entity.lv + 1);
+
+        if (!nextCfg) {
+            this.addLog("已達最高等級！");
+            return;
+        }
+
+        const unlockStatus = this.isUpgradeUnlocked(entity, nextCfg);
+        if (!unlockStatus.unlocked) {
+            this.addLog(`未滿足升級條件：${unlockStatus.reason}`);
+            return;
+        }
+
+        // 檢查資源
+        for (let r in currentCfg.upgradeResources) {
+            const cost = currentCfg.upgradeResources[r];
+            if ((this.state.resources[r] || 0) < cost) {
+                this.triggerWarning("1", [r.toUpperCase()]);
+                return;
+            }
+        }
+
+        // 扣除資源
+        for (let r in currentCfg.upgradeResources) {
+            this.state.resources[r] -= currentCfg.upgradeResources[r];
+        }
+
+        entity.isUpgrading = true;
+        entity.upgradeProgress = 0;
+        entity.upgradeTime = currentCfg.upgradeTime || 10;
+        this.addLog(`開始升級 ${currentCfg.name} 到 ${entity.lv + 1} 級，預計耗時 ${entity.upgradeTime} 秒。`);
+        if (window.UIManager) {
+            window.UIManager.updateValues(true);
+            window.UIManager.showContextMenu(entity);
+        }
+    }
+
     static getMaxPopulation() {
         let total = 0;
         this.state.mapEntities.forEach(ent => {
             if (ent.isUnderConstruction) return;
-            const cfg = this.state.buildingConfigs[ent.type];
+            // 升級中的建築依然提供人口上限？通常是。
+            const cfg = this.getBuildingConfig(ent.type, ent.lv);
             if (cfg && cfg.population) total += cfg.population;
         });
         return total || 5;
@@ -825,7 +954,10 @@ export class GameEngine {
         const villageCfg = this.state.buildingConfigs['village'] || {};
         this.state.mapEntities.push({
             id: 'core_village',
-            type: 'village', x: villagePos.x, y: villagePos.y, name: villageCfg.name || "城鎮中心", queue: [], productionTimer: 0
+            model: 'village',
+            type: 'village',
+            lv: 1,
+            x: villagePos.x, y: villagePos.y, name: villageCfg.name || "城鎮中心", queue: [], productionTimer: 0
         });
         const vgx = Math.round((villagePos.x - (villageFP.uw * TS) / 2) / TS);
         const vgy = Math.round((villagePos.y - (villageFP.uh * TS) / 2) / TS);
@@ -2001,7 +2133,7 @@ export class GameEngine {
         // 1. 檢查建築與實體碰撞
         const allToCheck = [...this.state.mapEntities, ...tempEntities];
         const hitEntity = allToCheck.some(ent => {
-            const ecfg = this.getEntityConfig(ent.type);
+            const ecfg = this.getEntityConfig(ent.type, ent.lv || 1);
             let ew = this.TILE_SIZE, eh = this.TILE_SIZE;
             if (ecfg) {
                 const em = ecfg.size ? ecfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
@@ -2294,7 +2426,7 @@ export class GameEngine {
         // 隨機生產模式：成本取列表中的第一個，或可以定義一個平均成本
         let costConfigName = configName;
         if (configName === 'RANDOM' && building) {
-            const bCfg = this.state.buildingConfigs[building.type];
+            const bCfg = this.getBuildingConfig(building.type, building.lv || 1);
             if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
                 costConfigName = bCfg.npcProduction[0];
             }
@@ -2374,7 +2506,10 @@ export class GameEngine {
 
         const newBuilding = {
             id: `build_${type}_${x}_${y}_${Date.now()}`,
-            type: type, x: x, y: y, name: "待施工",
+            model: cfg.model,
+            type: cfg.type,
+            lv: cfg.lv || 1,
+            x: x, y: y, name: "待施工",
             isUnderConstruction: true, buildProgress: 0,
             buildTime: Math.max(1, cfg.buildTime || 5), // 防止 0 或 NaN
             targetWorkerCount: ['timber_factory', 'stone_factory', 'barn', 'quarry', 'gold_mining_factory'].includes(type) ? 1 : 0,

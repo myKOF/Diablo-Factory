@@ -150,6 +150,34 @@ html {
     box-shadow: 0 0 10px rgba(255, 87, 34, 0.5);
 }
 
+.action-btn.upgrade-btn {
+    background: linear-gradient(145deg, #1b5e20, #1b5e20);
+    border-color: #2e7d32;
+    width: 140px; /* 升級按鈕寬度稍大以容納文字 */
+    flex-direction: row;
+    gap: 8px;
+    padding: 0 10px;
+}
+
+.action-btn.upgrade-btn:hover {
+    background: linear-gradient(145deg, #2e7d32, #1b5e20);
+    border-color: #ffd740;
+}
+
+.action-btn.disabled {
+    background: rgba(45, 45, 45, 0.6) !important;
+    border-color: #424242 !important;
+    color: #757575 !important;
+    cursor: not-allowed !important;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+.action-btn.disabled .icon {
+    filter: grayscale(1);
+    opacity: 0.5;
+}
+
 .action-btn .icon {
     font-size: 28px;
     margin-bottom: 4px;

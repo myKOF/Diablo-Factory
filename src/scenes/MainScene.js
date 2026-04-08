@@ -598,6 +598,7 @@ export class MainScene extends Phaser.Scene {
         this.updatePlacementPreview(state);
 
         if (window.UIManager) {
+            window.UIManager.updateValues(); // [修復] 同步 UI 數值更新至 60FPS
             window.UIManager.updateStickyPositions();
 
             const coordsEl = document.getElementById("coords_display");
@@ -838,6 +839,8 @@ export class MainScene extends Phaser.Scene {
                 // 施工中時，確保生產隊列標籤隱藏
                 const id = ent.id || `${ent.type}_${ent.x}_${ent.y}`;
                 if (this.queueTexts.has(id)) this.queueTexts.get(id).setVisible(false);
+            } else if (ent.isUpgrading) {
+                this.drawUpgradeProgressBar(g, ent, uw, uh, TS);
             } else if (ent.queue) {
                 // 不論 queue.length 是否大於 0 都呼叫，讓 drawProductionHUD 內部處理隱藏邏輯
                 this.drawProductionHUD(g, ent, uw, uh, TS);
@@ -848,6 +851,28 @@ export class MainScene extends Phaser.Scene {
                 this.drawRallyPoint(g, ent);
             }
         });
+    }
+
+    drawUpgradeProgressBar(g, ent, uw, uh, TS) {
+        const prog = ent.upgradeProgress || 0;
+        const barW = uw * TS * 0.8;
+        const barH = 8;
+        const x = ent.x - barW / 2;
+        const y = ent.y + (uh * TS) / 2 + 10;
+
+        // 背景
+        g.fillStyle(0x000000, 0.6);
+        g.fillRoundedRect(x, y, barW, barH, 4);
+        
+        // 進度 (橘黃色代表升級)
+        if (prog > 0) {
+            g.fillStyle(0xff9800, 1);
+            g.fillRoundedRect(x + 1, y + 1, Math.max(0, (barW - 2) * prog), barH - 2, 3);
+        }
+
+        // 外框
+        g.lineStyle(1.5, 0xffffff, 0.8);
+        g.strokeRoundedRect(x, y, barW, barH, 4);
     }
 
     drawRallyPoint(g, ent) {
@@ -1415,8 +1440,9 @@ export class MainScene extends Phaser.Scene {
 
         // 3. 等級標籤 (Level)
         let lvlTxt = this.levelLabels.get(id);
-        if (ent.level !== undefined) {
-            const levelStr = `Lv.${ent.level}`;
+        const currentLv = ent.lv || ent.level;
+        if (currentLv !== undefined) {
+            const levelStr = `Lv.${currentLv}`;
             if (!lvlTxt) {
                 lvlTxt = this.add.text(visualX, visualY, levelStr, {
                     font: cfg.level.fontSize,

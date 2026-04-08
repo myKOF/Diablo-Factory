@@ -817,7 +817,7 @@ export class UIManager {
                 if (GameEngine.state.rightClickStartedInPlacementMode) {
                     const scene = window.PhaserScene;
                     const wasDragging = scene && scene.lastDragTime && (Date.now() - scene.lastDragTime < 100);
-                    
+
                     if (drift < 10 && !wasDragging) {
                         this.cancelBuildingMode();
                     }
@@ -907,7 +907,7 @@ export class UIManager {
             const drift = Math.hypot(e.clientX - this.leftMouseDownPos.x, e.clientY - this.leftMouseDownPos.y);
             // 核心衝突點：此閾值必須與 MainScene.js 的框選啟動閾值 (5px) 同步。
             // 只要偵測到超過 5px 的位移，即視為有意圖的「框選」或「拖動」，此時應封鎖建築選單的自動開啟。
-            const threshold = 5; 
+            const threshold = 5;
             const wasDrag = drift > threshold;
             this.leftMouseDownPos = null; // 立即消耗
             if (wasDrag) return;
@@ -995,17 +995,100 @@ export class UIManager {
         menu.style.padding = "15px";
         if (cfg.minWidth) menu.style.minWidth = typeof cfg.minWidth === 'number' ? `${cfg.minWidth}px` : cfg.minWidth;
 
-        // ... (中間內容不變)
+        let name = entity.isUnderConstruction ? (GameEngine.getBuildingConfig(entity.type, entity.lv)?.name || "施工中的建築") : (entity.name || entity.type);
+        
+        // --- 新版標頭佈局 (Lv.X 建築名稱 | 升級區) ---
+        let headerHtml = "";
+        const cfg_current = GameEngine.getBuildingConfig(entity.type, entity.lv || 1);
+        const nextCfg = GameEngine.getBuildingConfig(entity.type, (entity.lv || 1) + 1);
+        
+        // --- 標頭佈局 (Lv.X 建築名稱 | 升級區) ---
+        let leftHeader = "";
+        if (isConfirming) {
+            leftHeader = `
+                <div style="display: flex; flex-direction: column;">
+                    <span style="font-size: 18px; color: #ff8a80; font-weight: bold;">${entity.isUnderConstruction ? "取消建設？" : "確定銷毀？"}</span>
+                    <span style="font-size: 24px; color: #fbc02d; font-weight: bold;">${name}</span>
+                </div>
+            `;
+        } else {
+            leftHeader = `
+                <div style="display: flex; align-items: baseline;">
+                    <span style="font-size: 36px; font-weight: 900; color: #ffffff; margin-right: 12px; font-family: 'Arial Black', sans-serif; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">Lv.${entity.lv || 1}</span>
+                    <span style="font-size: 24px; color: #fbc02d; font-weight: bold; text-shadow: 1px 1px 3px rgba(0,0,0,0.8);">${name}</span>
+                </div>
+            `;
+        }
 
-        let name = entity.isUnderConstruction ? (GameEngine.state.buildingConfigs[entity.type]?.name || "施工中的建築") : (entity.name || entity.type);
-        let headerText = isConfirming ? 
-            (entity.isUnderConstruction ? `確定取消建設 ${name} 並全額退還？` : `確定銷毀 ${name} 並退還 50%？`) 
-            : name;
-        let titleStyle = isConfirming ? `style="text-align:center; font-size: 20px; color:#ff8a80; border-bottom-color:#c62828;"` : `style="text-align:center; font-size: 20px;"`;
+        // 升級控制區 (右側)
+        let rightHeader = "";
+        if (!isConfirming && nextCfg && !entity.isUnderConstruction && !entity.isUpgrading) {
+            const unlock = GameEngine.isUpgradeUnlocked(entity, nextCfg);
+            const costs = cfg_current?.upgradeResources || {};
+            const costItems = [];
+            if (costs.food) costItems.push({ icon: '🍖', val: costs.food });
+            if (costs.wood) costItems.push({ icon: '🪵', val: costs.wood });
+            if (costs.stone) costItems.push({ icon: '🪨', val: costs.stone });
+            if (costs.gold) costItems.push({ icon: '💰', val: costs.gold });
 
-        let html = `<div class="title" ${titleStyle}>${headerText}</div>`;
+            let upgradeStyle = "display: flex; align-items: center; padding: 4px 10px; border-radius: 4px; background: rgba(255,255,255,0.08); transition: all 0.2s; cursor: pointer; border: 1px solid rgba(255,255,255,0.1);";
+            let upgradeAction = `window.GameEngine.startUpgrade(event, window.UIManager.activeMenuEntity)`;
+            
+            if (!unlock.unlocked) {
+                upgradeStyle = "display: flex; align-items: center; padding: 4px 10px; border-radius: 4px; background: rgba(0,0,0,0.3); opacity: 0.6; cursor: not-allowed;";
+                upgradeAction = "";
+            }
 
-        html += `<div style="display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; justify-content:center;">`;
+            let resLineHtml = "";
+            costItems.forEach(item => {
+                resLineHtml += `
+                    <div style="display: flex; align-items: center; gap: 4px; margin-right: 12px;">
+                        <div style="background: #2e7d32; width: 22px; height: 22px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 13px; box-shadow: 0 1px 3px rgba(0,0,0,0.4);">${item.icon}</div>
+                        <span style="font-size: 14px; font-weight: bold; color: #fff;">${item.val}</span>
+                    </div>
+                `;
+            });
+
+            rightHeader = `
+                <div class="upgrade-header-btn" style="${upgradeStyle}" onclick="${upgradeAction}">
+                   <!-- 亮黃色背景圖示 -->
+                   <div style="width: 48px; height: 48px; background: #ffff00; border: 2px solid #333; border-radius: 2px; display: flex; align-items: center; justify-content: center; margin-right: 12px; box-shadow: 0 0 15px rgba(255, 255, 0, 0.2);">
+                        <div style="width: 32px; height: 32px; background: #42a5f5; border-radius: 4px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.4);">
+                            <span style="color: white; font-size: 18px;">▲</span>
+                        </div>
+                   </div>
+                   <div style="display: flex; flex-direction: column;">
+                        <span style="font-size: 15px; font-weight: bold; color: #fff; margin-bottom: 5px;">升級至 Lv.${(entity.lv || 1) + 1}</span>
+                        <div style="display: flex; align-items: center;">
+                            ${resLineHtml || '<span style="font-size: 12px; color: #81c784;">免費</span>'}
+                        </div>
+                        ${!unlock.unlocked ? `<div style="color: #ff5252; font-size: 11px; margin-top: 3px; font-weight: bold;">${unlock.reason}</div>` : ""}
+                   </div>
+                </div>
+            `;
+        } else if (!isConfirming && entity.lv > 1 && !nextCfg) {
+            rightHeader = `<div style="color: #fbc02d; font-weight: bold; font-size: 16px; border: 1px solid rgba(251, 192, 45, 0.3); padding: 5px 15px; border-radius: 20px; background: rgba(251, 192, 45, 0.05);"><span style="margin-right:8px">⭐</span> 已達最高等級</div>`;
+        }
+
+        let html = `
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid rgba(255,255,255,0.15); margin-bottom: 20px; padding-bottom: 12px; min-height: 60px;">
+                ${leftHeader}
+                ${rightHeader}
+            </div>
+        `;
+
+        // 顯示升級進度條 (如果在升級中)
+        if (entity.isUpgrading) {
+            const prog = Math.floor((entity.upgradeProgress || 0) * 100);
+            html += `
+                <div style="width: 100%; height: 26px; background: rgba(0,0,0,0.3); border-radius: 13px; margin-bottom: 15px; position: relative; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);">
+                    <div id="upgrade_progress_bar" style="width: ${prog}%; height: 100%; background: linear-gradient(90deg, #4caf50, #81c784); box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);"></div>
+                    <div id="upgrade_percentage_text" style="position: absolute; width: 100%; text-align: center; top: 0; font-size: 13px; line-height: 26px; color: white; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.8);">升級中... ${prog}%</div>
+                </div>
+            `;
+        }
+
+        html += `<div style="display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; justify-content:center; ${entity.isUpgrading ? 'pointer-events: none; opacity: 0.5;' : ''}">`;
 
         const eid = entity.id || `${entity.type}_${entity.x}_${entity.y}`;
 
@@ -1020,6 +1103,8 @@ export class UIManager {
                 </button>
             `;
         } else {
+            // 升級按鈕已移至標頭區，此處不再重複顯示
+
             // 一般模式
             if (entity.type === 'town_center' || entity.type === 'village') {
                 html += `
@@ -1041,8 +1126,8 @@ export class UIManager {
                 `;
             }
 
-            // 動態生成 NPC 生產按鈕
-            const bCfg = GameEngine.state.buildingConfigs[entity.type];
+            // 動態生成 NPC 生產按鈕 (根據當前等級配置)
+            const bCfg = GameEngine.getBuildingConfig(entity.type, entity.lv || 1);
             if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0 && !entity.isUnderConstruction) {
                 const iconMap = {
                     'villagers': '👤', 'female villagers': '👩', 'mage': '🧙', 'swordsman': '⚔️', 'archer': '🏹',
@@ -1308,6 +1393,15 @@ export class UIManager {
             debugInfo.innerHTML = `[DEBUG] ${v.configName} (${v.state}): (${v.x.toFixed(0)}, ${v.y.toFixed(0)}) ${target}`;
         } else if (debugInfo) {
             debugInfo.style.display = "none";
+        }
+
+        // 更新升級進度條
+        const upgradeBar = document.getElementById("upgrade_progress_bar");
+        const upgradeText = document.getElementById("upgrade_percentage_text");
+        if (this.activeMenuEntity && this.activeMenuEntity.isUpgrading) {
+            const rawProg = (this.activeMenuEntity.upgradeProgress || 0) * 100;
+            if (upgradeBar) upgradeBar.style.width = `${rawProg}%`; // [修復] 使用浮點數以達成子像素級平滑
+            if (upgradeText) upgradeText.innerText = `升級中... ${Math.floor(rawProg)}%`;
         }
 
         const lp = document.getElementById("log_content");
