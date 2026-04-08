@@ -937,7 +937,8 @@ export class GameEngine {
                     if (checkOccupiedG(gx, gy, 1, 1)) continue;
 
                     // 2. 同 ID 敵人間距檢查 (查閱 proximityGrid)
-                    if (proximityGrid[gy * cols + gx] === 1) continue;
+                    const pIdx = getIdx(gx, gy);
+                    if (pIdx === -1 || proximityGrid[pIdx] === 1) continue;
 
                     const x = gx * TS + TS / 2;
                     const y = gy * TS + TS / 2;
@@ -949,16 +950,21 @@ export class GameEngine {
                     this.spawnNPC(npcID, null, { x, y });
 
                     // 標記間距範圍 (以當前點為中心，半徑為 minInterval 的區域)
+                    // [使用者要求] 維持格數單位進行計算
                     const r = Math.ceil(minInterval);
                     if (r > 0) {
                         const r2 = r * r;
                         for (let dy = -r; dy <= r; dy++) {
                             const ny = gy + dy;
-                            if (ny < 0 || ny >= rows) continue;
+                            if (ny < minGY || ny >= minGY + rows) continue;
                             for (let dx = -r; dx <= r; dx++) {
                                 const nx = gx + dx;
-                                if (nx >= 0 && nx < cols && (dx * dx + dy * dy <= r2)) {
-                                    proximityGrid[ny * cols + nx] = 1;
+                                if (nx >= minGX && nx < minGX + cols) {
+                                    const distSq = (dx * dx + dy * dy);
+                                    if (distSq <= r2) {
+                                        const nIdx = getIdx(nx, ny);
+                                        if (nIdx !== -1) proximityGrid[nIdx] = 1;
+                                    }
                                 }
                             }
                         }
