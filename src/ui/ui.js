@@ -985,7 +985,6 @@ export class UIManager {
         const menu = document.getElementById("context_menu");
         const cfg = UI_CONFIG.ActionMenu;
 
-        // 若配置有錨點設定則套用
         if (cfg.anchor) {
             this.applyAnchorStyle(menu, cfg);
         }
@@ -996,99 +995,106 @@ export class UIManager {
         if (cfg.minWidth) menu.style.minWidth = typeof cfg.minWidth === 'number' ? `${cfg.minWidth}px` : cfg.minWidth;
 
         let name = entity.isUnderConstruction ? (GameEngine.getBuildingConfig(entity.type, entity.lv)?.name || "施工中的建築") : (entity.name || entity.type);
-        
-        // --- 新版標頭佈局 (Lv.X 建築名稱 | 升級區) ---
-        let headerHtml = "";
         const cfg_current = GameEngine.getBuildingConfig(entity.type, entity.lv || 1);
         const nextCfg = GameEngine.getBuildingConfig(entity.type, (entity.lv || 1) + 1);
+        const hCfg = UI_CONFIG.ActionMenuHeader;
         
-        // --- 標頭佈局 (Lv.X 建築名稱 | 升級區) ---
         let leftHeader = "";
         if (isConfirming) {
             leftHeader = `
                 <div style="display: flex; flex-direction: column;">
-                    <span style="font-size: 18px; color: #ff8a80; font-weight: bold;">${entity.isUnderConstruction ? "取消建設？" : "確定銷毀？"}</span>
-                    <span style="font-size: 24px; color: #fbc02d; font-weight: bold;">${name}</span>
+                    <span style="font-size: 16px; color: #ff8a80; font-weight: bold;">${entity.isUnderConstruction ? "取消建設？" : "確定銷毀？"}</span>
+                    <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold;">${name}</span>
                 </div>
             `;
         } else {
             leftHeader = `
                 <div style="display: flex; align-items: baseline;">
-                    <span style="font-size: 36px; font-weight: 900; color: #ffffff; margin-right: 12px; font-family: 'Arial Black', sans-serif; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">Lv.${entity.lv || 1}</span>
-                    <span style="font-size: 24px; color: #fbc02d; font-weight: bold; text-shadow: 1px 1px 3px rgba(0,0,0,0.8);">${name}</span>
+                    <span style="font-size: ${hCfg.levelFontSize}; font-weight: 900; color: #ffffff; margin-right: 12px; font-family: 'Arial Black', sans-serif; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">Lv.${entity.lv || 1}</span>
+                    <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold; text-shadow: 1px 1px 3px rgba(0,0,0,0.8);">${name}</span>
                 </div>
             `;
         }
 
-        // 升級控制區 (右側)
         let rightHeader = "";
-        if (!isConfirming && nextCfg && !entity.isUnderConstruction && !entity.isUpgrading) {
+        const headerActionHeight = "64px"; 
+
+        if (!isConfirming && entity.isUpgrading) {
+            const prog = Math.floor((entity.upgradeProgress || 0) * 100);
+            rightHeader = `
+                <div style="display: flex; align-items: center; background: rgba(0, 0, 0, 0.3); padding: 0 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); min-width: 220px; height: ${headerActionHeight}; box-sizing: border-box;">
+                    <div style="flex: 1; height: 22px; background: rgba(0,0,0,0.5); border-radius: 11px; position: relative; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); margin-right: 12px; min-width: 120px;">
+                        <div id="upgrade_progress_bar" style="width: ${prog}%; height: 100%; background: linear-gradient(90deg, ${hCfg.progressColorStart}, ${hCfg.progressColorEnd}); box-shadow: 0 0 8px rgba(76, 175, 80, 0.4);"></div>
+                        <div id="upgrade_percentage_text" style="position: absolute; width: 100%; text-align: center; top: 0; font-size: 11px; line-height: 22px; color: white; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.8);">升級中 ${prog}%</div>
+                    </div>
+                    <button class="action-btn" 
+                            style="background: ${hCfg.cancelBtnBg}; border: 1px solid rgba(255,255,255,0.2); padding: 0 12px; height: 30px; border-radius: 15px; font-size: 12px; font-weight: bold; color: white; cursor: pointer; transition: all 0.2s; white-space: nowrap; min-width: 54px;"
+                            onmouseover="this.style.background='${hCfg.cancelBtnHoverBg}'"
+                            onmouseout="this.style.background='${hCfg.cancelBtnBg}'"
+                            onclick="window.GameEngine.cancelUpgrade(event, window.UIManager.activeMenuEntity)">
+                        取消
+                    </button>
+                </div>
+            `;
+        } else if (!isConfirming && nextCfg && !entity.isUnderConstruction) {
             const unlock = GameEngine.isUpgradeUnlocked(entity, nextCfg);
             const costs = cfg_current?.upgradeResources || {};
             const costItems = [];
-            if (costs.food) costItems.push({ icon: '🍖', val: costs.food });
-            if (costs.wood) costItems.push({ icon: '🪵', val: costs.wood });
-            if (costs.stone) costItems.push({ icon: '🪨', val: costs.stone });
-            if (costs.gold) costItems.push({ icon: '💰', val: costs.gold });
+            if (costs.food) costItems.push({ key: 'food', icon: '🍖', val: costs.food });
+            if (costs.wood) costItems.push({ key: 'wood', icon: '🪵', val: costs.wood });
+            if (costs.stone) costItems.push({ key: 'stone', icon: '🪨', val: costs.stone });
+            if (costs.gold) costItems.push({ key: 'gold', icon: '💰', val: costs.gold });
 
-            let upgradeStyle = "display: flex; align-items: center; padding: 4px 10px; border-radius: 4px; background: rgba(255,255,255,0.08); transition: all 0.2s; cursor: pointer; border: 1px solid rgba(255,255,255,0.1);";
+            let upgradeStyle = `width: 48px; height: 48px; background: ${hCfg.upgradeBtnBg}; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; box-shadow: ${hCfg.upgradeBtnShadow}; border: 1px solid rgba(255,255,255,0.2);`;
             let upgradeAction = `window.GameEngine.startUpgrade(event, window.UIManager.activeMenuEntity)`;
+            let hoverEvents = `onmouseover="this.style.background='${hCfg.upgradeBtnHoverBg}'; this.style.transform='translateY(-2px) scale(1.05)';" onmouseout="this.style.background='${hCfg.upgradeBtnBg}'; this.style.transform='translateY(0) scale(1)';"`;
             
             if (!unlock.unlocked) {
-                upgradeStyle = "display: flex; align-items: center; padding: 4px 10px; border-radius: 4px; background: rgba(0,0,0,0.3); opacity: 0.6; cursor: not-allowed;";
+                upgradeStyle = `width: 48px; height: 48px; background: #555; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: not-allowed; opacity: 0.5; filter: grayscale(1);`;
                 upgradeAction = "";
+                hoverEvents = "";
             }
 
             let resLineHtml = "";
             costItems.forEach(item => {
+                const playerVal = GameEngine.state.resources[item.key] || 0;
+                const isSufficient = playerVal >= item.val;
+                const textColor = isSufficient ? hCfg.resSufficientColor : hCfg.resInsufficientColor;
                 resLineHtml += `
                     <div style="display: flex; align-items: center; gap: 4px; margin-right: 12px;">
-                        <div style="background: #2e7d32; width: 22px; height: 22px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 13px; box-shadow: 0 1px 3px rgba(0,0,0,0.4);">${item.icon}</div>
-                        <span style="font-size: 14px; font-weight: bold; color: #fff;">${item.val}</span>
+                        <span style="font-size: 14px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5));">${item.icon}</span>
+                        <span style="font-size: 14px; font-weight: bold; color: ${textColor};">${item.val}</span>
                     </div>
                 `;
             });
 
             rightHeader = `
-                <div class="upgrade-header-btn" style="${upgradeStyle}" onclick="${upgradeAction}">
-                   <!-- 亮黃色背景圖示 -->
-                   <div style="width: 48px; height: 48px; background: #ffff00; border: 2px solid #333; border-radius: 2px; display: flex; align-items: center; justify-content: center; margin-right: 12px; box-shadow: 0 0 15px rgba(255, 255, 0, 0.2);">
-                        <div style="width: 32px; height: 32px; background: #42a5f5; border-radius: 4px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.4);">
-                            <span style="color: white; font-size: 18px;">▲</span>
-                        </div>
-                   </div>
-                   <div style="display: flex; flex-direction: column;">
-                        <span style="font-size: 15px; font-weight: bold; color: #fff; margin-bottom: 5px;">升級至 Lv.${(entity.lv || 1) + 1}</span>
-                        <div style="display: flex; align-items: center;">
+                <div style="display: flex; align-items: center; background: rgba(0, 0, 0, 0.2); padding: 0 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); position: relative; min-width: 220px; height: ${headerActionHeight}; box-sizing: border-box;">
+                   <div style="display: flex; flex-direction: column; margin-right: 16px; pointer-events: none; justify-content: center;">
+                        <span style="font-size: 11px; font-weight: bold; color: rgba(255,255,255,0.4); margin-bottom: 2px;">升級至 Lv.${(entity.lv || 1) + 1}</span>
+                        <div style="display: flex; align-items: center; white-space: nowrap;">
                             ${resLineHtml || '<span style="font-size: 12px; color: #81c784;">免費</span>'}
                         </div>
-                        ${!unlock.unlocked ? `<div style="color: #ff5252; font-size: 11px; margin-top: 3px; font-weight: bold;">${unlock.reason}</div>` : ""}
                    </div>
+                   <div class="upgrade-action-btn" style="${upgradeStyle}" onclick="${upgradeAction}" ${hoverEvents}>
+                        <span style="color: white; font-size: 22px; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">▲</span>
+                   </div>
+                   ${!unlock.unlocked ? `<div style="color: #ff8a80; font-size: 11px; font-weight: bold; position: absolute; left: 12px; bottom: -18px; white-space: nowrap;">${unlock.reason}</div>` : ""}
                 </div>
             `;
         } else if (!isConfirming && entity.lv > 1 && !nextCfg) {
-            rightHeader = `<div style="color: #fbc02d; font-weight: bold; font-size: 16px; border: 1px solid rgba(251, 192, 45, 0.3); padding: 5px 15px; border-radius: 20px; background: rgba(251, 192, 45, 0.05);"><span style="margin-right:8px">⭐</span> 已達最高等級</div>`;
+            rightHeader = `<div style="color: #fbc02d; font-weight: bold; font-size: 15px; border: 1px solid rgba(251, 192, 45, 0.3); display: flex; align-items: center; justify-content: center; border-radius: 20px; background: rgba(251, 192, 45, 0.05); min-width: 200px; height: ${headerActionHeight}; box-sizing: border-box;"><span style="margin-right:8px">⭐</span> 已達最高等級</div>`;
         }
 
         let html = `
-            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid rgba(255,255,255,0.15); margin-bottom: 20px; padding-bottom: 12px; min-height: 60px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid rgba(255,255,255,0.15); margin-bottom: 20px; padding-bottom: 12px; height: 80px; box-sizing: border-box;">
                 ${leftHeader}
                 ${rightHeader}
             </div>
         `;
 
-        // 顯示升級進度條 (如果在升級中)
-        if (entity.isUpgrading) {
-            const prog = Math.floor((entity.upgradeProgress || 0) * 100);
-            html += `
-                <div style="width: 100%; height: 26px; background: rgba(0,0,0,0.3); border-radius: 13px; margin-bottom: 15px; position: relative; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);">
-                    <div id="upgrade_progress_bar" style="width: ${prog}%; height: 100%; background: linear-gradient(90deg, #4caf50, #81c784); box-shadow: 0 0 10px rgba(76, 175, 80, 0.5);"></div>
-                    <div id="upgrade_percentage_text" style="position: absolute; width: 100%; text-align: center; top: 0; font-size: 13px; line-height: 26px; color: white; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.8);">升級中... ${prog}%</div>
-                </div>
-            `;
-        }
-
-        html += `<div style="display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; justify-content:center; ${entity.isUpgrading ? 'pointer-events: none; opacity: 0.5;' : ''}">`;
+        // 下方動作按鈕區域
+        html += `<div style="display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; justify-content:center; min-height: 80px; align-content: flex-start; ${entity.isUpgrading ? 'pointer-events: none; filter: grayscale(0.5); opacity: 0.5;' : 'opacity: 1;'}">`;
 
         const eid = entity.id || `${entity.type}_${entity.x}_${entity.y}`;
 

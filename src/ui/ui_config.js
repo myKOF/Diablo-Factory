@@ -377,5 +377,24 @@ export const UI_CONFIG = {
         glowQuality: 12,               // 發光品質
         selectionScale: 1,           // 僅縮放發光外框的大小，不改變物體圖形
         depth: 15                      // 顯示深度
+    },
+    // ── 建築指令選單標頭 (ActionMenuHeader) ───────────────────
+    ActionMenuHeader: {
+        levelFontSize: "28px",          // 等級文字大小 (縮小約 20%)
+        nameFontSize: "20px",           // 建築名稱文字大小
+        nameColor: "#fbc02d",           // 建築名稱顏色
+        upgradeBtnBg: "#4caf50",         // 升級按鈕背景色 (綠色代碼)
+        upgradeBtnHoverBg: "#66bb6a",    // 懸停色
+        upgradeBtnShadow: "0 4px 12px rgba(76, 175, 80, 0.3)",
+        resSufficientColor: "#ffca28",  // 資源足夠時的顏色
+        resInsufficientColor: "#ff5252", // 資源不足時的顏色
+        cancelBtnBg: "#d32f2f",         // 取消按鈕背景色 (紅色)
+        cancelBtnHoverBg: "#f44336",    // 取消按鈕懸停色
+        cancelBtnFontSize: "13px",      // 取消按鈕字體大小
+        // ── 升級進度條顏色 ──
+        progressColorStart: "#4caf50",  // 選單內進度條漸層起點
+        progressColorEnd: "#81c784",    // 選單內進度條漸層終點
+        worldProgressColor: "#4caf50",  // 建築物上方進度條顏色
+        worldProgressBg: "rgba(0,0,0,0.6)" // 建築物上方進度條背景
     }
 };

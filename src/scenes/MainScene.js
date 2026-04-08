@@ -855,18 +855,21 @@ export class MainScene extends Phaser.Scene {
 
     drawUpgradeProgressBar(g, ent, uw, uh, TS) {
         const prog = ent.upgradeProgress || 0;
+        const hCfg = UI_CONFIG.ActionMenuHeader;
         const barW = uw * TS * 0.8;
         const barH = 8;
         const x = ent.x - barW / 2;
         const y = ent.y + (uh * TS) / 2 + 10;
 
         // 背景
-        g.fillStyle(0x000000, 0.6);
+        const bgVal = this.hexOrRgba(hCfg.worldProgressBg);
+        g.fillStyle(bgVal.color, bgVal.alpha);
         g.fillRoundedRect(x, y, barW, barH, 4);
         
-        // 進度 (橘黃色代表升級)
+        // 進度
         if (prog > 0) {
-            g.fillStyle(0xff9800, 1);
+            const fillVal = this.hexOrRgba(hCfg.worldProgressColor);
+            g.fillStyle(fillVal.color, fillVal.alpha);
             g.fillRoundedRect(x + 1, y + 1, Math.max(0, (barW - 2) * prog), barH - 2, 3);
         }
 

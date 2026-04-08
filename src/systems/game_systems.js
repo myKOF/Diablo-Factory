@@ -876,6 +876,29 @@ export class GameEngine {
         }
     }
 
+    static cancelUpgrade(event, entity) {
+        if (event && event.stopPropagation) event.stopPropagation();
+        if (!entity || !entity.isUpgrading) return;
+
+        // 返還資源 (100% 返還)
+        const currentCfg = this.getBuildingConfig(entity.type, entity.lv);
+        const costs = currentCfg?.upgradeResources || {};
+        for (let r in costs) {
+            if (this.state.resources.hasOwnProperty(r)) {
+                this.state.resources[r] += costs[r];
+            }
+        }
+
+        entity.isUpgrading = false;
+        entity.upgradeProgress = 0;
+        
+        this.addLog(`${currentCfg.name || entity.type} 升級已取消，資源已退還。`);
+        if (window.UIManager) {
+            window.UIManager.showWarning("升級已取消，資源已全額退還");
+            window.UIManager.showContextMenu(entity);
+        }
+    }
+
     static getMaxPopulation() {
         let total = 0;
         this.state.mapEntities.forEach(ent => {
