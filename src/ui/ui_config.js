@@ -18,6 +18,14 @@ export const UI_CONFIG = {
         minDragDistance: 15,        // 最小拖動位移（像素），低於此值將被視為點擊，不觸發畫面拖動
     },
 
+    // ── 邊緣捲動系統 (EdgeScrolling) ──────────────────────────────
+    EdgeScrolling: {
+        enabled: true,
+        edgeWidth: 50,              // 邊緣感測寬度 (像素)
+        moveSpeed: 1500,            // 移動速度 (像素/秒)
+        mapCenter: { x: 960, y: 560 }
+    },
+
     // ── 頂部資源列 ────────────────────────────────────────────────
     ResourceBar: {
         anchor: "TOP_CENTER",  // 錨點：頂部置中

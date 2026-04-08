@@ -106,6 +106,11 @@ export class MainScene extends Phaser.Scene {
         if (this.input && this.input.mouse) {
             this.input.mouse.disableContextMenu();
         }
+
+        // 邊緣捲動輔助：追蹤鼠標是否在視窗內
+        this.isMouseIn = true;
+        this.input.on('gameout', () => { this.isMouseIn = false; });
+        this.input.on('gameover', () => { this.isMouseIn = true; });
     }
 
     generateTextures() {
@@ -176,6 +181,27 @@ export class MainScene extends Phaser.Scene {
         const cam = this.cameras.main;
         let lastPointer = { x: 0, y: 0 };
         this.isDragging = false;
+
+        // 核心設定：地圖範圍邊界
+        const TS = GameEngine.TILE_SIZE;
+        const mapCfg = (GameEngine.state.systemConfig && GameEngine.state.systemConfig.map_size) || { w: 7500, h: 7500 };
+        const cols = Math.floor(mapCfg.w / TS);
+        const rows = Math.floor(mapCfg.h / TS);
+        const minGX = Math.floor(960 / TS) - Math.floor(cols / 2);
+        const minGY = Math.floor(560 / TS) - Math.floor(rows / 2);
+
+        const boundsX = minGX * TS;
+        const boundsY = minGY * TS;
+        const boundsW = cols * TS;
+        const boundsH = rows * TS;
+
+        cam.setBounds(boundsX, boundsY, boundsW, boundsH);
+
+        // 如果目前相機位置處於邊界外，則初始化到中心 (960, 560)
+        // 考慮到相機寬度可能尚未完成初始化，我們先做基礎校正
+        if (cam.scrollX < boundsX || cam.scrollX > boundsX + boundsW) {
+            cam.setScroll(960 - 960, 560 - 540); // 預設 1920x1080 視野中心
+        }
 
         this.input.on('pointerdown', (pointer) => {
             // 核心功能：不論是否被 UI 阻擋，第一時間捕捉目前的建築狀態快照
@@ -683,6 +709,9 @@ export class MainScene extends Phaser.Scene {
         const state = window.GAME_STATE;
         if (!state) return;
 
+        // RTS 邊緣捲動實作
+        this.updateEdgeScrolling(deltaTime);
+
         const cam = this.cameras.main;
 
         // 1. 抓取狀態並更新基礎 UI (此部分負擔極輕，需保證即時性)
@@ -750,6 +779,96 @@ export class MainScene extends Phaser.Scene {
         // 渲染戰鬥視覺 (HP Bars) - 同時包含單位與具備血量的建築實體
         const allCombatants = [...state.units.villagers, ...state.mapEntities.filter(e => e.hp !== undefined)];
         BattleRenderer.renderHPBars(this.hudGraphics, allCombatants, deltaTime);
+    }
+
+    updateEdgeScrolling(dt) {
+        const cfg = UI_CONFIG.EdgeScrolling;
+        if (!cfg || !cfg.enabled) return;
+
+        const pointer = this.input.activePointer;
+        if (!pointer || !pointer.active) return;
+
+        const margin = cfg.edgeWidth || 50;
+        const speed = cfg.moveSpeed || 1000;
+        const winW = this.cameras.main.width;
+        const winH = this.cameras.main.height;
+
+        // 核心檢查：鼠標必須在遊戲視窗內才執行，移出則停止
+        // 1. 基於事件監聽的狀態檢查 (最優先)
+        if (this.isMouseIn === false) {
+            this.updateEdgeCursor(0, 0);
+            return;
+        }
+
+        // 2. 基本座標邊界檢查 (容許誤差 1 像素，若超出則視為移出)
+        if (pointer.x < -1 || pointer.x > winW + 1 || pointer.y < -1 || pointer.y > winH + 1) {
+            this.updateEdgeCursor(0, 0);
+            return;
+        }
+
+        // 1. 判定是否處於邊緣感應區 (用於切換游標與判斷是否啟動捲動)
+        let ex = 0, ey = 0;
+        if (pointer.x < margin) ex = -1;
+        else if (pointer.x > winW - margin) ex = 1;
+        if (pointer.y < margin) ey = -1;
+        else if (pointer.y > winH - margin) ey = 1;
+
+        // 2. 更新鼠標樣式
+        this.updateEdgeCursor(ex, ey, pointer, winW, winH);
+
+        // 3. 執行全向捲動 (直線射線方向)
+        if ((ex !== 0 || ey !== 0) && !this.isDragging) {
+            // [核心需求] 以中央座標到鼠標的位置的這個直線方向移動
+            const centerX = winW / 2;
+            const centerY = winH / 2;
+
+            const dx = pointer.x - centerX;
+            const dy = pointer.y - centerY;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist > 1) {
+                const moveX = (dx / dist) * speed * dt;
+                const moveY = (dy / dist) * speed * dt;
+
+                this.cameras.main.scrollX += moveX;
+                this.cameras.main.scrollY += moveY;
+
+                this.lastDragTime = Date.now();
+            }
+        }
+    }
+
+    /**
+     * 更新並快取鼠標箭頭樣式，避免頻繁調用 DOM 操作
+     */
+    updateEdgeCursor(ex, ey, pointer, winW, winH) {
+        let cursor = 'default';
+
+        if (ex !== 0 || ey !== 0) {
+            // [核心邏輯] 將邊緣切成四等分，依據滑鼠所在分段切換箭頭樣式
+            if (ey === -1) { // 上邊緣
+                if (pointer.x < winW / 4) cursor = 'nw-resize';
+                else if (pointer.x > winW * 3 / 4) cursor = 'ne-resize';
+                else cursor = 'n-resize';
+            } else if (ey === 1) { // 下邊緣
+                if (pointer.x < winW / 4) cursor = 'sw-resize';
+                else if (pointer.x > winW * 3 / 4) cursor = 'se-resize';
+                else cursor = 's-resize';
+            } else if (ex === -1) { // 左邊緣
+                if (pointer.y < winH / 4) cursor = 'nw-resize';
+                else if (pointer.y > winH * 3 / 4) cursor = 'sw-resize';
+                else cursor = 'w-resize';
+            } else if (ex === 1) { // 右邊緣
+                if (pointer.y < winH / 4) cursor = 'ne-resize';
+                else if (pointer.y > winH * 3 / 4) cursor = 'se-resize';
+                else cursor = 'e-resize';
+            }
+        }
+
+        if (this._lastAppliedCursor !== cursor) {
+            this._lastAppliedCursor = cursor;
+            this.input.setDefaultCursor(cursor);
+        }
     }
 
     updateTownCenterLocator(cam) {
