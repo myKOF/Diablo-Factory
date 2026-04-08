@@ -3,6 +3,7 @@ import { UI_CONFIG } from "../ui/ui_config.js";
 import { CharacterRenderer } from "../renderers/character_renderer.js";
 import { ResourceRenderer } from "../renderers/resource_renderer.js";
 import { BattleRenderer } from "../renderers/battle_renderer.js";
+import { InputSystem } from "../systems/InputSystem.js";
 
 export class MainScene extends Phaser.Scene {
     constructor() {
@@ -23,6 +24,7 @@ export class MainScene extends Phaser.Scene {
         this.lastRenderVersion = 0;
         this.isMouseIn = false;      // 追蹤滑鼠是否在遊戲畫面內
         this.hasMouseEnteredGame = false; // 追蹤滑鼠是否曾真實進入過遊戲 (防止刷新後的 0,0 漂移)
+        this.inputSystem = null; // 在 create 中初始化
     }
 
     hexToCssRgba(hex, alpha) {
@@ -97,15 +99,16 @@ export class MainScene extends Phaser.Scene {
         this.lastCamY = -9999;
         this.isDragging = false;
         this.lastVisibleEntities = [];        // 精確追蹤滑鼠進入/離開狀態
-        this.input.on('pointerover', () => { 
-            this.isMouseIn = true; 
+        this.input.on('pointerover', () => {
+            this.isMouseIn = true;
             this.hasMouseEnteredGame = true; // 只要進入過就視為有效
         });
-        this.input.on('pointerout', () => { 
-            this.isMouseIn = false; 
-            this.updateEdgeCursor(0, 0); 
+        this.input.on('pointerout', () => {
+            this.isMouseIn = false;
+            this.updateEdgeCursor(0, 0);
         });
         this.pendingVisibleEntities = true; // 強制首幀加載
+        this.inputSystem = new InputSystem(this); 
         this.setupCamera();
 
         // 設置全局引用
@@ -212,69 +215,36 @@ export class MainScene extends Phaser.Scene {
 
         this.input.on('pointerdown', (pointer) => {
             const isPlacement = !!GameEngine.state.placingType;
-            this.rightClickWasPlacement = isPlacement;
-            GameEngine.state.rightClickStartedInPlacementMode = isPlacement;
-
             if (window.UIManager && window.UIManager.dragGhost) return;
 
             const isMiddleDrag = pointer.middleButtonDown();
-            const isRightClick = pointer.rightButtonDown();
 
             if (pointer.leftButtonDown() && !isPlacement && !isMiddleDrag) {
                 this.selectionStartPos = { x: pointer.worldX, y: pointer.worldY };
                 this.mouseDownScreenPos = { x: pointer.x, y: pointer.y };
             }
 
-            if (isRightClick || isMiddleDrag) {
-                this.isDragging = true;
-                this.hasMetDragThreshold = false;
+            if (isMiddleDrag) {
+                this.isMiddleDragging = true;
                 this.dragStartPos = { x: pointer.x, y: pointer.y };
                 lastPointer = { x: pointer.x, y: pointer.y };
-            }
-
-            if (isPlacement && !isMiddleDrag) return;
-        });
-
-        window.addEventListener('mouseup', (e) => {
-            if (this.isDragging) {
-                this.isDragging = false;
-                this.dragStartPos = null;
-            }
-            if (this.selectionStartPos) {
-                this.handleSelectionEnd(e);
-            }
-        });
-
-        window.addEventListener('mousemove', (e) => {
-            this.lastLocalMouse = window.UIManager ? window.UIManager.getLocalMouse(e) : { x: e.clientX, y: e.clientY };
-            if (this.selectionStartPos) {
-                this.handleSelectionMove();
             }
         });
 
         this.input.on('pointermove', (pointer) => {
-            // 滑鼠發生過真實位移，標記為已進入遊戲
             if (!this.hasMouseEnteredGame && (pointer.x !== 0 || pointer.y !== 0)) {
                 this.hasMouseEnteredGame = true;
                 this.isMouseIn = true;
             }
 
-            // 同步最後位置，確保 handleSelectionMove 在 update 循環中能讀取最新點
             this.lastLocalMouse = { x: pointer.x, y: pointer.y };
 
-            if (this.isDragging && this.dragStartPos) {
+            if (this.isMiddleDragging && this.dragStartPos) {
                 const dx = pointer.x - lastPointer.x;
                 const dy = pointer.y - lastPointer.y;
-
-                const dragDist = Math.hypot(pointer.x - this.dragStartPos.x, pointer.y - this.dragStartPos.y);
-                const threshold = (UI_CONFIG.Interaction && UI_CONFIG.Interaction.minDragDistance) || 10;
-
-                if (dragDist > threshold || this.hasMetDragThreshold) {
-                    this.hasMetDragThreshold = true;
-                    cam.scrollX -= dx;
-                    cam.scrollY -= dy;
-                    this.lastDragTime = Date.now();
-                }
+                cam.scrollX -= dx;
+                cam.scrollY -= dy;
+                this.lastManualDragTime = Date.now();
             }
             lastPointer = { x: pointer.x, y: pointer.y };
         });
@@ -282,118 +252,17 @@ export class MainScene extends Phaser.Scene {
         this.input.on('pointerup', (pointer) => {
             const isPlacement = !!GameEngine.state.placingType;
 
-            if (pointer.button === 2) {
-                this.isDragging = false;
-                const now = Date.now();
-                const dragDecay = 100;
-                const wasCameraDragging = (this.lastDragTime && (now - this.lastDragTime < dragDecay));
-
-                if (wasCameraDragging) {
-                    this.rightClickWasPlacement = false;
-                    return;
-                }
-
-                if (this.rightClickWasPlacement || GameEngine.state.rightClickStartedInPlacementMode) {
-                    this.rightClickWasPlacement = false;
-                    GameEngine.state.rightClickStartedInPlacementMode = false;
-                    return;
-                }
-
-                this.rightClickWasPlacement = false;
-                GameEngine.state.rightClickStartedInPlacementMode = false;
-
-                const dragDist = this.dragStartPos ? Math.hypot(pointer.x - this.dragStartPos.x, pointer.y - this.dragStartPos.y) : 0;
-                const threshold = (UI_CONFIG.Interaction && UI_CONFIG.Interaction.minDragDistance) || 10;
-                if (dragDist > threshold) return;
-
-                let clickedEnemy = null;
-                let clickedEntity = null;
-                let bestDist = 40;
-
-                GameEngine.state.units.villagers.forEach(v => {
-                    const camp = (v.config && v.config.camp) || v.camp || 'neutral';
-                    if (camp === 'enemy') {
-                        const d = Math.hypot(v.x - pointer.worldX, v.y - pointer.worldY);
-                        if (d < bestDist) { bestDist = d; clickedEnemy = v; }
-                    }
-                });
-
-                if (!clickedEnemy) {
-                    const TS = GameEngine.TILE_SIZE;
-                    GameEngine.state.mapEntities.forEach(e => {
-                        const fp = GameEngine.getFootprint(e.type);
-                        const w = fp.uw * TS, h = fp.uh * TS;
-                        if (pointer.worldX >= e.x - w / 2 - 10 && pointer.worldX <= e.x + w / 2 + 10 &&
-                            pointer.worldY >= e.y - h / 2 - 10 && pointer.worldY <= e.y + h / 2 + 10) {
-                            clickedEntity = e;
-                        }
-                    });
-                }
-
-                if (!clickedEnemy && !clickedEntity && GameEngine.state.mapData) {
-                    const TS = GameEngine.TILE_SIZE;
-                    const clickX = pointer.worldX, clickY = pointer.worldY;
-                    const searchGx = Math.floor(clickX / TS), searchGy = Math.floor(clickY / TS);
-
-                    for (let dy = -1; dy <= 1; dy++) {
-                        for (let dx = -1; dx <= 1; dx++) {
-                            const gx = searchGx + dx, gy = searchGy + dy;
-                            const res = GameEngine.state.mapData.getResource(gx, gy);
-                            if (!res) continue;
-                            const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
-                            const typeName = typeMap[res.type];
-                            const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
-                            if (!cfg) continue;
-
-                            const ms = cfg.model_size || { x: 1, y: 1 };
-                            const vWidth = 120 * ms.x, vHeight = 120 * ms.y;
-                            const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
-
-                            if (clickX >= rx - vWidth / 2 && clickX <= rx + vWidth / 2 &&
-                                clickY >= ry - vHeight / 2 && clickY <= ry + vHeight / 2) {
-                                clickedEntity = {
-                                    id: `${gx}_${gy}`, gx, gy, x: rx, y: ry,
-                                    type: typeName, resourceType: typeName, amount: res.amount
-                                };
-                                break;
-                            }
-                        }
-                        if (clickedEntity) break;
-                    }
-                }
-
-                if (clickedEnemy) this.addClickEffect(clickedEnemy.x, clickedEnemy.y, 'enemy');
-                else if (clickedEntity) this.addClickEffect(clickedEntity.x, clickedEntity.y, 'ground');
-                else this.addClickEffect(pointer.worldX, pointer.worldY, 'ground');
-
-                const selectedIds = GameEngine.state.selectedUnitIds || [];
-                if (selectedIds.length > 0) {
-                    const unitsToMove = selectedIds.map(id => GameEngine.state.units.villagers.find(v => v.id === id)).filter(v => v);
-                    if (clickedEntity && clickedEntity.isUnderConstruction) {
-                        const vCandidates = unitsToMove.filter(v => v.config?.type === 'villagers');
-                        if (vCandidates.length > 0) {
-                            vCandidates.forEach(v => this.handleRightClickCommand(v, pointer, clickedEntity));
-                            return;
-                        }
-                    }
-
-                    const colsNum = Math.ceil(Math.sqrt(unitsToMove.length));
-                    const spacing = 40;
-                    unitsToMove.forEach((unit, i) => {
-                        const r = Math.floor(i / colsNum), c = i % colsNum;
-                        const offX = (c - (colsNum - 1) / 2) * spacing, offY = (r - (colsNum - 1) / 2) * spacing;
-                        const offsetPointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
-                        this.handleRightClickCommand(unit, offsetPointer, clickedEnemy || clickedEntity);
-                    });
-                }
-            }
-
             if (pointer.button === 0 && this.selectionStartPos && !isPlacement) {
                 this.handleSelectionEnd(pointer);
             }
 
-            if (pointer.button !== 0) this.isDragging = false;
-            this.dragStartPos = null;
+            // Cleanup
+            if (pointer.button === 0) {
+                this.selectionStartPos = null;
+            } else if (pointer.button === 1) { // Middle button
+                this.isMiddleDragging = false;
+                this.dragStartPos = null;
+            }
         });
     }
 
@@ -401,6 +270,7 @@ export class MainScene extends Phaser.Scene {
      * 處理單位的右鍵指令（移動或攻擊）
      */
     handleRightClickCommand(unit, pointer, clickedTarget = null) {
+        console.log(`[Command] ${unit.configName} (${unit.id}) right-click cmd at ${pointer.worldX.toFixed(0)}, ${pointer.worldY.toFixed(0)}`);
         // [最終防護] 若正處於建造預覽狀態，或按下鼠標時正處於建造預覽狀態，屏蔽所有指令
         if (GameEngine.state.placingType || GameEngine.state.rightClickStartedInPlacementMode) return;
 
@@ -693,7 +563,8 @@ export class MainScene extends Phaser.Scene {
         this.updateEdgeCursor(ex, ey, pointer, winW, winH);
 
         // 3. 執行全向捲動 (直線射線方向)
-        if ((ex !== 0 || ey !== 0) && !this.isDragging) {
+        const isCurrentlyDragging = this.isMiddleDragging || (this.inputSystem && this.inputSystem.isDragging);
+        if ((ex !== 0 || ey !== 0) && !isCurrentlyDragging) {
             // [核心需求] 以中央座標到鼠標的位置的這個直線方向移動
             const centerX = winW / 2;
             const centerY = winH / 2;
@@ -709,7 +580,7 @@ export class MainScene extends Phaser.Scene {
                 this.cameras.main.scrollX += moveX;
                 this.cameras.main.scrollY += moveY;
 
-                this.lastDragTime = Date.now();
+                this.lastEdgeScrollTime = Date.now();
             }
         }
     }
@@ -865,7 +736,7 @@ export class MainScene extends Phaser.Scene {
         const bgVal = this.hexOrRgba(hCfg.worldProgressBg);
         g.fillStyle(bgVal.color, bgVal.alpha);
         g.fillRoundedRect(x, y, barW, barH, 4);
-        
+
         // 進度
         if (prog > 0) {
             const fillVal = this.hexOrRgba(hCfg.worldProgressColor);

@@ -11,7 +11,7 @@ export class UIManager {
     static activeBuilding = null;
     static logHeight = 200; // 預設日誌高度
     static isResizingLog = false;
-    static logFilters = { COMMON: true, PATH: true }; // 日誌篩選器
+    static logFilters = { COMMON: true, PATH: true, INPUT: true }; // 日誌篩選器
     static startY = 0;
     static startHeight = 200;
     static leftMouseDownPos = null; // 記錄左鍵按下位置，用於過濾框選後的誤觸
@@ -290,7 +290,7 @@ export class UIManager {
             z-index: 400; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
         `;
 
-        const categories = { COMMON: "一般訊息", PATH: "尋路訊息" };
+        const categories = { COMMON: "一般訊息", PATH: "尋路訊息", INPUT: "右鍵行為訊息" };
         Object.entries(categories).forEach(([key, label]) => {
             const item = document.createElement("label");
             item.style.cssText = `display: flex; align-items: center; gap: 8px; font-size: 13px; color: #fff; cursor: pointer;`;
