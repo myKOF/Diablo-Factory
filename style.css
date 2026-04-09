@@ -121,7 +121,8 @@ html {
     cursor: pointer;
     position: relative;
     transition: background 0.2s, transform 0.2s, border-color 0.2s, box-shadow 0.2s;
-    flex: 0 0 auto;
+    flex: 0 1 auto; /* [修正] 允許縮小以適應窄面板 */
+    min-width: 48px; /* 最小寬度限制，避免過度變形 */
     text-align: center;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
@@ -152,7 +153,8 @@ html {
 .action-btn.upgrade-btn {
     background: linear-gradient(145deg, #1b5e20, #1b5e20);
     border-color: #2e7d32;
-    width: 140px; /* 升級按鈕寬度稍大以容納文字 */
+    width: 140px;
+    /* 升級按鈕寬度稍大以容納文字 */
     flex-direction: row;
     gap: 8px;
     padding: 0 10px;

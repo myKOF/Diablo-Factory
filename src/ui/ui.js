@@ -414,7 +414,7 @@ export class UIManager {
         menu.id = "context_menu";
         menu.className = "panel";
         const menuCfg = UI_CONFIG.ActionMenu;
-        menu.style.cssText = `position: absolute; display: none; z-index: 1000; pointer-events: auto;`;
+        menu.style.cssText = `position: absolute; display: none; z-index: 1000; pointer-events: auto; overflow: hidden;`;
         if (menuCfg.anchor) this.applyAnchorStyle(menu, menuCfg);
         this.uiLayer.appendChild(menu);
 
@@ -490,8 +490,13 @@ export class UIManager {
                 break;
         }
 
-        if (cfg.width) el.style.width = typeof cfg.width === 'number' ? `${cfg.width}px` : cfg.width;
-        if (cfg.height) el.style.height = typeof cfg.height === 'number' ? `${cfg.height}px` : cfg.height;
+        // 尺寸設定 (支援寬高及最小/最大值)
+        const dimensions = ['width', 'height', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'];
+        dimensions.forEach(dim => {
+            if (cfg[dim] !== undefined) {
+                el.style[dim] = typeof cfg[dim] === 'number' ? `${cfg[dim]}px` : cfg[dim];
+            }
+        });
 
         // 進階美化
         if (cfg.glass) el.classList.add("glass-panel");
@@ -927,55 +932,59 @@ export class UIManager {
         const menu = document.getElementById("context_menu");
         const cfg = UI_CONFIG.ActionMenu;
 
+        // 套用錨點樣式 (包含寬高、最小寬度等尺寸設定)
         if (cfg.anchor) {
             this.applyAnchorStyle(menu, cfg);
         }
 
         menu.style.display = "flex";
         menu.style.flexDirection = "column";
-        menu.style.padding = "15px";
-        if (cfg.minWidth) menu.style.minWidth = typeof cfg.minWidth === 'number' ? `${cfg.minWidth}px` : cfg.minWidth;
+        menu.style.padding = "20px";
+        menu.style.boxSizing = "border-box";
+        menu.style.overflow = "hidden";
 
         let name = entity.isUnderConstruction ? (GameEngine.getBuildingConfig(entity.type, entity.lv)?.name || "施工中的建築") : (entity.name || entity.type);
         const cfg_current = GameEngine.getBuildingConfig(entity.type, entity.lv || 1);
         const nextCfg = GameEngine.getBuildingConfig(entity.type, (entity.lv || 1) + 1);
         const hCfg = UI_CONFIG.ActionMenuHeader;
 
+        // --- 1. 左側標頭：Lv 與 名稱 (垂直堆疊) ---
         let leftHeader = "";
+        const lOffset = hCfg.leftOffset || { x: 0, y: 0 };
         if (isConfirming) {
             leftHeader = `
-                <div style="display: flex; flex-direction: column; justify-content: center; height: 100%;">
-                    <span style="font-size: 16px; color: #ff8a80; font-weight: bold;">${entity.isUnderConstruction ? "取消建設？" : "確定銷毀？"}</span>
-                    <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold;">${name}</span>
+                <div style="display: flex; flex-direction: column; justify-content: center; transform: translate(${lOffset.x}px, ${lOffset.y}px);">
+                    <span style="font-size: 16px; color: #ff8a80; font-weight: bold; margin-bottom: 4px;">${entity.isUnderConstruction ? "取消建設？" : "確定銷毀？"}</span>
+                    <span style="font-size: 22px; color: ${hCfg.nameColor}; font-weight: bold; text-shadow: 1px 1px 3px rgba(0,0,0,0.8);">${name}</span>
                 </div>
             `;
         } else {
             leftHeader = `
-                <div style="display: flex; align-items: baseline; height: 100%; align-items: center;">
-                    <span style="font-size: ${hCfg.levelFontSize}; font-weight: 900; color: #ffffff; margin-right: 15px; font-family: 'Arial Black', sans-serif; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">Lv.${entity.lv || 1}</span>
-                    <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); white-space: nowrap;">${name}</span>
+                <div style="display: flex; flex-direction: column; justify-content: center; transform: translate(${lOffset.x}px, ${lOffset.y}px);">
+                    <span style="font-size: ${hCfg.levelFontSize}; font-weight: 900; color: #ffffff; line-height: 0.9; font-family: 'Arial Black', sans-serif; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">Lv.${entity.lv || 1}</span>
+                    <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold; margin-top: 10px; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); white-space: nowrap;">${name}</span>
                 </div>
             `;
         }
 
+        // --- 2. 右側面板：升級資訊 (暗色圓角框) ---
         let rightHeader = "";
-        const headerActionHeight = "64px";
+        let requirementHtml = "";
+        const rOffset = hCfg.rightOffset || { x: 0, y: 0 };
+        const reqOffset = hCfg.requirementOffset || { x: 0, y: 0 };
+        const boxW = typeof hCfg.upgradeInfoWidth === 'number' ? `${hCfg.upgradeInfoWidth}px` : hCfg.upgradeInfoWidth;
+        const boxH = typeof hCfg.upgradeInfoHeight === 'number' ? `${hCfg.upgradeInfoHeight}px` : hCfg.upgradeInfoHeight;
 
         if (!isConfirming && entity.isUpgrading) {
             const prog = Math.floor((entity.upgradeProgress || 0) * 100);
             rightHeader = `
-                <div style="display: flex; align-items: center; background: rgba(0, 0, 0, 0.3); padding: 0 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); min-width: 220px; height: ${headerActionHeight}; box-sizing: border-box;">
-                    <div style="flex: 1; height: 22px; background: rgba(0,0,0,0.5); border-radius: 11px; position: relative; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); margin-right: 12px; min-width: 120px;">
-                        <div id="upgrade_progress_bar" style="width: ${prog}%; height: 100%; background: linear-gradient(90deg, ${hCfg.progressColorStart}, ${hCfg.progressColorEnd}); box-shadow: 0 0 8px rgba(76, 175, 80, 0.4);"></div>
-                        <div id="upgrade_percentage_text" style="position: absolute; width: 100%; text-align: center; top: 0; font-size: 11px; line-height: 22px; color: white; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.8);">升級中 ${prog}%</div>
+                <div style="display: flex; align-items: center; background: rgba(0, 0, 0, 0.4); padding: ${hCfg.upgradeInfoPadding}; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); width: ${boxW}; min-width: ${boxW}; height: ${boxH}; box-sizing: border-box; transform: translate(${rOffset.x}px, ${rOffset.y}px);">
+                    <div style="flex: 1; height: 24px; background: rgba(0,0,0,0.5); border-radius: 12px; position: relative; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); margin-right: 15px;">
+                        <div id="upgrade_progress_bar" style="width: ${prog}%; height: 100%; background: linear-gradient(90deg, ${hCfg.progressColorStart}, ${hCfg.progressColorEnd});"></div>
+                        <div id="upgrade_percentage_text" style="position: absolute; width: 100%; text-align: center; top: 0; font-size: 12px; line-height: 24px; color: white; font-weight: bold; text-shadow: 0 1px 2px black;">升級中 ${prog}%</div>
                     </div>
-                    <button class="action-btn" 
-                            style="background: ${hCfg.cancelBtnBg}; border: 1px solid rgba(255,255,255,0.2); padding: 0 12px; height: 30px; border-radius: 15px; font-size: 12px; font-weight: bold; color: white; cursor: pointer; transition: all 0.2s; white-space: nowrap; min-width: 54px;"
-                            onmouseover="this.style.background='${hCfg.cancelBtnHoverBg}'"
-                            onmouseout="this.style.background='${hCfg.cancelBtnBg}'"
-                            onclick="window.GameEngine.cancelUpgrade(event, window.UIManager.activeMenuEntity)">
-                        取消
-                    </button>
+                    <button class="action-btn" style="width: 56px; height: 34px; border-radius: 17px; background: ${hCfg.cancelBtnBg}; border: 1px solid rgba(255,255,255,0.2); font-size: 13px; font-weight: bold; color: white; cursor: pointer;"
+                            onclick="window.GameEngine.cancelUpgrade(event, window.UIManager.activeMenuEntity)">取消</button>
                 </div>
             `;
         } else if (!isConfirming && nextCfg && !entity.isUnderConstruction) {
@@ -987,173 +996,189 @@ export class UIManager {
             if (costs.stone) costItems.push({ key: 'stone', icon: '🪨', val: costs.stone });
             if (costs.gold) costItems.push({ key: 'gold', icon: '💰', val: costs.gold });
 
-            let upgradeStyle = `width: 48px; height: 48px; background: ${hCfg.upgradeBtnBg}; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; box-shadow: ${hCfg.upgradeBtnShadow}; border: 1px solid rgba(255,255,255,0.2);`;
-            let upgradeAction = `window.GameEngine.startUpgrade(event, window.UIManager.activeMenuEntity)`;
-            let hoverEvents = `onmouseover="this.style.background='${hCfg.upgradeBtnHoverBg}'; this.style.transform='translateY(-2px) scale(1.05)';" onmouseout="this.style.background='${hCfg.upgradeBtnBg}'; this.style.transform='translateY(0) scale(1)';"`;
+            const btnSize = hCfg.upgradeBtnSize || 54;
+            let btnStyle = `width: ${btnSize}px; height: ${btnSize}px; background: ${hCfg.upgradeBtnBg}; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; box-shadow: ${hCfg.upgradeBtnShadow}; border: 1.5px solid rgba(255,255,255,0.2); flex-shrink: 0;`;
+            let btnAction = `window.GameEngine.startUpgrade(event, window.UIManager.activeMenuEntity)`;
+            let btnEvents = `onmouseover="this.style.background='${hCfg.upgradeBtnHoverBg}'; this.style.transform='scale(1.05)';" onmouseout="this.style.background='${hCfg.upgradeBtnBg}'; this.style.transform='scale(1)';"`;
 
             if (!unlock.unlocked) {
-                upgradeStyle = `width: 48px; height: 48px; background: #555; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: not-allowed; opacity: 0.5; filter: grayscale(1);`;
-                upgradeAction = "";
-                hoverEvents = "";
+                btnStyle = `width: ${btnSize}px; height: ${btnSize}px; background: #444; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: not-allowed; opacity: 0.6; filter: grayscale(1); border: 1px solid rgba(255,255,255,0.1); flex-shrink: 0;`;
+                btnAction = ""; btnEvents = "";
             }
 
-            let resLineHtml = "";
+            let costsHtml = "";
             costItems.forEach(item => {
                 const playerVal = GameEngine.state.resources[item.key] || 0;
                 const isSufficient = playerVal >= item.val;
-                const textColor = isSufficient ? hCfg.resSufficientColor : hCfg.resInsufficientColor;
-                resLineHtml += `
-                    <div style="display: flex; align-items: center; gap: 4px; margin-right: 12px;">
-                        <span style="font-size: 14px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5));">${item.icon}</span>
-                        <span style="font-size: 14px; font-weight: bold; color: ${textColor};">${item.val}</span>
+                costsHtml += `
+                    <div style="display: flex; align-items: center; gap: 4px; color: ${isSufficient ? hCfg.resSufficientColor : hCfg.resInsufficientColor}; font-weight: bold; font-size: ${hCfg.upgradeInfoCostFontSize || '17px'}; flex-shrink: 0;">
+                        <span>${item.icon}</span><span>${item.val}</span>
                     </div>
                 `;
             });
 
             rightHeader = `
-                <div style="display: flex; align-items: center; background: rgba(0, 0, 0, 0.2); padding: 0 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); position: relative; min-width: 240px; height: 72px; box-sizing: border-box; margin-left: auto;">
-                   <div style="display: flex; flex-direction: column; flex: 1; pointer-events: none; justify-content: center;">
-                        <span style="font-size: 12px; font-weight: bold; color: rgba(255,255,255,0.4); margin-bottom: 4px;">升級至 Lv.${(entity.lv || 1) + 1}</span>
-                        <div style="display: flex; align-items: center; white-space: nowrap;">
-                            ${resLineHtml || '<span style="font-size: 12px; color: #81c784;">免費</span>'}
-                        </div>
-                   </div>
-                   <div class="upgrade-action-btn" style="${upgradeStyle}; margin-left: 12px;" onclick="${upgradeAction}" ${hoverEvents}>
-                        <span style="color: white; font-size: 22px; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">▲</span>
-                   </div>
-                   ${!unlock.unlocked ? `<div style="color: #ff8a80; font-size: 13px; font-weight: bold; position: absolute; right: 16px; bottom: -18px; white-space: nowrap; text-shadow: 0 1px 2px black;">⚠️ ${unlock.reason}</div>` : ""}
+                <div style="display: flex; align-items: center; background: rgba(0, 0, 0, 0.4); padding: ${hCfg.upgradeInfoPadding}; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); width: ${boxW}; min-width: ${boxW}; height: ${boxH}; box-sizing: border-box; transform: translate(${rOffset.x}px, ${rOffset.y}px);">
+                    <div style="display: flex; flex-direction: column; flex: 1; overflow: hidden; justify-content: center;">
+                        <span style="font-size: ${hCfg.upgradeInfoLabelFontSize || '13px'}; font-weight: bold; color: rgba(255,255,255,0.3); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">升級至 Lv.${(entity.lv || 1) + 1}</span>
+                        <div style="display: flex; align-items: center; flex-wrap: nowrap; gap: ${hCfg.upgradeInfoResourceGap !== undefined ? hCfg.upgradeInfoResourceGap : 15}px;">${costsHtml || '<span style="color: #81c784; font-size: 14px;">免費</span>'}</div>
+                    </div>
+                    <div class="upgrade-action-btn" style="${btnStyle}; margin-left: 15px;" onclick="${btnAction}" ${btnEvents}>
+                        <span style="color: white; font-size: ${btnSize * 0.5}px; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">▲</span>
+                    </div>
                 </div>
             `;
+
+            if (unlock.requirement) {
+                requirementHtml = `
+                    <div style="color: ${unlock.requirement.satisfied ? '#81c784' : hCfg.requirementColor}; font-size: ${hCfg.requirementFontSize}; font-weight: bold; text-shadow: 0 1px 2px black; transform: translate(${reqOffset.x}px, ${reqOffset.y}px);">
+                        ${unlock.requirement.text}
+                    </div>
+                `;
+            }
         } else if (!isConfirming && entity.lv > 1 && !nextCfg) {
-            rightHeader = `<div style="color: #fbc02d; font-weight: bold; font-size: 15px; border: 1px solid rgba(251, 192, 45, 0.3); display: flex; align-items: center; justify-content: center; border-radius: 20px; background: rgba(251, 192, 45, 0.05); min-width: 200px; height: ${headerActionHeight}; box-sizing: border-box;"><span style="margin-right:8px">⭐</span> 已達最高等級</div>`;
+            rightHeader = `<div style="color: #fbc02d; font-weight: bold; font-size: 16px; border: 1px solid rgba(251, 192, 45, 0.3); display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgba(0,0,0,0.3); width: ${boxW}; height: ${boxH}; box-sizing: border-box; transform: translate(${rOffset.x}px, ${rOffset.y}px);">已達最高等級 ⭐</div>`;
         }
-
-        let headerHtml = `
-            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid rgba(255,255,255,0.15); margin-bottom: 25px; padding-bottom: 15px; height: 110px; box-sizing: border-box; gap: 30px;">
-                ${leftHeader}
-                ${rightHeader}
-            </div>
-        `;
-
-        let gridHtml = `
-            <div id="action_button_grid" style="display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; justify-content:center; align-content: flex-start; transition: all 0.3s; box-sizing: border-box;">
-        `;
 
         const eid = entity.id || `${entity.type}_${entity.x}_${entity.y}`;
         const btnOpacity = entity.isUpgrading ? "opacity: 0.4; filter: grayscale(1); pointer-events: none;" : "opacity: 1;";
 
+        // --- 3. 指令按鈕生成 (格網) ---
+        const gOffset = hCfg.actionGridOffset || { x: 0, y: 0 };
+        // [修正] 改為 nowrap 並使用 space-evenly，確保縮減寬度時，間距會同比調整，且永不換行
+        const gridJustify = isConfirming ? "center" : "space-evenly";
+        const gridGap = isConfirming ? "20px" : "4px"; 
+        let gridHtml = `<div id="action_button_grid" style="display:flex; flex-direction:row; flex-wrap:nowrap; gap:${gridGap}; justify-content:${gridJustify}; align-items:center; transition: all 0.3s; width: 100%; transform: translate(${gOffset.x}px, ${gOffset.y}px);">`;
+
         if (isConfirming) {
-            // 確認銷毀模式
             gridHtml += `
-                <button class="action-btn danger" onclick="window.UIManager.actualDestroy(event, '${eid}')" style="pointer-events: auto;">
-                    <span class="icon">✔️</span><span class="label">確定銷毀</span>
+                <button class="action-btn danger" onclick="window.UIManager.actualDestroy(event, '${eid}')" style="width: 100px; height: 44px; flex-direction: row; gap: 8px;">
+                    <span class="icon" style="font-size:18px; margin:0;">✔️</span><span class="label">確定銷毀</span>
                 </button>
-                <button class="action-btn" onclick="window.UIManager.cancelDestroy(event)" style="pointer-events: auto;">
-                    <span class="icon">❌</span><span class="label">取消</span>
+                <button class="action-btn" onclick="window.UIManager.cancelDestroy(event)" style="width: 100px; height: 44px; flex-direction: row; gap: 8px;">
+                    <span class="icon" style="font-size:18px; margin:0;">❌</span><span class="label">取消</span>
                 </button>
             `;
         } else {
-            // 一般模式
+            // 普通指令模式
             if (entity.type === 'town_center' || entity.type === 'village') {
-                gridHtml += `
-                    <button class="action-btn" id="cmd_WOOD" onclick="window.GameEngine.setCommand(event, 'WOOD')" style="${btnOpacity}">
-                        <span class="icon">🪓</span><span class="label">採集木材</span>
-                    </button>
-                    <button class="action-btn" id="cmd_STONE" onclick="window.GameEngine.setCommand(event, 'STONE')" style="${btnOpacity}">
-                        <span class="icon">⛏️</span><span class="label">採集石頭</span>
-                    </button>
-                    <button class="action-btn" id="cmd_GOLD" onclick="window.GameEngine.setCommand(event, 'GOLD')" style="${btnOpacity}">
-                        <span class="icon">💰</span><span class="label">採集黃金</span>
-                    </button>
-                    <button class="action-btn" id="cmd_FOOD" onclick="window.GameEngine.setCommand(event, 'FOOD')" style="${btnOpacity}">
-                        <span class="icon">🧺</span><span class="label">採集食物</span>
-                    </button>
-                    <button class="action-btn" id="cmd_RETURN" onclick="window.GameEngine.setCommand(event, 'RETURN')" style="${btnOpacity}">
-                        <span class="icon">🏘️</span><span class="label">收工</span>
-                    </button>
-                `;
+                const cmds = [['WOOD', '🪓', '採集木材'], ['STONE', '⛏️', '採集石頭'], ['GOLD', '💰', '採集黃金'], ['FOOD', '🧺', '採集食物'], ['RETURN', '🏘️', '收工']];
+                cmds.forEach(c => {
+                    gridHtml += `<button class="action-btn" id="cmd_${c[0]}" onclick="window.GameEngine.setCommand(event, '${c[0]}')" style="${btnOpacity}"><span class="icon">${c[1]}</span><span class="label">${c[2]}</span></button>`;
+                });
             }
 
-            // 動態生成 NPC 生產按鈕
+            // 生產按鈕
             const bCfg = GameEngine.getBuildingConfig(entity.type, entity.lv || 1);
             if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0 && !entity.isUnderConstruction) {
-                const iconMap = {
-                    'villagers': '👤', 'female villagers': '👩', 'mage': '🧙', 'swordsman': '⚔️', 'archer': '🏹'
-                };
-
+                const iconMap = { 'villagers': '👤', 'female villagers': '👩', 'mage': '🧙', 'swordsman': '⚔️', 'archer': '🏹' };
                 if (bCfg.productionMode === 'rand') {
-                    const firstId = bCfg.npcProduction[0];
-                    const icon = iconMap[firstId] || '❓';
                     gridHtml += `
                         <button class="action-btn" onclick="window.GameEngine.addToProductionQueue(event, 'RANDOM', null)" style="${btnOpacity}">
-                            <span class="icon">${icon}</span><span class="label">隨機招募</span>
-                            <div class="queue-badge" style="display:none">0</div>
-                            <div class="progress-bar-mini"></div>
-                        </button>
-                    `;
+                            <span class="icon">${iconMap[bCfg.npcProduction[0]] || '❓'}</span><span class="label">隨機招募</span>
+                            <div class="queue-badge" style="display:none">0</div><div class="progress-bar-mini"></div>
+                        </button>`;
                 } else {
-                    // 一般生產模式
                     bCfg.npcProduction.forEach(id => {
                         const name = GameEngine.state.idToNameMap[id] || id;
-                        const icon = iconMap[id] || iconMap[name] || '👤';
                         gridHtml += `
                             <button class="action-btn" onclick="window.GameEngine.addToProductionQueue(event, '${id}', null)">
-                                <span class="icon">${icon}</span><span class="label">${name}</span>
-                                <div class="queue-badge" style="display:none">0</div>
-                                <div class="progress-bar-mini"></div>
-                            </button>
-                        `;
+                                <span class="icon">${iconMap[id] || iconMap[name] || '👤'}</span><span class="label">${name}</span>
+                                <div class="queue-badge" style="display:none">0</div><div class="progress-bar-mini"></div>
+                            </button>`;
                     });
                 }
             }
+        }
+        gridHtml += `</div>`; // 結束指令按鈕格網 (action_button_grid)
 
-            // 倉庫自動化管理介面
-            const isWarehouse = ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(entity.type);
-            if (isWarehouse && !entity.isUnderConstruction) {
-                const currentAssigned = GameEngine.state.units.villagers.filter(v =>
-                    v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
-                    v.assignedWarehouseId === eid
-                ).length;
-                gridHtml += `
-                    <div class="warehouse-controls" style="margin-top: 5px;">
-                        <div class="control-title">自動化採集管理</div>
-                        <div class="control-row">
-                            <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)">-</button>
-                            <span class="count-display">${currentAssigned} / ${entity.targetWorkerCount || 0}</span>
-                            <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, 1)">+</button>
-                        </div>
-                        <div class="status-hint">派遣狀態</div>
+        // [修正] 人數控制項移出 action_button_grid，使其獨立置中且不被 actionGridOffset 偏移影響
+        if (!isConfirming && ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(entity.type) && !entity.isUnderConstruction) {
+            const current = GameEngine.state.units.villagers.filter(v => v.config?.type === 'villagers' && v.assignedWarehouseId === eid).length;
+            const wcOff = hCfg.workerControlOffset || { x: 0, y: 15 };
+            gridHtml += `
+                <div class="warehouse-controls" style="margin: 0; background: none; border: none; padding: 0; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) translate(${wcOff.x}px, ${wcOff.y}px); z-index: 10;">
+                    <div class="control-title" style="color: #ffffff; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.8);">採集人數</div>
+                    <div class="control-row" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); padding: 5px 20px; border-radius: 8px; display: flex; align-items: center; gap: 15px;">
+                        <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)" style="border-radius:4px; width: 32px; height: 32px; cursor: pointer; background: #4e342e; color: white; border: 1.5px solid #8b6e4b;">-</button>
+                        <span class="count-display" style="font-size: 22px; min-width: 80px; text-align: center; color: white; font-weight: bold; font-family: monospace;">${current} / ${entity.targetWorkerCount || 0}</span>
+                        <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, 1)" style="border-radius:4px; width: 32px; height: 32px; cursor: pointer; background: #4e342e; color: white; border: 1.5px solid #8b6e4b;">+</button>
                     </div>
-                `;
-            }
+                </div>`;
         }
 
-        gridHtml += `</div>`;
-
-        // 判斷是否隱藏選單：如果除了標題外沒有任何操作按鈕，且非銷毀確認模式，則隱藏下方區塊
+        // --- 4. 判斷是否顯示指令列 ---
         const hasActions = gridHtml.includes('action-btn') || gridHtml.includes('warehouse-controls');
 
-        // 最終組合
-        let finalHtml = headerHtml;
+        // --- 5. 最終組合 ---
+        // 動態調整高度：沒有指令時高度自適應，有指令時使用配置的高度
         if (hasActions) {
-            finalHtml += gridHtml;
+            if (cfg.height) menu.style.height = typeof cfg.height === 'number' ? `${cfg.height}px` : cfg.height;
+            // [修正] 確保寬度也重新套用，避免被其它邏輯誤改
+            if (cfg.width) menu.style.width = typeof cfg.width === 'number' ? `${cfg.width}px` : cfg.width;
+            if (cfg.minWidth) menu.style.minWidth = typeof cfg.minWidth === 'number' ? `${cfg.minWidth}px` : cfg.minWidth;
         } else {
-            // 如果沒有動作且非確認模式，則調整 header 的邊距，讓它看起來更精簡
-            finalHtml = headerHtml.replace('margin-bottom: 25px;', 'margin-bottom: 0;').replace('border-bottom: 2px solid rgba(255,255,255,0.15);', 'border-bottom: none;');
+            menu.style.height = "auto";
+            // 當內容少時，允許寬度彈性但仍維持最小寬度
+            if (cfg.minWidth) menu.style.width = "auto";
         }
+
+        const headerOff = hCfg.headerOffset || { x: 0, y: 0 };
+        const gridOff = hCfg.actionGridOffset || { x: 0, y: 0 };
+
+        // 組合內容
+        if (hasActions) {
+            menu.innerHTML = `
+                <div style="height: 100%; width: 100%; display: flex; flex-direction: column; position: relative; overflow: visible;">
+                    <!-- 上部：標頭區 (佔 50%) -->
+                    <div style="height: 50%; width: 100%; display: flex; flex-direction: column; justify-content: flex-start; transform: translate(${headerOff.x}px, ${headerOff.y}px);">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
+                            ${leftHeader}
+                            <div style="display: flex; flex-direction: column; align-items: flex-end;">
+                                ${rightHeader}
+                                <div style="height: 32px; display: flex; align-items: center; margin-top: 8px;">
+                                    ${requirementHtml}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 中部：分隔線 -->
+                    <div style="position: absolute; left: -20px; top: 50%; width: calc(100% + 40px); height: 1.5px; background: rgba(255,255,255,0.15); transform: translateY(-50%); pointer-events: none; z-index: 1;"></div>
+
+                    <!-- 下部：指令區 (佔 50%，內容垂直置中) -->
+                    <div style="height: 50%; width: 100%; display: flex; align-items: center; justify-content: center; position: relative;">
+                        ${gridHtml}
+                    </div>
+                </div>
+            `;
+        } else {
+            // 沒有指令時：只顯示標頭，不顯示中線與下方空間
+            menu.innerHTML = `
+                <div style="width: 100%; transform: translate(${headerOff.x}px, ${headerOff.y}px);">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
+                        ${leftHeader}
+                        <div style="display: flex; flex-direction: column; align-items: flex-end;">
+                            ${rightHeader}
+                            <div style="height: 32px; display: flex; align-items: center; margin-top: 8px;">
+                                ${requirementHtml}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 智慧隱藏選單
         if (!hasActions && !isConfirming && !rightHeader) {
             menu.style.display = "none";
         } else {
-            menu.style.display = "flex"; // 確保恢復顯示
-            menu.innerHTML = finalHtml;
+            menu.style.display = "flex";
             if (!cfg.anchor) {
-                // 先把選單移出可視區域，等 DOM 渲染一幀取得真實尺寸後再定位，避免首幀跳動
-                menu.style.left = "-9999px";
-                menu.style.top = "-9999px";
+                menu.style.left = "-9999px"; menu.style.top = "-9999px";
             }
         }
 
-        // 顯示銷毀按鈕 (只有在非確認模式下才顯示右上角的 X)
         const destroyBtn = document.getElementById("destroy_btn");
         if (destroyBtn) {
             const villageCount = GameEngine.state.mapEntities.filter(e => e.type === 'town_center' || e.type === 'village').length;
@@ -1205,6 +1230,8 @@ export class UIManager {
         if (event) event.stopPropagation();
         if (!this.activeMenuEntity) return;
         GameEngine.adjustWarehouseWorkers(this.activeMenuEntity, delta);
+        // [修正] 調整後立即重新渲染選單，以反映最新的人數數值
+        this.showContextMenu(this.activeMenuEntity);
     }
 
     static toggleSettingsPanel() {

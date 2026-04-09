@@ -812,9 +812,9 @@ export class GameEngine {
     }
 
     static isUpgradeUnlocked(entity, nextCfg) {
-        if (!nextCfg) return { unlocked: false, reason: "已達最高等級" };
+        if (!nextCfg) return { unlocked: false, reason: "已達最高等級", requirement: null };
         const unlockStr = nextCfg.buildUnlock;
-        if (!unlockStr || unlockStr === "{0}") return { unlocked: true };
+        if (!unlockStr || unlockStr === "{0}") return { unlocked: true, requirement: null };
 
         // 解析 {village.lv=2}
         const match = unlockStr.match(/\{([^.]+)\.lv=(\d+)\}/);
@@ -827,11 +827,15 @@ export class GameEngine {
                 // [修復] 只要目前等級夠，不論是否正在升級都算符合條件
                 return entType === targetType && ent.lv >= targetLv && !ent.isUnderConstruction;
             });
-            if (!hasRequirement) {
-                return { unlocked: false, reason: `需 ${this.state.buildingConfigs[targetType]?.name || targetType} 達到 ${targetLv} 級` };
-            }
+
+            const reqText = `需 ${this.state.buildingConfigs[targetType]?.name || targetType} ${targetLv} 級`;
+            return { 
+                unlocked: hasRequirement, 
+                reason: hasRequirement ? "" : reqText,
+                requirement: { text: reqText, satisfied: hasRequirement }
+            };
         }
-        return { unlocked: true };
+        return { unlocked: true, requirement: null };
     }
 
     static startUpgrade(event, entity) {

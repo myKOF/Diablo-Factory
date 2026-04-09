@@ -73,18 +73,7 @@ export const UI_CONFIG = {
             { id: "archer_place" }
         ]
     },
-    // ── 建築互動指令選單 ───────────────────────────
-    ActionMenu: {
-        anchor: "BOTTOM_CENTER",
-        offsetX: 0,
-        offsetY: 30,
-        width: "auto",
-        minWidth: 400,
-        height: "auto",
-        glass: true,
-        shadowColor: "#000000",
-        shadowAlpha: 0.8
-    },
+
     // ── 右下角日誌通知欄 ─────────────────────────────────────────
     LogPanel: {
         anchor: "BOTTOM_RIGHT",
@@ -298,7 +287,7 @@ export const UI_CONFIG = {
     TownCenterPointer: {
         width: 76, height: 76,
         fontSize: "38px",
-        bgColor: "#24f12bff",              // 亮綠色
+        bgColor: "#71ffa0ff",              // 亮綠色
         bgAlpha: 0.95,
         borderColor: "#ffffff",
         icon: "🏰",
@@ -378,17 +367,46 @@ export const UI_CONFIG = {
         selectionScale: 1,           // 僅縮放發光外框的大小，不改變物體圖形
         depth: 15                      // 顯示深度
     },
+    // ── 建築指令選單 ───────────────────────────
+    ActionMenu: {
+        anchor: "BOTTOM_CENTER",         // 錨點位置 (底部置中)
+        offsetX: 0,                      // 水平偏移
+        offsetY: 30,                     // 垂直偏移 (距底部距離)
+        width: 440,                      // 面板寬度
+        minWidth: 440,                   // 最小寬度
+        height: 200,                     // 面板高度 (確保內容量充足)
+        glass: true,                     // 啟用毛玻璃質感背景
+        shadowColor: "#000000",          // 陰影顏色
+        shadowAlpha: 0.8                 // 陰影透明度
+    },
     // ── 建築指令選單標頭 (ActionMenuHeader) ───────────────────
     ActionMenuHeader: {
-        levelFontSize: "28px",          // 等級文字大小 (縮小約 20%)
-        nameFontSize: "20px",           // 建築名稱文字大小
+        levelFontSize: "20px",          // 大等級文字
+        nameFontSize: "20px",           // 建築名稱文字
         nameColor: "#fbc02d",           // 建築名稱顏色
-        upgradeBtnBg: "#4caf50",         // 升級按鈕背景色 (綠色代碼)
+        requirementFontSize: "15px",    // 升級條件文字大小
+        requirementColor: "#ff9100ff",    // 升級條件顏色
+        // ── 升級資訊區尺寸 (Upgrade Info Panel) ──
+        upgradeInfoWidth: 230,          // 升級框寬度
+        upgradeInfoHeight: 60,          // 升級框高度
+        upgradeInfoPadding: "0 8px",   // 內部間距 (第一個數字是上下、第二個是左右)
+        upgradeInfoLabelFontSize: "13px", // "升級至 Lv.X" 標籤字體大小
+        upgradeInfoCostFontSize: "11px",  // 資源消耗數字字體大小
+        upgradeInfoResourceGap: 2,     // 每個資源之間的間隙
+        upgradeBtnSize: 46,             // 升級按鈕大小 (正方形)
+        // ── 區塊偏移自訂 (Offsets) ──
+        leftOffset: { x: 0, y: 0 },     // 左側標題區偏移
+        rightOffset: { x: 0, y: -5 },    // 右側升級框區偏移
+        requirementOffset: { x: -10, y: -20 }, // 升級條件文字偏移
+        actionGridOffset: { x: 0, y: 5 },  // 指令按鈕區偏移
+        workerControlOffset: { x: 0, y: 8 }, // 採集人數面板偏移 (當錨點為 CENTER 時)
+        // ── 其他設定 ──
+        upgradeBtnBg: "#4caf50",         // 升級按鈕背景色
         upgradeBtnHoverBg: "#66bb6a",    // 懸停色
         upgradeBtnShadow: "0 4px 12px rgba(76, 175, 80, 0.3)",
         resSufficientColor: "#ffca28",  // 資源足夠時的顏色
         resInsufficientColor: "#ff5252", // 資源不足時的顏色
-        cancelBtnBg: "#d32f2f",         // 取消按鈕背景色 (紅色)
+        cancelBtnBg: "#d32f2f",         // 取消按鈕背景色
         cancelBtnHoverBg: "#f44336",    // 取消按鈕懸停色
         cancelBtnFontSize: "13px",      // 取消按鈕字體大小
         // ── 升級進度條顏色 ──
