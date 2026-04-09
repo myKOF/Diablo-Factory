@@ -265,7 +265,12 @@ export const UI_CONFIG = {
         mainAlpha: 0.12,
         subColor: "#000000",
         subAlpha: 0.03,
-        floorColor: "#ffffff"
+        floorColor: "#ffffff",
+        texture: "assets/grass_pebbles.png",
+        useTexture: true,
+        textureAlpha: 0.25,      // 貼圖透明度 (0.0 ~ 1.0)
+        textureScale: 0.25,      // 貼圖縮放倍率 (1.0 為原大，可設為 0.5 或 2.0)
+        textureTint: "#ffffffff"  // 貼圖疊色 (#ffffff 為原色)
     },
     // -- 設置選單 (SettingsPanel) ----------------------------------
     SettingsButton: {

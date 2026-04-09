@@ -38,6 +38,9 @@ export class MainScene extends Phaser.Scene {
     preload() {
         // 目前沒有外部資產，如果有的話可以在這裡加載
         // 例如: this.load.image('village', 'assets/village.png');
+        if (UI_CONFIG.Grid && UI_CONFIG.Grid.useTexture && UI_CONFIG.Grid.texture) {
+            this.load.image('ground_texture', UI_CONFIG.Grid.texture);
+        }
     }
 
     create() {
@@ -59,6 +62,33 @@ export class MainScene extends Phaser.Scene {
         this.generateTextures();
 
         window.PhaserScene = this;
+
+        // 創建地表情境 (使用 AI 生成的無縫貼圖)
+        if (UI_CONFIG.Grid && UI_CONFIG.Grid.useTexture) {
+            const TS = GameEngine.TILE_SIZE;
+            const mapCfg = (GameEngine.state.systemConfig && GameEngine.state.systemConfig.map_size) || { w: 7500, h: 7500 };
+            const cols = Math.floor(mapCfg.w / TS);
+            const rows = Math.floor(mapCfg.h / TS);
+            const minGX = Math.floor(960 / TS) - Math.floor(cols / 2);
+            const minGY = Math.floor(560 / TS) - Math.floor(rows / 2);
+            const boundsW = cols * TS;
+            const boundsH = rows * TS;
+            const centerX = minGX * TS + boundsW / 2;
+            const centerY = minGY * TS + boundsH / 2;
+
+            this.backgroundSprite = this.add.tileSprite(centerX, centerY, boundsW, boundsH, 'ground_texture');
+            this.backgroundSprite.setDepth(-10); // 確保在格線與所有實體之下
+
+            // 應用自訂參數
+            const gridCfg = UI_CONFIG.Grid;
+            if (gridCfg.textureAlpha !== undefined) this.backgroundSprite.setAlpha(gridCfg.textureAlpha);
+            if (gridCfg.textureScale !== undefined) this.backgroundSprite.setTileScale(gridCfg.textureScale);
+            if (gridCfg.textureTint) {
+                const tintInt = typeof gridCfg.textureTint === 'string' ? 
+                                parseInt(gridCfg.textureTint.replace('#', ''), 16) : gridCfg.textureTint;
+                this.backgroundSprite.setTint(tintInt);
+            }
+        }
 
         // 創建格網
         this.gridGraphics = this.add.graphics();
