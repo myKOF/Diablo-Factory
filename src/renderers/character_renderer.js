@@ -404,102 +404,124 @@ export class CharacterRenderer {
     }
 
     static renderWolf(ctx, x, y, t, unitData, isMoving, moveFreq, headBobFreq, breatheFreq) {
-        const color = 0x78909c; // 狼灰
-        const eyeColor = 0xffff00; // 黃眼
+        const bodyColor = 0x78909c; // 狼灰
+        const accentColor = 0x455a64; // 深灰色裝飾
+        const eyeColor = 0xffff00;  // 亮黃眼
         const isAttacking = unitData.state === 'ATTACK';
-        const legOffset = isMoving ? Math.sin(t * moveFreq) * 6 : 0;
+        const legOffset = isMoving ? Math.sin(t * moveFreq) * 8 : 0;
+        const tailWag = Math.sin(t * moveFreq * 1.5) * 15;
 
-        this.setCtxStyle(ctx, color, 1);
-        // 腳 (四肢)
-        ctx.fillRect(x - 10, y + 5 + legOffset, 4, 8); // 左前
-        ctx.fillRect(x + 6, y + 5 - legOffset, 4, 8);  // 右前
-        ctx.fillRect(x - 8, y + 2 - legOffset, 4, 8);  // 左後
-        ctx.fillRect(x + 4, y + 2 + legOffset, 4, 8);  // 右後
+        // 1. 繪製陰影 (額外加強)
+        this.setCtxStyle(ctx, 0x000000, 0.2);
+        if (ctx.fillEllipse) ctx.fillEllipse(x, y + 10, 25, 10);
 
-        // 身體
-        ctx.fillRect(x - 12, y - 5, 24, 12);
+        // 2. 繪製尾巴 (生動的擺動)
+        this.setCtxStyle(ctx, bodyColor, 1);
+        this.drawRectRotated(ctx, x - 10, y, -15, -2, 18, 6, (tailWag * Math.PI) / 180, bodyColor);
 
-        // 呼吸效果 (待機時縮放身體)
-        const breathing = (isMoving || isAttacking) ? 0 : Math.sin(t * breatheFreq * 1.2) * 1.2;
+        // 3. 繪製腿部 (更靈動)
+        this.setCtxStyle(ctx, accentColor, 1);
+        ctx.fillRect(x - 12, y + 4 + legOffset, 4, 10); // 左前
+        ctx.fillRect(x + 8, y + 4 - legOffset, 4, 10);  // 右前
+        ctx.fillRect(x - 8, y + 2 - legOffset, 4, 10);  // 左後
+        ctx.fillRect(x + 4, y + 2 + legOffset, 4, 10);  // 右後
 
+        // 4. 身體
+        this.setCtxStyle(ctx, bodyColor, 1);
+        ctx.fillRect(x - 14, y - 8, 28, 14);
+        this.setCtxStyle(ctx, accentColor, 0.3); // 背部深色條紋
+        ctx.fillRect(x - 14, y - 8, 28, 4);
+
+        // 呼吸與攻擊衝刺
+        const breathing = (isMoving || isAttacking) ? 0 : Math.sin(t * breatheFreq * 1.2) * 1.5;
         const multiplier = CharacterRenderer.getFreqMultiplier(unitData);
-        // 戰鬥頻率基準 (原本 15 太快了，改用與人類接近的基準再乘上倍率)
         const animWorkFreq = (UI_CONFIG.Animation ? UI_CONFIG.Animation.workFreq : 2);
-        const atkFreq = animWorkFreq * 4 * multiplier; // 基準提升一點但保持受控
+        const atkFreq = animWorkFreq * 5 * multiplier;
+        const attackDash = isAttacking ? Math.abs(Math.sin(t * atkFreq)) * 12 : 0;
 
-        // 身體前傾效果 (攻擊時向右衝)
-        const attackDash = isAttacking ? Math.abs(Math.sin(t * atkFreq)) * 8 : 0;
+        // 5. 頭部 (更具侵略性)
+        const headBob = isAttacking ? Math.sin(t * atkFreq) * 5 : (isMoving ? Math.sin(t * headBobFreq) * 2 : Math.sin(t * breatheFreq * 0.8) * 1.5);
+        const headX = x + 10 + attackDash;
+        const headY = y - 14 + headBob + breathing;
 
-        // 頭部
-        const headBob = isAttacking ? Math.sin(t * atkFreq) * 4 : (isMoving ? Math.sin(t * headBobFreq) * 2 : Math.sin(t * breatheFreq * 0.8) * 1);
-        const headX = x + 8 + attackDash;
-        const headY = y - 12 + headBob + breathing;
+        this.setCtxStyle(ctx, bodyColor, 1);
+        ctx.fillRect(headX, headY, 16, 12); // 更長的狼吻
+        
+        // 尖耳朵
+        ctx.fillRect(headX + 2, headY - 6, 3, 7);
+        ctx.fillRect(headX + 8, headY - 6, 3, 7);
 
-        ctx.fillRect(headX, headY, 12, 10); // 狼頭向右
-
-        // 嘴巴 (攻擊時張開)
-        if (isAttacking && Math.sin(t * atkFreq) > 0) {
-            ctx.fillRect(headX + 8, headY + 6, 6, 4);
+        // 6. 顯眼的發光眼睛
+        this.setCtxStyle(ctx, eyeColor, 1);
+        const blink = !isMoving && Math.sin(t * 1.5) > 0.98;
+        if (!blink) {
+            ctx.fillRect(headX + 11, headY + 3, 3, 3); // 黃光亮點
+            this.setCtxStyle(ctx, 0xffffff, 0.8);
+            ctx.fillRect(headX + 12, headY + 4, 1, 1); // 瞳孔反光
         }
 
-        // 耳朵
-        ctx.fillRect(headX + 2, headY - 4, 3, 5);
-        ctx.fillRect(headX + 7, headY - 4, 3, 5);
-
-        // 眼睛 (偶爾眨眼)
-        const isBlinking = !isMoving && (Math.sin(t * 2) > 0.95);
-        if (!isBlinking) {
-            this.setCtxStyle(ctx, eyeColor, 1);
-            ctx.fillRect(headX + 8, headY + 4, 2, 2);
+        // 7. 攻擊時的利齒
+        if (isAttacking && Math.sin(t * atkFreq) > 0) {
+            this.setCtxStyle(ctx, 0xffffff, 1);
+            ctx.fillRect(headX + 10, headY + 8, 4, 4);
         }
     }
 
     static renderBear(ctx, x, y, t, unitData, isMoving, moveFreq, headBobFreq, breatheFreq) {
-        const color = 0x5d4037; // 棕熊
-        const eyeColor = 0x000000;
+        const bodyColor = 0x5d4037; // 棕熊主色
+        const noseColor = 0x2d1b14; // 深色鼻子
         const isAttacking = unitData.state === 'ATTACK';
-        const legOffset = isMoving ? Math.sin(t * moveFreq) * 4 : 0;
+        const legOffset = isMoving ? Math.sin(t * moveFreq) * 5 : 0;
 
-        this.setCtxStyle(ctx, color, 1);
-        // 腳 (粗壯)
-        ctx.fillRect(x - 12, y + 5 + legOffset, 8, 12); // 左前
-        ctx.fillRect(x + 4, y + 5 - legOffset, 8, 12);  // 右前
-        ctx.fillRect(x - 8, y + 2 - legOffset, 8, 12);  // 左後
-        ctx.fillRect(x + 0, y + 2 + legOffset, 8, 12);  // 右後
+        // 1. 繪製陰影 (熊比較大，陰影也大)
+        this.setCtxStyle(ctx, 0x000000, 0.25);
+        if (ctx.fillEllipse) ctx.fillEllipse(x, y + 12, 35, 12);
 
-        // 呼吸效果 (熊比較壯碩，呼吸更慢)
-        const breathing = (isMoving || isAttacking) ? 0 : Math.sin(t * breatheFreq * 0.8) * 1.5;
+        // 2. 粗壯的腿
+        this.setCtxStyle(ctx, bodyColor, 1);
+        ctx.fillRect(x - 14, y + 4 + legOffset, 10, 14); // 左前
+        ctx.fillRect(x + 6, y + 4 - legOffset, 10, 14);  // 右前
+        ctx.fillRect(x - 10, y + 0 - legOffset, 10, 14); // 左後
+        ctx.fillRect(x + 2, y + 0 + legOffset, 10, 14);  // 右後
 
+        // 3. 呼吸效果與攻擊衝擊感
+        const breathing = (isMoving || isAttacking) ? 0 : Math.sin(t * breatheFreq * 0.7) * 2;
         const multiplier = CharacterRenderer.getFreqMultiplier(unitData);
-        // 戰鬥頻率基準
         const animWorkFreq = (UI_CONFIG.Animation ? UI_CONFIG.Animation.workFreq : 2);
-        const atkFreq = animWorkFreq * 3 * multiplier;
+        const atkFreq = animWorkFreq * 4 * multiplier;
+        const attackDash = isAttacking ? Math.abs(Math.sin(t * atkFreq)) * 8 : 0;
 
-        // 身體前傾效果
-        const attackDash = isAttacking ? Math.abs(Math.sin(t * atkFreq)) * 6 : 0;
+        // 4. 極其壯碩的身體
+        this.setCtxStyle(ctx, bodyColor, 1);
+        // 身體由兩塊矩形組成，增加厚實感
+        ctx.fillRect(x - 18 + attackDash, y - 12 - breathing, 36, 22 + breathing); // 後軀
+        ctx.fillRect(x - 16 + attackDash, y - 18 - breathing, 32, 22 + breathing); // 肩膀隆起
 
-        // 身體 (壯碩)
-        ctx.fillRect(x - 15 + attackDash, y - 10 - (breathing / 2), 30, 20 + breathing);
+        // 5. 圓大的頭部
+        const headBob = isAttacking ? Math.sin(t * atkFreq) * 4 : (isMoving ? Math.sin(t * headBobFreq) * 1.5 : Math.cos(t * breatheFreq * 0.6) * 2);
+        const headX = x + 14 + attackDash;
+        const headY = y - 20 + headBob;
+        
+        ctx.fillRect(headX, headY, 18, 18);
+        
+        // 圓耳朵
+        ctx.fillRect(headX + 2, headY - 4, 5, 5);
+        ctx.fillRect(headX + 11, headY - 4, 5, 5);
 
-        // 頭 (圓大)
-        const headBob = isAttacking ? Math.sin(t * atkFreq) * 3 : (isMoving ? Math.sin(t * headBobFreq) * 1 : Math.cos(t * breatheFreq * 0.6) * 1.5);
-        const headX = x + 10 + attackDash;
-        const headY = y - 15 + headBob;
-        ctx.fillRect(headX, headY, 15, 15);
+        // 6. 鼻子與眼睛 (更顯眼)
+        this.setCtxStyle(ctx, noseColor, 1);
+        ctx.fillRect(headX + 12, headY + 10, 8, 8); // 熊吻
+        this.setCtxStyle(ctx, 0x000000, 1);
+        ctx.fillRect(headX + 10, headY + 6, 3, 3); // 眼睛
 
-        // 熊掌擊打動作 (攻擊時)
+        // 7. 攻擊利爪 (亮白色)
         if (isAttacking) {
-            this.setCtxStyle(ctx, color, 1);
-            ctx.fillRect(headX + 10, headY + 10 + Math.sin(t * atkFreq) * 5, 8, 8);
+            this.setCtxStyle(ctx, 0xffffff, 0.9);
+            const swipe = Math.sin(t * atkFreq) * 8;
+            ctx.fillRect(headX + 15, headY + 15 + swipe, 6, 10);
+            this.setCtxStyle(ctx, 0x000000, 0.2); // 爪痕陰影
+            ctx.fillRect(headX + 22, headY + 18 + swipe, 10, 2);
         }
-
-        // 耳朵 (小而圓)
-        ctx.fillRect(headX + 2, headY - 3, 4, 4);
-        ctx.fillRect(headX + 9, headY - 3, 4, 4);
-
-        // 眼睛
-        this.setCtxStyle(ctx, eyeColor, 1);
-        ctx.fillRect(headX + 8, headY + 5, 2, 2);
     }
 
     static drawTool(ctx, x, y, type, angle) {
