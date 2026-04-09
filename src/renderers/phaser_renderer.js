@@ -13,6 +13,7 @@ export class PhaserRenderer {
             width: 1920,
             height: 1080,
             transparent: true,
+            disableContextMenu: true,
             scene: [MainScene],
             fps: {
                 target: 60,

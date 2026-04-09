@@ -45,6 +45,12 @@ export class InputSystem {
 
     onPointerDown(pointer) {
         if (pointer.button === 2) {
+            // [核心防護] 過濾 Browser/Phaser 合成的假性 Down (例如跨越 UI 回到畫布時產生的 pointerover/pointerenter)
+            // 確保只有真實的物理點擊才算是拖曳起點，防止干擾連續拖曳狀態
+            if (pointer.event && pointer.event.type !== 'pointerdown' && pointer.event.type !== 'mousedown') {
+                return;
+            }
+
             const cam = this.scene.cameras.main;
             this.rightDownInfo = { 
                 id: pointer.id, 
@@ -85,6 +91,12 @@ export class InputSystem {
     onPointerUp(pointer) {
         if (pointer.button === 2) {
             if (!this.rightDownInfo) return;
+
+            // [核心防護] 檢查這是否只是「移出畫布」進入 UI 面板所引發的假性放開 (pointerout)
+            // e.buttons 的二進位表示目前實際按壓的按鈕，2 代表右鍵仍被硬體按死著
+            if (pointer.event && (pointer.event.buttons & 2) !== 0) {
+                return; // 直接無視，維持拖曳狀態！讓玩家可以在 UI 面板上順滑拖移而不中斷
+            }
 
             const now = Date.now();
 
@@ -129,12 +141,22 @@ export class InputSystem {
 
             // 3. 核心判定：判定為移動才執行動作
             if (canMove) {
-                if (GameEngine.state.placingType) {
+                if (GameEngine.state.placingType || GameEngine.state.rightClickStartedInPlacementMode) {
                     GameEngine.addLog(`[Input] 單擊：取消建築`, 'INPUT');
                     if (this.scene.cancelPlacement) {
                         this.scene.cancelPlacement();
+                    } else if (window.UIManager) {
+                        window.UIManager.cancelBuildingMode();
                     } else {
                         GameEngine.state.placingType = null;
+                    }
+                } else if (window.UIManager && window.UIManager.activeMenuEntity) {
+                    const ent = window.UIManager.activeMenuEntity;
+                    const bCfg = GameEngine.state.buildingConfigs[ent.type];
+                    if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
+                        this.handleRallyPoint(pointer, ent, bCfg);
+                    } else {
+                        this.handleUnitMove(pointer);
                     }
                 } else {
                     this.handleUnitMove(pointer);
@@ -144,6 +166,31 @@ export class InputSystem {
             // 清理狀態供下次使用
             this.rightDownInfo = null;
             this.didMove = false;
+            GameEngine.state.rightClickStartedInPlacementMode = false;
+        }
+    }
+
+    handleRallyPoint(pointer, ent, bCfg) {
+        const pos = { x: pointer.worldX, y: pointer.worldY };
+        let uw = 1, uh = 1;
+        if (bCfg.size) {
+            const m = bCfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
+            if (m) { uw = parseInt(m[1]); uh = parseInt(m[2]); }
+        }
+        const halfW = (uw * GameEngine.TILE_SIZE) / 2;
+        const halfH = (uh * GameEngine.TILE_SIZE) / 2;
+
+        const isInside = pos.x >= ent.x - halfW && pos.x <= ent.x + halfW &&
+            pos.y >= ent.y - halfH && pos.y <= ent.y + halfH;
+
+        if (isInside) {
+            ent.rallyPoint = null;
+            GameEngine.addLog(`已取消建築集結點。`);
+            if (window.UIManager) window.UIManager.updateValues(true);
+        } else {
+            ent.rallyPoint = pos;
+            GameEngine.addLog(`${bCfg.name} 集結點已設定：(${pos.x.toFixed(0)}, ${pos.y.toFixed(0)})`);
+            if (window.UIManager) window.UIManager.updateValues(true);
         }
     }
 

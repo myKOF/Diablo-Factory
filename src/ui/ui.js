@@ -65,13 +65,9 @@ export class UIManager {
             if (e.key === "Escape") this.cancelBuildingMode();
         });
         window.addEventListener("contextmenu", (e) => {
-            if (GameEngine.state.placingType || this.activeMenuEntity) {
-                e.preventDefault();
-                // 如果偵測到剛發生過相機拖動，則不執行取消建築模式的操作
-                const scene = window.PhaserScene;
-                const wasDragging = scene && scene.lastDragTime && (Date.now() - scene.lastDragTime < 100);
-                if (GameEngine.state.placingType && !wasDragging) this.cancelBuildingMode();
-            }
+            // [核心修復] 無條件封鎖原生右鍵選單，防止它在一般地面右鍵（移動指令）時彈出並打斷事件流
+            // 所有右鍵遊戲邏輯（取消建築、設定集結點、單位移動）已全數交由 InputSystem.js 處理
+            e.preventDefault();
         });
 
         setInterval(() => this.updateValues(), 500);
@@ -807,62 +803,8 @@ export class UIManager {
     static handleWorldMouseUp(e) {
         // [右鍵邏輯專區]
         if (e.button === 2) {
-            if (this.rightMouseDownPos) {
-                const now = Date.now();
-                const drift = Math.hypot(e.clientX - this.rightMouseDownPos.x, e.clientY - this.rightMouseDownPos.y);
-                const duration = now - (this.rightMouseDownTime || 0);
-                this.rightMouseDownPos = null;
-
-                // [核心修復] 僅在「右鍵單擊」而非「右鍵移動」(拖動畫框) 時取消建造模式
-                if (GameEngine.state.rightClickStartedInPlacementMode) {
-                    const scene = window.PhaserScene;
-                    const wasDragging = scene && scene.lastDragTime && (Date.now() - scene.lastDragTime < 100);
-
-                    if (drift < 10 && !wasDragging) {
-                        this.cancelBuildingMode();
-                    }
-                    GameEngine.state.rightClickStartedInPlacementMode = false;
-                    return;
-                }
-
-                // 核心同步：判斷 Phaser 相機是否在移動中 (依據 MainScene.js 邏輯)
-                const scene = window.PhaserScene;
-                const wasDragging = scene && scene.lastDragTime && (now - scene.lastDragTime < 100);
-
-                // 如果位移超過 10 或在過去 0.1 秒內發生過畫面拖移，則判定為拖移而非指令
-                if (drift < 10 && !wasDragging) {
-                    const ent = this.activeMenuEntity;
-                    const bCfg = ent ? GameEngine.state.buildingConfigs[ent.type] : null;
-
-                    // 1. 設定/取消集結點
-                    if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
-                        const pos = this.getWorldMousePos(e.clientX, e.clientY);
-                        let uw = 1, uh = 1;
-                        if (bCfg.size) {
-                            const m = bCfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
-                            if (m) { uw = parseInt(m[1]); uh = parseInt(m[2]); }
-                        }
-                        const halfW = (uw * GameEngine.TILE_SIZE) / 2;
-                        const halfH = (uh * GameEngine.TILE_SIZE) / 2;
-
-                        const isInside = pos.x >= ent.x - halfW && pos.x <= ent.x + halfW &&
-                            pos.y >= ent.y - halfH && pos.y <= ent.y + halfH;
-
-                        if (isInside) {
-                            ent.rallyPoint = null;
-                            GameEngine.addLog(`已取消建築集結點。`);
-                            this.updateValues(true);
-                        } else {
-                            ent.rallyPoint = pos;
-                            GameEngine.addLog(`${bCfg.name} 集結點已設定：(${pos.x.toFixed(0)}, ${pos.y.toFixed(0)})`);
-                            this.updateValues(true);
-                        }
-                    } else if (GameEngine.state.placingType) {
-                        // 2. 取消當前的建造預覽
-                        this.cancelBuildingMode();
-                    }
-                }
-            }
+            // 所有右鍵行為（取消建築、設定集結點）已全數整合至 InputSystem.js 處理
+            this.rightMouseDownPos = null;
             return;
         }
 
