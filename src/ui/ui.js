@@ -1047,7 +1047,7 @@ export class UIManager {
         const gOffset = hCfg.actionGridOffset || { x: 0, y: 0 };
         // [修正] 改為 nowrap 並使用 space-evenly，確保縮減寬度時，間距會同比調整，且永不換行
         const gridJustify = isConfirming ? "center" : "space-evenly";
-        const gridGap = isConfirming ? "20px" : "4px"; 
+        const gridGap = isConfirming ? "20px" : "4px";
         let gridHtml = `<div id="action_button_grid" style="display:flex; flex-direction:row; flex-wrap:nowrap; gap:${gridGap}; justify-content:${gridJustify}; align-items:center; transition: all 0.3s; width: 100%; transform: translate(${gOffset.x}px, ${gOffset.y}px);">`;
 
         if (isConfirming) {
@@ -1093,7 +1093,7 @@ export class UIManager {
         gridHtml += `</div>`; // 結束指令按鈕格網 (action_button_grid)
 
         // [修正] 人數控制項移出 action_button_grid，使其獨立置中且不被 actionGridOffset 偏移影響
-        if (!isConfirming && ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(entity.type) && !entity.isUnderConstruction) {
+        if (!isConfirming && ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(entity.type) && !entity.isUnderConstruction) {
             const current = GameEngine.state.units.villagers.filter(v => v.config?.type === 'villagers' && v.assignedWarehouseId === eid).length;
             const wcOff = hCfg.workerControlOffset || { x: 0, y: 15 };
             gridHtml += `
@@ -1136,8 +1136,12 @@ export class UIManager {
                             ${leftHeader}
                             <div style="display: flex; flex-direction: column; align-items: flex-end;">
                                 ${rightHeader}
-                                <div style="height: 32px; display: flex; align-items: center; margin-top: 8px;">
+                                <div style="display: flex; flex-direction: column; align-items: flex-end; margin-top: 8px; gap: 4px;">
                                     ${requirementHtml}
+                                    ${(entity.type === 'farmland' || entity.type === 'tree_plantation') ? `
+                                    <div style="color: #fbc02d; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px black; white-space: nowrap;">
+                                        剩餘量 ${Math.floor(entity.amount || 0)}/${Math.floor(entity.maxAmount || entity.amount || 0)}
+                                    </div>` : ''}
                                 </div>
                             </div>
                         </div>

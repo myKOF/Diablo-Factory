@@ -614,19 +614,20 @@ export class GameEngine {
                     if (clean) prodList = clean.split(',').map(s => s.trim());
                 }
 
-                const cfg = {
-                    name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : model,
-                    desc: (descIdx !== -1 && row[descIdx]) ? row[descIdx].trim() : "",
-                    model: model,
-                    type: type,
-                    lv: lv,
-                    collision: row[idxCol] === '1',
-                    size: row[idxSize] || "{1,1}",
-                    population: parseInt(row[idxPop]) || 0,
-                    costs: this.parseResourceCosts(row[idxNeed]),
-                    maxCount: parseInt(row[idxMax]) || 999,
-                    buildTime: parseFloat(row[idxTime]) || 5,
-                    resourceValue: (idxResourceValue !== -1 && row[idxResourceValue]) ? parseInt(row[idxResourceValue]) : 0,
+                    const resValCosts = this.parseResourceCosts(row[idxResourceValue]);
+                    const cfg = {
+                        name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : model,
+                        desc: (descIdx !== -1 && row[descIdx]) ? row[descIdx].trim() : "",
+                        model: model,
+                        type: type,
+                        lv: lv,
+                        collision: row[idxCol] === '1',
+                        size: row[idxSize] || "{1,1}",
+                        population: parseInt(row[idxPop]) || 0,
+                        costs: this.parseResourceCosts(row[idxNeed]),
+                        maxCount: parseInt(row[idxMax]) || 999,
+                        buildTime: parseFloat(row[idxTime]) || 5,
+                        resourceValue: resValCosts.food || resValCosts.wood || resValCosts.stone || resValCosts.gold || 0,
                     npcProduction: prodList,
                     productionMode: (row[idxProdType] || 'normal').toLowerCase().trim(),
                     // 升級相關
@@ -829,8 +830,8 @@ export class GameEngine {
             });
 
             const reqText = `需 ${this.state.buildingConfigs[targetType]?.name || targetType} ${targetLv} 級`;
-            return { 
-                unlocked: hasRequirement, 
+            return {
+                unlocked: hasRequirement,
                 reason: hasRequirement ? "" : reqText,
                 requirement: { text: reqText, satisfied: hasRequirement }
             };
@@ -895,7 +896,7 @@ export class GameEngine {
 
         entity.isUpgrading = false;
         entity.upgradeProgress = 0;
-        
+
         this.addLog(`${currentCfg.name || entity.type} 升級已取消，資源已退還。`);
         if (window.UIManager) {
             window.UIManager.showWarning("升級已取消，資源已全額退還");
@@ -1377,12 +1378,17 @@ export class GameEngine {
 
                 // 核心修復：如果已有指定目標 (手動指令)，優先前往該目標，而非自動搜尋最近
                 let target = v.targetId;
-                if (!target || target.gx === undefined) {
+                const isEntityResource = target && (target.type === 'farmland' || target.type === 'tree_plantation');
+                
+                if (!target || (target.gx === undefined && !isEntityResource)) {
                     target = this.findNearestResource(searchX, searchY, v.type, v.id);
-                } else {
+                } else if (target.gx !== undefined) {
                     // 檢查指定目標是否還有效 (MapData)
                     const res = this.state.mapData.getResource(target.gx, target.gy);
                     if (!res || res.amount <= 0) target = this.findNearestResource(searchX, searchY, v.type, v.id);
+                } else if (isEntityResource) {
+                    // 實體資源 (農田) 若已枯竭，重新尋找
+                    if (target.amount <= 0) target = this.findNearestResource(searchX, searchY, v.type, v.id);
                 }
 
                 if (target) {
@@ -1669,6 +1675,7 @@ export class GameEngine {
                         v.targetId = null; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
                         this.addLog(`建造者已自動轉為 ${finishedBuilding.name} 的專職員工。`);
                     } else if (type === 'farmland' || type === 'tree_plantation') {
+                        v.assignedWarehouseId = (finishedBuilding.id || `${finishedBuilding.type}_${finishedBuilding.x}_${finishedBuilding.y}`);
                         v.type = (type === 'farmland' ? 'FOOD' : 'WOOD');
                         v.state = 'MOVING_TO_RESOURCE'; v.targetId = finishedBuilding; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
                         v.workOffset = { x: (Math.random() - 0.5) * 50, y: (Math.random() - 0.5) * 50 };
@@ -1678,7 +1685,7 @@ export class GameEngine {
                         if (!GameEngine.assignNextConstructionTask(v)) {
                             this.restoreVillagerTask(v);
                             v.constructionTarget = null;
-                            
+
                             // [核心優化] 多人完工散開邏輯：若回歸閒置狀態，則給予一個隨機的微小位移目標，避免多人擠在同一個點
                             if (v.state === 'IDLE') {
                                 const angle = Math.random() * Math.PI * 2;
@@ -1688,7 +1695,7 @@ export class GameEngine {
                                     y: v.y + Math.sin(angle) * dist
                                 };
                             }
-                            
+
                             this.addLog(`建造清單已清空，工人們嘗試散開並待命。`);
                         }
                     }
@@ -1791,7 +1798,7 @@ export class GameEngine {
 
         // 2. 各倉庫滿員情況 (優先補滿專職位)
         const warehouses = this.state.mapEntities.filter(e =>
-            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(e.type) && !e.isUnderConstruction
+            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(e.type) && !e.isUnderConstruction
         );
 
         if (v.assignedWarehouseId) {
@@ -1813,9 +1820,9 @@ export class GameEngine {
             const winfo = (w.id || `${w.type}_${w.x}_${w.y}`);
             const count = this.state.units.villagers.filter(vi => vi.assignedWarehouseId === winfo).length;
             if (count < (w.targetWorkerCount || 0)) {
-                const resType = (w.type === 'timber_factory' ? 'WOOD' :
+                const resType = (w.type === 'timber_factory' || w.type === 'tree_plantation' ? 'WOOD' :
                     (w.type === 'stone_factory' ? 'STONE' :
-                        (w.type === 'barn' ? 'FOOD' : 'GOLD')));
+                        (w.type === 'barn' || w.type === 'farmland' ? 'FOOD' : 'GOLD')));
                 if (this.findNearestResource(w.x, w.y, resType, v.id)) {
                     v.assignedWarehouseId = winfo;
                     v.type = resType;
@@ -2231,6 +2238,20 @@ export class GameEngine {
         if (targetType === 0) return null;
 
         const TS = this.TILE_SIZE;
+        
+        // --- 核心優化：優先搜尋建築實體資源 (農田/樹木田) ---
+        const entities = this.state.mapEntities.filter(e => 
+            !e.isUnderConstruction && e.amount > 0 &&
+            ((targetType === 3 && e.type === 'farmland') || (targetType === 1 && e.type === 'tree_plantation'))
+        );
+        if (entities.length > 0) {
+            entities.sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y));
+            const nearestEnt = entities[0];
+            if (Math.hypot(nearestEnt.x - x, nearestEnt.y - y) < 800) {
+                return nearestEnt;
+            }
+        }
+
         const gx = Math.floor(x / TS);
         const gy = Math.floor(y / TS);
 
@@ -2299,7 +2320,7 @@ export class GameEngine {
 
     static updateWorkerAssignments() {
         const warehouses = this.state.mapEntities.filter(e =>
-            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(e.type) && !e.isUnderConstruction
+            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(e.type) && !e.isUnderConstruction
         );
 
         // 1. 回收所有失效倉庫的工人，並收集有效的分配情況
@@ -2357,11 +2378,15 @@ export class GameEngine {
                 if (workers.length < target && allIdle.length > 0) {
                     const v = allIdle.shift();
                     v.assignedWarehouseId = wid;
-                    v.type = (entity.type === 'timber_factory' ? 'WOOD' :
+                    v.type = (entity.type === 'timber_factory' || entity.type === 'tree_plantation' ? 'WOOD' :
                         (entity.type === 'stone_factory' ? 'STONE' :
-                            (entity.type === 'barn' ? 'FOOD' : 'GOLD')));
+                            (entity.type === 'barn' || entity.type === 'farmland' ? 'FOOD' : 'GOLD')));
                     v.state = 'MOVING_TO_RESOURCE';
-                    v.targetId = null;
+                    if (entity.type === 'farmland' || entity.type === 'tree_plantation') {
+                        v.targetId = entity;
+                    } else {
+                        v.targetId = null;
+                    }
                     v.pathTarget = null;
                     workers.push(v);
                     needsRefill = true;
@@ -2550,7 +2575,10 @@ export class GameEngine {
             x: x, y: y, name: "待施工",
             isUnderConstruction: true, buildProgress: 0,
             buildTime: Math.max(1, cfg.buildTime || 5), // 防止 0 或 NaN
-            targetWorkerCount: ['timber_factory', 'stone_factory', 'barn', 'quarry', 'gold_mining_factory'].includes(type) ? 1 : 0,
+            amount: cfg.resourceValue || 0,
+            maxAmount: cfg.resourceValue || 0,
+            isResource: (type === 'farmland' || type === 'tree_plantation'),
+            targetWorkerCount: (type === 'farmland' || type === 'tree_plantation') ? 1 : (['timber_factory', 'stone_factory', 'barn', 'quarry', 'gold_mining_factory'].includes(type) ? 1 : 0),
             ...(cfg.npcProduction && cfg.npcProduction.length > 0 ? { queue: [], productionTimer: 0 } : {})
         };
         this.state.mapEntities.push(newBuilding);

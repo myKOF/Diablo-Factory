@@ -1,4 +1,5 @@
 import { GameEngine } from "./game_systems.js";
+import { UI_CONFIG } from "../ui/ui_config.js";
 
 /**
  * InputSystem: 簡約邏輯穩定版
@@ -14,7 +15,8 @@ export class InputSystem {
         }
         window._globalInputSystem = this;
 
-        this.DRAG_THRESHOLD = 5;
+        // 從 UI_CONFIG 讀取最小拖動距離設定，預設為 5
+        this.DRAG_THRESHOLD = (UI_CONFIG && UI_CONFIG.Interaction) ? UI_CONFIG.Interaction.minDragDistance : 5;
         this.didMove = false; // 關鍵：標記本次右鍵按下後是否「動過」
         this.rightDownInfo = null;
         this.lastX = 0;

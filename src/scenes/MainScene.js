@@ -287,7 +287,9 @@ export class MainScene extends Phaser.Scene {
 
         // 1. 識別目標類別
         if (clickedTarget) {
-            const isResource = !!(clickedTarget.gx !== undefined && clickedTarget.gy !== undefined) || (clickedTarget.resourceType);
+            const isResource = !!(clickedTarget.gx !== undefined && clickedTarget.gy !== undefined) || 
+                               (clickedTarget.resourceType) || 
+                               (clickedTarget.type === 'farmland' || clickedTarget.type === 'tree_plantation');
             const isEnemy = (clickedTarget.config && clickedTarget.config.camp === 'enemy') || clickedTarget.camp === 'enemy' || clickedTarget.isEnemy;
 
             // [核心修復] 不再強制強制切換為目標中心座標。使用帶有偏移的點擊座標 (wx, wy) 作為基準，
@@ -1346,7 +1348,8 @@ export class MainScene extends Phaser.Scene {
         }
 
         // 3. 數量標籤 (Amount) - 僅資源使用 MapResourceLabels.amount
-        if (!isBuilding && showLabels && ent.amount !== undefined) {
+        const isFarmlandType = ent.type === 'farmland' || ent.type === 'tree_plantation';
+        if ((!isBuilding || isFarmlandType) && showLabels && ent.amount !== undefined) {
             let amtTxt = this.resourceLabels.get(id);
             const amtStr = `[${Math.floor(ent.amount)}]`;
             if (!amtTxt) {

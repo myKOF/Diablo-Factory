@@ -15,7 +15,7 @@
 export const UI_CONFIG = {
     // -- 全局交互設定 ----------------------------------------------
     Interaction: {
-        minDragDistance: 30,        // 最小拖動位移（像素），低於此值將被視為點擊，不觸發畫面拖動
+        minDragDistance: 10,        // 最小拖動位移（像素），低於此值將被視為點擊，不觸發畫面拖動
     },
 
     // -- 邊緣捲動系統 (EdgeScrolling) ------------------------------
@@ -152,9 +152,9 @@ export const UI_CONFIG = {
         },
         level: {
             fontSize: "14px Arial",
-            color: "#ffffff",
+            color: "#ccf9ffff",
             offsetX: 0,
-            offsetY: -22,
+            offsetY: -20,
             outlineColor: "#000000",
             outlineAlpha: 0.8,
             outlineWidth: 2
