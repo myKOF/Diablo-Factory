@@ -305,7 +305,7 @@ export class MainScene extends Phaser.Scene {
                 unit.idleTarget = { x: finalTx, y: finalTy };
                 unit.isPlayerLocked = true;
                 unit.chaseFrame = 999;
-                GameEngine.addLog(`[命令] ${unit.configName} 鎖定目標 ${clickedTarget.configName || '敵人'} 並進入追擊。`);
+                GameEngine.addLog(`[命令] ${unit.configName} 鎖定目標 ${clickedTarget.configName || '敵人'} 並進入追擊。`, 'INPUT');
             } else if (clickedTarget.isUnderConstruction && unit.config.type === 'villagers') {
                 // 我方工人右鍵點施工中建築：開始建造 (一人一間配給邏輯由外層 dispatcher 處理)
                 unit.state = 'MOVING_TO_CONSTRUCTION';
@@ -317,7 +317,7 @@ export class MainScene extends Phaser.Scene {
                 // [視覺優化] 同步選取該建築，顯示選取框與取消按鈕
                 if (window.UIManager) window.UIManager.showContextMenu(clickedTarget);
 
-                GameEngine.addLog(`[命令] 工人 ${unit.id} 前往建設 ${clickedTarget.name || clickedTarget.type}。`, 'COMMON');
+                GameEngine.addLog(`[命令] 工人 ${unit.id} 前往建設 ${clickedTarget.name || clickedTarget.type}。`, 'INPUT');
                 return;
             } else if (isResource && unit.config.type === 'villagers') {
                 // 我方工人右鍵點資源：採集該資源
@@ -326,7 +326,7 @@ export class MainScene extends Phaser.Scene {
                 unit.targetId = clickedTarget;
                 unit.pathTarget = null;
                 unit.isPlayerLocked = true;
-                GameEngine.addLog(`[命令] ${unit.configName} 前往採集 ${unit.type}。`);
+                GameEngine.addLog(`[命令] ${unit.configName} 前往採集 ${unit.type}。`, 'INPUT');
                 return; // 採集進入獨立流程
             } else {
                 // 其它情況：點資源(非工人)、障礙、友軍建築
@@ -344,7 +344,7 @@ export class MainScene extends Phaser.Scene {
                 }
                 unit.targetId = null;
                 unit.forceFocus = false;
-                GameEngine.addLog(`[命令] ${unit.configName} 移動至目標附近。`);
+                GameEngine.addLog(`[命令] ${unit.configName} 移動至目標附近。`, 'INPUT');
             }
         } else {
             // 我方單位右鍵點地板：移動至該位置
@@ -365,7 +365,7 @@ export class MainScene extends Phaser.Scene {
             unit.pathTarget = null;
             unit.constructionTarget = null;
             unit.assignedWarehouseId = null;
-            GameEngine.addLog(`[命令] ${unit.configName} 移動至地面。`);
+            GameEngine.addLog(`[命令] ${unit.configName} 移動至地面。`, 'INPUT');
         }
 
         // 2. 執行通用移動狀態設定

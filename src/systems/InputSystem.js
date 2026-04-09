@@ -137,7 +137,7 @@ export class InputSystem {
             const dragStatus = isFinalDrag ? "判定為拖動" : "判定為點擊";
             const moveStatus = canMove ? "可移動" : "不可移動";
 
-            GameEngine.addLog(`[Input-${this.instanceId}] 右鍵放開: ${panStatus} | ${dragStatus} | ${moveStatus} (Dist:${totalDist.toFixed(1)}, Time:${duration}ms, CD:${timeSinceLastDrag}ms)`, 'COMMON');
+            GameEngine.addLog(`[Input-${this.instanceId}] 右鍵放開: ${panStatus} | ${dragStatus} | ${moveStatus} (Dist:${totalDist.toFixed(1)}, Time:${duration}ms, CD:${timeSinceLastDrag}ms)`, 'INPUT');
 
             // 3. 核心判定：判定為移動才執行動作
             if (canMove) {

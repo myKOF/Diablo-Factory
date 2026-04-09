@@ -280,7 +280,7 @@ export class UIManager {
         const filterMenu = document.createElement("div");
         filterMenu.id = "log_filter_menu";
         filterMenu.style.cssText = `
-            position: absolute; bottom: 30px; right: 0; width: 120px;
+            position: absolute; bottom: 30px; right: 0; min-width: 140px; white-space: nowrap;
             background: ${this.hexToRgba(logCfg.bgColor, 0.95)}; border: 1.5px solid ${logCfg.borderColor};
             border-radius: 4px; padding: 10px; display: none; flex-direction: column; gap: 8px;
             z-index: 400; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
