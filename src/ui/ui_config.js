@@ -4,8 +4,8 @@
  * 所有與遊戲 HUD、面板、標籤有關的樣式數值都集中在這裡。
  * 修改此處的數值可直接調整 UI 位置、大小、顏色，
  * 無需改動任何渲染邏輯，方便快速做視覺微調。
- 
-    [錨點對齊]
+ *
+ * [錨點對齊]
  * 上方置中	anchor: "TOP_CENTER"
  * 下方置中	anchor: "BOTTOM_CENTER"
  * 左上角	anchor: "TOP_LEFT"
@@ -13,12 +13,12 @@
  * 畫面正中央	anchor: "CENTER"
  */
 export const UI_CONFIG = {
-    // ── 全局交互設定 ──────────────────────────────────────────────
+    // -- 全局交互設定 ----------------------------------------------
     Interaction: {
-        minDragDistance: 15,        // 最小拖動位移（像素），低於此值將被視為點擊，不觸發畫面拖動
+        minDragDistance: 30,        // 最小拖動位移（像素），低於此值將被視為點擊，不觸發畫面拖動
     },
 
-    // ── 邊緣捲動系統 (EdgeScrolling) ──────────────────────────────
+    // -- 邊緣捲動系統 (EdgeScrolling) ------------------------------
     EdgeScrolling: {
         enabled: true,
         edgeWidth: 50,              // 邊緣感測寬度 (像素)
@@ -26,7 +26,7 @@ export const UI_CONFIG = {
         mapCenter: { x: 960, y: 560 }
     },
 
-    // ── 頂部資源列 ────────────────────────────────────────────────
+    // -- 頂部資源列 ------------------------------------------------
     ResourceBar: {
         anchor: "TOP_CENTER",  // 錨點：頂部置中
         offsetX: 0,            // 水平偏移（像素）
@@ -45,7 +45,7 @@ export const UI_CONFIG = {
             villagerCount: "👨‍🌾 村民："
         }
     },
-    // ── 左側建築操作面板 ─────────────────────────────────────────
+    // -- 左側建築操作面板 -----------------------------------------
     BuildingPanel: {
         anchor: "TOP_LEFT",               // 錨點：左上角
         offsetX: 30,                       // 距左側邊界的距離（像素）
@@ -74,7 +74,7 @@ export const UI_CONFIG = {
         ]
     },
 
-    // ── 右下角日誌通知欄 ─────────────────────────────────────────
+    // -- 右下角日誌通知欄 -----------------------------------------
     LogPanel: {
         anchor: "BOTTOM_RIGHT",
         offsetX: 20,
@@ -89,7 +89,7 @@ export const UI_CONFIG = {
         shadowColor: "#000000",
         shadowAlpha: 0.8
     },
-    // ── 中央警告提示 (HUD) ───────────────────────────────────────
+    // -- 中央警告提示 (HUD) ---------------------------------------
     WarningHUD: {
         anchor: "TOP_CENTER",
         offsetX: 0,
@@ -104,7 +104,7 @@ export const UI_CONFIG = {
         padding: "20px 50px",
         duration: 2000
     },
-    // ── 地圖資源實體標籤（MapResourceLabels）───────────────────────
+    // -- 地圖資源實體標籤（MapResourceLabels）-----------------------
     MapResourceLabels: {
         name: {
             fontSize: "bold 13px Arial",
@@ -139,7 +139,28 @@ export const UI_CONFIG = {
             outlineWidth: 3
         }
     },
-    // ── 自然資源渲染配置（ResourceRenderer）────────────────────
+    // -- 大地圖建築標籤 (MapBuildingLabels) -----------------------
+    MapBuildingLabels: {
+        name: {
+            fontSize: "bold 15px Arial",
+            color: "#fbc02d",               // 建築名稱顏色 (琥珀黃)
+            offsetX: 0,
+            offsetY: 0,
+            outlineColor: "#000000",
+            outlineAlpha: 0.8,
+            outlineWidth: 3
+        },
+        level: {
+            fontSize: "14px Arial",
+            color: "#ffffff",
+            offsetX: 0,
+            offsetY: -22,
+            outlineColor: "#000000",
+            outlineAlpha: 0.8,
+            outlineWidth: 2
+        }
+    },
+    // -- 自然資源渲染配置（ResourceRenderer）--------------------
     ResourceRenderer: {
         Tree: {
             trunkColor: "#5d4037",
@@ -184,7 +205,7 @@ export const UI_CONFIG = {
             }
         }
     },
-    // ── 建築施工進度條（BuildingProgressBar）───────────────────
+    // -- 建築施工進度條（BuildingProgressBar）-------------------
     BuildingProgressBar: {
         widthScale: 0.95,
         height: 8,
@@ -199,7 +220,7 @@ export const UI_CONFIG = {
             town_center: { widthScale: 0.8 }
         }
     },
-    // ── 城鎮中心生產 HUD（ProductionHUD）───────────────────────
+    // -- 城鎮中心生產 HUD（ProductionHUD）-----------------------
     ProductionHUD: {
         width: 85,
         height: 12,
@@ -209,7 +230,7 @@ export const UI_CONFIG = {
         barBlocked: "#f44336",
         badgeBg: "#c62828"
     },
-    // ── 工人村民狀態顏色（VillagerColors）──────────────────────────
+    // -- 工人村民狀態顏色（VillagerColors）--------------------------
     VillagerColors: {
         IDLE: "#42a5f5",
         CONSTRUCTING: "#b939068e",
@@ -223,7 +244,7 @@ export const UI_CONFIG = {
         ENEMY_LABEL: "#ff4444",
         DEFAULT: "#42a5f5"
     },
-    // ── 工人背負資源顏色 (CargoColors) ──────────────────────────────────
+    // -- 工人背負資源顏色 (CargoColors) ----------------------------------
     CargoColors: {
         WOOD: "#1ce026ff",
         STONE: "#acacacff",
@@ -231,14 +252,14 @@ export const UI_CONFIG = {
         GOLD: "#ffe047ff",
         DEFAULT: "#ad9191ff" // 預設籃子顏色
     },
-    // ── NPC及敵人 文字標籤顯示 (NPCLabel) ──────────────────────────────────
+    // -- NPC及敵人 文字標籤顯示 (NPCLabel) ----------------------------------
     NPCLabel: {
         fontSize: "bold 14px Arial",
         enemyColor: "#ff4444",
         offsetY: -35,
         shadowColor: "rgba(0, 0, 0, 0.6)"
     },
-    // ── 地圖格網（Grid）──────────────────────────────────────────
+    // -- 地圖格網（Grid）------------------------------------------
     Grid: {
         mainColor: "#000000",
         mainAlpha: 0.12,
@@ -246,7 +267,7 @@ export const UI_CONFIG = {
         subAlpha: 0.03,
         floorColor: "#ffffff"
     },
-    // ── 設置選單 (SettingsPanel) ──────────────────────────────────
+    // -- 設置選單 (SettingsPanel) ----------------------------------
     SettingsButton: {
         anchor: "TOP_LEFT",
         offsetX: 20, offsetY: 20,
@@ -263,7 +284,7 @@ export const UI_CONFIG = {
         title: "⚙️ 系統核心設置",
         glass: true
     },
-    // ── 座標顯示標籤 (CoordsDisplay) ──────────────────────────────────
+    // -- 座標顯示標籤 (CoordsDisplay) ----------------------------------
     CoordsDisplay: {
         anchor: "TOP_LEFT",
         offsetX: 85, offsetY: 20,
@@ -273,7 +294,7 @@ export const UI_CONFIG = {
         glass: true,
         padding: "0 20px"
     },
-    // ── FPS 顯示 (FPSDisplay) ──────────────────────────────────
+    // -- FPS 顯示 (FPSDisplay) ----------------------------------
     FPSDisplay: {
         anchor: "TOP_LEFT",
         offsetX: 280, offsetY: 20,
@@ -283,7 +304,7 @@ export const UI_CONFIG = {
         glass: true,
         padding: "0 20px"
     },
-    // ── 村莊中心指針 (TownCenterPointer) ──────────────────────────
+    // -- 村莊中心指針 (TownCenterPointer) --------------------------
     TownCenterPointer: {
         width: 76, height: 76,
         fontSize: "38px",
@@ -297,12 +318,12 @@ export const UI_CONFIG = {
         margin: 80,
         panSpeed: 800
     },
-    // ── 尋路系統設定 (Pathfinding) ─────────────────────────────────
+    // -- 尋路系統設定 (Pathfinding) ---------------------------------
     Pathfinding: {
         debugColor: "#00ff00",
         iterationsPerFrame: 1000
     },
-    // ── 建築集結點 (RallyPoint) ────────────────────────────────────
+    // -- 建築集結點 (RallyPoint) ------------------------------------
     RallyPoint: {
         lineColor: "#0026fcff",
         lineAlpha: 1,
@@ -313,7 +334,7 @@ export const UI_CONFIG = {
         circleMaxRadius: 15,
         pulseSpeed: 0.005
     },
-    // ── 單位動畫設定 (Animation) ────────────────────────────────────
+    // -- 單位動畫設定 (Animation) ------------------------------------
     Animation: {
         runningFreq: 5,
         wanderingFreq: 1.5,
@@ -322,13 +343,13 @@ export const UI_CONFIG = {
         armSwingFreqRunning: 5,
         armSwingFreqWandering: 1
     },
-    // ── 單位視界圈 (VisionRange) ──────────────────────────────────
+    // -- 單位視界圈 (VisionRange) ----------------------------------
     VisionRange: {
         lineColor: "#ff0000",
         lineAlpha: 0.8,
         lineWidth: 1.5,
     },
-    // ── 單位血條 (UnitHealthBar) ──────────────────────────────────
+    // -- 單位血條 (UnitHealthBar) ----------------------------------
     UnitHealthBar: {
         width: 40,
         height: 6,
@@ -340,12 +361,12 @@ export const UI_CONFIG = {
         borderAlpha: 0.5,
         showTimer: 1.5
     },
-    // ── 建築碰撞與對齊設置 (BuildingCollision) ─────────────────────────
+    // -- 建築碰撞與對齊設置 (BuildingCollision) -------------------------
     BuildingCollision: {
         buffer: 10,
         feetOffset: 8
     },
-    // ── 尋路目標提示 (PathfindingTarget) ──────────────────────────
+    // -- 尋路目標提示 (PathfindingTarget) --------------------------
     PathfindingTarget: {
         enemyColor: "#ff4444",
         floorColor: "#00e5ff",
@@ -355,7 +376,7 @@ export const UI_CONFIG = {
         alpha: 0.7,
         clickEffectDuration: 500
     },
-    // ── 資源選取與描邊效果 (ResourceSelection) ──────────────────────────
+    // -- 資源選取與描邊效果 (ResourceSelection) --------------------------
     ResourceSelection: {
         glowColor: "#00ff0dd5",          // 選取發光顏色
         targetColor: "#00ff0dd5",        // 工人目標發光顏色
@@ -367,7 +388,7 @@ export const UI_CONFIG = {
         selectionScale: 1,           // 僅縮放發光外框的大小，不改變物體圖形
         depth: 15                      // 顯示深度
     },
-    // ── 建築指令選單 ───────────────────────────
+    // -- 建築指令選單 ---------------------------
     ActionMenu: {
         anchor: "BOTTOM_CENTER",         // 錨點位置 (底部置中)
         offsetX: 0,                      // 水平偏移
@@ -379,14 +400,14 @@ export const UI_CONFIG = {
         shadowColor: "#000000",          // 陰影顏色
         shadowAlpha: 0.8                 // 陰影透明度
     },
-    // ── 建築指令選單標頭 (ActionMenuHeader) ───────────────────
+    // -- 建築指令選單標頭 (ActionMenuHeader) --------------------------
     ActionMenuHeader: {
         levelFontSize: "20px",          // 大等級文字
         nameFontSize: "20px",           // 建築名稱文字
         nameColor: "#fbc02d",           // 建築名稱顏色
         requirementFontSize: "15px",    // 升級條件文字大小
         requirementColor: "#ff9100ff",    // 升級條件顏色
-        // ── 升級資訊區尺寸 (Upgrade Info Panel) ──
+        // -- 升級資訊區尺寸 (Upgrade Info Panel) --
         upgradeInfoWidth: 230,          // 升級框寬度
         upgradeInfoHeight: 60,          // 升級框高度
         upgradeInfoPadding: "0 8px",   // 內部間距 (第一個數字是上下、第二個是左右)
@@ -394,13 +415,13 @@ export const UI_CONFIG = {
         upgradeInfoCostFontSize: "11px",  // 資源消耗數字字體大小
         upgradeInfoResourceGap: 2,     // 每個資源之間的間隙
         upgradeBtnSize: 46,             // 升級按鈕大小 (正方形)
-        // ── 區塊偏移自訂 (Offsets) ──
+        // -- 區塊偏移自訂 (Offsets) --
         leftOffset: { x: 0, y: 0 },     // 左側標題區偏移
         rightOffset: { x: 0, y: -5 },    // 右側升級框區偏移
         requirementOffset: { x: -10, y: -20 }, // 升級條件文字偏移
         actionGridOffset: { x: 0, y: 5 },  // 指令按鈕區偏移
         workerControlOffset: { x: 0, y: 8 }, // 採集人數面板偏移 (當錨點為 CENTER 時)
-        // ── 其他設定 ──
+        // -- 其他設定 --
         upgradeBtnBg: "#4caf50",         // 升級按鈕背景色
         upgradeBtnHoverBg: "#66bb6a",    // 懸停色
         upgradeBtnShadow: "0 4px 12px rgba(76, 175, 80, 0.3)",
@@ -409,7 +430,7 @@ export const UI_CONFIG = {
         cancelBtnBg: "#d32f2f",         // 取消按鈕背景色
         cancelBtnHoverBg: "#f44336",    // 取消按鈕懸停色
         cancelBtnFontSize: "13px",      // 取消按鈕字體大小
-        // ── 升級進度條顏色 ──
+        // -- 升級進度條顏色 --
         progressColorStart: "#4caf50",  // 選單內進度條漸層起點
         progressColorEnd: "#81c784",    // 選單內進度條漸層終點
         worldProgressColor: "#4caf50",  // 建築物上方進度條顏色

@@ -1269,11 +1269,14 @@ export class MainScene extends Phaser.Scene {
     }
 
     updateEntityLabel(id, ent) {
-        const cfg = UI_CONFIG.MapResourceLabels;
+        const resCfg = UI_CONFIG.MapResourceLabels;
+        const bldCfg = UI_CONFIG.MapBuildingLabels; // 使用專屬建築標籤配置
         const config = GameEngine.state.buildingConfigs[ent.type];
         const isBuilding = !!config;
 
+        // 建築標籤恆顯示，資源標籤依據設定開關
         const showLabels = isBuilding ? true : GameEngine.state.settings.showResourceInfo;
+        const cfg = isBuilding ? bldCfg : resCfg; // 根據類型切換配置來源
 
         if (!this._cachedLabelValues) this._cachedLabelValues = new Map();
         let cache = this._cachedLabelValues.get(id);
@@ -1282,11 +1285,11 @@ export class MainScene extends Phaser.Scene {
             this._cachedLabelValues.set(id, cache);
         }
 
-        // 1. 取得視覺物件中心點 (世界座標直接就是中心)
+        // 取得物件中心點
         const visualX = Math.round(ent.x);
         const visualY = Math.round(ent.y);
 
-        // 2. 名稱標籤 (Name)
+        // 1. 名稱標籤 (Name)
         const nameStr = ent.isUnderConstruction ? "施工中" : (ent.name || ent.type);
         let nameTxt = this.nameLabels.get(id);
         if (!nameTxt) {
@@ -1300,75 +1303,73 @@ export class MainScene extends Phaser.Scene {
             this.nameLabels.set(id, nameTxt);
         }
 
-        if (cache.name !== nameStr) {
-            nameTxt.setText(nameStr);
-            cache.name = nameStr;
+        if (showLabels) {
+            nameTxt.setVisible(true);
+            const ox = cfg.name.offsetX || 0;
+            const oy = cfg.name.offsetY || 0;
+            nameTxt.setPosition(visualX + ox, visualY + oy);
+            if (cache.name !== nameStr) {
+                nameTxt.setText(nameStr);
+                cache.name = nameStr;
+            }
+        } else {
+            nameTxt.setVisible(false);
         }
-        const nOffY = isBuilding ? (cfg.name.buildingOffsetY || -15) : (cfg.name.offsetY || -45);
-        const tx = visualX + (cfg.name.offsetX || 0);
-        const ty = visualY + nOffY;
-        if (nameTxt.x !== tx || nameTxt.y !== ty) {
-            nameTxt.setPosition(tx, ty);
-        }
-        if (nameTxt.visible !== showLabels) nameTxt.setVisible(showLabels);
 
-        // 3. 等級標籤 (Level)
-        let lvlTxt = this.levelLabels.get(id);
+        // 2. 等級標籤 (Level)
         const currentLv = ent.lv || ent.level;
-        if (currentLv !== undefined) {
-            const levelStr = `Lv.${currentLv}`;
-            if (!lvlTxt) {
-                lvlTxt = this.add.text(visualX, visualY, levelStr, {
+        // 修正：顯示所有帶有等級的物件，不再過濾 Lv.1
+        const showLevel = showLabels && (isBuilding || currentLv !== undefined);
+        let lvTxt = this.levelLabels.get(id);
+        if (showLevel) {
+            const lvStr = `Lv.${currentLv || 1}`;
+            if (!lvTxt) {
+                lvTxt = this.add.text(visualX, visualY, lvStr, {
                     font: cfg.level.fontSize,
                     fill: cfg.level.color,
                     align: 'center'
                 }).setOrigin(0.5, 0.5);
-                lvlTxt.setStroke(this.hexToCssRgba(cfg.level.outlineColor, cfg.level.outlineAlpha), cfg.level.outlineWidth);
-                lvlTxt.setDepth(50);
-                this.levelLabels.set(id, lvlTxt);
+                lvTxt.setStroke(this.hexToCssRgba(cfg.level.outlineColor, cfg.level.outlineAlpha), cfg.level.outlineWidth);
+                lvTxt.setDepth(51);
+                this.levelLabels.set(id, lvTxt);
             }
-            if (cache.level !== levelStr) {
-                lvlTxt.setText(levelStr);
-                cache.level = levelStr;
+            lvTxt.setVisible(true);
+            const lox = cfg.level.offsetX || 0;
+            const loy = cfg.level.offsetY || 0;
+            lvTxt.setPosition(visualX + lox, visualY + loy);
+            if (cache.level !== lvStr) {
+                lvTxt.setText(lvStr);
+                cache.level = lvStr;
             }
-            const lOffY = isBuilding ? (cfg.level.buildingLevelOffsetY || -35) : (cfg.level.offsetY || -65);
-            const ltx = visualX + (cfg.level.offsetX || 0);
-            const lty = visualY + lOffY;
-            if (lvlTxt.x !== ltx || lvlTxt.y !== lty) {
-                lvlTxt.setPosition(ltx, lty);
-            }
-            if (lvlTxt.visible !== showLabels) lvlTxt.setVisible(showLabels);
-        } else if (lvlTxt && lvlTxt.visible) {
-            lvlTxt.setVisible(false);
+        } else if (lvTxt) {
+            lvTxt.setVisible(false);
         }
 
-        // 3. 數量標籤 (Amount)
-        let amtTxt = this.resourceLabels.get(id);
-        if (ent.amount !== undefined) {
-            const amountVal = Math.floor(ent.amount);
-            const amountStr = `(${amountVal})`;
+        // 3. 數量標籤 (Amount) - 僅資源使用 MapResourceLabels.amount
+        if (!isBuilding && showLabels && ent.amount !== undefined) {
+            let amtTxt = this.resourceLabels.get(id);
+            const amtStr = `[${Math.floor(ent.amount)}]`;
             if (!amtTxt) {
-                amtTxt = this.add.text(visualX, visualY, amountStr, {
-                    font: cfg.amount.fontSize,
-                    fill: cfg.amount.color,
+                amtTxt = this.add.text(visualX, visualY, amtStr, {
+                    font: resCfg.amount.fontSize,
+                    fill: resCfg.amount.color,
                     align: 'center'
                 }).setOrigin(0.5, 0.5);
-                amtTxt.setStroke(this.hexToCssRgba(cfg.amount.outlineColor, cfg.amount.outlineAlpha), cfg.amount.outlineWidth);
-                amtTxt.setDepth(50);
+                amtTxt.setStroke(this.hexToCssRgba(resCfg.amount.outlineColor, resCfg.amount.outlineAlpha), resCfg.amount.outlineWidth);
+                amtTxt.setDepth(49);
                 this.resourceLabels.set(id, amtTxt);
             }
-            if (cache.amount !== amountVal) {
-                amtTxt.setText(amountStr);
-                cache.amount = amountVal;
+            amtTxt.setVisible(true);
+            const aox = resCfg.amount.offsetX || 0;
+            const aoy = resCfg.amount.offsetY || 0;
+            amtTxt.setPosition(visualX + aox, visualY + aoy);
+            if (cache.amount !== ent.amount) {
+                amtTxt.setText(amtStr);
+                cache.amount = ent.amount;
             }
-            const atx = visualX + (cfg.amount.offsetX || 0);
-            const aty = visualY + (cfg.amount.offsetY || 0);
-            if (amtTxt.x !== atx || amtTxt.y !== aty) {
-                amtTxt.setPosition(atx, aty);
-            }
-            if (amtTxt.visible !== showLabels) amtTxt.setVisible(showLabels);
-        } else if (amtTxt && amtTxt.visible) {
-            amtTxt.setVisible(false);
+        } else {
+            const amtTxt = this.resourceLabels.get(id);
+            if (amtTxt) amtTxt.setVisible(false);
         }
     }
 
