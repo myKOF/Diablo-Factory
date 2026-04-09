@@ -46,8 +46,10 @@ export class GameEngine {
         renderVersion: 0, // 用於通知渲染器強行刷新
         pathfinding: null, // 尋路系統實例
         selectedUnitIds: [], // 目前選中的單位 ID 列表
+        selectedBuildingIds: [], // 目前選中的建築 ID 列表
         selectedResourceId: null, // 目前選中的資源 ID (gx_gy)
         lastSelectedUnitId: null, // 上一次選中的單位 ID (用於雙擊檢測)
+        lastSelectedBuildingId: null, // 上一次選中的建築 ID (用於雙擊檢測)
         lastSelectionTime: 0, // 上一次選中的時間 (用於雙擊檢測)
         mapData: null // 大地圖數據系統實例 (Uint16Array)
     };
@@ -167,27 +169,42 @@ export class GameEngine {
 
                 if (ent.isUnderConstruction || !ent.queue || ent.queue.length === 0) return;
 
+                // [人口邏輯優化] 預先檢查隊列首位單位的具體人口需求
+                const nextConfigName = ent.queue[0];
+                let nextCfg = this.state.npcConfigs[nextConfigName];
+                if (!nextCfg) {
+                    const mappedName = this.state.idToNameMap[nextConfigName];
+                    if (mappedName) nextCfg = this.state.npcConfigs[mappedName];
+                }
+                const unitPop = nextCfg ? (nextCfg.population || 1) : 1;
+                const canSpawn = (currentPop + unitPop) <= maxPop;
+
                 // 處理生產計時
                 if (ent.productionTimer === undefined) ent.productionTimer = 0;
 
-                if (!isPopFull) {
+                // 不論是否能產出，都允許計時器跑完到 100% (timer=0)
+                if (ent.productionTimer > 0) {
                     ent.productionTimer -= deltaTime;
-                    this.state.hasHitPopLimit = false;
-                } else if (ent.productionTimer <= 0.1) {
-                    ent.productionTimer = 0;
-                    if (!this.state.hasHitPopLimit) {
-                        this.triggerWarning("2");
-                        this.state.hasHitPopLimit = true;
-                    }
-                } else {
-                    ent.productionTimer -= deltaTime;
+                    if (ent.productionTimer < 0) ent.productionTimer = 0;
                 }
 
-                if (ent.productionTimer <= 0 && !isPopFull) {
-                    const configName = ent.queue.shift();
-                    const success = GameEngine.spawnNPC(configName, ent);
-                    // 更新 HUD 進度條與數字
-                    ent.productionTimer = ent.queue.length > 0 ? 5 : 0;
+                // 如果計時器跑完但人口不夠，則維持在 0 (100% 進度) 並觸發警告
+                if (ent.productionTimer <= 0 && !canSpawn) {
+                    if (!this.state.hasHitPopLimit) {
+                        this.triggerWarning("2"); // 人口已滿
+                        this.state.hasHitPopLimit = true;
+                    }
+                } else if (canSpawn) {
+                    this.state.hasHitPopLimit = false;
+                }
+
+                // 只有當計時器歸零且人口空間足夠時，才真正產出並從隊列移除
+                if (ent.productionTimer <= 0 && canSpawn) {
+                    const configName = ent.queue[0]; // 僅窺視
+                    if (GameEngine.spawnNPC(configName, ent)) {
+                        ent.queue.shift(); // 產出成功才移除
+                        ent.productionTimer = ent.queue.length > 0 ? 5 : 0;
+                    }
                 }
             });
 
@@ -614,20 +631,20 @@ export class GameEngine {
                     if (clean) prodList = clean.split(',').map(s => s.trim());
                 }
 
-                    const resValCosts = this.parseResourceCosts(row[idxResourceValue]);
-                    const cfg = {
-                        name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : model,
-                        desc: (descIdx !== -1 && row[descIdx]) ? row[descIdx].trim() : "",
-                        model: model,
-                        type: type,
-                        lv: lv,
-                        collision: row[idxCol] === '1',
-                        size: row[idxSize] || "{1,1}",
-                        population: parseInt(row[idxPop]) || 0,
-                        costs: this.parseResourceCosts(row[idxNeed]),
-                        maxCount: parseInt(row[idxMax]) || 999,
-                        buildTime: parseFloat(row[idxTime]) || 5,
-                        resourceValue: resValCosts.food || resValCosts.wood || resValCosts.stone || resValCosts.gold || 0,
+                const resValCosts = this.parseResourceCosts(row[idxResourceValue]);
+                const cfg = {
+                    name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : model,
+                    desc: (descIdx !== -1 && row[descIdx]) ? row[descIdx].trim() : "",
+                    model: model,
+                    type: type,
+                    lv: lv,
+                    collision: row[idxCol] === '1',
+                    size: row[idxSize] || "{1,1}",
+                    population: parseInt(row[idxPop]) || 0,
+                    costs: this.parseResourceCosts(row[idxNeed]),
+                    maxCount: parseInt(row[idxMax]) || 999,
+                    buildTime: parseFloat(row[idxTime]) || 5,
+                    resourceValue: resValCosts.food || resValCosts.wood || resValCosts.stone || resValCosts.gold || 0,
                     npcProduction: prodList,
                     productionMode: (row[idxProdType] || 'normal').toLowerCase().trim(),
                     // 升級相關
@@ -1379,7 +1396,7 @@ export class GameEngine {
                 // 核心修復：如果已有指定目標 (手動指令)，優先前往該目標，而非自動搜尋最近
                 let target = v.targetId;
                 const isEntityResource = target && (target.type === 'farmland' || target.type === 'tree_plantation');
-                
+
                 if (!target || (target.gx === undefined && !isEntityResource)) {
                     target = this.findNearestResource(searchX, searchY, v.type, v.id);
                 } else if (target.gx !== undefined) {
@@ -2238,9 +2255,9 @@ export class GameEngine {
         if (targetType === 0) return null;
 
         const TS = this.TILE_SIZE;
-        
+
         // --- 核心優化：優先搜尋建築實體資源 (農田/樹木田) ---
-        const entities = this.state.mapEntities.filter(e => 
+        const entities = this.state.mapEntities.filter(e =>
             !e.isUnderConstruction && e.amount > 0 &&
             ((targetType === 3 && e.type === 'farmland') || (targetType === 1 && e.type === 'tree_plantation'))
         );
@@ -2472,70 +2489,142 @@ export class GameEngine {
     static addToProductionQueue(event, configName, sourceBuilding = null) {
         if (event && event.stopPropagation) event.stopPropagation();
 
-        // 取得點選的建築實體
-        const building = sourceBuilding || (window.UIManager && window.UIManager.activeMenuEntity);
-        if (!building || !building.queue) {
+        // 取得主要建築實體 (如果是從 UI 點擊)
+        const activeBuilding = sourceBuilding || (window.UIManager && window.UIManager.activeMenuEntity);
+        if (!activeBuilding || !activeBuilding.queue) {
             this.addLog("此建築無法生產單位！");
             return;
         }
 
+        // 判斷是否為多選模式且選中多個同類型建築
+        const isMultiSelect = this.state.selectedBuildingIds && this.state.selectedBuildingIds.length > 1;
+        let targets = [activeBuilding];
+        
+        if (isMultiSelect) {
+            targets = this.state.mapEntities.filter(e => 
+                this.state.selectedBuildingIds.includes(e.id || `${e.type}_${e.x}_${e.y}`) && 
+                e.type === activeBuilding.type &&
+                !e.isUnderConstruction
+            );
+        }
+
+        // 對每個目標建築執行生產邏輯
+        targets.forEach(target => {
+            this._executeSingleProduction(configName, target);
+        });
+
+        if (window.UIManager) window.UIManager.updateValues(true);
+    }
+
+    /**
+     * 執行單一建築的生產指令
+     * 會根據建築等級自動匹配對應的單位等級
+     */
+    static _executeSingleProduction(clickedConfigId, building) {
+        if (!building || !building.queue) return;
+
         if (building.queue.length >= 10) {
             this.addLog(`${building.name} 的生產隊伍已滿 (10/10)！`);
-            this.triggerWarning("4");
             return;
         }
 
-        // 檢查資源成本
-        // 隨機生產模式：成本取列表中的第一個，或可以定義一個平均成本
-        let costConfigName = configName;
-        if (configName === 'RANDOM' && building) {
-            const bCfg = this.getBuildingConfig(building.type, building.lv || 1);
-            if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
-                costConfigName = bCfg.npcProduction[0];
+        // [關鍵] 根據建築等級調整產出的單位編號 (例如 A 生產 Lv1, B 生產 Lv2)
+        const finalConfigId = this.resolveAppropriateUnitId(clickedConfigId, building);
+        
+        // 檢查該建築是否真的被允許生產此單位 (或此種類型)
+        const bCfg = this.getBuildingConfig(building.type, building.lv || 1);
+        if (!bCfg || !bCfg.npcProduction) return;
+        
+        // 如果不是 RANDOM，則檢查 finalConfigId 是否在該等級建築的產出清單中
+        if (finalConfigId !== 'RANDOM') {
+            const finalCfg = this.state.npcConfigs[finalConfigId] || this.state.npcConfigs[this.state.idToNameMap[finalConfigId]];
+            const finalType = finalCfg ? finalCfg.type : null;
+
+            const isAllowed = bCfg.npcProduction.some(id => {
+                const name = this.state.idToNameMap[id] || id;
+                const cfg = this.state.npcConfigs[name] || this.state.npcConfigs[id];
+                return id == finalConfigId || (cfg && finalType && cfg.type === finalType);
+            });
+            if (!isAllowed) {
+                console.warn(`[生產跳過] ${building.name} (Lv.${building.lv}) 不支援生產 ${finalConfigId} (類型: ${finalType})`);
+                return;
             }
         }
 
-        let cfg = this.state.npcConfigs[costConfigName];
-        if (!cfg) {
-            const name = this.state.idToNameMap[costConfigName];
-            if (name) cfg = this.state.npcConfigs[name];
+        // 檢查資源成本
+        let costConfigId = finalConfigId;
+        if (finalConfigId === 'RANDOM') {
+            costConfigId = bCfg.npcProduction[0];
         }
 
+        let cfg = this.state.npcConfigs[costConfigId] || this.state.npcConfigs[this.state.idToNameMap[costConfigId]];
         if (!cfg) {
-            console.error(`[生產] 找不到配置 (用於計費): ${costConfigName}`);
+            console.error(`[生產] 找不到配置 (用於計費): ${costConfigId}`);
             return;
         }
 
         if (cfg.costs) {
-            console.log(`[生產預檢] 項目: ${cfg.name}, 成本物件:`, cfg.costs);
             for (let r in cfg.costs) {
                 const cost = cfg.costs[r];
                 if (cost > 0) {
                     const current = this.state.resources[r.toLowerCase()] || 0;
                     if (current < cost) {
-                        console.warn(`[生產攔截] 資源不足: ${r}, 需要 ${cost}, 目前 ${current}`);
                         this.triggerWarning("1", [r.toUpperCase()]);
-                        return;
+                        return; // 只要有一項不夠就停止該建築生產
                     }
                 }
             }
-            // 扣額 (必須先通過上方的全部檢查)
+            // 扣錢
             for (let r in cfg.costs) {
                 const cost = cfg.costs[r];
                 if (cost > 0) {
                     this.state.resources[r.toLowerCase()] -= cost;
-                    console.log(`[生產扣費] ${r}: -${cost}, 剩餘: ${this.state.resources[r.toLowerCase()]}`);
                 }
             }
         }
 
-        building.queue.push(configName);
+        building.queue.push(finalConfigId);
         if (building.queue.length === 1 && (building.productionTimer || 0) <= 0) {
             building.productionTimer = 5;
         }
-        this.addLog(`${building.name} 加入生產隊列：${configName} (${building.queue.length}/10)`);
+        this.addLog(`${building.name} 加入生產隊列：${finalConfigId} (${building.queue.length}/10)`);
+    }
 
-        if (window.UIManager) window.UIManager.updateValues(true);
+    /**
+     * 根據建築等級解析最適合的單位 ID
+     * 邏輯：找到與 clickedConfigId 同類型且等級不高於建築等級的最高級單位
+     */
+    static resolveAppropriateUnitId(clickedId, building) {
+        // 先獲取原始點擊單位的配置，以得知其「類型」 (swordsman, mage, etc.)
+        let baseCfg = this.state.npcConfigs[clickedId];
+        if (!baseCfg) {
+            const name = this.state.idToNameMap[clickedId];
+            if (name) baseCfg = this.state.npcConfigs[name];
+        }
+        
+        if (!baseCfg || clickedId === 'RANDOM') return clickedId;
+
+        const unitType = baseCfg.type;
+        const bLv = building.lv || 1;
+
+        // 在所有 NPC 配置中尋找：
+        // 1. 類型相同
+        // 2. 等級 <= 建築等級
+        // 3. 取等級最高的一個
+        let bestId = clickedId;
+        let bestLv = baseCfg.lv || 1;
+
+        for (const name in this.state.npcConfigs) {
+            const cfg = this.state.npcConfigs[name];
+            if (cfg.type === unitType && cfg.lv <= bLv) {
+                if (cfg.lv > bestLv) {
+                    bestLv = cfg.lv;
+                    bestId = cfg.id || name;
+                }
+            }
+        }
+
+        return bestId;
     }
 
     static addLog(msg, category = 'COMMON') {

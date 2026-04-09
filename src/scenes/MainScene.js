@@ -58,6 +58,8 @@ export class MainScene extends Phaser.Scene {
         // 生成所有建築與資源的材質
         this.generateTextures();
 
+        window.PhaserScene = this;
+
         // 創建格網
         this.gridGraphics = this.add.graphics();
         this.drawGrid();
@@ -720,7 +722,9 @@ export class MainScene extends Phaser.Scene {
             }
 
             // 繪製集結點 (僅在選中且有集結點時顯示)
-            if (ent.rallyPoint && window.UIManager && window.UIManager.activeMenuEntity === ent) {
+            const isSelected = (window.UIManager && window.UIManager.activeMenuEntity === ent) || 
+                               (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(ent.id || `${ent.type}_${ent.x}_${ent.y}`));
+            if (ent.rallyPoint && isSelected) {
                 this.drawRallyPoint(g, ent);
             }
         });
@@ -788,15 +792,32 @@ export class MainScene extends Phaser.Scene {
         g.fillCircle(ent.rallyPoint.x, ent.rallyPoint.y, radius * 0.6);
     }
 
+    drawSingleSelectionBox(g, ent, color) {
+        const TS = GameEngine.TILE_SIZE;
+        const cfg = GameEngine.getEntityConfig(ent.type);
+        let uw = 1, uh = 1;
+        if (cfg && cfg.size) {
+            const m = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
+            if (m) { uw = parseInt(m[1]); uh = parseInt(m[2]); }
+        }
+        
+        g.lineStyle(4, color, 1);
+        g.strokeRect(ent.x - (uw * TS) / 2 - 2, ent.y - (uh * TS) / 2 - 2, uw * TS + 4, uh * TS + 4);
+    }
+
     drawSelectionHighlight() {
         const g = this.selectionGraphics;
         g.clear();
 
         // 僅處理建築選取框。單位選取圈已移至 CharacterRenderer.js 以達成 100% 同步
         // 1. [手動選取] 建築選取框 (橘色，由玩家點擊觸發)
-        if (window.UIManager && window.UIManager.activeMenuEntity) {
-            const ent = window.UIManager.activeMenuEntity;
-            this.drawSingleSelectionBox(g, ent, 0xff9800);
+        if (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.length > 0) {
+            GameEngine.state.selectedBuildingIds.forEach(id => {
+                const ent = GameEngine.state.mapEntities.find(e => (e.id === id || `${e.type}_${e.x}_${e.y}` === id));
+                if (ent) {
+                    this.drawSingleSelectionBox(g, ent, 0xff9800);
+                }
+            });
         }
 
         // 2. [資源與目標] 物件描邊效果 (使用 FX Sprite 管理)
@@ -1438,11 +1459,6 @@ export class MainScene extends Phaser.Scene {
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
         }
 
-        const isSelected = window.UIManager && window.UIManager.activeMenuEntity === ent;
-        if (isSelected) {
-            g.lineStyle(4, 0xffeb3b, 1);
-            g.strokeRect(offX - (uw * TS) / 2 - 2, offY - (uh * TS) / 2 - 2, uw * TS + 4, uh * TS + 4);
-        }
 
         if (ent.type === 'village' || ent.type === 'town_center') {
             g.fillStyle(0x8d6e63, finalAlpha);
@@ -1642,7 +1658,15 @@ export class MainScene extends Phaser.Scene {
 
         const cfg = UI_CONFIG.ProductionHUD;
         const maxPop = GameEngine.getMaxPopulation();
-        const isPopFull = GameEngine.state.units.villagers.length >= maxPop;
+        const currentPop = GameEngine.getCurrentPopulation();
+
+        // [視覺同步] 判斷當前首位單位是否能產出
+        const currentUnitId = queue[0];
+        const unitName = GameEngine.state.idToNameMap[currentUnitId] || currentUnitId;
+        const nextCfg = GameEngine.state.npcConfigs[unitName] || GameEngine.state.npcConfigs[currentUnitId];
+        const unitPop = nextCfg ? (nextCfg.population || 1) : 1;
+        const canSpawn = (currentPop + unitPop) <= maxPop;
+
         const progress = 1.0 - (timer / 5);
 
         // 智慧型對齊：計算整體 HUD 寬度並居中
@@ -1657,8 +1681,8 @@ export class MainScene extends Phaser.Scene {
         g.fillStyle(parseInt(cfg.barBg.replace('#', ''), 16), cfg.barAlpha || 0.7);
         g.fillRect(bx + iconReserved + 5, by + 12, barWidth, 10);
 
-        // 2. 繪製進度內容
-        const fillColor = isPopFull ? 0xf44336 : 0x4caf50;
+        // 2. 繪製進度內容 (若產出受阻則顯示紅色)
+        const fillColor = !canSpawn ? 0xf44336 : 0x4caf50;
         g.fillStyle(fillColor, 1);
         g.fillRect(bx + iconReserved + 5, by + 12, barWidth * Math.max(0, Math.min(1, progress)), 10);
 
@@ -1671,8 +1695,6 @@ export class MainScene extends Phaser.Scene {
             'villagers': '👤', 'female villagers': '👩', 'mage': '🧙', 'swordsman': '⚔️', 'archer': '🏹',
             '1': '👤', '2': '👩', '3': '⚔️', '4': '🧙', '5': '🏹'
         };
-        const currentUnitId = queue[0];
-        const unitName = GameEngine.state.idToNameMap[currentUnitId] || currentUnitId;
         const emoji = iconMap[currentUnitId] || iconMap[unitName] || '👤';
 
         let iconTxt = this.unitIconTexts.get(id);
@@ -1960,6 +1982,7 @@ export class MainScene extends Phaser.Scene {
                 GameEngine.state.selectedUnitIds = boxUnits.map(v => v.id);
                 GameEngine.state.selectedResourceId = null;
                 GameEngine.state.selectedBuildingId = null;
+                GameEngine.state.selectedBuildingIds = [];
                 if (window.UIManager) window.UIManager.hideContextMenu();
             }
             if (boxUnits.length > 0) GameEngine.addLog(`[選取] 框選操作選中了 ${boxUnits.length} 個我方單位。`);
@@ -1994,21 +2017,44 @@ export class MainScene extends Phaser.Scene {
         if (foundRes && !isShift) {
             GameEngine.state.selectedResourceId = `${foundRes.gx}_${foundRes.gy}`;
             GameEngine.state.selectedUnitIds = []; GameEngine.state.selectedBuildingId = null;
+            GameEngine.state.selectedBuildingIds = [];
             if (window.UIManager) window.UIManager.hideContextMenu();
             GameEngine.addLog(`[選取] 資源：${foundRes.res.type} (Lv.${foundRes.res.level})`);
         } else {
-            let clickedB = null, bestBD = 40;
-            GameEngine.state.mapEntities.forEach(e => {
-                const d = Math.hypot(e.x - worldX, e.y - worldY);
-                if (d < bestBD) { bestBD = d; clickedB = e; }
-            });
+            // 建築選取邏輯：優先使用 AABB 碰撞檢測以對應大型建築
+            let clickedB = null;
+            const TS = GameEngine.TILE_SIZE;
+            
+            // 將地圖實體按距離排序，優先選取最近的 (或最上層的)
+            const sortedBuildings = [...GameEngine.state.mapEntities].sort((a, b) => 
+                Math.hypot(a.x - worldX, a.y - worldY) - Math.hypot(b.x - worldX, b.y - worldY)
+            );
+
+            for (const e of sortedBuildings) {
+                const cfg = GameEngine.getEntityConfig(e.type);
+                let uw = 1, uh = 1;
+                if (cfg && cfg.size) {
+                    const match = cfg.size.toString().match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
+                    if (match) { uw = parseFloat(match[1]); uh = parseFloat(match[2]); }
+                }
+                const w = uw * TS, h = uh * TS;
+                if (worldX >= e.x - w / 2 && worldX <= e.x + w / 2 && worldY >= e.y - h / 2 && worldY <= e.y + h / 2) {
+                    clickedB = e;
+                    break;
+                }
+            }
+
             if (clickedB && !isShift) {
-                GameEngine.state.selectedBuildingId = clickedB.id;
-                GameEngine.state.selectedUnitIds = []; GameEngine.state.selectedResourceId = null;
-                if (window.UIManager) window.UIManager.hideContextMenu();
+                // 基礎選取標記 (進階選取與雙擊偵測已移至 UIManager.handleWorldClick 統一管理)
+                // 這裡僅保留 Log 輸出與標籤顯示邏輯
+                if (window.UIManager) window.UIManager.showContextMenu(clickedB);
+                
                 GameEngine.addLog(`[選取] 建築：${clickedB.name || clickedB.type}`);
             } else if (!isShift) {
-                GameEngine.state.selectedUnitIds = []; GameEngine.state.selectedResourceId = null;
+                GameEngine.state.selectedUnitIds = []; 
+                GameEngine.state.selectedResourceId = null;
+                GameEngine.state.selectedBuildingId = null;
+                GameEngine.state.selectedBuildingIds = [];
                 if (window.UIManager) window.UIManager.hideContextMenu();
             }
         }

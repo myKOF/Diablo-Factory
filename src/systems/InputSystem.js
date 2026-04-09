@@ -161,10 +161,23 @@ export class InputSystem {
                         GameEngine.state.placingType = null;
                     }
                 } else if (window.UIManager && window.UIManager.activeMenuEntity) {
-                    const ent = window.UIManager.activeMenuEntity;
-                    const bCfg = GameEngine.state.buildingConfigs[ent.type];
+                    const activeEnt = window.UIManager.activeMenuEntity;
+                    const bCfg = GameEngine.state.buildingConfigs[activeEnt.type];
+                    
+                    // 如果選中的建築可以集結 (有生產功能)
                     if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
-                        this.handleRallyPoint(pointer, ent, bCfg);
+                        const isMulti = GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.length > 1;
+                        if (isMulti) {
+                            // 多選模式：為所有同類型的選中建築設定集結點
+                            const type = activeEnt.type;
+                            const targets = GameEngine.state.mapEntities.filter(e => 
+                                GameEngine.state.selectedBuildingIds.includes(e.id || `${e.type}_${e.x}_${e.y}`) &&
+                                e.type === type && !e.isUnderConstruction
+                            );
+                            targets.forEach(t => this.handleRallyPoint(pointer, t, GameEngine.state.buildingConfigs[t.type]));
+                        } else {
+                            this.handleRallyPoint(pointer, activeEnt, bCfg);
+                        }
                     } else {
                         this.handleUnitMove(pointer);
                     }

@@ -418,7 +418,7 @@ export class UIManager {
         if (menuCfg.anchor) this.applyAnchorStyle(menu, menuCfg);
         this.uiLayer.appendChild(menu);
 
-        // 9. 獨立的銷毀按鈕 (右上角的小 X)
+        // 9. 獨立的銷毀按鈕 (跟隨建築物右上角)
         const destroyBtn = document.createElement("div");
         destroyBtn.id = "destroy_btn";
         destroyBtn.innerHTML = "×";
@@ -923,7 +923,40 @@ export class UIManager {
         });
 
         if (clicked) {
+            const now = Date.now();
+            const buildingId = clicked.id || `${clicked.type}_${clicked.x}_${clicked.y}`;
+            
+            // 雙擊全選邏輯：移至 UIManager 以避開 UI 遮擋造成的 Phaser 事件丟失
+            const isDoubleClick = (GameEngine.state.lastSelectedBuildingId === buildingId && (now - GameEngine.state.lastSelectionTime < 500));
+            
+            if (isDoubleClick) {
+                const type = clicked.type;
+                const scene = window.PhaserScene;
+                if (scene) {
+                    const view = scene.cameras.main.worldView;
+                    const visibleBuildings = GameEngine.state.mapEntities.filter(e => 
+                        e.type === type &&
+                        e.x >= view.x && e.x <= view.x + view.width &&
+                        e.y >= view.y && e.y <= view.y + view.height
+                    );
+                    GameEngine.state.selectedBuildingIds = visibleBuildings.map(e => e.id || `${e.type}_${e.x}_${e.y}`);
+                    GameEngine.addLog(`[選取] 相同類型建築共 ${visibleBuildings.length} 個。`);
+                }
+            } else {
+                GameEngine.state.selectedBuildingIds = [buildingId];
+                GameEngine.state.selectedBuildingId = clicked.id;
+            }
+
+            GameEngine.state.lastSelectionTime = now;
+            GameEngine.state.lastSelectedBuildingId = buildingId;
+            GameEngine.state.selectedUnitIds = [];
+            GameEngine.state.selectedResourceId = null;
+
             this.showContextMenu(clicked);
+        } else {
+            // 點擊地面
+            GameEngine.state.selectedBuildingIds = [];
+            GameEngine.state.selectedBuildingId = null;
         }
     }
 
@@ -1537,7 +1570,7 @@ export class UIManager {
                 menu.style.top = `${finalY}px`;
             }
 
-            // 更新銷毀按鈕位置 (右上角)
+            // [同步圖 4 需求] 更新銷毀按鈕位置到建築物右上角
             const dBtn = document.getElementById("destroy_btn");
             if (dBtn && dBtn.style.display !== 'none') {
                 const bCfg = GameEngine.getEntityConfig(this.activeMenuEntity.type);
@@ -1549,7 +1582,7 @@ export class UIManager {
                 const halfW = (uw * GameEngine.TILE_SIZE) / 2;
                 const halfH = (uh * GameEngine.TILE_SIZE) / 2;
 
-                // sx, sy 是建築中心，讓按鈕完全待在內部邊緣
+                // sx, sy 是建築中心
                 dBtn.style.left = `${sx + halfW - 20}px`;
                 dBtn.style.top = `${sy - halfH + 2}px`;
             }
