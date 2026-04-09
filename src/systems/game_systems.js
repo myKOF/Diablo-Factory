@@ -777,6 +777,7 @@ export class GameEngine {
                 x: building.rallyPoint.x + offsetX,
                 y: building.rallyPoint.y + offsetY
             };
+            v._isRallyMovement = true; // [新協定] 標記這是集結點移動，便於 UI 判斷是否顯示指示器
         }
         return true;
     }
@@ -1369,11 +1370,15 @@ export class GameEngine {
             case 'IDLE':
                 if (v.idleTarget) {
                     this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt, ignoreEnts);
-                    if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
+                    // 抵達目標判定 (放寬至 10px 以涵蓋偏移誤差)
+                    if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 10) {
                         v.idleTarget = null;
                         v.isPlayerLocked = false;
+                        v._isRallyMovement = false;
                         v.waitTimer = 1 + Math.random() * 2;
                         v.pathTarget = null;
+                        v.fullPath = null;
+                        v.pathIndex = 0;
                     }
                 }
                 break;
@@ -1730,11 +1735,10 @@ export class GameEngine {
                 v._stuckFrames = (v._stuckFrames || 0) + 1;
                 if (v._stuckFrames > 12) {
                     this.resolveStuck(v);
-                    v._stuckFrames = 0;
+                    // 不再手動設為 0，讓 resolveStuck 的冷動期 (-20) 生效
                 }
             } else {
                 this.resolveStuck(v);
-                v._stuckFrames = 0;
             }
         } else {
             if (Math.hypot(v.x - oldX, v.y - oldY) > 0.1) {
@@ -1743,7 +1747,6 @@ export class GameEngine {
                 v._stuckFrames = (v._stuckFrames || 0) + 1;
                 if (v._stuckFrames > 15) {
                     this.resolveStuck(v);
-                    v._stuckFrames = 0;
                 }
             }
         }
@@ -2008,7 +2011,8 @@ export class GameEngine {
                 }
             } else {
                 // 如果沒有路徑或是正在尋路中，執行直線逼近 (moveTowards 本身帶有碰撞檢查)
-                this.moveTowards(v, tx, ty, speed, remainingDt, ignoreEnts);
+                // [核心修復] 若正在尋路中，直線移動應更加保守，避免在回呼前就因撞牆而重疊請求
+                this.moveTowards(v, tx, ty, speed * (v.isFindingPath ? 0.7 : 1.0), remainingDt, ignoreEnts);
                 remainingDt = 0;
             }
         }
@@ -2042,7 +2046,8 @@ export class GameEngine {
             v.pathTarget = null;
             v._lastRequestedTarget = null;
             v.isFindingPath = false;
-            v._stuckFrames = 0; // 重置計數
+            v._stuckFrames = -20; // [核心修復] 提供一段冷卻期，防止在一幀內反覆觸發 resolveStuck
+            v._isRallyMovement = false;
 
             if (isSelected) {
                 GameEngine.addLog(`[防卡死修復] 已由 (${oldX.toFixed(0)},${oldY.toFixed(0)}) 移至 (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`, "PATH");
@@ -2072,10 +2077,11 @@ export class GameEngine {
                 v.y = nextY;
                 v._stuckFrames = 0; // 移動成功，重置
             } else {
-                // 如果直线走不通，增加卡死計數並重置路徑
+                // 如果直線走不通，增加卡死計數
                 v._stuckFrames = (v._stuckFrames || 0) + 1;
+                // [核心修復] 禁止在此處重置 isFindingPath。
+                // 若正在尋路中且撞牆，應維持尋路標籤直到非同步回呼返回，否則會導致 moveDetailed 在下一幀重複觸發 new findPath
                 v.fullPath = null;
-                v.isFindingPath = false;
             }
         }
     }

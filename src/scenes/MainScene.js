@@ -271,7 +271,7 @@ export class MainScene extends Phaser.Scene {
     /**
      * 處理單位的右鍵指令（移動或攻擊）
      */
-    handleRightClickCommand(unit, pointer, clickedTarget = null) {
+    handleRightClickCommand(unit, pointer, clickedTarget = null, cmdCenter = null) {
         console.log(`[Command] ${unit.configName} (${unit.id}) right-click cmd at ${pointer.worldX.toFixed(0)}, ${pointer.worldY.toFixed(0)}`);
         // [最終防護] 若正處於建造預覽狀態，或按下鼠標時正處於建造預覽狀態，屏蔽所有指令
         if (GameEngine.state.placingType || GameEngine.state.rightClickStartedInPlacementMode) return;
@@ -385,6 +385,7 @@ export class MainScene extends Phaser.Scene {
         }
 
         unit.idleTarget = { x: finalTx, y: finalTy };
+        unit.commandCenter = cmdCenter || { x: finalTx, y: finalTy }; // 儲存視覺中心點
         unit.isPlayerLocked = true;
     }
 
@@ -1004,15 +1005,20 @@ export class MainScene extends Phaser.Scene {
                 const isEnemy = (u.config && u.config.camp === 'enemy') || u.camp === 'enemy';
                 if (isEnemy) return;
 
-                // 2. 只有狀態不是 IDLE 或是有目標時才顯示
-                if (u.targetId) {
-                    // [核心修正] 不再在此處顯示攻擊目標點（縮放紅圈）。
-                    // 根據玩家要求，攻擊目標只需常態顯示自身紅圈與血條，不需要點擊指示器。
-                } else if (u.idleTarget && u.state !== 'IDLE') {
-                    const key = `ground_${Math.floor(u.idleTarget.x)}_${Math.floor(u.idleTarget.y)}`;
-                    if (!drawnPos.has(key)) {
-                        this.drawTargetIndicator(g, u.idleTarget.x, u.idleTarget.y, 'ground', cfg.alpha || 0.7, now);
-                        drawnPos.add(key);
+                // 2. 只有手動點擊地板的移動指示才顯示光圈 (以 IDLE 狀態 + 被玩家鎖定 為準)
+                // [核心修復] 優先使用 commandCenter 以確保多選單位僅顯示一個中心點光圈
+                const targetPoint = u.commandCenter || u.idleTarget;
+                if (targetPoint && u.state === 'IDLE' && u.isPlayerLocked && !u._isRallyMovement) {
+                    const dist = Math.hypot(u.x - u.idleTarget.x, u.y - u.idleTarget.y);
+                    if (dist > 15) {
+                        const key = `ground_${Math.floor(targetPoint.x)}_${Math.floor(targetPoint.y)}`;
+                        if (!drawnPos.has(key)) {
+                            this.drawTargetIndicator(g, targetPoint.x, targetPoint.y, 'ground', cfg.alpha || 0.7, now);
+                            drawnPos.add(key);
+                        }
+                    } else {
+                        // 抵達後清除視覺中心點
+                        u.commandCenter = null;
                     }
                 }
             });
@@ -1933,11 +1939,29 @@ export class MainScene extends Phaser.Scene {
         const dragDist = this.mouseDownScreenPos ? Math.hypot(screenX - this.mouseDownScreenPos.x, screenY - this.mouseDownScreenPos.y) : 0;
 
         if (dragDist < 5) {
-            let bestDist = 40;
+            let bestDist = 60; // 提高選取寬容度 (原 40)
             let clickedUnit = null;
+            const TS = GameEngine.TILE_SIZE;
+
+            // [核心優化] 優先判定玩家單位，且採用混合 hitbox 檢測 (圓形 + 矩形)
             GameEngine.state.units.villagers.forEach(v => {
+                const isPlayer = (v.config?.camp === 'player' || v.camp === 'player' || !v.camp);
                 const d = Math.hypot(v.x - endX, v.y - endY);
-                if (d < bestDist) { bestDist = d; clickedUnit = v; }
+                
+                // 矩形 Hitbox 判定 (適用於點擊中心稍微偏移的情況)
+                const inHitbox = Math.abs(v.x - endX) < 30 && Math.abs(v.y - endY) < 40;
+                
+                if (d < bestDist || inHitbox) {
+                    // 如果原本選中的不是玩家單位，或者這個單位更近
+                    if (!clickedUnit || (isPlayer && !clickedUnit._isPlayer)) {
+                        bestDist = d;
+                        clickedUnit = v;
+                        clickedUnit._isPlayer = isPlayer; // 暫存用於優先級比較
+                    } else if (isPlayer === clickedUnit._isPlayer && d < bestDist) {
+                        bestDist = d;
+                        clickedUnit = v;
+                    }
+                }
             });
 
             if (clickedUnit) {

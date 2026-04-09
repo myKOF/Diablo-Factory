@@ -286,7 +286,8 @@ export class InputSystem {
                     const r = Math.floor(i / colsNum), c = i % colsNum;
                     const offX = (c - (colsNum - 1) / 2) * spacing, offY = (r - (colsNum - 1) / 2) * spacing;
                     const offsetPointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
-                    scene.handleRightClickCommand(unit, offsetPointer, clickedEnemy || clickedEntity);
+                    // [核心優化] 傳入原始點 pointer.worldX/Y 作為視覺指示座標，避免多單位時地面光圈過多
+                    scene.handleRightClickCommand(unit, offsetPointer, clickedEnemy || clickedEntity, { x: pointer.worldX, y: pointer.worldY });
                 });
             }
         }

@@ -910,6 +910,14 @@ export class UIManager {
         const local = this.getLocalMouse(e);
         const scene = window.PhaserScene;
         const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
+        
+        // [核心修復] 選取優先級優化：偵測滑鼠位置附近是否有單位
+        // 如果點擊點附近有單位，優先交給 Phaser 層處理單位的選取，此處直接退出
+        const worldX = local.x - cam.x;
+        const worldY = local.y - cam.y;
+        const nearbyUnit = GameEngine.state.units.villagers.find(u => Math.hypot(u.x - worldX, u.y - worldY) < 50);
+        if (nearbyUnit) return;
+
         const entities = GameEngine.state.mapEntities;
 
         const clicked = entities.find(ent => {
