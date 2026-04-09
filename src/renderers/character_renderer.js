@@ -187,11 +187,15 @@ export class CharacterRenderer {
                 clothColor = parseColor(colors.IDLE);
             } else if (state === 'CONSTRUCTING' || state === 'MOVING_TO_CONSTRUCTION') {
                 clothColor = parseColor(colors.CONSTRUCTING);
+            } else if (state === 'ATTACK' || state === 'CHASE' || state === 'MOVE') {
+                // 戰鬥狀態或奔向戰場時，回歸基本配色
+                clothColor = parseColor(colors.DEFAULT);
             } else {
                 if (data.type === 'WOOD') clothColor = parseColor(colors.WOOD);
                 else if (data.type === 'STONE') clothColor = parseColor(colors.STONE);
                 else if (data.type === 'FOOD') clothColor = parseColor(colors.FOOD);
                 else if (data.type === 'GOLD') clothColor = parseColor(colors.GOLD);
+                else clothColor = parseColor(colors.DEFAULT);
             }
         }
 

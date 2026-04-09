@@ -458,7 +458,12 @@ export class MainScene extends Phaser.Scene {
         const cfg = UI_CONFIG.Grid || { mainColor: "#000000", mainAlpha: 0.12, subColor: "#000000", subAlpha: 0.03 };
 
         // 將 "#rrggbb" 字串格式轉為 Phaser lineStyle 需要的數字格式
-        const parseColor = (c) => typeof c === 'string' ? parseInt(c.replace('#', ''), 16) : c;
+        const parseColor = (c) => {
+            if (typeof c !== 'string') return c;
+            let raw = c.replace('#', '');
+            if (raw.length === 8) raw = raw.substring(0, 6);
+            return parseInt(raw, 16);
+        };
 
         const mapCfg = GameEngine.state.systemConfig.map_size || { w: 3200, h: 2000 };
         const cols = Math.floor(mapCfg.w / TS);
@@ -1079,7 +1084,12 @@ export class MainScene extends Phaser.Scene {
      */
     drawTargetIndicator(g, x, y, type, alpha, time) {
         const cfg = UI_CONFIG.PathfindingTarget;
-        const parseColor = (c) => typeof c === 'string' ? parseInt(c.replace('#', ''), 16) : c;
+        const parseColor = (c) => {
+            if (typeof c !== 'string') return c;
+            let raw = c.replace('#', '');
+            if (raw.length === 8) raw = raw.substring(0, 6);
+            return parseInt(raw, 16);
+        };
 
         if (type === 'enemy') {
             const color = parseColor(cfg.enemyColor || "#ff4444");

@@ -373,8 +373,8 @@ export const UI_CONFIG = {
     },
     // -- 尋路目標提示 (PathfindingTarget) --------------------------
     PathfindingTarget: {
-        enemyColor: "#ff4444",
-        floorColor: "#00e5ff",
+        enemyColor: "#ffffffff",
+        floorColor: "#ffffffff",
         circleMinRadius: 6,
         circleMaxRadius: 14,
         pulseSpeed: 0.01,

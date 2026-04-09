@@ -97,11 +97,7 @@ export class BattleRenderer {
             if (unit.hitTimer > 0 || isHovered || isSelected || isInCombat || isTargetedByPlayerArmy) {
                 this.drawHPBar(g, unit, rx, ry);
 
-                // 受擊閃爍紅白框 (受傷回饋，僅在受擊當下瞬間)
-                if (unit.hitTimer > (this.hpBarTimer - 0.7)) {
-                    g.lineStyle(2, 0xffffff, 0.8);
-                    g.strokeCircle(rx, ry, 25);
-                }
+
             }
         });
     }
