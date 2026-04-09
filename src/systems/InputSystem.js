@@ -68,6 +68,14 @@ export class InputSystem {
 
     onPointerMove(pointer) {
         if (this.rightDownInfo && pointer.id === this.rightDownInfo.id) {
+            // [核心防護] 處理滑鼠在視窗/瀏覽器外放開，再移回視窗內造成的「無限拖曳」問題
+            // 若偵測到指標移動時，物理右鍵 (buttons & 2) 已不再處於按壓狀態，即代表在外部被放開了
+            if (pointer.event && (pointer.event.buttons & 2) === 0) {
+                this.rightDownInfo = null;
+                this.didMove = false;
+                return;
+            }
+
             const dist = Math.hypot(pointer.x - this.rightDownInfo.x, pointer.y - this.rightDownInfo.y);
 
             // 只要位移超過門檻，就把「沒動過」變成「動過」
