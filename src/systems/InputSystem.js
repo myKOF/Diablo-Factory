@@ -45,7 +45,15 @@ export class InputSystem {
 
     onPointerDown(pointer) {
         if (pointer.button === 2) {
-            this.rightDownInfo = { id: pointer.id, x: pointer.x, y: pointer.y };
+            const cam = this.scene.cameras.main;
+            this.rightDownInfo = { 
+                id: pointer.id, 
+                x: pointer.x, 
+                y: pointer.y,
+                time: Date.now(),
+                scrollX: cam ? cam.scrollX : 0,
+                scrollY: cam ? cam.scrollY : 0
+            };
             this.didMove = false; // 1. 按下時，重置移動狀態為「沒動過」
             this.lastX = pointer.x;
             this.lastY = pointer.y;
@@ -66,6 +74,7 @@ export class InputSystem {
                 if (cam) {
                     cam.scrollX -= dx;
                     cam.scrollY -= dy;
+                    this.scene.lastManualDragTime = Date.now();
                 }
             }
         }
@@ -77,11 +86,49 @@ export class InputSystem {
         if (pointer.button === 2) {
             if (!this.rightDownInfo) return;
 
-            // 3. 核心判定：只要這期間「動過」，放開時就絕對不執行點擊指令
-            if (this.didMove) {
-                GameEngine.addLog(`[Input] 拖曳結束 (攔截指令)`, 'INPUT');
-            } else {
-                // 4. 只有「完全沒動過」才進入點擊邏輯
+            const now = Date.now();
+
+            // [全域防重] 無論是什麼類型的放開，一律防抖 (防止硬體微動連點在 50ms 內觸發兩次)
+            if (window._lastRightUpProcessed && (now - window._lastRightUpProcessed < 50)) {
+                this.rightDownInfo = null;
+                this.didMove = false;
+                return;
+            }
+            window._lastRightUpProcessed = now;
+
+            const cam = this.scene.cameras.main;
+            const duration = now - this.rightDownInfo.time;
+            const totalDist = Math.hypot(pointer.x - this.rightDownInfo.x, pointer.y - this.rightDownInfo.y);
+
+            let cameraMoved = false;
+            if (cam) {
+                cameraMoved = Math.abs(cam.scrollX - this.rightDownInfo.scrollX) > 0.1 || 
+                              Math.abs(cam.scrollY - this.rightDownInfo.scrollY) > 0.1;
+            }
+
+            const isFinalDrag = this.didMove || totalDist > this.DRAG_THRESHOLD;
+
+            if (isFinalDrag || cameraMoved) {
+                // 如果本次操作是拖動，記錄拖動結束的時間
+                window._lastDragEndTime = now;
+            }
+
+            // 檢查是否處於「剛結束拖動的冷卻期」(200ms 內)，避免硬體 Bounce 產生新的獨立 Click
+            const timeSinceLastDrag = window._lastDragEndTime ? (now - window._lastDragEndTime) : 9999;
+            const isJustAfterDrag = timeSinceLastDrag < 200;
+
+            const CLICK_TIME_LIMIT = 250;
+            // 極端嚴格的判定：相機沒動、沒有觸發過拖動、點擊時間短，且不是在剛結束拖拉之後
+            const canMove = !cameraMoved && !isFinalDrag && (duration < CLICK_TIME_LIMIT) && !isJustAfterDrag;
+
+            const panStatus = cameraMoved ? "畫面有動" : "畫面沒動";
+            const dragStatus = isFinalDrag ? "判定為拖動" : "判定為點擊";
+            const moveStatus = canMove ? "可移動" : "不可移動";
+
+            GameEngine.addLog(`[Input-${this.instanceId}] 右鍵放開: ${panStatus} | ${dragStatus} | ${moveStatus} (Dist:${totalDist.toFixed(1)}, Time:${duration}ms, CD:${timeSinceLastDrag}ms)`, 'COMMON');
+
+            // 3. 核心判定：判定為移動才執行動作
+            if (canMove) {
                 if (GameEngine.state.placingType) {
                     GameEngine.addLog(`[Input] 單擊：取消建築`, 'INPUT');
                     if (this.scene.cancelPlacement) {
@@ -90,7 +137,6 @@ export class InputSystem {
                         GameEngine.state.placingType = null;
                     }
                 } else {
-                    GameEngine.addLog(`[Input] 單擊：移動單位`, 'INPUT');
                     this.handleUnitMove(pointer);
                 }
             }

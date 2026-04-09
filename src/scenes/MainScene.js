@@ -563,7 +563,7 @@ export class MainScene extends Phaser.Scene {
         this.updateEdgeCursor(ex, ey, pointer, winW, winH);
 
         // 3. 執行全向捲動 (直線射線方向)
-        const isCurrentlyDragging = this.isMiddleDragging || (this.inputSystem && this.inputSystem.isDragging);
+        const isCurrentlyDragging = this.isMiddleDragging || (this.inputSystem && this.inputSystem.didMove);
         if ((ex !== 0 || ey !== 0) && !isCurrentlyDragging) {
             // [核心需求] 以中央座標到鼠標的位置的這個直線方向移動
             const centerX = winW / 2;
