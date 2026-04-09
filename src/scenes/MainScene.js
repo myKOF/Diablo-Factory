@@ -249,6 +249,9 @@ export class MainScene extends Phaser.Scene {
                 this.lastManualDragTime = Date.now();
             }
             lastPointer = { x: pointer.x, y: pointer.y };
+
+            // [核心修復] 呼叫框選移動邏輯，確保框選框隨滑鼠移動
+            this.handleSelectionMove(pointer);
         });
 
         this.input.on('pointerup', (pointer) => {
@@ -265,6 +268,22 @@ export class MainScene extends Phaser.Scene {
                 this.isMiddleDragging = false;
                 this.dragStartPos = null;
             }
+        });
+
+        // [核心修復] 跨 UI 穿透框選：綁定全域原生 Mouse 事件以支援在 UI 面板上拉取框選
+        const globalMove = (e) => this.handleSelectionMove(e);
+        const globalUp = (e) => {
+            if (e.button === 0 && this.selectionStartPos) {
+                this.handleSelectionEnd(e);
+                this.selectionStartPos = null;
+            }
+        };
+        window.addEventListener('mousemove', globalMove);
+        window.addEventListener('mouseup', globalUp);
+
+        this.events.once('shutdown', () => {
+            window.removeEventListener('mousemove', globalMove);
+            window.removeEventListener('mouseup', globalUp);
         });
     }
 

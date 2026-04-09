@@ -1507,12 +1507,20 @@ export class GameEngine {
                         v.cargoType = null;
                         v.gatherTimer = 0;
                         if (v.targetId.amount <= 0) {
-                            this.addLog(`${v.targetId.name || '資源點'} 已枯竭。`);
-                            this.state.mapEntities = this.state.mapEntities.filter(e => e !== v.targetId);
+                            this.addLog(`${v.targetId.name || '資源點'} 已枯竭，需重新整理。`, 'SYSTEM');
+                            // [核心修復] 不再刪除，而是轉為施工中狀態，允許工人重新建造以刷新資源
+                            const resEnt = v.targetId;
+                            resEnt.isUnderConstruction = true;
+                            resEnt.buildProgress = 0;
+                            resEnt.name = "施工中 (" + (resEnt.type === 'farmland' ? "農田" : "樹木田") + ")";
+
+                            // 建築狀態變更，刷新尋路格網 (施工中不阻擋)
+                            GameEngine.updatePathfindingGrid();
+
                             v.targetId = null;
                             v.gatherPoint = null;
-                            v.state = 'MOVING_TO_RESOURCE';
-                            v.pathTarget = null;
+                            // [狀態更迭] 工人恢復原先任務或進入自動指派 (若附近有工地則會自動轉去建造)
+                            this.restoreVillagerTask(v);
                         }
                     } else {
                         // 目標無效
@@ -1620,24 +1628,36 @@ export class GameEngine {
                 const halfWC = (fpC.uw * this.TILE_SIZE) / 2;
                 const halfHC = (fpC.uh * this.TILE_SIZE) / 2;
 
-                const dxC = v.x - v.constructionTarget.x;
-                const dyC = v.y - v.constructionTarget.y;
-                let txC = v.constructionTarget.x, tyC = v.constructionTarget.y;
+                // [核心修復] 穩定目標點：避免在 45 度角附近切換時產生「目標抖動」導致反覆尋路
+                if (!v._stableConstructionTarget || Math.hypot(v.x - (v._lastUnitPosX || 0), v.y - (v._lastUnitPosY || 0)) > 50) {
+                    const dxC = v.x - v.constructionTarget.x;
+                    const dyC = v.y - v.constructionTarget.y;
+                    let txC = v.constructionTarget.x, tyC = v.constructionTarget.y;
 
-                if (Math.abs(dxC) > Math.abs(dyC)) {
-                    txC = dxC > 0 ? (v.constructionTarget.x + halfWC + 10) : (v.constructionTarget.x - halfWC - 10);
-                    const spreadY = (idNumC % 5 - 2) * (halfHC * 0.7);
-                    tyC = v.constructionTarget.y + spreadY;
-                } else {
-                    tyC = dyC > 0 ? (v.constructionTarget.y + halfHC + 10) : (v.constructionTarget.y - halfHC - 10);
-                    const spreadX = (idNumC % 5 - 2) * (halfWC * 0.7);
-                    txC = v.constructionTarget.x + spreadX;
+                    if (Math.abs(dxC) > Math.abs(dyC)) {
+                        txC = dxC > 0 ? (v.constructionTarget.x + halfWC + 10) : (v.constructionTarget.x - halfWC - 10);
+                        const spreadY = (idNumC % 5 - 2) * (halfHC * 0.7);
+                        tyC = v.constructionTarget.y + spreadY;
+                    } else {
+                        tyC = dyC > 0 ? (v.constructionTarget.y + halfHC + 10) : (v.constructionTarget.y - halfHC - 10);
+                        const spreadX = (idNumC % 5 - 2) * (halfWC * 0.7);
+                        txC = v.constructionTarget.x + spreadX;
+                    }
+                    v._stableConstructionTarget = { x: txC, y: tyC };
+                    v._lastUnitPosX = v.x;
+                    v._lastUnitPosY = v.y;
                 }
 
+                const txC = v._stableConstructionTarget.x;
+                const tyC = v._stableConstructionTarget.y;
+
                 const distC = Math.hypot(txC - v.x, tyC - v.y);
-                if (distC < 25) {
+                const buildingDist = Math.hypot(v.constructionTarget.x - v.x, v.constructionTarget.y - v.y);
+                // [核心優化] 寬容度調整：只要靠近目標點 35px 或靠近建築邊緣，就可啟動建設
+                if (distC < 35 || buildingDist < (Math.max(halfWC, halfHC) + 15)) {
                     v.state = 'CONSTRUCTING';
                     v.pathTarget = null;
+                    v._stableConstructionTarget = null;
                 } else {
                     this.moveDetailed(v, txC, tyC, moveSpeed, dt, ignoreEnts);
                 }
@@ -1945,9 +1965,13 @@ export class GameEngine {
         // 核心優化：平滑尋路偵測 (不立即清空舊路徑以防止抖動)
         const targetDist = !v._lastRequestedTarget ? 999 : Math.hypot(v._lastRequestedTarget.x - tx, v._lastRequestedTarget.y - ty);
 
-        if (targetDist > 15 && !v.isFindingPath && this.state.pathfinding) {
+        const now = Date.now();
+        const lastPathTime = v._lastPathTime || 0;
+
+        if (targetDist > 15 && !v.isFindingPath && this.state.pathfinding && (now - lastPathTime > 500)) {
             v._lastRequestedTarget = { x: tx, y: ty };
             v.isFindingPath = true;
+            v._lastPathTime = now;
 
             const isSelected = GameEngine.state.selectedUnitIds && GameEngine.state.selectedUnitIds.includes(v.id);
             if (isSelected) {
@@ -2003,7 +2027,7 @@ export class GameEngine {
                         v._stuckFrames = (v._stuckFrames || 0) + 1;
                         v.fullPath = null;
                         v.isFindingPath = false;
-                        v._lastRequestedTarget = null;
+                        // [核心修復] 不再此處清除 _lastRequestedTarget，防止每一幀都重疊進行 pathfinding 請求造成日誌洪流
                     }
                     remainingDt = 0;
                 } else {
