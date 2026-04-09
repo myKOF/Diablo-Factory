@@ -1577,7 +1577,7 @@ export class GameEngine {
                     v.pathTarget = null;
                     // [核心修復] 嘗試尋找下一個工地，否則回歸通用分配
                     if (!GameEngine.assignNextConstructionTask(v)) {
-                        this.assignNextTask(v);
+                        this.restoreVillagerTask(v);
                     }
                     return;
                 }
@@ -1674,7 +1674,18 @@ export class GameEngine {
                         if (!GameEngine.assignNextConstructionTask(v)) {
                             this.restoreVillagerTask(v);
                             v.constructionTarget = null;
-                            this.addLog(`建造清單已清空，回歸原位。`);
+                            
+                            // [核心優化] 多人完工散開邏輯：若回歸閒置狀態，則給予一個隨機的微小位移目標，避免多人擠在同一個點
+                            if (v.state === 'IDLE') {
+                                const angle = Math.random() * Math.PI * 2;
+                                const dist = 30 + Math.random() * 40;
+                                v.idleTarget = {
+                                    x: v.x + Math.cos(angle) * dist,
+                                    y: v.y + Math.sin(angle) * dist
+                                };
+                            }
+                            
+                            this.addLog(`建造清單已清空，工人們嘗試散開並待命。`);
                         }
                     }
                 }

@@ -998,26 +998,26 @@ export class UIManager {
         const cfg_current = GameEngine.getBuildingConfig(entity.type, entity.lv || 1);
         const nextCfg = GameEngine.getBuildingConfig(entity.type, (entity.lv || 1) + 1);
         const hCfg = UI_CONFIG.ActionMenuHeader;
-        
+
         let leftHeader = "";
         if (isConfirming) {
             leftHeader = `
-                <div style="display: flex; flex-direction: column;">
+                <div style="display: flex; flex-direction: column; justify-content: center; height: 100%;">
                     <span style="font-size: 16px; color: #ff8a80; font-weight: bold;">${entity.isUnderConstruction ? "取消建設？" : "確定銷毀？"}</span>
                     <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold;">${name}</span>
                 </div>
             `;
         } else {
             leftHeader = `
-                <div style="display: flex; align-items: baseline;">
-                    <span style="font-size: ${hCfg.levelFontSize}; font-weight: 900; color: #ffffff; margin-right: 12px; font-family: 'Arial Black', sans-serif; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">Lv.${entity.lv || 1}</span>
-                    <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold; text-shadow: 1px 1px 3px rgba(0,0,0,0.8);">${name}</span>
+                <div style="display: flex; align-items: baseline; height: 100%; align-items: center;">
+                    <span style="font-size: ${hCfg.levelFontSize}; font-weight: 900; color: #ffffff; margin-right: 15px; font-family: 'Arial Black', sans-serif; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">Lv.${entity.lv || 1}</span>
+                    <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); white-space: nowrap;">${name}</span>
                 </div>
             `;
         }
 
         let rightHeader = "";
-        const headerActionHeight = "64px"; 
+        const headerActionHeight = "64px";
 
         if (!isConfirming && entity.isUpgrading) {
             const prog = Math.floor((entity.upgradeProgress || 0) * 100);
@@ -1048,7 +1048,7 @@ export class UIManager {
             let upgradeStyle = `width: 48px; height: 48px; background: ${hCfg.upgradeBtnBg}; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; box-shadow: ${hCfg.upgradeBtnShadow}; border: 1px solid rgba(255,255,255,0.2);`;
             let upgradeAction = `window.GameEngine.startUpgrade(event, window.UIManager.activeMenuEntity)`;
             let hoverEvents = `onmouseover="this.style.background='${hCfg.upgradeBtnHoverBg}'; this.style.transform='translateY(-2px) scale(1.05)';" onmouseout="this.style.background='${hCfg.upgradeBtnBg}'; this.style.transform='translateY(0) scale(1)';"`;
-            
+
             if (!unlock.unlocked) {
                 upgradeStyle = `width: 48px; height: 48px; background: #555; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: not-allowed; opacity: 0.5; filter: grayscale(1);`;
                 upgradeAction = "";
@@ -1069,33 +1069,32 @@ export class UIManager {
             });
 
             rightHeader = `
-                <div style="display: flex; align-items: center; background: rgba(0, 0, 0, 0.2); padding: 0 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); position: relative; min-width: 220px; height: ${headerActionHeight}; box-sizing: border-box;">
-                   <div style="display: flex; flex-direction: column; margin-right: 16px; pointer-events: none; justify-content: center;">
-                        <span style="font-size: 11px; font-weight: bold; color: rgba(255,255,255,0.4); margin-bottom: 2px;">升級至 Lv.${(entity.lv || 1) + 1}</span>
+                <div style="display: flex; align-items: center; background: rgba(0, 0, 0, 0.2); padding: 0 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); position: relative; min-width: 240px; height: 72px; box-sizing: border-box; margin-left: auto;">
+                   <div style="display: flex; flex-direction: column; flex: 1; pointer-events: none; justify-content: center;">
+                        <span style="font-size: 12px; font-weight: bold; color: rgba(255,255,255,0.4); margin-bottom: 4px;">升級至 Lv.${(entity.lv || 1) + 1}</span>
                         <div style="display: flex; align-items: center; white-space: nowrap;">
                             ${resLineHtml || '<span style="font-size: 12px; color: #81c784;">免費</span>'}
                         </div>
                    </div>
-                   <div class="upgrade-action-btn" style="${upgradeStyle}" onclick="${upgradeAction}" ${hoverEvents}>
+                   <div class="upgrade-action-btn" style="${upgradeStyle}; margin-left: 12px;" onclick="${upgradeAction}" ${hoverEvents}>
                         <span style="color: white; font-size: 22px; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">▲</span>
                    </div>
-                   ${!unlock.unlocked ? `<div style="color: #ff8a80; font-size: 11px; font-weight: bold; position: absolute; left: 12px; bottom: -18px; white-space: nowrap;">${unlock.reason}</div>` : ""}
+                   ${!unlock.unlocked ? `<div style="color: #ff8a80; font-size: 13px; font-weight: bold; position: absolute; right: 16px; bottom: -18px; white-space: nowrap; text-shadow: 0 1px 2px black;">⚠️ ${unlock.reason}</div>` : ""}
                 </div>
             `;
         } else if (!isConfirming && entity.lv > 1 && !nextCfg) {
             rightHeader = `<div style="color: #fbc02d; font-weight: bold; font-size: 15px; border: 1px solid rgba(251, 192, 45, 0.3); display: flex; align-items: center; justify-content: center; border-radius: 20px; background: rgba(251, 192, 45, 0.05); min-width: 200px; height: ${headerActionHeight}; box-sizing: border-box;"><span style="margin-right:8px">⭐</span> 已達最高等級</div>`;
         }
 
-        let html = `
-            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid rgba(255,255,255,0.15); margin-bottom: 20px; padding-bottom: 12px; height: 80px; box-sizing: border-box;">
+        let headerHtml = `
+            <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid rgba(255,255,255,0.15); margin-bottom: 25px; padding-bottom: 15px; height: 110px; box-sizing: border-box; gap: 30px;">
                 ${leftHeader}
                 ${rightHeader}
             </div>
         `;
 
-        // 下方動作按鈕區域
-        html += `
-            <div id="action_button_grid" style="display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; justify-content:center; min-height: 90px; align-content: flex-start; transition: all 0.3s; box-sizing: border-box;">
+        let gridHtml = `
+            <div id="action_button_grid" style="display:flex; flex-direction:row; flex-wrap:wrap; gap:10px; justify-content:center; align-content: flex-start; transition: all 0.3s; box-sizing: border-box;">
         `;
 
         const eid = entity.id || `${entity.type}_${entity.x}_${entity.y}`;
@@ -1103,7 +1102,7 @@ export class UIManager {
 
         if (isConfirming) {
             // 確認銷毀模式
-            html += `
+            gridHtml += `
                 <button class="action-btn danger" onclick="window.UIManager.actualDestroy(event, '${eid}')" style="pointer-events: auto;">
                     <span class="icon">✔️</span><span class="label">確定銷毀</span>
                 </button>
@@ -1114,7 +1113,7 @@ export class UIManager {
         } else {
             // 一般模式
             if (entity.type === 'town_center' || entity.type === 'village') {
-                html += `
+                gridHtml += `
                     <button class="action-btn" id="cmd_WOOD" onclick="window.GameEngine.setCommand(event, 'WOOD')" style="${btnOpacity}">
                         <span class="icon">🪓</span><span class="label">採集木材</span>
                     </button>
@@ -1143,7 +1142,7 @@ export class UIManager {
                 if (bCfg.productionMode === 'rand') {
                     const firstId = bCfg.npcProduction[0];
                     const icon = iconMap[firstId] || '❓';
-                    html += `
+                    gridHtml += `
                         <button class="action-btn" onclick="window.GameEngine.addToProductionQueue(event, 'RANDOM', null)" style="${btnOpacity}">
                             <span class="icon">${icon}</span><span class="label">隨機招募</span>
                             <div class="queue-badge" style="display:none">0</div>
@@ -1155,7 +1154,7 @@ export class UIManager {
                     bCfg.npcProduction.forEach(id => {
                         const name = GameEngine.state.idToNameMap[id] || id;
                         const icon = iconMap[id] || iconMap[name] || '👤';
-                        html += `
+                        gridHtml += `
                             <button class="action-btn" onclick="window.GameEngine.addToProductionQueue(event, '${id}', null)">
                                 <span class="icon">${icon}</span><span class="label">${name}</span>
                                 <div class="queue-badge" style="display:none">0</div>
@@ -1173,8 +1172,8 @@ export class UIManager {
                     v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
                     v.assignedWarehouseId === eid
                 ).length;
-                html += `
-                    <div class="warehouse-controls">
+                gridHtml += `
+                    <div class="warehouse-controls" style="margin-top: 5px;">
                         <div class="control-title">自動化採集管理</div>
                         <div class="control-row">
                             <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)">-</button>
@@ -1187,15 +1186,24 @@ export class UIManager {
             }
         }
 
-        html += `</div>`;
+        gridHtml += `</div>`;
 
-        // 判斷是否隱藏選單：如果除了標題外沒有任何操作按鈕，且非銷毀確認模式，則隱藏選單
-        const hasActions = html.includes('action-btn') || html.includes('warehouse-controls');
-        if (!hasActions && !isConfirming) {
+        // 判斷是否隱藏選單：如果除了標題外沒有任何操作按鈕，且非銷毀確認模式，則隱藏下方區塊
+        const hasActions = gridHtml.includes('action-btn') || gridHtml.includes('warehouse-controls');
+
+        // 最終組合
+        let finalHtml = headerHtml;
+        if (hasActions) {
+            finalHtml += gridHtml;
+        } else {
+            // 如果沒有動作且非確認模式，則調整 header 的邊距，讓它看起來更精簡
+            finalHtml = headerHtml.replace('margin-bottom: 25px;', 'margin-bottom: 0;').replace('border-bottom: 2px solid rgba(255,255,255,0.15);', 'border-bottom: none;');
+        }
+        if (!hasActions && !isConfirming && !rightHeader) {
             menu.style.display = "none";
         } else {
             menu.style.display = "flex"; // 確保恢復顯示
-            menu.innerHTML = html;
+            menu.innerHTML = finalHtml;
             if (!cfg.anchor) {
                 // 先把選單移出可視區域，等 DOM 渲染一幀取得真實尺寸後再定位，避免首幀跳動
                 menu.style.left = "-9999px";
