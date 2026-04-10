@@ -835,13 +835,14 @@ export class GameEngine {
                     v.isPlayerLocked = true;
                     GameEngine.addLog(`[集結] 已加入資源田作業。`);
                 } else if (['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(targetEnt.type)) {
-                    this.adjustWarehouseWorkers(targetEnt, 1);
+                    // [核心修復] 先設定歸屬，再增加需求，確保自動化邏輯不會搶先指派其它人。
                     v.assignedWarehouseId = targetEnt.id || `${targetEnt.type}_${targetEnt.x}_${targetEnt.y}`;
+                    this.adjustWarehouseWorkers(targetEnt, 1);
                     v.type = (targetEnt.type === 'timber_factory' ? 'WOOD' : 
                              (targetEnt.type === 'stone_factory' ? 'STONE' : 
                              (targetEnt.type === 'barn' ? 'FOOD' : 'GOLD')));
                     v.state = 'MOVING_TO_RESOURCE';
-                    v.isPlayerLocked = false;
+                    v.isPlayerLocked = true; // [核心修復] 鎖定狀態防止出生瞬間被 assignNextTask 覆蓋
                     GameEngine.addLog(`[集結] 已加入 ${targetEnt.name || targetEnt.type} 採集隊列。`);
                 } else if (targetEnt.hp !== undefined && (targetEnt.config.camp === 'enemy' || targetEnt.camp === 'enemy')) {
                     v.state = 'CHASE';

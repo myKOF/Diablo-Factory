@@ -953,6 +953,48 @@ export class MainScene extends Phaser.Scene {
             }
         });
 
+        // 3. 選中建築的集結點目標 (提示描邊外框)
+        const selectedBldIds = state.selectedBuildingIds || [];
+        selectedBldIds.forEach(bid => {
+            const b = state.mapEntities.find(e => (e.id === bid || `${e.type}_${e.x}_${e.y}` === bid));
+            if (b && b.rallyPoint && b.rallyPoint.targetId) {
+                const rp = b.rallyPoint;
+                let target = null;
+                let isRes = false;
+
+                if (rp.targetType === 'RESOURCE') {
+                    const parts = rp.targetId.split('_'); // 'res_gx_gy'
+                    if (parts.length >= 3) {
+                        const gx = parseInt(parts[1]), gy = parseInt(parts[2]);
+                        const res = GameEngine.state.mapData.getResource(gx, gy);
+                        if (res && res.type !== 0) {
+                            const TS = GameEngine.TILE_SIZE;
+                            const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
+                            if (worldView.contains(rx, ry)) {
+                                target = { ...res, gx, gy, x: rx, y: ry };
+                                isRes = true;
+                            }
+                        }
+                    }
+                } else {
+                    target = state.mapEntities.find(e => (e.id === rp.targetId || `${e.type}_${e.x}_${e.y}` === rp.targetId)) ||
+                             state.units.villagers.find(u => u.id === rp.targetId);
+                }
+
+                if (target && target.x !== undefined) {
+                    if (worldView.left - 150 < target.x && worldView.right + 150 > target.x &&
+                        worldView.top - 150 < target.y && worldView.bottom + 150 > target.y) {
+                        const tId = target.id || (target.gx !== undefined ? `res_${target.gx}_${target.gy}` : rp.targetId);
+                        activeTargets.set(tId + "_rally", { 
+                            entity: target, 
+                            fxType: 'target', 
+                            config: isRes ? cfgRes : cfgBld 
+                        });
+                    }
+                }
+            }
+        });
+
         // 3. 建立或更新所需的 FX Sprite
         activeTargets.forEach((info, fullId) => {
             const { entity, fxType, config } = info;
