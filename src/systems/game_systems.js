@@ -772,23 +772,50 @@ export class GameEngine {
         if (v.config.type === 'villagers') this.assignNextTask(v);
 
         if (v.state === 'IDLE' && building && building.rallyPoint) {
-            // [核心優化] 集結點散開邏輯：使用 40px 間隔 (同手動指令) 並結合建築 ID 雜湊，防止多建築單位重疊
-            const bldHash = (building.id || "0").split('').reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0);
-            const hashOffset = Math.abs(bldHash) % 13; // 隨機但穩定的建築偏移量
-            const idx = (building.spawnIdx - 1) + hashOffset; 
-
-            const spacing = 40;
-            const gridW = 5;
-            const offsetX = (idx % gridW - Math.floor(gridW / 2)) * spacing;
-            const offsetY = (Math.floor(idx / gridW)) * spacing;
-
-            v.idleTarget = {
-                x: building.rallyPoint.x + offsetX,
-                y: building.rallyPoint.y + offsetY
-            };
-            v._isRallyMovement = true; // [新協定] 標記這是集結點移動，便於 UI 判斷是否顯示指示器
+            // [核心修復] 動態佔位邏輯：尋找距離集結點中心最近的「非佔用」空位
+            const spot = this.findAvailableRallySpot(building.rallyPoint);
+            v.idleTarget = spot;
+            v._isRallyMovement = true; 
         }
         return true;
+    }
+
+    /**
+     * [核心協定] 在集結點周圍尋找空位 (優先填充中心)
+     * @param {Object} rallyPoint 原始集結點座標
+     */
+    static findAvailableRallySpot(rallyPoint) {
+        const spacing = 25; 
+        const goldenAngle = 137.508 * (Math.PI / 180);
+        const claimedSpots = [];
+
+        // 1. 收集所有相關單位的目標或現有位置
+        this.state.units.villagers.forEach(v => {
+            if (v._isRallyMovement && v.idleTarget) {
+                // 如果目標點就在這個集結點附近，視為已佔用
+                if (Math.hypot(v.idleTarget.x - rallyPoint.x, v.idleTarget.y - rallyPoint.y) < 200) {
+                    claimedSpots.push(v.idleTarget);
+                }
+            } else if (v.state === 'IDLE' && !v.idleTarget) {
+                // 如果已經停在這個集結點附近，也視為已佔用
+                if (Math.hypot(v.x - rallyPoint.x, v.y - rallyPoint.y) < 150) {
+                    claimedSpots.push({ x: v.x, y: v.y });
+                }
+            }
+        });
+
+        // 2. 從中心向外依照螺旋尋找第一個空位
+        for (let idx = 0; idx < 100; idx++) {
+            const r = spacing * Math.sqrt(idx);
+            const theta = idx * goldenAngle;
+            const tx = rallyPoint.x + Math.cos(theta) * r;
+            const ty = rallyPoint.y + Math.sin(theta) * r;
+
+            // 判點此位置是否與已有單位重疊 (判定半徑略小於 spacing 以保持緊湊)
+            const isOccupied = claimedSpots.some(s => Math.hypot(s.x - tx, s.y - ty) < 18);
+            if (!isOccupied) return { x: tx, y: ty };
+        }
+        return { x: rallyPoint.x, y: rallyPoint.y };
     }
 
     static getFootprint(type) {

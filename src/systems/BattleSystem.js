@@ -70,30 +70,15 @@ export class BattleSystem {
             if (unit.chaseFrame === undefined) unit.chaseFrame = 0;
             unit.chaseFrame++;
 
+            // 直奔目標，進入射程即停
             if (dist <= range) {
                 unit.state = 'ATTACK';
                 unit.idleTarget = null;
                 unit.pathTarget = null;
                 unit.chaseFrame = 0;
-            } else if (unit.chaseFrame >= 10 || !unit.idleTarget) {
-                // [核心優化] 分層式追擊：遠距離時向中心聚攏，近距離才散開包圍
-                const idNum = parseInt((unit.id || "0").replace(/[^0-9]/g, '')) || (Math.floor(Math.random() * 100));
-
-                if (dist > range * 3) {
-                    // 遠距離：直接朝目標中心移動，保持隊形緊湊
-                    unit.idleTarget = { x: target.x, y: target.y };
-                } else {
-                    // 近距離：計算分佈式包圍點，避免重疊
-                    const baseAngle = ((idNum * 137) % 360);
-                    const angleRad = (baseAngle * Math.PI) / 180;
-                    const jitterFactor = ((idNum % 7) / 7);
-                    const offsetDist = range * (0.7 + jitterFactor * 0.2);
-
-                    unit.idleTarget = {
-                        x: target.x + Math.cos(angleRad) * offsetDist,
-                        y: target.y + Math.sin(angleRad) * offsetDist
-                    };
-                }
+            } else if (unit.chaseFrame >= 15 || !unit.idleTarget) {
+                // [協議簡化] 不再進行複雜包圍計算，直接鎖定目標中心點
+                unit.idleTarget = { x: target.x, y: target.y };
                 unit.chaseFrame = 0;
             }
         } else if (unit.state === 'ATTACK') {
@@ -101,6 +86,18 @@ export class BattleSystem {
                 unit.state = 'CHASE';
                 unit.chaseFrame = 10;
             } else {
+                // [本地避讓] 僅在定點重合時，作極小幅度的位置微調
+                if (shouldScan) {
+                    const neighbors = state.units.villagers.filter(u => u !== unit && u.hp > 0 && u.state === 'ATTACK' && this.getDist(unit, u) < 10);
+                    if (neighbors.length > 0) {
+                        const angle = Math.atan2(unit.y - neighbors[0].y, unit.x - neighbors[0].x) + (Math.random() - 0.5);
+                        unit.idleTarget = { x: unit.x + Math.cos(angle) * 15, y: unit.y + Math.sin(angle) * 15 };
+                        unit.state = 'CHASE';
+                        unit.chaseFrame = 5; // 快速反應
+                        return;
+                    }
+                }
+
                 if (unit.attackTimer === undefined) unit.attackTimer = 0;
                 unit.attackTimer -= dt;
                 if (unit.attackTimer <= 0) {
