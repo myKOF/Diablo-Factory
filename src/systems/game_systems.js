@@ -127,8 +127,8 @@ export class GameEngine {
 
             // 處理每間城鎮中心各自的獨立生產隊列
             const maxPop = this.getMaxPopulation();
-            const currentPop = this.getCurrentPopulation();
-            const isPopFull = currentPop >= maxPop;
+            let currentPopCount = this.getCurrentPopulation();
+            let anyFoundBlocked = false;
 
             // 偵測人口上限變動（全域一次即可）
             if (this.state.lastMaxPop > 0 && maxPop > this.state.lastMaxPop) {
@@ -150,26 +150,23 @@ export class GameEngine {
                         if (newCfg) {
                             ent.name = newCfg.name;
                             ent.model = newCfg.model;
-                            // 如果有其它需要更新的屬性可以在此更新
                         }
                         this.addLog(`${ent.name} 升級成功！目前等級：${ent.lv}`);
-                        this.triggerWarning("upgrade_success", [ent.name, ent.lv]); // 需要在 strings.csv 或程式碼中處理訊息
+                        this.triggerWarning("upgrade_success", [ent.name, ent.lv]);
                         if (window.UIManager) {
                             window.UIManager.showWarning(`${ent.name} 升級至 ${ent.lv} 級！`);
                             window.UIManager.updateValues(true);
-                            // [修復] 升級完成後重新刷新選單以隱藏進度條並恢復生產按鈕
                             if (window.UIManager.activeMenuEntity === ent) {
                                 window.UIManager.showContextMenu(ent);
                             }
                         }
                         this.state.renderVersion++;
                     }
-                    return; // 升級中不執行生產
+                    return;
                 }
 
                 if (ent.isUnderConstruction || !ent.queue || ent.queue.length === 0) return;
 
-                // [人口邏輯優化] 預先檢查隊列首位單位的具體人口需求
                 const nextConfigName = ent.queue[0];
                 let nextCfg = this.state.npcConfigs[nextConfigName];
                 if (!nextCfg) {
@@ -177,36 +174,39 @@ export class GameEngine {
                     if (mappedName) nextCfg = this.state.npcConfigs[mappedName];
                 }
                 const unitPop = nextCfg ? (nextCfg.population || 1) : 1;
-                const canSpawn = (currentPop + unitPop) <= maxPop;
+                const canSpawnPossible = (currentPopCount + unitPop) <= maxPop;
 
                 // 處理生產計時
                 if (ent.productionTimer === undefined) ent.productionTimer = 0;
-
-                // 不論是否能產出，都允許計時器跑完到 100% (timer=0)
                 if (ent.productionTimer > 0) {
                     ent.productionTimer -= deltaTime;
                     if (ent.productionTimer < 0) ent.productionTimer = 0;
                 }
 
-                // 如果計時器跑完但人口不夠，則維持在 0 (100% 進度) 並觸發警告
-                if (ent.productionTimer <= 0 && !canSpawn) {
-                    if (!this.state.hasHitPopLimit) {
-                        this.triggerWarning("2"); // 人口已滿
-                        this.state.hasHitPopLimit = true;
-                    }
-                } else if (canSpawn) {
-                    this.state.hasHitPopLimit = false;
-                }
-
-                // 只有當計時器歸零且人口空間足夠時，才真正產出並從隊列移除
-                if (ent.productionTimer <= 0 && canSpawn) {
-                    const configName = ent.queue[0]; // 僅窺視
-                    if (GameEngine.spawnNPC(configName, ent)) {
-                        ent.queue.shift(); // 產出成功才移除
-                        ent.productionTimer = ent.queue.length > 0 ? 5 : 0;
+                // [邏輯優化] 只有計時跑完時才判斷是否因人口不足被卡住
+                if (ent.productionTimer <= 0) {
+                    if (!canSpawnPossible) {
+                        anyFoundBlocked = true;
+                    } else {
+                        // 產出
+                        if (GameEngine.spawnNPC(nextConfigName, ent)) {
+                            ent.queue.shift();
+                            currentPopCount += unitPop; // 模擬即時人口增加，供下一個建築判斷
+                            ent.productionTimer = ent.queue.length > 0 ? 5 : 0;
+                        }
                     }
                 }
             });
+
+            // 統一處理人口警告 flag，防止多建築狀態不一時產生的閃爍 Log 洪流
+            if (anyFoundBlocked) {
+                if (!this.state.hasHitPopLimit) {
+                    this.triggerWarning("2"); // 人口已滿
+                    this.state.hasHitPopLimit = true;
+                }
+            } else {
+                this.state.hasHitPopLimit = false;
+            }
 
             const selectedIds = new Set(this.state.selectedUnitIds || []);
             const sortedVillagers = [...this.state.units.villagers].sort((a, b) => {
@@ -230,6 +230,8 @@ export class GameEngine {
             }
         } catch (err) {
             console.error("Logic Loop Error:", err);
+            // [核心修補] 加入詳細錯誤捕捉，防止崩潰靜默
+            this.addLog(`[系統錯誤] 邏輯循環異常: ${err.message}`, 'SYSTEM');
         }
     }
 
@@ -736,7 +738,7 @@ export class GameEngine {
         if (options && options.y !== undefined) spawnY = options.y;
 
         const v = {
-            id: 'unit_' + Math.random().toString(36).substr(2, 9),
+            id: 'unit_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
             x: spawnX, y: spawnY,
             spawnX: spawnX, spawnY: spawnY, // 記錄初始位置用於巡邏
             state: 'IDLE', targetId: null, cargo: 0,
@@ -937,9 +939,18 @@ export class GameEngine {
      * 計算當前我方陣營總佔用人口 (排除敵方與中立單位)
      */
     static getCurrentPopulation() {
-        return (this.state.units.villagers || [])
-            .filter(v => v.config && v.config.camp === 'player')
-            .reduce((sum, v) => sum + (v.config.population || 1), 0);
+        if (!this.state.units || !this.state.units.villagers) return 0;
+        let pop = 0;
+        const list = this.state.units.villagers;
+        for (let i = 0; i < list.length; i++) {
+            const v = list[i];
+            if (v && v.config && v.config.camp === 'player') {
+                // 強制轉換為數字，防止 CSV 讀取時產生的潛在字串加法問題
+                const p = parseInt(v.config.population) || 1;
+                pop += p;
+            }
+        }
+        return pop;
     }
 
     static generateMap() {
@@ -1253,6 +1264,7 @@ export class GameEngine {
         this.state.units.villagers.forEach(v => {
             v.fullPath = null;
             v.pathIndex = 0;
+            v.isFindingPath = false; // [修復] 同步重置尋路狀態，防止單位因 isFindingPath 鎖死而維持直線行走
             v._lastTargetPos = null; // 強制重置追蹤位置
         });
     }
@@ -1403,7 +1415,14 @@ export class GameEngine {
                 const isEntityResource = target && (target.type === 'farmland' || target.type === 'tree_plantation');
 
                 if (!target || (target.gx === undefined && !isEntityResource)) {
-                    target = this.findNearestResource(searchX, searchY, v.type, v.id);
+                    // [核心安全檢查] 若 targetId 是 ID 字串，需先轉換為實體物件或資源點
+                    if (typeof target === 'string') {
+                        const ent = this.state.mapEntities.find(e => e.id === target);
+                        if (ent) target = ent;
+                        else target = this.findNearestResource(searchX, searchY, v.type, v.id);
+                    } else {
+                        target = this.findNearestResource(searchX, searchY, v.type, v.id);
+                    }
                 } else if (target.gx !== undefined) {
                     // 檢查指定目標是否還有效 (MapData)
                     const res = this.state.mapData.getResource(target.gx, target.gy);
@@ -2272,7 +2291,7 @@ export class GameEngine {
     }
 
     static findNearestResource(x, y, typeOrName, villagerId) {
-        if (!this.state.mapData) return null;
+        if (!this.state.mapData || !typeOrName) return null;
 
         // 轉換類型名稱為數字 (1: WOOD, 2: STONE, 3: FOOD, 4: GOLD)
         let targetType = 0;
@@ -2529,10 +2548,10 @@ export class GameEngine {
         // 判斷是否為多選模式且選中多個同類型建築
         const isMultiSelect = this.state.selectedBuildingIds && this.state.selectedBuildingIds.length > 1;
         let targets = [activeBuilding];
-        
+
         if (isMultiSelect) {
-            targets = this.state.mapEntities.filter(e => 
-                this.state.selectedBuildingIds.includes(e.id || `${e.type}_${e.x}_${e.y}`) && 
+            targets = this.state.mapEntities.filter(e =>
+                this.state.selectedBuildingIds.includes(e.id || `${e.type}_${e.x}_${e.y}`) &&
                 e.type === activeBuilding.type &&
                 !e.isUnderConstruction
             );
@@ -2560,11 +2579,11 @@ export class GameEngine {
 
         // [關鍵] 根據建築等級調整產出的單位編號 (例如 A 生產 Lv1, B 生產 Lv2)
         const finalConfigId = this.resolveAppropriateUnitId(clickedConfigId, building);
-        
+
         // 檢查該建築是否真的被允許生產此單位 (或此種類型)
         const bCfg = this.getBuildingConfig(building.type, building.lv || 1);
         if (!bCfg || !bCfg.npcProduction) return;
-        
+
         // 如果不是 RANDOM，則檢查 finalConfigId 是否在該等級建築的產出清單中
         if (finalConfigId !== 'RANDOM') {
             const finalCfg = this.state.npcConfigs[finalConfigId] || this.state.npcConfigs[this.state.idToNameMap[finalConfigId]];
@@ -2631,7 +2650,7 @@ export class GameEngine {
             const name = this.state.idToNameMap[clickedId];
             if (name) baseCfg = this.state.npcConfigs[name];
         }
-        
+
         if (!baseCfg || clickedId === 'RANDOM') return clickedId;
 
         const unitType = baseCfg.type;

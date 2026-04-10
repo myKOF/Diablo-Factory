@@ -9,7 +9,7 @@ export class PathfindingSystem {
     constructor() {
         // 兼容不同 ESM 包裝格式 (esm.sh 可能回傳 { js: [Function] } 或直接是類別)
         const ESClass = EasyStarNamespace.js || EasyStarNamespace.default || EasyStarNamespace;
-        
+
         try {
             this.easystar = new ESClass();
         } catch (e) {
@@ -21,11 +21,11 @@ export class PathfindingSystem {
         this.tileSize = 20; // 預設值，應與 GameEngine 同步
         this.grid = [];
         this.isGridSet = false;
-        
+
         // 從全域配置讀取 (核心協議：解耦規範)
         const cfg = UI_CONFIG.Pathfinding || { debugColor: '#00ff00', iterationsPerFrame: 1000 };
-        this.debugColor = cfg.debugColor; 
-        
+        this.debugColor = cfg.debugColor;
+
         // 每幀限制計算量以確保拖動畫面不卡頓
         if (this.easystar) {
             this.easystar.setIterationsPerCalculation(cfg.iterationsPerFrame);
@@ -64,7 +64,7 @@ export class PathfindingSystem {
      * @param {Function} callback 尋路完成回呼
      */
     findPath(startX, startY, endX, endY, callback) {
-        if (!this.isGridSet) return;
+        if (!this.isGridSet) { callback(null); return; }
 
         const offset = (window.GAME_STATE && window.GAME_STATE.mapOffset) || { x: 0, y: 0 };
         const gx1 = Math.floor(startX / this.tileSize) - offset.x;
@@ -149,7 +149,7 @@ export class PathfindingSystem {
     }
 
     isValidAndWalkable(x, y, isAbsolute = true) {
-        const offset = isAbsolute ? (GameEngine.state.mapOffset || { x: 0, y: 0 }) : { x: 0, y: 0 };
+        const offset = isAbsolute ? ((window.GAME_STATE && window.GAME_STATE.mapOffset) || { x: 0, y: 0 }) : { x: 0, y: 0 };
         const lx = x - offset.x, ly = y - offset.y;
         return (ly >= 0 && ly < this.grid.length && lx >= 0 && lx < this.grid[0].length && this.grid[ly][lx] === 0);
     }

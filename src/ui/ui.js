@@ -1117,7 +1117,7 @@ export class UIManager {
                     gridHtml += `
                         <button class="action-btn" onclick="window.GameEngine.addToProductionQueue(event, 'RANDOM', null)" style="${btnOpacity}">
                             <span class="icon">${iconMap[bCfg.npcProduction[0]] || '❓'}</span><span class="label">隨機招募</span>
-                            <div class="queue-badge" style="display:none">0</div><div class="progress-bar-mini"></div>
+                            <div id="queue_badge" class="queue-badge" style="display:none">0</div><div id="prod_progress" class="progress-bar-mini"></div>
                         </button>`;
                 } else {
                     bCfg.npcProduction.forEach(id => {
@@ -1125,7 +1125,7 @@ export class UIManager {
                         gridHtml += `
                             <button class="action-btn" onclick="window.GameEngine.addToProductionQueue(event, '${id}', null)">
                                 <span class="icon">${iconMap[id] || iconMap[name] || '👤'}</span><span class="label">${name}</span>
-                                <div class="queue-badge" style="display:none">0</div><div class="progress-bar-mini"></div>
+                                <div id="queue_badge" class="queue-badge" style="display:none">0</div><div id="prod_progress" class="progress-bar-mini"></div>
                             </button>`;
                     });
                 }
@@ -1499,14 +1499,14 @@ export class UIManager {
         // 更新區域：倉庫自動化管理
         const countDisplay = document.querySelector(".count-display");
         const statusHint = document.querySelector(".status-hint");
-        if (countDisplay && statusHint && this.activeMenuEntity) {
+        if (countDisplay && this.activeMenuEntity) {
             const ent = this.activeMenuEntity;
             const current = GameEngine.state.units.villagers.filter(v =>
                 v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
                 v.assignedWarehouseId === (ent.id || `${ent.type}_${ent.x}_${ent.y}`)
             ).length;
             countDisplay.innerText = `${current} / ${ent.targetWorkerCount || 0}`;
-            statusHint.innerText = `派遣狀態`;
+            if (statusHint) statusHint.innerText = `派遣狀態`;
         }
 
         // 更新指令高亮狀態

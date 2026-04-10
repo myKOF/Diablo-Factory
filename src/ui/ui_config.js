@@ -18,6 +18,15 @@ export const UI_CONFIG = {
         minDragDistance: 10,        // 最小拖動位移（像素），低於此值將被視為點擊，不觸發畫面拖動
     },
 
+    // -- 框選範圍 (Selection Marquee) ----------------------------------
+    SelectionMarquee: {
+        fillColor: "#00ff00",         // 填滿顏色
+        fillAlpha: 0.20,               // 填滿透明度
+        borderColor: "#000000a4",       // 外框線條顏色
+        borderAlpha: 0.8,              // 外框線條透明度
+        borderWidth: 1                // 外框線條寬度
+    },
+
     // -- 邊緣捲動系統 (EdgeScrolling) ------------------------------
     EdgeScrolling: {
         enabled: true,
@@ -423,7 +432,7 @@ export const UI_CONFIG = {
         // -- 區塊偏移自訂 (Offsets) --
         leftOffset: { x: 0, y: 0 },     // 左側標題區偏移
         rightOffset: { x: 0, y: -5 },    // 右側升級框區偏移
-        requirementOffset: { x: -10, y: -17 }, // 升級條件文字偏移
+        requirementOffset: { x: -10, y: -15 }, // 升級條件文字偏移
         actionGridOffset: { x: 0, y: 5 },  // 指令按鈕區偏移
         workerControlOffset: { x: 0, y: 8 }, // 採集人數面板偏移 (當錨點為 CENTER 時)
         // -- 其他設定 --

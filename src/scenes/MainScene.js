@@ -367,9 +367,6 @@ export class MainScene extends Phaser.Scene {
                 unit.pathTarget = null;
                 unit.isPlayerLocked = true;
 
-                // [視覺優化] 同步選取該建築，顯示選取框與取消按鈕
-                if (window.UIManager) window.UIManager.showContextMenu(clickedTarget);
-
                 GameEngine.addLog(`[命令] 工人 ${unit.id} 前往建設 ${clickedTarget.name || clickedTarget.type}。`, 'INPUT');
                 return;
             } else if (isResource && unit.config.type === 'villagers') {
@@ -1123,12 +1120,20 @@ export class MainScene extends Phaser.Scene {
         const w = Math.abs(start.x - end.x);
         const h = Math.abs(start.y - end.y);
 
-        // 框框本體 (綠色透明)
-        g.fillStyle(0x00ff00, 0.15);
+        const cfg = UI_CONFIG.SelectionMarquee || { 
+            fillColor: "#00ff00", fillAlpha: 0.15, 
+            borderColor: "#00ff00", borderAlpha: 0.8, borderWidth: 1.5 
+        };
+
+        const fill = this.hexOrRgba(cfg.fillColor);
+        const border = this.hexOrRgba(cfg.borderColor);
+
+        // 框框本體
+        g.fillStyle(fill.color, cfg.fillAlpha !== undefined ? cfg.fillAlpha : fill.alpha);
         g.fillRect(x, y, w, h);
 
-        // 框框輪廓 (綠色實線)
-        g.lineStyle(1.5, 0x00ff00, 0.8);
+        // 框框輪廓
+        g.lineStyle(cfg.borderWidth || 1.5, border.color, cfg.borderAlpha !== undefined ? cfg.borderAlpha : border.alpha);
         g.strokeRect(x, y, w, h);
     }
 
