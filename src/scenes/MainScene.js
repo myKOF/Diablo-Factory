@@ -883,66 +883,106 @@ export class MainScene extends Phaser.Scene {
     updateResourceFX() {
         if (!this.resourceFXMap) this.resourceFXMap = new Map();
 
-        const cfgFX = UI_CONFIG.ResourceSelection || {
+        const state = GameEngine.state;
+        const cam = this.cameras.main;
+        const worldView = cam.worldView; // 緩存世界視圖範圍
+
+        const cfgRes = UI_CONFIG.ResourceSelection || {
             glowColor: "#ffeb3b", targetColor: "#00e5ff",
             glowOuterStrength: 2, glowInnerStrength: 0,
-            glowAlpha: 0.1, glowQuality: 12, depth: 15
+            glowAlpha: 0.1, glowQuality: 8, depth: 15
         };
+        const cfgBld = UI_CONFIG.BuildingConstructionSelection || { ...cfgRes, glowQuality: 4 };
 
-        const activeIds = new Set();
-        const selectedResId = GameEngine.state.selectedResourceId;
+        const activeTargets = new Map(); // id -> { entity, fxType, config }
+
+        // [效能優化] 建立村民快速索引，避免 O(N*M) 的 find 查找
+        const villagerMap = new Map();
+        if (state.units && state.units.villagers) {
+            state.units.villagers.forEach(v => villagerMap.set(v.id, v));
+        }
+
+        // 1. 手動選中的資源 (檢查可見性)
+        const selectedResId = state.selectedResourceId;
         if (selectedResId) {
             const parts = selectedResId.split('_');
-            const res = GameEngine.state.mapData.getResource(parseInt(parts[0]), parseInt(parts[1]));
+            const gx = parseInt(parts[0]), gy = parseInt(parts[1]);
+            const res = GameEngine.state.mapData.getResource(gx, gy);
             if (res && res.type !== 0) {
-                activeIds.add(selectedResId + "_sel");
+                const TS = GameEngine.TILE_SIZE;
+                const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
+                // 僅在畫面內時處理 FX，減少 Shader 渲染量
+                if (worldView.contains(rx, ry)) {
+                    activeTargets.set(selectedResId + "_sel", { entity: { ...res, gx, gy }, fxType: 'sel', config: cfgRes });
+                }
             } else {
-                // [核心修復] 若資源已枯竭，自動清除全域選取狀態，防止殘留描邊
-                GameEngine.state.selectedResourceId = null;
+                state.selectedResourceId = null;
             }
         }
 
-        const selectedIds = GameEngine.state.selectedUnitIds || [];
+        // 2. 選中的單位之指令目標 (檢查可見性)
+        const selectedIds = state.selectedUnitIds || [];
         selectedIds.forEach(uid => {
-            const u = GameEngine.state.units.villagers.find(v => v.id === uid);
-            if (u && u.targetId && u.targetId.gx !== undefined) {
+            const u = villagerMap.get(uid);
+            if (!u) return;
+
+            // 資源採集目標
+            if (u.targetId && u.targetId.gx !== undefined) {
                 const res = GameEngine.state.mapData.getResource(u.targetId.gx, u.targetId.gy);
                 if (res && res.type !== 0) {
-                    activeIds.add(`${u.targetId.gx}_${u.targetId.gy}_target`);
+                    const TS = GameEngine.TILE_SIZE;
+                    const rx = u.targetId.gx * TS + TS / 2, ry = u.targetId.gy * TS + TS / 2;
+                    if (worldView.contains(rx, ry)) {
+                        activeTargets.set(`${u.targetId.gx}_${u.targetId.gy}_target`, { entity: { ...res, gx: u.targetId.gx, gy: u.targetId.gy }, fxType: 'target', config: cfgRes });
+                    }
+                }
+            }
+
+            // 建築施工目標
+            if (u.constructionTarget) {
+                const b = u.constructionTarget;
+                // [優化] 增加可見性檢查，大幅減少大尺寸建築的 Glow Shader 計算
+                // 安全邊界設為 100，避免建築邊角突然消失
+                if (worldView.left - 100 < b.x && worldView.right + 100 > b.x &&
+                    worldView.top - 100 < b.y && worldView.bottom + 100 > b.y) {
+                    const bId = b.id || `${b.type}_${b.x}_${b.y}`;
+                    activeTargets.set(bId + "_const", { entity: b, fxType: 'const', config: cfgBld });
                 }
             }
         });
 
-        // 1. 建立或更新所需的 FX Sprite
-        activeIds.forEach(fullId => {
-            const parts = fullId.split('_');
-            const gx = parseInt(parts[0]), gy = parseInt(parts[1]);
-            const fxType = parts[2]; // "sel" or "target"
-
-            const res = GameEngine.state.mapData.getResource(gx, gy);
-            if (!res) return;
-
+        // 3. 建立或更新所需的 FX Sprite
+        activeTargets.forEach((info, fullId) => {
+            const { entity, fxType, config } = info;
             let fxSprite = this.resourceFXMap.get(fullId);
-            if (!fxSprite) {
-                const textureKey = this.getTextureKeyFromType(res.type);
-                fxSprite = this.add.sprite(0, 0, textureKey);
-                fxSprite.setDepth(cfgFX.depth); // 使用設定的深度
 
-                // 套用描邊或發光效果
+            if (!fxSprite) {
+                let textureKey;
+                if (entity.gx !== undefined && typeof entity.type === 'number') {
+                    textureKey = this.getTextureKeyFromType(entity.type);
+                } else {
+                    textureKey = this.getTextureKey(entity.type);
+                }
+
+                if (!textureKey || !this.textures.exists(textureKey)) return;
+
+                fxSprite = this.add.sprite(0, 0, textureKey);
+                fxSprite.setDepth(config.depth || 15);
+
                 if (fxSprite.postFX) {
-                    const colorStr = fxType === 'sel' ? cfgFX.glowColor : cfgFX.targetColor;
-                    // 指令修復：處理 8 位元 Hex (RGBA)，只取前 6 位 (RGB)
+                    const colorStr = (fxType === 'target') ? (config.targetColor || config.glowColor) : config.glowColor;
                     let cleanColor = colorStr.replace('#', '');
                     if (cleanColor.length > 6) cleanColor = cleanColor.substring(0, 6);
                     const color = parseInt(cleanColor, 16);
 
+                    // [效能關鍵] 使用較低的 Quality 進行描邊 (Building 預設降至 4)
                     const glow = fxSprite.postFX.addGlow(
                         color,
-                        cfgFX.glowOuterStrength,
-                        cfgFX.glowInnerStrength,
-                        cfgFX.glowKnockOut !== undefined ? cfgFX.glowKnockOut : true, // [修正] 使用 KnockOut 隱藏發光物件的中心本體
-                        cfgFX.glowAlpha,
-                        cfgFX.glowQuality
+                        config.glowOuterStrength,
+                        config.glowInnerStrength,
+                        config.glowKnockOut !== undefined ? config.glowKnockOut : true,
+                        config.glowAlpha,
+                        config.glowQuality || 6
                     );
                     fxSprite.setData('fx', glow);
                 }
@@ -952,26 +992,42 @@ export class MainScene extends Phaser.Scene {
 
             // 更新位置與縮放
             const TS = GameEngine.TILE_SIZE;
-            const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
-            const resCfg = GameEngine.state.resourceConfigs.find(c => c.type === typeMap[res.type] && c.lv === (res.level || 1));
+            if (entity.gx !== undefined && typeof entity.type === 'number') {
+                const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+                const resCfg = GameEngine.state.resourceConfigs.find(c => c.type === typeMap[entity.type] && c.lv === (entity.level || 1));
+                const idx = GameEngine.state.mapData.getIndex(entity.gx, entity.gy);
+                const varInfo = idx !== -1 ? GameEngine.state.mapData.variationGrid[idx] : 0xFFFFFF;
+                const vScale = ((varInfo >> 24) & 0xFF) / 100 || 1.0;
 
-            // 讀取視覺變量中的隨機縮放
-            const idx = GameEngine.state.mapData.getIndex(gx, gy);
-            const varInfo = idx !== -1 ? GameEngine.state.mapData.variationGrid[idx] : 0xFFFFFF;
-            const vScale = ((varInfo >> 24) & 0xFF) / 100 || 1.0;
+                fxSprite.x = entity.gx * TS + TS / 2;
+                fxSprite.y = entity.gy * TS + TS / 2;
+                if (resCfg && resCfg.model_size) {
+                    const s = config.selectionScale || 1.1;
+                    fxSprite.setScale(resCfg.model_size.x * vScale * s, resCfg.model_size.y * vScale * s);
+                }
+            } else {
+                fxSprite.x = entity.x;
+                fxSprite.y = entity.y;
+                const cfg = GameEngine.getEntityConfig(entity.type);
+                if (cfg && cfg.model_size) {
+                    let sx = 0.6, sy = 0.6;
+                    if (typeof cfg.model_size === 'string') {
+                        const m = cfg.model_size.match(/\{[ ]*([\d.]+)[ ]*[\*x][ ]*([\d.]+)[ ]*\}/);
+                        if (m) { sx = parseFloat(m[1]); sy = parseFloat(m[2]); }
+                    } else if (cfg.model_size.x) { sx = cfg.model_size.x; sy = cfg.model_size.y; }
 
-            fxSprite.x = gx * TS + TS / 2;
-            fxSprite.y = gy * TS + TS / 2;
-            if (resCfg && resCfg.model_size) {
-                const s = cfgFX.selectionScale || 1.1;
-                fxSprite.setScale(resCfg.model_size.x * vScale * s, resCfg.model_size.y * vScale * s);
+                    const finalSx = sx * (entity.vScaleX || 1) * (config.selectionScale || 1);
+                    const finalSy = sy * (entity.vScaleY || 1) * (config.selectionScale || 1);
+                    fxSprite.setScale(finalSx, finalSy);
+                }
+                if (entity.vTint !== undefined) fxSprite.setTint(entity.vTint);
             }
             fxSprite.setVisible(true);
         });
 
-        // 2. 清理不再需要的 FX Sprite
+        // 4. 清理不再需要的 FX Sprite
         for (const [fid, sprite] of this.resourceFXMap.entries()) {
-            if (!activeIds.has(fid)) {
+            if (!activeTargets.has(fid)) {
                 sprite.destroy();
                 this.resourceFXMap.delete(fid);
             }
@@ -1044,23 +1100,25 @@ export class MainScene extends Phaser.Scene {
             return true;
         });
 
-        // 2. 處理選中單位的持久目標 (僅當單位在移動或有目標時)
+        // 2. 處理選中單位的持久目標
         const selectedIds = GameEngine.state.selectedUnitIds || [];
         if (selectedIds.length > 0) {
+            // [優化] 建立快速索引
+            const villagerMap = new Map();
+            GameEngine.state.units.villagers.forEach(v => villagerMap.set(v.id, v));
+
             const drawnPos = new Set();
             selectedIds.forEach(id => {
-                const u = GameEngine.state.units.villagers.find(v => v.id === id);
+                const u = villagerMap.get(id);
                 if (!u) return;
 
-                // 2. 敵人的目標點不顯示 (僅顯示友方單位的移動目的地)
+                // 2. 敵人的目標點不顯示
                 const isEnemy = (u.config && u.config.camp === 'enemy') || u.camp === 'enemy';
                 if (isEnemy) return;
 
-                // 2. 只有手動點擊地板的移動指示才顯示光圈 (以 IDLE 狀態 + 被玩家鎖定 為準)
-                // [核心修復] 優先使用 commandCenter 以確保多選單位僅顯示一個中心點光圈
                 const targetPoint = u.commandCenter || u.idleTarget;
                 if (targetPoint && u.state === 'IDLE' && u.isPlayerLocked && !u._isRallyMovement) {
-                    const dist = Math.hypot(u.x - u.idleTarget.x, u.y - u.idleTarget.y);
+                    const dist = Math.hypot(u.x - targetPoint.x, u.y - targetPoint.y);
                     if (dist > 15) {
                         const key = `ground_${Math.floor(targetPoint.x)}_${Math.floor(targetPoint.y)}`;
                         if (!drawnPos.has(key)) {
@@ -1068,7 +1126,6 @@ export class MainScene extends Phaser.Scene {
                             drawnPos.add(key);
                         }
                     } else {
-                        // 抵達後清除視覺中心點
                         u.commandCenter = null;
                     }
                 }

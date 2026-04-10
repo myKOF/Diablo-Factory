@@ -339,10 +339,10 @@ export const UI_CONFIG = {
     },
     // -- 建築集結點 (RallyPoint) ------------------------------------
     RallyPoint: {
-        lineColor: "#0026fcff",
+        lineColor: "#ffffffff",
         lineAlpha: 1,
         lineDash: [10, 5],
-        circleColor: "#00e5ff",
+        circleColor: "#ffffffff",
         circleAlpha: 0.6,
         circleMinRadius: 8,
         circleMaxRadius: 15,
