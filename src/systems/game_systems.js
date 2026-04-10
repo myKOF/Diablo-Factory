@@ -137,7 +137,22 @@ export class GameEngine {
             }
             this.state.lastMaxPop = maxPop;
 
-            // 1.2 建築生產與升級邏輯
+            // 1.2 [新協定] 更新動態集結點 (即時追蹤敵人位置，供視覺渲染與新生單位定位)
+            this.state.mapEntities.forEach(ent => {
+                if (ent.rallyPoint && ent.rallyPoint.targetId && ent.rallyPoint.targetType === 'UNIT') {
+                    const target = this.state.units.villagers.find(u => u.id === ent.rallyPoint.targetId);
+                    if (target && target.hp > 0) {
+                        ent.rallyPoint.x = target.x;
+                        ent.rallyPoint.y = target.y;
+                    } else {
+                        // 目標消失或死亡，定格在最後位置
+                        ent.rallyPoint.targetId = null;
+                        ent.rallyPoint.targetType = 'GROUND';
+                    }
+                }
+            });
+
+            // 1.3 建築生產與升級邏輯
             this.state.mapEntities.forEach(ent => {
                 // 處理升級進度
                 if (ent.isUpgrading) {
@@ -769,13 +784,93 @@ export class GameEngine {
         };
 
         this.state.units.villagers.push(v);
-        if (v.config.type === 'villagers') this.assignNextTask(v);
 
-        if (v.state === 'IDLE' && building && building.rallyPoint) {
-            // [核心修復] 動態佔位邏輯：尋找距離集結點中心最近的「非佔用」空位
-            const spot = this.findAvailableRallySpot(building.rallyPoint);
-            v.idleTarget = spot;
-            v._isRallyMovement = true; 
+        // [集結點邏輯] 核心協定：新生單位優先執行建築物預設的集結指令（鎖定狀態），若無指令才進入自動分派
+        if (building && building.rallyPoint) {
+            const rp = building.rallyPoint;
+            const isVillager = v.config.type === 'villagers';
+
+            // 1. 尋找集結點鎖定的目標旗標實體
+            let targetEnt = null;
+            if (rp.targetId) {
+                if (rp.targetType === 'RESOURCE') {
+                    const parts = rp.targetId.split('_');
+                    const gx = parseInt(parts[1]), gy = parseInt(parts[2]);
+                    const res = this.state.mapData.getResource(gx, gy);
+                    if (res && res.type !== 0) {
+                        targetEnt = { 
+                            id: rp.targetId, gx, gy, 
+                            x: gx * this.TILE_SIZE + this.TILE_SIZE / 2, 
+                            y: gy * this.TILE_SIZE + this.TILE_SIZE / 2,
+                            type: 'RESOURCE',
+                            resourceType: ['NONE', 'WOOD', 'STONE', 'FOOD', 'GOLD'][res.type]
+                        };
+                    }
+                } else {
+                    targetEnt = this.state.units.villagers.find(u => u.id === rp.targetId) ||
+                                 this.state.mapEntities.find(e => {
+                                     const eid = e.id || `${e.type}_${e.x}_${e.y}`;
+                                     return eid === rp.targetId;
+                                 });
+                }
+            }
+
+            // 2. 根據目標實體類型決定初始行為
+            if (targetEnt && isVillager) {
+                if (targetEnt.isUnderConstruction) {
+                    v.state = 'MOVING_TO_CONSTRUCTION';
+                    v.constructionTarget = targetEnt;
+                    v.isPlayerLocked = true;
+                    GameEngine.addLog(`[集結] 已自動指派至建造任務。`);
+                } else if (targetEnt.type === 'RESOURCE') {
+                    v.state = 'MOVING_TO_RESOURCE';
+                    v.targetId = targetEnt;
+                    v.type = targetEnt.resourceType;
+                    v.isPlayerLocked = true;
+                    GameEngine.addLog(`[集結] 已自動指派至採集任務。`);
+                } else if (['farmland', 'tree_plantation'].includes(targetEnt.type)) {
+                    v.state = 'MOVING_TO_RESOURCE';
+                    v.targetId = targetEnt;
+                    v.type = (targetEnt.type === 'farmland' ? 'FOOD' : 'WOOD');
+                    v.isPlayerLocked = true;
+                    GameEngine.addLog(`[集結] 已加入資源田作業。`);
+                } else if (['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(targetEnt.type)) {
+                    this.adjustWarehouseWorkers(targetEnt, 1);
+                    v.assignedWarehouseId = targetEnt.id || `${targetEnt.type}_${targetEnt.x}_${targetEnt.y}`;
+                    v.type = (targetEnt.type === 'timber_factory' ? 'WOOD' : 
+                             (targetEnt.type === 'stone_factory' ? 'STONE' : 
+                             (targetEnt.type === 'barn' ? 'FOOD' : 'GOLD')));
+                    v.state = 'MOVING_TO_RESOURCE';
+                    v.isPlayerLocked = false;
+                    GameEngine.addLog(`[集結] 已加入 ${targetEnt.name || targetEnt.type} 採集隊列。`);
+                } else if (targetEnt.hp !== undefined && (targetEnt.config.camp === 'enemy' || targetEnt.camp === 'enemy')) {
+                    v.state = 'CHASE';
+                    v.targetId = targetEnt.id;
+                    v.isPlayerLocked = true;
+                    GameEngine.addLog(`[集結] 正在追擊鎖定的敵軍！`);
+                } else {
+                    v.idleTarget = this.findAvailableRallySpot(rp);
+                    v._isRallyMovement = true;
+                }
+            } else if (targetEnt && !isVillager) {
+                if (targetEnt.hp !== undefined && (targetEnt.config.camp === 'enemy' || targetEnt.camp === 'enemy')) {
+                    v.state = 'CHASE';
+                    v.targetId = targetEnt.id;
+                    GameEngine.addLog(`[集結] 戰鬥單位正在追擊敵軍！`);
+                } else {
+                    v.idleTarget = this.findAvailableRallySpot(rp);
+                    v._isRallyMovement = true;
+                }
+            } else {
+                const spot = this.findAvailableRallySpot(rp);
+                v.idleTarget = spot;
+                v._isRallyMovement = true; 
+            }
+        }
+
+        // 僅在無明確集結指令時，才進入自動分派系統
+        if (v.state === 'IDLE' && v.config.type === 'villagers') {
+            this.assignNextTask(v);
         }
         return true;
     }
@@ -2130,6 +2225,32 @@ export class GameEngine {
             v.isFindingPath = false;
             v._stuckFrames = -40; // [核心修復] 延長冷卻期，給予足夠時間重新尋路並移開
             v._isRallyMovement = false;
+
+            // [核心修復] 處理不合法目標修正 (Point 3)
+            // 如果當前移動目標 (idleTarget/gatherPoint 等) 距離當前脫困點過近，說明原始目標就在障礙物內部。
+            // 直接將目標修正為脫困後的合法位置，使其抵達後立即停止，防止死循環。
+            if (v.idleTarget) {
+                const d = Math.hypot(v.idleTarget.x - v.x, v.idleTarget.y - v.y);
+                if (d < 60) {
+                    v.idleTarget = { x: v.x, y: v.y };
+                    if (isSelected) GameEngine.addLog(`[路徑修正] 目標位於障礙區，已修正至合法邊緣點。`, 'PATH');
+                }
+            } else if (v.gatherPoint) {
+                const d = Math.hypot(v.gatherPoint.x - v.x, v.gatherPoint.y - v.y);
+                if (d < 50) {
+                    v.gatherPoint = { x: v.x, y: v.y };
+                }
+            } else if (v.depositPoint) {
+                const d = Math.hypot(v.depositPoint.x - v.x, v.depositPoint.y - v.y);
+                if (d < 50) {
+                    v.depositPoint = { x: v.x, y: v.y };
+                }
+            } else if (v._stableConstructionTarget) {
+                const d = Math.hypot(v._stableConstructionTarget.x - v.x, v._stableConstructionTarget.y - v.y);
+                if (d < 50) {
+                    v._stableConstructionTarget = { x: v.x, y: v.y };
+                }
+            }
 
             if (isSelected) {
                 GameEngine.addLog(`[防卡死修復] 已由 (${oldX.toFixed(0)},${oldY.toFixed(0)}) 移至 (${v.x.toFixed(0)}, ${v.y.toFixed(0)})`, "PATH");

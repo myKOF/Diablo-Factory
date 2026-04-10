@@ -195,22 +195,75 @@ export class InputSystem {
 
     handleRallyPoint(pointer, ent, bCfg) {
         const pos = { x: pointer.worldX, y: pointer.worldY };
-        let uw = 1, uh = 1;
-        if (bCfg.size) {
-            const m = bCfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
-            if (m) { uw = parseInt(m[1]); uh = parseInt(m[2]); }
+        const TS = GameEngine.TILE_SIZE;
+
+        // [核心邏輯] 偵測點擊位置的物件類型以決定集結模式
+        let clickedTarget = null;
+        let targetType = 'GROUND';
+
+        // 1. 檢查是否點擊到敵方單位 (優先級最高)
+        GameEngine.state.units.villagers.forEach(v => {
+            const camp = (v.config && v.config.camp) || v.camp || 'neutral';
+            if (camp === 'enemy' && v.hp > 0) {
+                const d = Math.hypot(v.x - pos.x, v.y - pos.y);
+                if (d < 30) {
+                    clickedTarget = v;
+                    targetType = 'UNIT';
+                }
+            }
+        });
+
+        // 2. 檢查是否點擊到資源 (地圖格網型)
+        if (!clickedTarget && GameEngine.state.mapData) {
+            const gx = Math.floor(pos.x / TS);
+            const gy = Math.floor(pos.y / TS);
+            const res = GameEngine.state.mapData.getResource(gx, gy);
+            if (res && res.type !== 0) {
+                clickedTarget = { 
+                    id: `res_${gx}_${gy}`, 
+                    gx, gy, 
+                    x: gx * TS + TS / 2, 
+                    y: gy * TS + TS / 2, 
+                    type: 'RESOURCE_NODE',
+                    resourceType: ['NONE', 'WOOD', 'STONE', 'FOOD', 'GOLD'][res.type]
+                };
+                targetType = 'RESOURCE';
+            }
         }
-        const halfW = (uw * GameEngine.TILE_SIZE) / 2;
-        const halfH = (uh * GameEngine.TILE_SIZE) / 2;
 
-        const isInside = pos.x >= ent.x - halfW && pos.x <= ent.x + halfW &&
-            pos.y >= ent.y - halfH && pos.y <= ent.y + halfH;
+        // 3. 檢查是否點擊到建築物 (地圖實體型，包含我方工地或採集場)
+        if (!clickedTarget) {
+            GameEngine.state.mapEntities.forEach(e => {
+                const fp = GameEngine.getFootprint(e.type);
+                const w = fp.uw * TS, h = fp.uh * TS;
+                if (pos.x >= e.x - w / 2 - 5 && pos.x <= e.x + w / 2 + 5 &&
+                    pos.y >= e.y - h / 2 - 5 && pos.y <= e.y + h / 2 + 5) {
+                    clickedTarget = e;
+                    targetType = 'BUILDING';
+                }
+            });
+        }
 
-        if (isInside) {
+        const isSelf = clickedTarget && (clickedTarget.id === ent.id || (clickedTarget.x === ent.x && clickedTarget.y === ent.y));
+
+        if (isSelf) {
             ent.rallyPoint = null;
             GameEngine.addLog(`已取消建築集結點。`);
             if (window.UIManager) window.UIManager.updateValues(true);
+        } else if (clickedTarget) {
+            // [Snap 邏輯] 將集結點鎖定到目標中心，並保存 ID 用於後續連動渲染或追蹤
+            ent.rallyPoint = {
+                x: clickedTarget.x,
+                y: clickedTarget.y,
+                targetId: clickedTarget.id || (clickedTarget.gx !== undefined ? `res_${clickedTarget.gx}_${clickedTarget.gy}` : null),
+                targetType: targetType,
+                // 保存基礎屬性快照
+                name: clickedTarget.name || clickedTarget.type || '目標'
+            };
+            GameEngine.addLog(`${bCfg.name} 集結點已鎖定至：${ent.rallyPoint.name}`);
+            if (window.UIManager) window.UIManager.updateValues(true);
         } else {
+            // 一般空地
             ent.rallyPoint = pos;
             GameEngine.addLog(`${bCfg.name} 集結點已設定：(${pos.x.toFixed(0)}, ${pos.y.toFixed(0)})`);
             if (window.UIManager) window.UIManager.updateValues(true);
