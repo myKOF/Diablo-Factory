@@ -118,31 +118,31 @@ export class PathfindingSystem {
      * @param {boolean} isAbsolute 是世界座標(需扣offset)還是網格索引(不需扣)
      * @returns {{x: number, y: number} | null} 回傳與輸入相同類別的座標
      */
-    getNearestWalkableTile(gx, gy, maxRadius = 10, isAbsolute = true) {
+    getNearestWalkableTile(gx, gy, maxRadius = 10, isAbsolute = true, skipCurrent = false) {
         if (!this.isGridSet || !this.grid) return null;
         const offset = isAbsolute ? (window.GAME_STATE && window.GAME_STATE.mapOffset || { x: 0, y: 0 }) : { x: 0, y: 0 };
         const lgx = gx - offset.x, lgy = gy - offset.y;
 
-        // 如果當前點就可行，直接回傳
-        if (this.isValidAndWalkable(lgx, lgy, false)) return { x: gx, y: gy };
+        // 如果當前點就可行且不要求跳過，直接回傳
+        if (!skipCurrent && this.isValidAndWalkable(lgx, lgy, false)) return { x: gx, y: gy };
 
         // 螺旋搜尋 (Spiral Search)
         for (let r = 1; r <= maxRadius; r++) {
             // 從上方橫向搜尋 (含對角線)
             for (let x = lgx - r; x <= lgx + r; x++) {
-                if (this.isValidAndWalkable(x, lgy - r, false)) return { x: x + offset.x, y: gy - r };
+                if (this.isValidAndWalkable(x, lgy - r, false)) return { x: x + offset.x, y: (lgy - r) + offset.y };
             }
             // 從下方橫向搜尋
             for (let x = lgx - r; x <= lgx + r; x++) {
-                if (this.isValidAndWalkable(x, lgy + r, false)) return { x: x + offset.x, y: gy + r };
+                if (this.isValidAndWalkable(x, lgy + r, false)) return { x: x + offset.x, y: (lgy + r) + offset.y };
             }
             // 從左側縱向搜尋
             for (let y = lgy - r + 1; y < lgy + r; y++) {
-                if (this.isValidAndWalkable(lgx - r, y, false)) return { x: gx - r, y: y + offset.y };
+                if (this.isValidAndWalkable(lgx - r, y, false)) return { x: (lgx - r) + offset.x, y: y + offset.y };
             }
             // 從右側縱向搜尋
             for (let y = lgy - r + 1; y < lgy + r; y++) {
-                if (this.isValidAndWalkable(lgx + r, y, false)) return { x: gx + r, y: y + offset.y };
+                if (this.isValidAndWalkable(lgx + r, y, false)) return { x: (lgx + r) + offset.x, y: y + offset.y };
             }
         }
         return null;

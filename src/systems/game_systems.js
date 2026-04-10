@@ -2113,8 +2113,9 @@ export class GameEngine {
         const gx = Math.floor(v.x / this.TILE_SIZE);
         const gy = Math.floor(v.y / this.TILE_SIZE);
 
-        // 搜尋最近的空地 (格網索引)
-        const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100, true);
+        // [核心修復] 尋找最近的空地，且強制排除當前所在的格(skipCurrent=true)，
+        // 避免因為「網格判定可行但實體判定寬度超出」導致原地傳送後再度卡進建築邊緣的死循環。
+        const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100, true, true);
 
         if (nearest) {
             // 傳送至該格的像素中心，並加入微小隨機量打破路徑循環
@@ -2127,7 +2128,7 @@ export class GameEngine {
             v.pathTarget = null;
             v._lastRequestedTarget = null;
             v.isFindingPath = false;
-            v._stuckFrames = -20; // [核心修復] 提供一段冷卻期，防止在一幀內反覆觸發 resolveStuck
+            v._stuckFrames = -40; // [核心修復] 延長冷卻期，給予足夠時間重新尋路並移開
             v._isRallyMovement = false;
 
             if (isSelected) {

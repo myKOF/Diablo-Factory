@@ -189,6 +189,8 @@ export class BattleSystem {
                 target: target,
                 damage: dmg,
                 speed: attackType === 2 ? this.VISUAL_CONFIG.arrow.speed : this.VISUAL_CONFIG.fireball.speed,
+                lastX: target.x,
+                lastY: target.y,
                 progress: 0,
                 duration: 0,
                 totalDistance: Math.hypot(target.x - attacker.x, target.y - attacker.y)
@@ -246,17 +248,20 @@ export class BattleSystem {
                 }
                 state.projectiles.splice(i, 1);
             } else {
-                // 更新子彈實時位置 (追蹤移動中的目標)
+                // 更新子彈實時位置
                 const target = this.findEntityById(p.targetId, state);
-                if (target) {
-                    // 子彈朝向目標移動
-                    const curX = p.startX + (target.x - p.startX) * p.progress;
-                    const curY = p.startY + (target.y - p.startY) * p.progress;
-                    p.x = curX;
-                    p.y = curY;
+                if (target && target.hp > 0) {
+                    // 追蹤移動中的目標
+                    p.x = p.startX + (target.x - p.startX) * p.progress;
+                    p.y = p.startY + (target.y - p.startY) * p.progress;
+                    p.lastX = target.x;
+                    p.lastY = target.y;
                 } else {
-                    // 目標消失，子彈繼續飛往最後已知點後消失 (簡單處理：直接消失)
-                    state.projectiles.splice(i, 1);
+                    // 目標消失，子彈繼續飛往最後紀錄點
+                    const tx = p.lastX !== undefined ? p.lastX : p.targetX || p.startX;
+                    const ty = p.lastY !== undefined ? p.lastY : p.targetY || p.startY;
+                    p.x = p.startX + (tx - p.startX) * p.progress;
+                    p.y = p.startY + (ty - p.startY) * p.progress;
                 }
             }
         }
