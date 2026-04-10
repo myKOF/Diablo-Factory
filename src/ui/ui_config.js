@@ -449,5 +449,26 @@ export const UI_CONFIG = {
         progressColorEnd: "#81c784",    // 選單內進度條漸層終點
         worldProgressColor: "#4caf50",  // 建築物上方進度條顏色
         worldProgressBg: "rgba(0,0,0,0.6)" // 建築物上方進度條背景
+    },
+
+    // -- 戰鬥表現相關參數 (Combat Visuals) -----------------------
+    Combat: {
+        scanInterval: 0.3,          // 自動尋敵頻率 (秒)
+        chaseSearchInterval: 10,    // 追擊路徑刷新頻率 (幀)
+
+        arrow: {
+            speed: 400,             // 飛行速度
+            color: "#d62d2d63",       // 顏色
+            size: 6,                // 粗細/大小
+            arcHeightMax: 60,      // 最大弧度高度
+            arcHeightFactor: 0.3    // 距離對弧度的影響係數
+        },
+        fireball: {
+            speed: 600,             // 飛行速度
+            colorCore: "#ffff00",   // 核心顏色 (黃)
+            colorGlow: "#ffa500",   // 發光顏色 (橘)
+            colorTrail: "#ff5500",  // 拖尾顏色 (紅)
+            sizeBase: 6             // 基礎大小
+        }
     }
 };

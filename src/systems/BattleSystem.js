@@ -1,10 +1,15 @@
-
+import { UI_CONFIG } from "../ui/ui_config.js";
 /**
  * 獨立戰鬥系統 Alpha 版 (BattleSystem.js)
  * 核心邏輯：陣營識別、自動索敵、攻擊循環、尋路追擊、分時掃描優化
  */
 export class BattleSystem {
-    static scanInterval = 0.3; 
+    // 戰鬥表現相關參數 (已根據 [核心規約] 移至 ui_config.js 統一管理)
+    static get VISUAL_CONFIG() {
+        return UI_CONFIG.Combat;
+    }
+
+    static scanInterval = BattleSystem.VISUAL_CONFIG.scanInterval;
     static scanTimer = 0;
     static debugMode = true;
 
@@ -21,6 +26,9 @@ export class BattleSystem {
             if (unit.hp <= 0) return;
             this.processCombat(unit, dt, state, TILE_SIZE, shouldScan);
         });
+
+        // 更新遠程子彈邏輯
+        this.updateProjectiles(state, dt, TILE_SIZE);
 
         this.cleanupDeadUnits(state);
     }
@@ -55,7 +63,7 @@ export class BattleSystem {
         const dist = this.getDist(unit, target);
         // 優化射程：近戰時增加體積緩衝，讓雙方不擠入同一格子
         const baseRange = (unit.range || (unit.config && unit.config.range) || 1.5);
-        const rangeBuffer = (baseRange < 2) ? TILE_SIZE * 0.9 : 0; 
+        const rangeBuffer = (baseRange < 2) ? TILE_SIZE * 0.9 : 0;
         const range = baseRange * TILE_SIZE + rangeBuffer;
 
         if (unit.state === 'CHASE') {
@@ -68,21 +76,24 @@ export class BattleSystem {
                 unit.pathTarget = null;
                 unit.chaseFrame = 0;
             } else if (unit.chaseFrame >= 10 || !unit.idleTarget) {
-                // [核心優化] 分散式追擊點計算：利用 ID 攪動與黃金分割角度，確保多個單位不重疊
+                // [核心優化] 分層式追擊：遠距離時向中心聚攏，近距離才散開包圍
                 const idNum = parseInt((unit.id || "0").replace(/[^0-9]/g, '')) || (Math.floor(Math.random() * 100));
-                
-                // 1. 基本環繞角度：利用大質數 137 (接近黃金角度) 確散分佈
-                const baseAngle = ((idNum * 137) % 360); 
-                const angleRad = (baseAngle * Math.PI) / 180;
-                
-                // 2. 距離攪動：讓單位在攻擊距離邊緣 (60%~95% 射程) 隨機分佈，形成多排包圍圈效果
-                const jitterFactor = ((idNum % 7) / 7); 
-                const offsetDist = range * (0.7 + jitterFactor * 0.2); 
-                
-                unit.idleTarget = {
-                    x: target.x + Math.cos(angleRad) * offsetDist,
-                    y: target.y + Math.sin(angleRad) * offsetDist
-                };
+
+                if (dist > range * 3) {
+                    // 遠距離：直接朝目標中心移動，保持隊形緊湊
+                    unit.idleTarget = { x: target.x, y: target.y };
+                } else {
+                    // 近距離：計算分佈式包圍點，避免重疊
+                    const baseAngle = ((idNum * 137) % 360);
+                    const angleRad = (baseAngle * Math.PI) / 180;
+                    const jitterFactor = ((idNum % 7) / 7);
+                    const offsetDist = range * (0.7 + jitterFactor * 0.2);
+
+                    unit.idleTarget = {
+                        x: target.x + Math.cos(angleRad) * offsetDist,
+                        y: target.y + Math.sin(angleRad) * offsetDist
+                    };
+                }
                 unit.chaseFrame = 0;
             }
         } else if (unit.state === 'ATTACK') {
@@ -122,7 +133,7 @@ export class BattleSystem {
         if (!isInitiative) {
             const currentTarget = this.findEntityById(unit.targetId, state);
             const isTargetEnemy = currentTarget && ((currentTarget.config && currentTarget.config.camp === 'enemy') || currentTarget.camp === 'enemy');
-            if (!isTargetEnemy) return; 
+            if (!isTargetEnemy) return;
         }
 
         let currentTarget = this.findEntityById(unit.targetId, state);
@@ -152,14 +163,47 @@ export class BattleSystem {
         if (nearestEnemy) {
             unit.targetId = nearestEnemy.id;
             unit.state = 'CHASE';
-            unit.chaseFrame = 10; 
+            unit.chaseFrame = 10;
             unit.forceFocus = false; // 自動索敵拿到的目標不具備強制鎖定屬性，可隨距離變換
             this.logToScreen(state, `[戰鬥] ${unit.configName} 鎖定目標: ${nearestEnemy.configName || nearestEnemy.id}`);
         }
     }
 
     static performAttack(attacker, target, state) {
+        const attackType = attacker.attack_type || 1;
         const dmg = attacker.attack || (attacker.config && attacker.config.attack) || 10;
+
+        if (attackType === 1) {
+            // 近戰：立刻結算
+            this.applyDamage(target, dmg, state);
+        } else {
+            // 遠程：發射子彈
+            if (!state.projectiles) state.projectiles = [];
+
+            const p = {
+                id: 'proj_' + Date.now() + Math.random(),
+                type: attackType,
+                attackerId: attacker.id,
+                targetId: target.id,
+                x: attacker.x,
+                y: attacker.y,
+                startX: attacker.x,
+                startY: attacker.y,
+                target: target,
+                damage: dmg,
+                speed: attackType === 2 ? this.VISUAL_CONFIG.arrow.speed : this.VISUAL_CONFIG.fireball.speed,
+                progress: 0,
+                duration: 0,
+                totalDistance: Math.hypot(target.x - attacker.x, target.y - attacker.y)
+            };
+
+            // 計算預估飛行時間
+            p.duration = p.totalDistance / p.speed;
+            state.projectiles.push(p);
+        }
+    }
+
+    static applyDamage(target, dmg, state) {
         target.hp -= dmg;
         target.hitTimer = 1.0;
 
@@ -175,9 +219,48 @@ export class BattleSystem {
 
             const targetCamp = (target.config && target.config.camp) || target.camp || 'neutral';
             if (targetCamp !== 'neutral') {
-                target.targetId = attacker.id;
-                target.state = 'CHASE';
-                target.chaseFrame = 10;
+                target.targetId = null; // 先重置
+                // 這裡會由 autoSeeking 下一次掃描時處理，或者立刻給予反擊目標
+                // 為了反應即時，這裡可以直接設定
+                // 但需要注意 attacker 可能已死
+            }
+        }
+    }
+
+    static updateProjectiles(state, dt, TILE_SIZE) {
+        if (!state.projectiles) return;
+
+        for (let i = state.projectiles.length - 1; i >= 0; i--) {
+            const p = state.projectiles[i];
+            p.progress += dt / Math.max(0.01, p.duration);
+
+            if (p.progress >= 1.0) {
+                // 命中目標
+                const target = this.findEntityById(p.targetId, state);
+                if (target && target.hp > 0) {
+                    this.applyDamage(target, p.damage, state);
+
+                    // 如果目標原本沒目標，且受擊，觸發反擊邏輯 (同 applyDamage 內)
+                    if (!target.targetId && !target.isPlayerLocked) {
+                        target.targetId = p.attackerId;
+                        target.state = 'CHASE';
+                        target.chaseFrame = 10;
+                    }
+                }
+                state.projectiles.splice(i, 1);
+            } else {
+                // 更新子彈實時位置 (追蹤移動中的目標)
+                const target = this.findEntityById(p.targetId, state);
+                if (target) {
+                    // 子彈朝向目標移動
+                    const curX = p.startX + (target.x - p.startX) * p.progress;
+                    const curY = p.startY + (target.y - p.startY) * p.progress;
+                    p.x = curX;
+                    p.y = curY;
+                } else {
+                    // 目標消失，子彈繼續飛往最後已知點後消失 (簡單處理：直接消失)
+                    state.projectiles.splice(i, 1);
+                }
             }
         }
     }
@@ -212,6 +295,6 @@ export class BattleSystem {
         if (!id || !state) return null;
         if (typeof id === 'object') return id;
         return (state.units.villagers || []).find(u => u.id === id) ||
-               (state.mapEntities ? state.mapEntities.filter(e => e.id === id)[0] : null);
+            (state.mapEntities ? state.mapEntities.filter(e => e.id === id)[0] : null);
     }
 }

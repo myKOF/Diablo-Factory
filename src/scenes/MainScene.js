@@ -553,8 +553,9 @@ export class MainScene extends Phaser.Scene {
         if (!camMoved && !this.pendingVisibleEntities && !entitiesCountChanged && !renderVersionChanged && !state.placingType) {
             this.updateUnits(state.units.villagers);
             this.updateDynamicHUD(this.lastVisibleEntities);
-            // 渲染戰鬥視覺 (HP Bars - 即使沒動也需更新動畫與剩餘時間)
+            // 渲染戰鬥視覺 (HP Bars & Projectiles - 即使沒動也需更新動畫與剩餘時間)
             BattleRenderer.renderHPBars(this.hudGraphics, state.units.villagers, deltaTime);
+            BattleRenderer.renderProjectiles(this.hudGraphics, state, deltaTime);
             return;
         }
 
@@ -575,6 +576,7 @@ export class MainScene extends Phaser.Scene {
         // 渲染戰鬥視覺 (HP Bars) - 同時包含單位與具備血量的建築實體
         const allCombatants = [...state.units.villagers, ...state.mapEntities.filter(e => e.hp !== undefined)];
         BattleRenderer.renderHPBars(this.hudGraphics, allCombatants, deltaTime);
+        BattleRenderer.renderProjectiles(this.hudGraphics, state, deltaTime);
     }
 
     updateEdgeScrolling(dt) {

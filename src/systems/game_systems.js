@@ -48,6 +48,7 @@ export class GameEngine {
         selectedUnitIds: [], // 目前選中的單位 ID 列表
         selectedBuildingIds: [], // 目前選中的建築 ID 列表
         selectedResourceId: null, // 目前選中的資源 ID (gx_gy)
+        projectiles: [], // [新協定] 存放活躍中的遠程子彈
         lastSelectedUnitId: null, // 上一次選中的單位 ID (用於雙擊檢測)
         lastSelectedBuildingId: null, // 上一次選中的建築 ID (用於雙擊檢測)
         lastSelectionTime: 0, // 上一次選中的時間 (用於雙擊檢測)
@@ -360,6 +361,7 @@ export class GameEngine {
                 idxAtk = hIdx('attack'),
                 idxAtkSpeed = hIdx('attack_speed'),
                 idxRange = hIdx('range'),
+                idxAttackType = hIdx('attack_type'),
                 idxType = hIdx('type'),
                 idxCamp = hIdx('camp'),
                 idxPop = hIdx('population'),
@@ -368,7 +370,7 @@ export class GameEngine {
                 idxInitiative = hIdx('initiative_attack'),
                 idxPixelSize = hIdx('pixel_size');
 
-            console.log(`[CSV載入] NPC配置欄位索引結果:`, { id: idxId, name: idxName, need: idxNeed, size: idxPixelSize });
+            console.log(`[CSV載入] NPC配置欄位索引結果:`, { id: idxId, name: idxName, need: idxNeed, size: idxPixelSize, attackType: idxAttackType });
 
 
             for (let i = headerIdx + 1; i < rows.length; i++) {
@@ -397,6 +399,7 @@ export class GameEngine {
                     attack: parseInt(row[idxAtk]) || 10,
                     attackSpeed: parseFloat(row[idxAtkSpeed]) || 1,
                     range: parseInt(row[idxRange]) || 10,
+                    attack_type: parseInt(row[idxAttackType]) || (name === 'mage' ? 3 : (name === 'archer' ? 2 : 1)),
                     patrol_range: parseFloat(row[idxPatrol]) || 0,
                     field_vision: parseFloat(row[idxVision]) || 15,
                     initiative_attack: parseInt(row[idxInitiative]) !== undefined ? parseInt(row[idxInitiative]) : 1,
@@ -755,6 +758,7 @@ export class GameEngine {
             moveSpeed: config.combatSpeed || config.speed || 5,
             attackSpeed: config.attackSpeed || 1,
             range: config.range || 10,
+            attack_type: config.attack_type || 1,
             field_vision: (config.field_vision !== undefined) ? config.field_vision : 15,
             initiative_attack: (config.initiative_attack !== undefined) ? config.initiative_attack : 1,
             facing: 1, // 1: 右, -1: 左
@@ -768,9 +772,12 @@ export class GameEngine {
         if (v.config.type === 'villagers') this.assignNextTask(v);
 
         if (v.state === 'IDLE' && building && building.rallyPoint) {
-            // 為集結點計算偏移量，讓單位以 5xN 的方塊形式排列，相隔 1 格 (20px)
-            const idx = building.spawnIdx - 1; // 剛才已經 ++ 過了
-            const spacing = 20;
+            // [核心優化] 集結點散開邏輯：使用 40px 間隔 (同手動指令) 並結合建築 ID 雜湊，防止多建築單位重疊
+            const bldHash = (building.id || "0").split('').reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0);
+            const hashOffset = Math.abs(bldHash) % 13; // 隨機但穩定的建築偏移量
+            const idx = (building.spawnIdx - 1) + hashOffset; 
+
+            const spacing = 40;
             const gridW = 5;
             const offsetX = (idx % gridW - Math.floor(gridW / 2)) * spacing;
             const offsetY = (Math.floor(idx / gridW)) * spacing;
@@ -806,6 +813,10 @@ export class GameEngine {
         const TS = this.TILE_SIZE;
         let tx, ty;
 
+        // [核心修復] 週邊座標計算應以「物理中心」為準 (考慮 feetOffset)，確保生成的單位不會壓在碰撞盒邊界上導致移動失敗
+        const collCfg = UI_CONFIG.BuildingCollision || { buffer: 10, feetOffset: 8 };
+        const footY = collCfg.feetOffset || 0;
+
         // 順序：下邊(左->右)、右邊(下->上)、上邊(右->左)、左邊(上->下)
         if (currentIdx <= uw + 1) {
             let k = currentIdx;
@@ -824,7 +835,7 @@ export class GameEngine {
             tx = -(uw + 2 * R - 1) / 2;
             ty = -(uh + 1) / 2 + k;
         }
-        return { x: building.x + tx * TS, y: building.y + ty * TS };
+        return { x: building.x + tx * TS, y: building.y - footY + ty * TS };
     }
 
     static getBuildingConfig(type, lv) {
