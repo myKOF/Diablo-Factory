@@ -129,9 +129,14 @@ export class BattleRenderer {
 
         // 2. 繪製填充 (優先根據敵我分類，次之根據血量比例)
         const isEnemy = (unit.config && unit.config.camp === 'enemy') || unit.camp === 'enemy';
+        const isNeutral = (unit.config && unit.config.camp === 'neutral') || unit.camp === 'neutral';
+        const neutralCfg = UI_CONFIG.NeutralSelection || { hpFillColor: "#ff9100" };
+
         let color = 0x4caf50; // Green
 
-        if (isEnemy) {
+        if (isNeutral) {
+            color = this.parseColor(neutralCfg.hpFillColor);
+        } else if (isEnemy) {
             color = 0xf44336; // 敵軍統一使用紅色
         } else {
             if (hpPercent < 0.3) color = 0xf44336; // 危險

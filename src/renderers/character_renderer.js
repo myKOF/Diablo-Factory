@@ -14,9 +14,20 @@ export class CharacterRenderer {
      * @param {number} time
      */
     static render(ctx, x, y, unitData, time) {
+        if (!unitData) return;
+
+        // [核心功能] 屍體渲染優先
+        if (unitData.isCorpse) {
+            this.renderCorpse(ctx, x, y, unitData);
+            return;
+        }
+
         const model = unitData.config ? unitData.config.model : "";
         if (model === 'wolf' || model === 'bear') {
             return this.renderAnimal(ctx, x, y, unitData, time);
+        }
+        if (model === 'sheep') {
+            return this.renderSheep(ctx, x, y, unitData, time);
         }
 
         const state = unitData.state || 'IDLE';
@@ -119,6 +130,71 @@ export class CharacterRenderer {
         }
     }
 
+    static renderCorpse(ctx, x, y, unitData) {
+        const model = unitData.sourceModel || 'villager';
+        
+        // 1. 繪製底部陰影 (確保在最底層)
+        this.drawShadow(ctx, x, y);
+
+        // 2. 繪製精簡血漬 (地面效果)
+        this.setCtxStyle(ctx, 0xb71c1c, 0.5); 
+        if (ctx.beginPath) {
+            ctx.beginPath();
+            ctx.arc(x - 10, y + 6, 5, 0, Math.PI * 2);
+            ctx.arc(x + 6, y + 2, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // 3. 繪製屍體主體
+        let bodyColor = 0x9e9e9e; 
+        let bodyWidth = 28;
+        let bodyHeight = 16;
+
+        if (model === 'sheep') {
+            bodyColor = 0xffffff;
+            bodyWidth = 32; 
+            bodyHeight = 18;
+        } else if (model === 'wolf') {
+            bodyColor = 0x546e7a;
+            bodyWidth = 36;
+            bodyHeight = 12;
+        } else if (model === 'bear') {
+            bodyColor = 0x4e342e;
+            bodyWidth = 45;
+            bodyHeight = 24;
+        }
+
+        ctx.save();
+        ctx.translate(x, y + 8);
+        ctx.rotate(0.25); 
+
+        // 繪製身體 (帶邊框)
+        this.setCtxStyle(ctx, bodyColor, 1.0);
+        if (ctx.beginPath) {
+            ctx.beginPath();
+            if (ctx.ellipse) {
+                ctx.ellipse(0, 0, bodyWidth / 2, bodyHeight / 2, 0, 0, Math.PI * 2);
+            } else {
+                ctx.rect(-bodyWidth/2, -bodyHeight/2, bodyWidth, bodyHeight);
+            }
+            ctx.fill();
+            
+            // 黑色輪廓線 (提升能見度)
+            this.setCtxStyle(ctx, 0x000000, 0.4);
+            if (ctx.stroke) ctx.stroke();
+            
+            // 屍體上的傷痕血跡
+            this.setCtxStyle(ctx, 0xd32f2f, 0.7);
+            ctx.beginPath();
+            ctx.arc(-8, -4, 4, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            // 極簡回退：填充矩形
+            if (ctx.fillRect) ctx.fillRect(-bodyWidth/2, -bodyHeight/2, bodyWidth, bodyHeight);
+        }
+        
+        ctx.restore();
+    }
 
     static drawVisionRange(ctx, x, y, radius) {
         const cfg = UI_CONFIG.VisionRange || { lineColor: "#ff0000", lineAlpha: 0.8, lineWidth: 1.5 };
@@ -310,11 +386,6 @@ export class CharacterRenderer {
             if (cargoType === 'WOOD') resColor = parseColor(colors.WOOD);
             else if (cargoType === 'STONE') resColor = parseColor(colors.STONE);
             else if (cargoType === 'FOOD') resColor = parseColor(colors.FOOD);
-            else if (cargoType === 'GOLD') resColor = parseColor(colors.GOLD);
-
-            this.setCtxStyle(ctx, resColor, 1);
-            // 負重搬運時的籃子晃動
-            const cargoFreq = isRunning ? anim.runningFreq : (isActuallyMoving ? anim.wanderingFreq : anim.breathingFreq);
             ctx.fillRect(x - 8, y + 10 + Math.sin(t * cargoFreq) * 2, 16, 12);
             // 加入頂部亮邊增加立體感
             this.setCtxStyle(ctx, 0xffffff, 0.3);
@@ -346,6 +417,7 @@ export class CharacterRenderer {
 
         // [渲染核心 5: 選取圈繪製]
         const isEnemy = (unitData.config && unitData.config.camp === 'enemy') || unitData.camp === 'enemy';
+        const isNeutral = (unitData.config && unitData.config.camp === 'neutral') || unitData.camp === 'neutral';
         const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
         const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
         const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
@@ -607,9 +679,9 @@ export class CharacterRenderer {
         if (ctx.lineStyle !== undefined) {
             // Phaser Graphics 渲染模式
             ctx.lineStyle(2, color, alpha);
-            ctx.strokeCircle(x, y + 10, radius + pulse);
+            ctx.strokeCircle(x, y + 5, radius + pulse);
             ctx.lineStyle(1, 0xffffff, 0.4);
-            ctx.strokeCircle(x, y + 10, radius - 2 + pulse);
+            ctx.strokeCircle(x, y + 5, radius - 2 + pulse);
         } else {
             // Canvas Context 渲染模式
             const r = (color >> 16) & 255;
@@ -618,13 +690,13 @@ export class CharacterRenderer {
             ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
             ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.arc(x, y + 10, radius + pulse, 0, Math.PI * 2);
+            ctx.arc(x, y + 5, radius + pulse, 0, Math.PI * 2);
             ctx.stroke();
 
             ctx.strokeStyle = `rgba(255, 255, 255, 0.4)`;
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.arc(x, y + 10, radius - 2 + pulse, 0, Math.PI * 2);
+            ctx.arc(x, y + 5, radius - 2 + pulse, 0, Math.PI * 2);
             ctx.stroke();
         }
     }
@@ -640,5 +712,60 @@ export class CharacterRenderer {
         if (name === 'swordsman' || name === 'mage' || name === 'archer') return 0.5;
 
         return 1.0;
+    }
+
+    static renderSheep(ctx, x, y, unitData, time) {
+        // [新實作] 羊的渲染：蓬鬆的白毛身體與灰頭
+        const bodyColor = 0xffffff;
+        const headColor = 0xbdbdbd;
+        const state = unitData.state || 'IDLE';
+        const isMoving = state.includes('MOVING') || state === 'MOVE' || state === 'CHASE';
+        const t = time * 0.01;
+        const anim = UI_CONFIG.Animation || { wanderingFreq: 5, breathingFreq: 1 };
+        const moveFreq = anim.wanderingFreq;
+
+        // 1. 繪製陰影
+        this.drawShadow(ctx, x, y);
+
+        // 2. 繪製腿 (短小，上移以貼合身體)
+        const legOffset = isMoving ? Math.sin(t * moveFreq) * 2 : 0;
+        this.setCtxStyle(ctx, 0x333333, 1);
+        ctx.fillRect(x - 8, y + 2 + legOffset, 3, 6);
+        ctx.fillRect(x - 2, y + 2 - legOffset, 3, 6);
+        ctx.fillRect(x + 5, y + 2 + legOffset, 3, 6);
+        ctx.fillRect(x + 11, y + 2 - legOffset, 3, 6);
+
+        // 3. 繪製蓬鬆的身體 (多個圓形組合，上移至中心)
+        const bob = Math.sin(t * anim.breathingFreq) * 1.5;
+        this.setCtxStyle(ctx, bodyColor, 1);
+        if (ctx.fillEllipse) {
+            ctx.fillEllipse(x, y - 2 + bob, 22, 16);
+            ctx.fillCircle(x - 10, y - 5 + bob, 10);
+            ctx.fillCircle(x + 10, y - 5 + bob, 10);
+            ctx.fillCircle(x, y - 8 + bob, 10);
+        } else {
+            ctx.fillRect(x - 15, y - 10 + bob, 30, 20);
+        }
+
+        // 4. 繪製頭部
+        const headX = (unitData.facing || 1) === 1 ? x + 15 : x - 15;
+        this.setCtxStyle(ctx, headColor, 1);
+        ctx.fillRect(headX - 6, y - 10 + bob, 12, 12);
+        // 耳朵
+        ctx.fillRect((unitData.facing === 1 ? headX - 7 : headX + 4), y - 8 + bob, 3, 6);
+
+        // 眼睛
+        this.setCtxStyle(ctx, 0x000000, 1);
+        ctx.fillRect(headX + 2 * (unitData.facing || 1), y - 6 + bob, 2, 2);
+
+        // 5. 選取圈 (使用橙色樣式)
+        const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
+        const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
+        const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
+        
+        if (isSelected || isHovered) {
+             const neutralCfg = UI_CONFIG.NeutralSelection || { selectionRingColor: 0xff9100 };
+             this.drawSelectionRing(ctx, x, y, time, neutralCfg.selectionRingColor);
+        }
     }
 }

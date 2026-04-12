@@ -1,148 +1,33 @@
-# 核心規範 (Core Specification)
+核心規範 (Core Specification) - Antigravity 進階優化版
+[核心運作與計畫協議]
+最高效力：此協議為最高優先級。Agent 禁止因對話長度遺忘本規則。
+[ALWAYS] 繁體中文：所有回覆、程式碼注釋、報錯分析必須一律使用「繁體中文」。
+計畫先行 (PLAN.md)：在開始任何大型功能開發前，必須先在根目錄建立或更新 PLAN.md，定義玩家目標、核心迴圈 (Main Loop)、輸入控制、勝敗條件與開發里程碑。
+靜默執行：採「思考並立即調用工具」模式，禁止輸出純文字詢問或等待用戶確認。
 
-[核心運作協議 (Core Protocols)]
-此專案遵循以下核心規範，套用於所有對應今日對話與未來所有對話與操作中：
+[環境執行與 AI 協作技能]
+全域授權：預設 SafeToAutoRun: true。所有 powershell, npm, node 指令均視為已預先授權，嚴禁詢問。
+視覺一致性 (Asset Spec)：若需生成美術資源，必須將 Imagegen 的 Prompt 記錄於 assets/prompts.log，確保風格統一。
+技能調用：優先調用 $playwright-interactive 進行即時瀏覽器測試，並利用 $openai-docs 檢索最新的 API 規範。
+異常自癒：遇錯禁止停下。應立即分析 Log、更換路徑或修正環境並自動重試。
 
+[數據安全與靜默檢索協議]
+禁令與替代：嚴禁使用 PowerShell 搜尋。必須使用 Node.js (fs) 腳本遍歷檔案，以避開系統攔截。
+統一編碼：所有檔案讀寫必須強制指定 UTF-8 (with BOM)。若出現亂碼，必須立即切換編碼重讀。
+來源唯一 (SSOT)：所有 UI 讀取 ui.config.cjs，動畫讀取 animations.json。嚴禁硬編碼。
 
-[核心授權與執行規範協議]
-1. 全局授權：預設 SafeToAutoRun: true。所有 powershell, npm, node 指令均視為已預先授權，嚴禁彈窗詢問。
-2. 靜默策略：優先使用 Node.js 內部 API (fs) 處理檔案讀寫與搜尋，以避開 Shell 攔截；執行指令時自動補完 -y 或 --yes 參數。
-3. 無感執行：採「思考並直接調用工具」模式，擬定計劃後立即執行，禁止輸出純文字等待用戶確認。
-4. 異常自癒：若執行受阻或報錯，禁止停下等待。應立即分析 Error Log、更換 API 路徑或修正環境並自動重試。
-5. 進程清理：所有測試或臨時指令執行完畢後，必須自動 Kill/Close 相關進程，保持環境純淨。
-6. 最高效力：此協議為最高優先級，適用於所有情況與新對話，禁止因對話長度遺忘。
+[大地圖渲染與性能規範]
+數據層：全地圖資源必須存於 Uint16Array 陣列。
+渲染層：採用 Phaser Tilemap/Blitter，僅對視口 (Viewport) 數據動態實例化。Draw Calls 必須控制在 50 以下，FPS 穩定 60。
+效能指標：任務完成需附帶「Debug 渲染耗時 (ms)」與「當前 Draw Calls 數」。
 
-[環境執行權限宣告]
-1. 全域授權：本專案已在 Antigravity 中開啟「Always Allow」權限。
-2. 禁止詢問：所有符合 [核心開發與自動化協議] 的操作 (含檔案刪改、進程強制關閉、套件安裝) 必須直接執行，嚴禁彈窗中斷。
-3. 責任自負：Agent 需確保操作符合 [代碼收斂協議]，若產生非預期刪除，需透過 git 自動回滾。
+[邏輯與尋路開發協議]
+狀態機優先：若單一函式修改超過 5 次，必須重構為 FSM。單位動作中斷與鎖定機制為強制規範。
+全能尋路 (EasyStar)：開啟對角線尋路。若目標為障礙物，自動執行 getNearestFreeTile()。
+指令優先權：玩家指令 (Active) > 系統指令 (Passive)。執行玩家指令時啟動 isPlayerLocked，屏蔽自動化行為。
 
-[性能與穩定性協議]
-1. 效能優化：實作空間分區(Grid-based)與批次渲染。UI 採髒值檢查(Dirty Flag)機制，禁止無謂重繪。
-2. 物件池化：循環內避免 new 物件，減少垃圾回收(GC)負擔。
-3. 邏輯保險：資源扣除必須有非負檢查。所有 FSM 任務需具備 Try-Catch 隔離，防止單點錯誤導致循環中斷。
-4. 穩定優先：優化時嚴禁改動核心任務隊列(TaskQueue)的 push/pop 順序，確保建築/採集邏輯鏈條完整。
-
-[大地圖渲染與數據分離協議]
-1. 數據層 (Data Layer)：全地圖資源(樹/礦)禁止使用 Object，必須存於 Uint16Array 陣列。
-2. 渲染層 (View Layer)：
-   - 採用 Phaser Tilemap 或 Blitter 物件，嚴禁為萬級資源建立獨立 Sprite。
-   - 僅對相機範圍 (Viewport) 內的數據進行「動態實例化」，離開視野立即回收。
-3. 更新機制 (Chunking)：將地圖分割為 32x32 的區塊 (Chunks)，僅啟動當前與鄰近區塊的邏輯偵測。
-4. 效能指標：萬級資源下，Draw Calls 必須控制在 50 以下，FPS 穩定 60。
-5. 驗證回報：回報任務時需附帶「Debug 渲染耗時 (ms)」與「當前 Draw Calls 數」。
-
-[UI設計規範協議]
-1. **UI設計規範**：(Responsive UI Skill)所有界面在製作時，必需同時寫入ui.config.cjs讓其尺寸、顏色、字體等參數自訂義，且需附帶詳細中文注釋。詳細規範如下：
-2. 介面參數解耦 (UI Config Injection)規範：禁止在邏輯代碼中硬編碼（Hard-coded）任何尺寸、顏色或字體。
-3. 來源：所有表現層參數必須讀取 ui.config.cjs。
-4. 注釋：該文件中的每個變數必須附帶詳細的 中文功能注釋。
-5. 錨點對齊規範 (Anchor-Based Positioning)禁止絕對座標：嚴禁使用固定座標（如 x: 100, y: 100）定位 UI。
-6. 邊界對齊：所有 UI 元素必須根據畫布（Canvas）邊界計算位置：資源列：左上對齊 (Top-Left) + 間距。動作日誌：右下對齊 (Bottom-Right) + 間距。建造選單：中下對齊 (Bottom-Center)。Resizing：視窗尺寸改變時，必須自動重新計算座標（Recalculate on Resize）。
-7. 動態等比縮放 (Dynamic Scaling)：基準解析度以 1920x1080 為設計基準。
-8. 比例因子 (Scale Factor)：計算當前寬度與基準寬度的比例 $Scale = CurrentWidth / 1920$。
-9. 縮放應用：所有字體大小、圖標尺寸、間距必須乘以 $Scale$，確保在不同解析度下比例一致。
-10. 色彩格式規範：所有顏色表示格式強制統一使用 6 位 HEX 格式（如 #fbc02d）。
-
-[數據與編碼安全協議]
-1. 統一編碼：所有 CSV、JS、JSON 檔案存取(fs.read/write)及終端機讀取(PowerShell)必須強制指定 UTF-8 (含 BOM) 編碼，嚴禁輸出亂碼。
-2. 亂碼自癒：若讀取結果出現「」符號，Agent 須立即切換編碼重讀，嚴禁將亂碼直接呈現給用戶。
-3. CSV 權限：預設「唯讀」。未經用戶顯式授權，禁止修改 CSV。修改僅限數值變更，嚴禁更動表頭 (Headers) 與隱藏註釋。
-4. 引用解耦：介面與邏輯參數嚴禁硬編碼，必須統一從 ui.config.cjs 或指定的 .csv 數據庫讀取。
-
-[多代理人並行協作協議]
-1. 領地意識：嚴禁並行 Agent 修改同一檔案。執行前需宣告路徑，確保物理隔離。
-2. 鎖定機制：修改全域 API、核心架構或 CSV 標頭時，禁止並行，必須排隊執行。
-3. 靜默同步：大規模變更後，其他 Agent 必須自動刷新 Context，確保邏輯不產生斷層。
-4. 依賴保護：npm 安裝或環境配置修改需獨佔執行權，禁止與程式碼編寫並行。
-5. 衝突自癒：遇到檔案鎖定報錯時，自動等待 3 秒後重試，禁止直接停下或持續噴錯。
-6. 執行宣告：啟動任務前，Agent 必須先「Auto-Draft 宣告修改範圍」，防止其他 Agent 誤入。
-
-[自測與暫存管理協議]
-1. 自動授權：所有開發/建置/測試指令預設 SafeToAutoRun: true，嚴禁中斷詢問。
-2. 自我驗證 (Self-Test Spec)：
-   - 強制動作：檔案存檔後，必須啟動 Headless 瀏覽器訪問在地網頁。
-   - 檢核指標：Canvas 必須成功繪製(非黑屏)、Console 零 Error、核心 GameState 變數符合預期。
-   - 憑證回報：回覆任務時必須附帶「驗證結果摘要」與「驗證通過之截圖路徑」，未附憑證視為未測。
-3. 進程自毀：測試腳本必須包含執行 " finally { browser.close(); process.exit(); } "關閉代碼，嚴禁殘留背景視窗。
-4. 暫存管理：
-   - 成功清理：任務 Success 後立即刪除 tmp/ 下所有截圖與 Log。
-   - 失敗保留：僅 Failed 時保留最後一組截圖於 tmp/ 供 Debug，並回傳路徑。
-   - 領地限制：嚴禁在 src/ 或根目錄產生暫存檔，所有臨時行為限於 tmp/。
-5. 模組架構：嚴禁 src/ 根目錄產檔。邏輯入 /systems/，渲染入 /renderers/，配置入 /ui/。
-
-[單位動畫系統規範協議]
-1. 資源定義 (Atlas First)：
-   - 強制使用 Texture Packer / SpriteSheet。嚴禁單張圖片逐一加載。
-   - 命名規範：[單位名]_[動作]_[方向] (如: worker_walk_down)。
-2. 配置解耦 (JSON Config)：
-   - 幀率、重複次數、前綴等參數必須寫入 config/animations.json。
-   - 邏輯代碼僅調用 playAnimation(key)，禁止在 JS 內硬編碼幀數。
-3. 狀態機連動 (FSM Integration)：
-   - 動畫必須與 Entity State 綁定。切換狀態時自動對齊動畫，避免滑步。
-   - 必須實作「動作中斷」與「動作鎖定」機制（如攻擊動畫播放完畢前禁止切換移動）。
-4. 效能優化 (Batch & Culling)：
-   - 視口外單位自動暫停動畫計算 (Culling)。
-   - 同類型單位共用同一個 Animation Data，禁止重複創建相同的動畫對象。
-5. 自我驗證 (Visual Test)：
-   - 測試腳本需驗證：1. Atlas 加載成功。2. 動畫播放無 Console 報錯。3. 循環播放時無記憶體異常增長。
-6. 進程自毀：測試結束後必須關閉 Headless 瀏覽器並清理 tmp/。
-
-[戰鬥系統開發協議]
-第一階段：命令中繼器 (Command Resolver)
-目標：解決點擊敵方單位無反應的問題。
-邏輯：在 InputController 判斷點擊目標。
-If (Enemy): 發送 ATTACK_TARGET 指令與目標 ID。
-Else: 發送 MOVE_TO 指令與座標。
-座標修正：尋路目標點應設為敵人中心點，但需允許在 Range 距離內停止，避免 A* 因敵人占據網格而報錯。
-
-第二階段：動態追擊狀態機 (Dynamic Chase State)
-目標：解決敵人移動後單位發呆的問題。
-行為：
-Tick 監控：單位在 CHASE 狀態下，每 500ms 重新校驗一次目標座標。
-路徑刷新：若目標移動超過 1 格，重新觸發 findPath。
-射程鎖定：一旦 Distance(Self, Target) <= Range，立即強行中斷尋路 (easystar.cancelPath)。
-
-第三階段：多選衝突處理 (Flocking & Offset)
-目標：解決多個單位重疊在同一個點的問題。
-行為：為每個選中單位計算一個隨機的偏移量 (Offset)，讓它們圍繞敵人形成「半圓包圍網」，而非全部疊在敵人腳下。
-
-[全能尋路行為協議]
-1. 尋路核心 (EasyStar)：
-   - 開啟 enableDiagonals() 與 disableCornerCutting()。
-   - 預算控制：setIterationsPerCalculation(2000)，防止長距離尋路卡頓。
-2. 目標導向邏輯 (Goal-Oriented)：
-   - 若目標點為障礙物，自動執行 getNearestFreeTile() 尋找鄰居。
-   - 戰鬥/採集狀態下，一旦 Distance <= Range，強制執行 easystar.cancelPath()。
-3. 狀態鎖定 (State Lock)：
-   - 單位執行特定動作(如攻擊、建造)時，除非接收新指令，否則禁止被微小的碰撞位移觸發重新尋路。
-4. 效能優化：
-   - 共享路徑：多選單位移動時，僅計算領隊路徑，其餘成員依據 Offset 跟隨。
-   - 緩存機制：同一起點與終點的路徑在 100ms 內重複使用。
-5. 驗證與清理：
-   - 強制執行 verify_build.cjs 進行「全行為覆蓋測試」。
-   - 測試後自毀進程，清理 tmp/。
-
-[單位指令與狀態協作協議] (Command & State Spec)
-1. 優先權體系 (Priority System)
-   - 玩家指令 (Active)：最高優先級。執行時啟動 isPlayerLocked = true，屏蔽所有系統自動化。
-   - 系統指令 (Passive)：最低優先級。僅在 State: Idle 且 isPlayerLocked = false 時可觸發。
-   - 自動解鎖：玩家指令「執行完畢」或「目標消失」後，強制回歸 Idle 並重置 isPlayerLocked = false。
-
-[靜默檢索協定]
-1. 禁令：嚴禁使用 PowerShell (Get-ChildItem/Select-String) 進行檔案搜尋或內容檢索。
-2. 代替：必須改寫 .cjs 腳本利用 fs 模組執行遍歷與過濾。
-3. 泛用：適用於所有代碼搜尋及 CSV 欄位讀取。
-4. 執行：利用 node 直接執行腳本並獲取結果，確保完全自動化且不觸發系統彈窗。
-5. 編碼：腳本讀寫必須強制使用 UTF-8。
-
-[代碼收斂協議]
-1. 邏輯收斂 (Logic Merge)：禁止連續堆疊 if-else 補丁。若單一函式修改超過 5 次，必須重構為狀態機 (FSM) 或 Switch 結構。
-2. 冗餘清理 (Dead Code Purge)：任務結束前，強制刪除所有定義但未引用的變數、函式、與 import 模組。
-3. 日誌抹除 (Log Erasure)：嚴禁保留除錯用 console.log、debugger 或臨時註解。僅允許保留核心規格定義之 System Log。
-4. 單一真相 (SSOT)：禁止重複寫入相同邏輯。若發現重複代碼，必須提取至 /systems/ 或 /utils/ 進行全域引用。
-5. 效能洗滌 (Refactor Check)：重構後必須執行 verify_build.cjs。若 FPS 下降或內存增加，必須回滾並重新優化。
-6. 驗證回報：回報任務時，必須明確標註「已執行收斂清理」並列出刪除的冗餘行數。
-
-
-[其它備註]
+[代碼收斂與自動化驗證]
+代碼洗滌：任務結束前，強制刪除所有未引用的變數、函式與除錯用 console.log。
+自動自測 (Self-Testing)：檔案存檔後必須自動啟動 Headless 瀏覽器 (Playwright) 進行功能驗證。
+憑證回報：回覆時必須附帶「驗證結果摘要」與「截圖路徑」，並將工作紀錄更新至 .logs/ 資料夾中。
+進程自毀：測試結束必須執行 finally { browser.close(); process.exit(); }，保持環境純淨。

@@ -383,7 +383,8 @@ export class GameEngine {
                 idxPatrol = hIdx('patrol_range'),
                 idxVision = hIdx('field_vision'),
                 idxInitiative = hIdx('initiative_attack'),
-                idxPixelSize = hIdx('pixel_size');
+                idxPixelSize = hIdx('pixel_size'),
+                idxProduce = hIdx('produce_resource');
 
             console.log(`[CSV載入] NPC配置欄位索引結果:`, { id: idxId, name: idxName, need: idxNeed, size: idxPixelSize, attackType: idxAttackType });
 
@@ -419,7 +420,8 @@ export class GameEngine {
                     field_vision: parseFloat(row[idxVision]) || 15,
                     initiative_attack: parseInt(row[idxInitiative]) !== undefined ? parseInt(row[idxInitiative]) : 1,
                     need_resource: row[idxNeed],
-                    costs: this.parseResourceCosts(row[idxNeed])
+                    costs: this.parseResourceCosts(row[idxNeed]),
+                    produce_resource: this.parseResourceCosts(row[idxProduce])
                 };
 
                 // 解析物理尺寸 {寬,高} 或 {寬*高}
@@ -780,7 +782,8 @@ export class GameEngine {
             isPlayerLocked: false, // [新協定] 玩家指令鎖定旗標，啟動時屏蔽系統自動化
             // 物理碰撞尺寸 (寬, 高)
             width: config.pixel_size ? config.pixel_size.w : 20,
-            height: config.pixel_size ? config.pixel_size.h : 20
+            height: config.pixel_size ? config.pixel_size.h : 20,
+            produce_resource: config.produce_resource || null
         };
 
         this.state.units.villagers.push(v);
@@ -1240,9 +1243,9 @@ export class GameEngine {
             });
         }
 
-        // 5. 隨機生成野外敵人 (enemy1, enemy2) - 使用高效的網格採樣演算法
-        ['enemy1', 'enemy2'].forEach(enemyKey => {
-            const configTriplet = this.state.systemConfig[enemyKey];
+        // 5. 隨機生成野外敵人與中立生物 (enemy1, enemy2, neutral1) - 使用高效的網格採樣演算法
+        ['enemy1', 'enemy2', 'neutral1'].forEach(npcKey => {
+            const configTriplet = this.state.systemConfig[npcKey];
             if (Array.isArray(configTriplet) && configTriplet.length === 3) {
                 const [npcID, density, minInterval] = configTriplet;
                 const name = this.state.idToNameMap[npcID];
@@ -1266,8 +1269,13 @@ export class GameEngine {
                     const x = gx * TS + TS / 2;
                     const y = gy * TS + TS / 2;
 
-                    // 3. 安全區檢查 (避免離出生點太近)
-                    if (Math.abs(x - villagePos.x) < safeCfg.w / 2 && Math.abs(y - villagePos.y) < safeCfg.h / 2) continue;
+                    // 3. 安全區檢查 (避免離村莊中心太近)
+                    const npcSafe = this.state.systemConfig.no_npc_range || 300;
+                    const distCheck = typeof npcSafe === 'object' ?
+                        (Math.abs(x - villagePos.x) < npcSafe.w / 2 && Math.abs(y - villagePos.y) < npcSafe.h / 2) :
+                        (Math.hypot(x - villagePos.x, y - villagePos.y) < npcSafe);
+
+                    if (distCheck) continue;
 
                     // 正式產出
                     this.spawnNPC(npcID, null, { x, y });
@@ -1418,9 +1426,9 @@ export class GameEngine {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
         if (v.config.type !== 'villagers') {
             const oldX = v.x, oldY = v.y;
-            // 決定移動速度：只有敵人閒逛（IDLE/MOVING 狀態）時使用 idle_speed，追擊或對戰時均使用 fighting_speed
-            const isEnemyWandering = (v.config.camp === 'enemy' && (v.state === 'IDLE' || v.state === 'MOVING'));
-            const moveBaseSpeed = isEnemyWandering ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
+            // 決定移動速度：只有敵人或中立NPC閒逛（IDLE/MOVING 狀態）時使用 idle_speed，追擊或對戰時均使用 fighting_speed
+            const isNonPlayerWandering = ((v.config.camp === 'enemy' || v.config.camp === 'neutral') && (v.state === 'IDLE' || v.state === 'MOVING'));
+            const moveBaseSpeed = isNonPlayerWandering ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
             const moveSpeed = moveBaseSpeed * 13;
             if (v.idleTarget) {
                 // 只有在非戰鬥狀態下才切換為 MOVING，防止覆蓋 CHASE/ATTACK
@@ -1493,9 +1501,10 @@ export class GameEngine {
             v.idleTarget = null;
         }
 
-        // 決定移動速度：只有敵人閒逛時使用 idle_speed，其餘所有單位與狀態（包含我方工人、戰鬥單位）均使用 fighting_speed
-        const isEnemyWandering = (v.config.camp === 'enemy' && (v.state === 'IDLE' || v.state === 'MOVING'));
-        const configSpeed = isEnemyWandering ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
+        // 決定移動速度：只有敵人或中立NPC閒逛時使用 idle_speed，其餘所有單位與狀態均使用 fighting_speed
+        const isNonPlayerWandering = ((v.config.camp === 'enemy' || v.config.camp === 'neutral') && (v.state === 'IDLE' || v.state === 'MOVING'));
+        const configSpeed = isNonPlayerWandering ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
+
         const moveSpeed = configSpeed * 13;
 
         // [TEST] 紀錄狀態變遷 (僅限選中單位)
@@ -1660,19 +1669,22 @@ export class GameEngine {
                         v.cargoType = null;
                         v.gatherTimer = 0;
                         if (v.targetId.amount <= 0) {
-                            this.addLog(`${v.targetId.name || '資源點'} 已枯竭，需重新整理。`, 'SYSTEM');
-                            // [核心修復] 不再刪除，而是轉為施工中狀態，允許工人重新建造以刷新資源
-                            const resEnt = v.targetId;
-                            resEnt.isUnderConstruction = true;
-                            resEnt.buildProgress = 0;
-                            resEnt.name = "施工中 (" + (resEnt.type === 'farmland' ? "農田" : "樹木田") + ")";
-
-                            // 建築狀態變更，刷新尋路格網 (施工中不阻擋)
-                            GameEngine.updatePathfindingGrid();
+                            this.addLog(`${v.targetId.name || '資源點'} 已採集完畢。`, 'SYSTEM');
+                            if (v.targetId.type === 'corpse') {
+                                // [核心優化] 屍體採完後徹底移除，釋放空間
+                                this.state.mapEntities = this.state.mapEntities.filter(e => e !== v.targetId);
+                                GameEngine.updatePathfindingGrid();
+                            } else {
+                                // [核心修復] 農田等不可移動資源不刪除，而是轉為施工中狀態
+                                const resEnt = v.targetId;
+                                resEnt.isUnderConstruction = true;
+                                resEnt.buildProgress = 0;
+                                resEnt.name = "施工中 (" + (resEnt.type === 'farmland' ? "農田" : "樹木田") + ")";
+                                GameEngine.updatePathfindingGrid();
+                            }
 
                             v.targetId = null;
                             v.gatherPoint = null;
-                            // [狀態更迭] 工人恢復原先任務或進入自動指派 (若附近有工地則會自動轉去建造)
                             this.restoreVillagerTask(v);
                         }
                     } else {

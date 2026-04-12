@@ -470,5 +470,11 @@ export const UI_CONFIG = {
             colorTrail: "#ff5500",  // 拖尾顏色 (紅)
             sizeBase: 6             // 基礎大小
         }
+    },
+    // -- 中立npc外框選取樣式 (NeutralSelection) --------------------------
+    NeutralSelection: {
+        glowColor: "#ff9100",           // 橘色外框 (橘黃)
+        hpFillColor: "#ff9100",         // 橘色血條
+        selectionRingColor: 0xff9100    // 橘色選取圈
     }
 };

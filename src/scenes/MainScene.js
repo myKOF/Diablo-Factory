@@ -327,7 +327,8 @@ export class MainScene extends Phaser.Scene {
 
         // 單位狀態檢查
         const unitType = unit.config ? unit.config.type : '';
-        if (unitType === 'wolf' || unitType === 'bear') return; // 非玩家控制單位不處理
+        const unitCamp = (unit.config && unit.config.camp) || unit.camp || 'player';
+        if (unitType === 'wolf' || unitType === 'bear' || unitCamp === 'neutral') return; // 非玩家控制單位不處理
 
         const wx = pointer.worldX, wy = pointer.worldY;
         const TS = GameEngine.TILE_SIZE;
@@ -341,7 +342,9 @@ export class MainScene extends Phaser.Scene {
             const isResource = !!(clickedTarget.gx !== undefined && clickedTarget.gy !== undefined) ||
                 (clickedTarget.resourceType) ||
                 (clickedTarget.type === 'farmland' || clickedTarget.type === 'tree_plantation');
-            const isEnemy = (clickedTarget.config && clickedTarget.config.camp === 'enemy') || clickedTarget.camp === 'enemy' || clickedTarget.isEnemy;
+            const isEnemy = (clickedTarget.config && (clickedTarget.config.camp === 'enemy' || clickedTarget.config.camp === 'neutral')) || 
+                           clickedTarget.camp === 'enemy' || clickedTarget.camp === 'neutral' || clickedTarget.isEnemy;
+
 
             // [核心修復] 不再強制強制切換為目標中心座標。使用帶有偏移的點擊座標 (wx, wy) 作為基準，
             // 如此一來即便多個單位同時點擊同一建築，也會因為各自不同的偏移量而散開至合法點位。
@@ -1729,6 +1732,22 @@ export class MainScene extends Phaser.Scene {
             g.lineStyle(2, 0xf44336, finalAlpha);
             g.strokeCircle(offX, offY, 15);
             g.strokeCircle(offX, offY, 5);
+        } else if (ent.type === 'corpse') {
+            // [新協定] 屍體資源點渲染：淡灰褐色的小堆，並帶有骨骼暗示
+            g.fillStyle(0xd7ccc8, finalAlpha); // 淺骨色
+            const rx = (uw * TS) / 2, ry = (uh * TS) / 2;
+            g.fillEllipse(offX, offY, rx, ry);
+            g.lineStyle(1, 0x5d4037, finalAlpha * 0.5);
+            g.strokeEllipse(offX, offY, rx, ry);
+
+            // 繪製一個簡單的「骨頭」圖案 (兩端圓球 + 中間桿子)
+            g.lineStyle(3, 0xffffff, finalAlpha);
+            g.lineBetween(offX - 10, offY, offX + 10, offY);
+            g.fillStyle(0xffffff, finalAlpha);
+            g.fillCircle(offX - 11, offY - 2, 4);
+            g.fillCircle(offX - 11, offY + 2, 4);
+            g.fillCircle(offX + 11, offY - 2, 4);
+            g.fillCircle(offX + 11, offY + 2, 4);
         } else if (ent.type === 'campfire') {
             const cfg = UI_CONFIG.ResourceRenderer.Campfire;
             g.fillStyle(cfg.groundColor, finalAlpha);
