@@ -84,8 +84,8 @@ export class MainScene extends Phaser.Scene {
             if (gridCfg.textureAlpha !== undefined) this.backgroundSprite.setAlpha(gridCfg.textureAlpha);
             if (gridCfg.textureScale !== undefined) this.backgroundSprite.setTileScale(gridCfg.textureScale);
             if (gridCfg.textureTint) {
-                const tintInt = typeof gridCfg.textureTint === 'string' ? 
-                                parseInt(gridCfg.textureTint.replace('#', ''), 16) : gridCfg.textureTint;
+                const tintInt = typeof gridCfg.textureTint === 'string' ?
+                    parseInt(gridCfg.textureTint.replace('#', ''), 16) : gridCfg.textureTint;
                 this.backgroundSprite.setTint(tintInt);
             }
         }
@@ -140,7 +140,7 @@ export class MainScene extends Phaser.Scene {
             this.updateEdgeCursor(0, 0);
         });
         this.pendingVisibleEntities = true; // 強制首幀加載
-        this.inputSystem = new InputSystem(this); 
+        this.inputSystem = new InputSystem(this);
         this.setupCamera();
 
         // 設置全局引用
@@ -338,9 +338,9 @@ export class MainScene extends Phaser.Scene {
 
         // 1. 識別目標類別
         if (clickedTarget) {
-            const isResource = !!(clickedTarget.gx !== undefined && clickedTarget.gy !== undefined) || 
-                               (clickedTarget.resourceType) || 
-                               (clickedTarget.type === 'farmland' || clickedTarget.type === 'tree_plantation');
+            const isResource = !!(clickedTarget.gx !== undefined && clickedTarget.gy !== undefined) ||
+                (clickedTarget.resourceType) ||
+                (clickedTarget.type === 'farmland' || clickedTarget.type === 'tree_plantation');
             const isEnemy = (clickedTarget.config && clickedTarget.config.camp === 'enemy') || clickedTarget.camp === 'enemy' || clickedTarget.isEnemy;
 
             // [核心修復] 不再強制強制切換為目標中心座標。使用帶有偏移的點擊座標 (wx, wy) 作為基準，
@@ -776,8 +776,8 @@ export class MainScene extends Phaser.Scene {
             }
 
             // 繪製集結點 (僅在選中且有集結點時顯示)
-            const isSelected = (window.UIManager && window.UIManager.activeMenuEntity === ent) || 
-                               (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(ent.id || `${ent.type}_${ent.x}_${ent.y}`));
+            const isSelected = (window.UIManager && window.UIManager.activeMenuEntity === ent) ||
+                (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(ent.id || `${ent.type}_${ent.x}_${ent.y}`));
             if (ent.rallyPoint && isSelected) {
                 this.drawRallyPoint(g, ent);
             }
@@ -854,7 +854,7 @@ export class MainScene extends Phaser.Scene {
             const m = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
             if (m) { uw = parseInt(m[1]); uh = parseInt(m[2]); }
         }
-        
+
         g.lineStyle(4, color, 1);
         g.strokeRect(ent.x - (uw * TS) / 2 - 2, ent.y - (uh * TS) / 2 - 2, uw * TS + 4, uh * TS + 4);
     }
@@ -896,13 +896,27 @@ export class MainScene extends Phaser.Scene {
         };
         const cfgBld = UI_CONFIG.BuildingConstructionSelection || { ...cfgRes, glowQuality: 4 };
 
-        const activeTargets = new Map(); // id -> { entity, fxType, config }
+        if (!this._villagerMap) this._villagerMap = new Map();
+        if (!this._activeTargets) this._activeTargets = new Map();
+        
+        const activeTargets = this._activeTargets;
+        activeTargets.clear();
 
-        // [效能優化] 建立村民快速索引，避免 O(N*M) 的 find 查找
-        const villagerMap = new Map();
+        const villagerMap = this._villagerMap;
+        villagerMap.clear();
         if (state.units && state.units.villagers) {
             state.units.villagers.forEach(v => villagerMap.set(v.id, v));
         }
+
+        // [效能優化] 建立建築快速索引，避免 O(N) find
+        if (!this._buildingMap || this._lastMapEntitiesCount !== state.mapEntities.length) {
+            this._buildingMap = new Map();
+            state.mapEntities.forEach(e => {
+                this._buildingMap.set(e.id || `${e.type}_${e.x}_${e.y}`, e);
+            });
+            this._lastMapEntitiesCount = state.mapEntities.length;
+        }
+        const buildingMap = this._buildingMap;
 
         // 1. 手動選中的資源 (檢查可見性)
         const selectedResId = state.selectedResourceId;
@@ -956,7 +970,7 @@ export class MainScene extends Phaser.Scene {
         // 3. 選中建築的集結點目標 (提示描邊外框)
         const selectedBldIds = state.selectedBuildingIds || [];
         selectedBldIds.forEach(bid => {
-            const b = state.mapEntities.find(e => (e.id === bid || `${e.type}_${e.x}_${e.y}` === bid));
+            const b = buildingMap.get(bid);
             if (b && b.rallyPoint && b.rallyPoint.targetId) {
                 const rp = b.rallyPoint;
                 let target = null;
@@ -976,19 +990,18 @@ export class MainScene extends Phaser.Scene {
                             }
                         }
                     }
-                } else {
-                    target = state.mapEntities.find(e => (e.id === rp.targetId || `${e.type}_${e.x}_${e.y}` === rp.targetId)) ||
-                             state.units.villagers.find(u => u.id === rp.targetId);
+                } else if (rp.targetType === 'UNIT') {
+                    target = villagerMap.get(rp.targetId) || buildingMap.get(rp.targetId);
                 }
 
                 if (target && target.x !== undefined) {
                     if (worldView.left - 150 < target.x && worldView.right + 150 > target.x &&
                         worldView.top - 150 < target.y && worldView.bottom + 150 > target.y) {
                         const tId = target.id || (target.gx !== undefined ? `res_${target.gx}_${target.gy}` : rp.targetId);
-                        activeTargets.set(tId + "_rally", { 
-                            entity: target, 
-                            fxType: 'target', 
-                            config: isRes ? cfgRes : cfgBld 
+                        activeTargets.set(tId + "_rally", {
+                            entity: target,
+                            fxType: 'target',
+                            config: isRes ? cfgRes : cfgBld
                         });
                     }
                 }
@@ -1019,14 +1032,15 @@ export class MainScene extends Phaser.Scene {
                     if (cleanColor.length > 6) cleanColor = cleanColor.substring(0, 6);
                     const color = parseInt(cleanColor, 16);
 
-                    // [效能關鍵] 使用較低的 Quality 進行描邊 (Building 預設降至 4)
+                    // [效能關鍵] 極低品質描邊用於非選中目標，保持流暢度
+                    const q = fxType === 'const' ? 2 : (config.glowQuality || 4);
                     const glow = fxSprite.postFX.addGlow(
                         color,
                         config.glowOuterStrength,
                         config.glowInnerStrength,
                         config.glowKnockOut !== undefined ? config.glowKnockOut : true,
                         config.glowAlpha,
-                        config.glowQuality || 6
+                        q
                     );
                     fxSprite.setData('fx', glow);
                 }
@@ -1147,9 +1161,11 @@ export class MainScene extends Phaser.Scene {
         // 2. 處理選中單位的持久目標
         const selectedIds = GameEngine.state.selectedUnitIds || [];
         if (selectedIds.length > 0) {
-            // [優化] 建立快速索引
-            const villagerMap = new Map();
-            GameEngine.state.units.villagers.forEach(v => villagerMap.set(v.id, v));
+            // [優化] 直接重用 updateResourceFX 已建好的快速索引
+            const villagerMap = this._villagerMap || new Map();
+            if (villagerMap.size === 0 && GameEngine.state.units.villagers) {
+                GameEngine.state.units.villagers.forEach(v => villagerMap.set(v.id, v));
+            }
 
             const drawnPos = new Set();
             selectedIds.forEach(id => {
@@ -1221,9 +1237,9 @@ export class MainScene extends Phaser.Scene {
         const w = Math.abs(start.x - end.x);
         const h = Math.abs(start.y - end.y);
 
-        const cfg = UI_CONFIG.SelectionMarquee || { 
-            fillColor: "#00ff00", fillAlpha: 0.15, 
-            borderColor: "#00ff00", borderAlpha: 0.8, borderWidth: 1.5 
+        const cfg = UI_CONFIG.SelectionMarquee || {
+            fillColor: "#00ff00", fillAlpha: 0.15,
+            borderColor: "#00ff00", borderAlpha: 0.8, borderWidth: 1.5
         };
 
         const fill = this.hexOrRgba(cfg.fillColor);
@@ -2112,10 +2128,10 @@ export class MainScene extends Phaser.Scene {
             GameEngine.state.units.villagers.forEach(v => {
                 const isPlayer = (v.config?.camp === 'player' || v.camp === 'player' || !v.camp);
                 const d = Math.hypot(v.x - endX, v.y - endY);
-                
+
                 // 矩形 Hitbox 判定 (適用於點擊中心稍微偏移的情況)
                 const inHitbox = Math.abs(v.x - endX) < 30 && Math.abs(v.y - endY) < 40;
-                
+
                 if (d < bestDist || inHitbox) {
                     // 如果原本選中的不是玩家單位，或者這個單位更近
                     if (!clickedUnit || (isPlayer && !clickedUnit._isPlayer)) {
@@ -2213,9 +2229,9 @@ export class MainScene extends Phaser.Scene {
             // 建築選取邏輯：優先使用 AABB 碰撞檢測以對應大型建築
             let clickedB = null;
             const TS = GameEngine.TILE_SIZE;
-            
+
             // 將地圖實體按距離排序，優先選取最近的 (或最上層的)
-            const sortedBuildings = [...GameEngine.state.mapEntities].sort((a, b) => 
+            const sortedBuildings = [...GameEngine.state.mapEntities].sort((a, b) =>
                 Math.hypot(a.x - worldX, a.y - worldY) - Math.hypot(b.x - worldX, b.y - worldY)
             );
 
@@ -2237,10 +2253,10 @@ export class MainScene extends Phaser.Scene {
                 // 基礎選取標記 (進階選取與雙擊偵測已移至 UIManager.handleWorldClick 統一管理)
                 // 這裡僅保留 Log 輸出與標籤顯示邏輯
                 if (window.UIManager) window.UIManager.showContextMenu(clickedB);
-                
+
                 GameEngine.addLog(`[選取] 建築：${clickedB.name || clickedB.type}`);
             } else if (!isShift) {
-                GameEngine.state.selectedUnitIds = []; 
+                GameEngine.state.selectedUnitIds = [];
                 GameEngine.state.selectedResourceId = null;
                 GameEngine.state.selectedBuildingId = null;
                 GameEngine.state.selectedBuildingIds = [];

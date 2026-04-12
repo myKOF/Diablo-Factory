@@ -450,7 +450,7 @@ export class CharacterRenderer {
 
         this.setCtxStyle(ctx, bodyColor, 1);
         ctx.fillRect(headX, headY, 16, 12); // 更長的狼吻
-        
+
         // 尖耳朵
         ctx.fillRect(headX + 2, headY - 6, 3, 7);
         ctx.fillRect(headX + 8, headY - 6, 3, 7);
@@ -505,9 +505,9 @@ export class CharacterRenderer {
         const headBob = isAttacking ? Math.sin(t * atkFreq) * 4 : (isMoving ? Math.sin(t * headBobFreq) * 1.5 : Math.cos(t * breatheFreq * 0.6) * 2);
         const headX = x + 14 + attackDash;
         const headY = y - 20 + headBob;
-        
+
         ctx.fillRect(headX, headY, 18, 18);
-        
+
         // 圓耳朵
         ctx.fillRect(headX + 2, headY - 4, 5, 5);
         ctx.fillRect(headX + 11, headY - 4, 5, 5);
@@ -633,12 +633,12 @@ export class CharacterRenderer {
         if (!unitData) return 1.0;
         const name = (unitData.configName || "").toLowerCase();
         const isEnemy = (unitData.config && unitData.config.camp === 'enemy') || unitData.camp === 'enemy';
-        
+
         if (isEnemy) return 0.25;
         if (name.includes('villager')) return 0.75;
         // 戰鬥單位：50%
         if (name === 'swordsman' || name === 'mage' || name === 'archer') return 0.5;
-        
+
         return 1.0;
     }
 }

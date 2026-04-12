@@ -798,9 +798,9 @@ export class GameEngine {
                     const gx = parseInt(parts[1]), gy = parseInt(parts[2]);
                     const res = this.state.mapData.getResource(gx, gy);
                     if (res && res.type !== 0) {
-                        targetEnt = { 
-                            id: rp.targetId, gx, gy, 
-                            x: gx * this.TILE_SIZE + this.TILE_SIZE / 2, 
+                        targetEnt = {
+                            id: rp.targetId, gx, gy,
+                            x: gx * this.TILE_SIZE + this.TILE_SIZE / 2,
                             y: gy * this.TILE_SIZE + this.TILE_SIZE / 2,
                             type: 'RESOURCE',
                             resourceType: ['NONE', 'WOOD', 'STONE', 'FOOD', 'GOLD'][res.type]
@@ -808,10 +808,10 @@ export class GameEngine {
                     }
                 } else {
                     targetEnt = this.state.units.villagers.find(u => u.id === rp.targetId) ||
-                                 this.state.mapEntities.find(e => {
-                                     const eid = e.id || `${e.type}_${e.x}_${e.y}`;
-                                     return eid === rp.targetId;
-                                 });
+                        this.state.mapEntities.find(e => {
+                            const eid = e.id || `${e.type}_${e.x}_${e.y}`;
+                            return eid === rp.targetId;
+                        });
                 }
             }
 
@@ -838,9 +838,9 @@ export class GameEngine {
                     // [核心修復] 先設定歸屬，再增加需求，確保自動化邏輯不會搶先指派其它人。
                     v.assignedWarehouseId = targetEnt.id || `${targetEnt.type}_${targetEnt.x}_${targetEnt.y}`;
                     this.adjustWarehouseWorkers(targetEnt, 1);
-                    v.type = (targetEnt.type === 'timber_factory' ? 'WOOD' : 
-                             (targetEnt.type === 'stone_factory' ? 'STONE' : 
-                             (targetEnt.type === 'barn' ? 'FOOD' : 'GOLD')));
+                    v.type = (targetEnt.type === 'timber_factory' ? 'WOOD' :
+                        (targetEnt.type === 'stone_factory' ? 'STONE' :
+                            (targetEnt.type === 'barn' ? 'FOOD' : 'GOLD')));
                     v.state = 'MOVING_TO_RESOURCE';
                     v.isPlayerLocked = true; // [核心修復] 鎖定狀態防止出生瞬間被 assignNextTask 覆蓋
                     GameEngine.addLog(`[集結] 已加入 ${targetEnt.name || targetEnt.type} 採集隊列。`);
@@ -865,7 +865,7 @@ export class GameEngine {
             } else {
                 const spot = this.findAvailableRallySpot(rp);
                 v.idleTarget = spot;
-                v._isRallyMovement = true; 
+                v._isRallyMovement = true;
             }
         }
 
@@ -881,7 +881,7 @@ export class GameEngine {
      * @param {Object} rallyPoint 原始集結點座標
      */
     static findAvailableRallySpot(rallyPoint) {
-        const spacing = 25; 
+        const spacing = 25;
         const goldenAngle = 137.508 * (Math.PI / 180);
         const claimedSpots = [];
 

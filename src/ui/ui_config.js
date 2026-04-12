@@ -1,4 +1,4 @@
-﻿/**
+/**
  * UI_CONFIG — 界面佈局與文字顯示的統一設定中心
  *
  * 所有與遊戲 HUD、面板、標籤有關的樣式數值都集中在這裡。
@@ -398,7 +398,7 @@ export const UI_CONFIG = {
         glowInnerStrength: 0,          // 發光內部強度
         glowAlpha: 0.2,                // 發光基礎透明度
         glowKnockOut: true,            // [重要] 是否隱藏本體圖形 (只留外框)
-        glowQuality: 12,               // 發光品質
+        glowQuality: 6,               // 發光品質
         selectionScale: 1,           // 僅縮放發光外框的大小，不改變物體圖形
         depth: 15                      // 顯示深度
     },

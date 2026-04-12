@@ -88,9 +88,9 @@ export class BattleRenderer {
 
             // 1. 判斷顯示條件：受擊中 OR 滑鼠懸停 OR 目前選中
             const distToPointer = Math.hypot(rx - pointer.worldX, ry - pointer.worldY);
-            const isHovered = distToPointer < 40; 
+            const isHovered = distToPointer < 40;
             const isSelected = selectedIds.includes(unit.id);
-            const isTargetedByPlayerArmy = window.GAME_STATE && 
+            const isTargetedByPlayerArmy = window.GAME_STATE &&
                 window.GAME_STATE.units.villagers.some(u => u.targetId === unit.id);
 
             // 如果符合任一條件（受擊、懸停、選中、正在戰鬥、或是我方單位集火目標），渲染血條
@@ -173,28 +173,28 @@ export class BattleRenderer {
                 const target = BattleSystem.findEntityById(p.targetId, state) || { x: p.x, y: p.y };
                 const nextX = p.startX + (target.x - p.startX) * nextP;
                 const nextY = p.startY + (target.y - p.startY) * nextP - Math.sin(Math.PI * nextP) * arcH;
-                
+
                 const angle = Math.atan2(nextY - ry, nextX - rx);
                 const colorNum = this.parseColor(cfg.color);
-                
+
                 g.lineStyle(1, colorNum, 1);
                 g.fillStyle(colorNum, 1);
-                
+
                 // 繪製帶旋轉的長方形 (箭身)
-                const arrowLen = 14; 
+                const arrowLen = 14;
                 const arrowWid = cfg.size || 2;
-                
+
                 const cos = Math.cos(angle);
                 const sin = Math.sin(angle);
-                
+
                 const x1 = rx - cos * arrowLen / 2;
                 const y1 = ry - sin * arrowLen / 2;
                 const x2 = rx + cos * arrowLen / 2;
                 const y2 = ry + sin * arrowLen / 2;
-                
+
                 g.lineStyle(arrowWid, colorNum, 1);
                 g.lineBetween(x1, y1, x2, y2);
-                
+
                 // 箭頭 (稍微突出)
                 g.fillStyle(colorNum, 1);
                 g.fillCircle(x2, y2, arrowWid);
@@ -202,7 +202,7 @@ export class BattleRenderer {
                 // -- 遠程直線魔法火球 --
                 const cfg = vCfg.fireball;
                 const size = cfg.sizeBase + Math.sin(Date.now() * 0.01) * 2;
-                
+
                 const glowColor = this.parseColor(cfg.colorGlow);
                 const coreColor = this.parseColor(cfg.colorCore);
                 const trailColor = this.parseColor(cfg.colorTrail);
@@ -211,7 +211,7 @@ export class BattleRenderer {
                 if (!p.history) p.history = [];
                 p.history.push({ x: rx, y: ry, alpha: 1.0 });
                 if (p.history.length > 8) p.history.shift();
-                
+
                 p.history.forEach((h, idx) => {
                     h.alpha -= 0.1;
                     const trailSize = size * (idx / p.history.length);
@@ -224,7 +224,7 @@ export class BattleRenderer {
                 g.fillCircle(rx, ry, size + 2);
                 g.fillStyle(coreColor, 1.0);
                 g.fillCircle(rx, ry, size);
-                
+
                 // 核心濺射感
                 g.fillStyle(0xffffff, 0.5);
                 g.fillCircle(rx, ry, size * 0.5);
