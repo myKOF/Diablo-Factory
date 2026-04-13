@@ -131,14 +131,25 @@ export class CharacterRenderer {
     }
 
     static renderCorpse(ctx, x, y, unitData) {
-        const model = unitData.sourceModel || 'villager';
-        
-        // 1. 繪製底部陰影 (確保在最底層)
-        this.drawShadow(ctx, x, y);
+        try {
+            const model = (unitData.sourceModel || 'villager').toLowerCase();
+            const corpseCfg = UI_CONFIG.CorpseRenderer || {};
+            
+            // [極度防禦] 確保 cfg 絕對不為 null/undefined，並帶有合理的預設值
+            let cfg = corpseCfg[model] || corpseCfg.default;
+            if (!cfg) {
+                cfg = { bodyColor: 0x9e9e9e, bodyWidth: 28, bodyHeight: 16, offsetY: 8, rotation: 0.25 };
+            }
 
-        // 2. 繪製精簡血漬 (地面效果)
-        this.setCtxStyle(ctx, 0xb71c1c, 0.5); 
-        if (ctx.beginPath) {
+            // 1. 繪製底部陰影
+            this.drawShadow(ctx, x, y);
+
+        // 2. 繪製地面積血 (修正：Phaser 使用 fillCircle)
+        this.setCtxStyle(ctx, 0xb71c1c, 0.4); 
+        if (ctx.fillCircle) {
+            ctx.fillCircle(x - 10, y + 6, 5);
+            ctx.fillCircle(x + 6, y + 2, 3);
+        } else if (ctx.beginPath) {
             ctx.beginPath();
             ctx.arc(x - 10, y + 6, 5, 0, Math.PI * 2);
             ctx.arc(x + 6, y + 2, 3, 0, Math.PI * 2);
@@ -146,54 +157,46 @@ export class CharacterRenderer {
         }
 
         // 3. 繪製屍體主體
-        let bodyColor = 0x9e9e9e; 
-        let bodyWidth = 28;
-        let bodyHeight = 16;
+        let bodyColor = cfg.bodyColor; 
+        let bodyWidth = cfg.bodyWidth;
+        let bodyHeight = cfg.bodyHeight;
 
-        if (model === 'sheep') {
-            bodyColor = 0xffffff;
-            bodyWidth = 32; 
-            bodyHeight = 18;
-        } else if (model === 'wolf') {
-            bodyColor = 0x546e7a;
-            bodyWidth = 36;
-            bodyHeight = 12;
-        } else if (model === 'bear') {
-            bodyColor = 0x4e342e;
-            bodyWidth = 45;
-            bodyHeight = 24;
-        }
+        // Phaser Graphics 不支援 ctx.save/translate 作為座標變換，需手動計算或使用其內部機制
+        // 這裡我們偵測是否有 save 方法且非 Phaser Graphics (Phaser Graphics 的 save 是存樣式)
+        const isPhaser = !!ctx.batchFillRect || !!ctx.fillEllipse;
 
-        ctx.save();
-        ctx.translate(x, y + 8);
-        ctx.rotate(0.25); 
-
-        // 繪製身體 (帶邊框)
-        this.setCtxStyle(ctx, bodyColor, 1.0);
-        if (ctx.beginPath) {
-            ctx.beginPath();
-            if (ctx.ellipse) {
-                ctx.ellipse(0, 0, bodyWidth / 2, bodyHeight / 2, 0, 0, Math.PI * 2);
-            } else {
-                ctx.rect(-bodyWidth/2, -bodyHeight/2, bodyWidth, bodyHeight);
+        if (!isPhaser && ctx.save) {
+            ctx.save();
+            ctx.translate(x, y + cfg.offsetY);
+            ctx.rotate(cfg.rotation); 
+            this.setCtxStyle(ctx, bodyColor, 1.0);
+            if (ctx.beginPath) {
+                ctx.beginPath();
+                if (ctx.ellipse) ctx.ellipse(0, 0, bodyWidth / 2, bodyHeight / 2, 0, 0, Math.PI * 2);
+                else ctx.rect(-bodyWidth/2, -bodyHeight/2, bodyWidth, bodyHeight);
+                ctx.fill();
             }
-            ctx.fill();
-            
-            // 黑色輪廓線 (提升能見度)
-            this.setCtxStyle(ctx, 0x000000, 0.4);
-            if (ctx.stroke) ctx.stroke();
-            
-            // 屍體上的傷痕血跡
-            this.setCtxStyle(ctx, 0xd32f2f, 0.7);
-            ctx.beginPath();
-            ctx.arc(-8, -4, 4, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.restore();
         } else {
-            // 極簡回退：填充矩形
-            if (ctx.fillRect) ctx.fillRect(-bodyWidth/2, -bodyHeight/2, bodyWidth, bodyHeight);
+            // Phaser Graphics 渲染路徑
+            this.setCtxStyle(ctx, bodyColor, 1.0);
+            const py = y + cfg.offsetY;
+            if (ctx.fillEllipse) {
+                ctx.fillEllipse(x, py, bodyWidth, bodyHeight);
+                // 輪廓線
+                this.setCtxStyle(ctx, 0x000000, 0.3);
+                ctx.strokeEllipse(x, py, bodyWidth, bodyHeight);
+            } else {
+                ctx.fillRect(x - bodyWidth/2, py - bodyHeight/2, bodyWidth, bodyHeight);
+            }
+            
+            // 加上一點血跡裝飾
+            this.setCtxStyle(ctx, 0xd32f2f, 0.6);
+            if (ctx.fillCircle) ctx.fillCircle(x - 5, py - 2, 4);
         }
-        
-        ctx.restore();
+        } catch (e) {
+            if (window.GameEngine) window.GameEngine.addLog(`[渲染錯誤] 屍體繪製異常: ${e.message}`, 'SYSTEM');
+        }
     }
 
     static drawVisionRange(ctx, x, y, radius) {
@@ -259,18 +262,18 @@ export class CharacterRenderer {
         } else {
             // 普通單位依據工作狀態配色
             const state = data.state;
+            const resType = (data.type || "").toUpperCase();
             if (state === 'IDLE') {
                 clothColor = parseColor(colors.IDLE);
             } else if (state === 'CONSTRUCTING' || state === 'MOVING_TO_CONSTRUCTION') {
                 clothColor = parseColor(colors.CONSTRUCTING);
             } else if (state === 'ATTACK' || state === 'CHASE' || state === 'MOVE') {
-                // 戰鬥狀態或奔向戰場時，回歸基本配色
                 clothColor = parseColor(colors.DEFAULT);
             } else {
-                if (data.type === 'WOOD') clothColor = parseColor(colors.WOOD);
-                else if (data.type === 'STONE') clothColor = parseColor(colors.STONE);
-                else if (data.type === 'FOOD') clothColor = parseColor(colors.FOOD);
-                else if (data.type === 'GOLD') clothColor = parseColor(colors.GOLD);
+                if (resType === 'WOOD') clothColor = parseColor(colors.WOOD);
+                else if (resType === 'STONE') clothColor = parseColor(colors.STONE);
+                else if (resType === 'FOOD') clothColor = parseColor(colors.FOOD);
+                else if (resType === 'GOLD') clothColor = parseColor(colors.GOLD);
                 else clothColor = parseColor(colors.DEFAULT);
             }
         }
@@ -374,7 +377,7 @@ export class CharacterRenderer {
             ctx.fillRect(x - 14, y + 5 + (isActuallyMoving || isAttacking ? 0 : Math.sin(t * breatheFreq) * 1), 4, 18);
         } else if (data.cargo > 0) {
             const colors = UI_CONFIG.CargoColors || UI_CONFIG.VillagerColors;
-            const cargoType = data.cargoType || data.type;
+            const cargoType = (data.cargoType || data.type || "").toUpperCase();
             const parseColor = (c) => {
                 if (!c) return 0x795548;
                 const cleaned = c.replace('#', '0x');
@@ -386,10 +389,10 @@ export class CharacterRenderer {
             if (cargoType === 'WOOD') resColor = parseColor(colors.WOOD);
             else if (cargoType === 'STONE') resColor = parseColor(colors.STONE);
             else if (cargoType === 'FOOD') resColor = parseColor(colors.FOOD);
-            ctx.fillRect(x - 8, y + 10 + Math.sin(t * cargoFreq) * 2, 16, 12);
+            ctx.fillRect(x - 8, y + 10 + Math.sin(t * armFreq) * 2, 16, 12);
             // 加入頂部亮邊增加立體感
             this.setCtxStyle(ctx, 0xffffff, 0.3);
-            ctx.fillRect(x - 8, y + 10 + Math.sin(t * cargoFreq) * 2, 16, 3);
+            ctx.fillRect(x - 8, y + 10 + Math.sin(t * armFreq) * 2, 16, 3);
         } else if (state === 'ATTACK') {
             // 通用攻擊動作（針對村民或其他無特定武器單位）
             const swing = Math.sin(t * combatFreq * 1.5) * 10;

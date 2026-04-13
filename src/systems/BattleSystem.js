@@ -111,6 +111,14 @@ export class BattleSystem {
                 unit.chaseFrame = 10;
             } else {
                 unit.state = 'ATTACK';
+                // [日誌項] 開始攻擊目標
+                if (typeof GameEngine !== 'undefined' && !unit._lastLogAttack) {
+                    const target = this.findEntityById(unit.targetId, state);
+                    if (target) {
+                        GameEngine.addLog(`[戰鬥資訊] 攻擊目標：${unit.configName || '單位'} 正在攻擊 ${target.name || target.type} (目標座標: ${Math.round(target.x)}, ${Math.round(target.y)})`, 'BATTLE');
+                        unit._lastLogAttack = unit.targetId;
+                    }
+                }
             }
         }
     }
@@ -199,6 +207,11 @@ export class BattleSystem {
             target.state = 'CHASE';
             target.chaseFrame = 10;
         }
+
+        // [核心追蹤] 幫助排查死亡延遲問題
+        if (target.hp <= 0 && typeof GameEngine !== 'undefined') {
+            GameEngine.addLog(`[生命值歸零] ${target.configName || '目標'} HP 已耗盡`, 'BATTLE');
+        }
     }
 
     static updateProjectiles(state, dt, TILE_SIZE) {
@@ -240,23 +253,40 @@ export class BattleSystem {
                     if (produce) {
                         const corpse = this.spawnCorpse(u, state);
                         if (corpse) {
-                            // 轉移攻擊該單位的工人的目標
+                            // 轉移攻擊該單位的工人的目標 (核心修復：支援物件與 ID 字串比對)
                             state.units.villagers.forEach(v => {
-                                if (v.targetId === deadId) {
-                                    v.targetId = corpse.id;
+                                const vTarget = v.targetId;
+                                const isTargetingMe = (vTarget === deadId) || (vTarget && typeof vTarget === 'object' && vTarget.id === deadId);
+                                
+                                if (isTargetingMe) {
+                                    v.targetId = corpse.id; // 改為追蹤新的屍體 ID
                                     v.type = corpse.resType;
                                     v.state = 'MOVING_TO_RESOURCE';
                                     v.pathTarget = null;
                                     v.isPlayerLocked = true;
+                                    if (typeof GameEngine !== 'undefined') {
+                                        GameEngine.addLog(`[採集轉移] ${v.configName || '工人'} 已轉為採集 ${corpse.name}`, 'TASK');
+                                    }
                                 }
                             });
                         }
+                    }
+
+                    if (typeof GameEngine !== 'undefined') {
+                        GameEngine.addLog(`[單位死亡] ${u.configName || '單位'} 已倒下`, 'BATTLE');
                     }
 
                     if (state.selectedUnitIds) {
                         const sIdx = state.selectedUnitIds.indexOf(deadId);
                         if (sIdx !== -1) state.selectedUnitIds.splice(sIdx, 1);
                     }
+                    if (state.renderVersion !== undefined) state.renderVersion++;
+                    state.needsGridUpdate = true; // [核心優化] 強制即時重新計算空間網格，確保屍體立即出現
+                    
+                    if (typeof GameEngine !== 'undefined') {
+                        GameEngine.addLog(`[戰鬥資訊] 目標死亡：${u.configName || '單位'} 已倒下，產生屍體中...`, 'SYSTEM');
+                    }
+                    
                     list.splice(i, 1);
                 }
             }
@@ -289,6 +319,9 @@ export class BattleSystem {
 
         if (!state.mapEntities) state.mapEntities = [];
         state.mapEntities.push(corpse);
+        if (typeof GameEngine !== 'undefined') {
+            GameEngine.addLog(`[戰鬥資訊] 屍體產生狀態：是否產生屍體（是） | 座標: ${Math.round(corpse.x)}, ${Math.round(corpse.y)} | 資源: ${corpse.resType} x${corpse.amount}`, 'SYSTEM');
+        }
         return corpse;
     }
 

@@ -142,10 +142,42 @@ export const UI_CONFIG = {
             color: "#81d4fa",
             offsetX: 0,
             offsetY: 0,
+            corpseOffsetY: 25,     // 屍體資源量顯示偏移
             align: 'center',
             outlineColor: "#000000",
             outlineAlpha: 0.8,
             outlineWidth: 3
+        }
+    },
+    // -- 屍體渲染配置 (CorpseRenderer) ---------------------------
+    CorpseRenderer: {
+        sheep: {
+            bodyColor: 0xffffff,
+            bodyWidth: 42,         // 增加寬度 (原 32)
+            bodyHeight: 24,        // 增加高度 (原 18)
+            offsetY: 0,
+            rotation: 0.25
+        },
+        wolf: {
+            bodyColor: 0x546e7a,
+            bodyWidth: 36,
+            bodyHeight: 12,
+            offsetY: 8,
+            rotation: 0.25
+        },
+        bear: {
+            bodyColor: 0x4e342e,
+            bodyWidth: 45,
+            bodyHeight: 24,
+            offsetY: 8,
+            rotation: 0.25
+        },
+        default: {
+            bodyColor: 0x9e9e9e,
+            bodyWidth: 28,
+            bodyHeight: 16,
+            offsetY: 8,
+            rotation: 0.25
         }
     },
     // -- 大地圖建築標籤 (MapBuildingLabels) -----------------------
@@ -265,6 +297,7 @@ export const UI_CONFIG = {
     NPCLabel: {
         fontSize: "bold 14px Arial",
         enemyColor: "#ff4444",
+        neutralColor: "#4caf50",         // 中立單位顏色 (綠色)
         offsetY: -35,
         shadowColor: "rgba(0, 0, 0, 0.6)"
     },

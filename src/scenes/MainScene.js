@@ -1505,18 +1505,18 @@ export class MainScene extends Phaser.Scene {
         // 1. 名稱標籤 (Name)
         const nameStr = ent.isUnderConstruction ? "施工中" : (ent.name || ent.type);
         let nameTxt = this.nameLabels.get(id);
-        if (!nameTxt) {
+        if (!nameTxt && cfg.name) {
             nameTxt = this.add.text(visualX, visualY, nameStr, {
-                font: cfg.name.fontSize,
-                fill: cfg.name.color,
+                font: cfg.name.fontSize || "12px Arial",
+                fill: cfg.name.color || "#ffffff",
                 align: 'center'
             }).setOrigin(0.5, 0.5);
-            nameTxt.setStroke(this.hexToCssRgba(cfg.name.outlineColor, cfg.name.outlineAlpha), cfg.name.outlineWidth);
+            nameTxt.setStroke(this.hexToCssRgba(cfg.name.outlineColor || "#000000", cfg.name.outlineAlpha || 0.8), cfg.name.outlineWidth || 2);
             nameTxt.setDepth(50);
             this.nameLabels.set(id, nameTxt);
         }
 
-        if (showLabels) {
+        if (showLabels && nameTxt && cfg.name) {
             nameTxt.setVisible(true);
             const ox = cfg.name.offsetX || 0;
             const oy = cfg.name.offsetY || 0;
@@ -1560,22 +1560,28 @@ export class MainScene extends Phaser.Scene {
 
         // 3. 數量標籤 (Amount) - 僅資源使用 MapResourceLabels.amount
         const isFarmlandType = ent.type === 'farmland' || ent.type === 'tree_plantation';
-        if ((!isBuilding || isFarmlandType) && showLabels && ent.amount !== undefined) {
+        if ((!isBuilding || isFarmlandType) && showLabels && ent.amount !== undefined && resCfg.amount) {
             let amtTxt = this.resourceLabels.get(id);
             const amtStr = `[${Math.floor(ent.amount)}]`;
             if (!amtTxt) {
                 amtTxt = this.add.text(visualX, visualY, amtStr, {
-                    font: resCfg.amount.fontSize,
-                    fill: resCfg.amount.color,
+                    font: resCfg.amount.fontSize || "12px Arial",
+                    fill: resCfg.amount.color || "#ffffff",
                     align: 'center'
                 }).setOrigin(0.5, 0.5);
-                amtTxt.setStroke(this.hexToCssRgba(resCfg.amount.outlineColor, resCfg.amount.outlineAlpha), resCfg.amount.outlineWidth);
+                amtTxt.setStroke(this.hexToCssRgba(resCfg.amount.outlineColor || "#000000", resCfg.amount.outlineAlpha || 0.8), resCfg.amount.outlineWidth || 2);
                 amtTxt.setDepth(49);
                 this.resourceLabels.set(id, amtTxt);
             }
             amtTxt.setVisible(true);
             const aox = resCfg.amount.offsetX || 0;
-            const aoy = resCfg.amount.offsetY || 0;
+            let aoy = resCfg.amount.offsetY || 0;
+            
+            // [核心修復] 針對屍體類型資源，套用專屬偏移以避免遮擋模型
+            if (ent.isCorpse && resCfg.amount.corpseOffsetY !== undefined) {
+                aoy = resCfg.amount.corpseOffsetY;
+            }
+            
             amtTxt.setPosition(visualX + aox, visualY + aoy);
             if (cache.amount !== ent.amount) {
                 amtTxt.setText(amtStr);
@@ -1733,21 +1739,8 @@ export class MainScene extends Phaser.Scene {
             g.strokeCircle(offX, offY, 15);
             g.strokeCircle(offX, offY, 5);
         } else if (ent.type === 'corpse') {
-            // [新協定] 屍體資源點渲染：淡灰褐色的小堆，並帶有骨骼暗示
-            g.fillStyle(0xd7ccc8, finalAlpha); // 淺骨色
-            const rx = (uw * TS) / 2, ry = (uh * TS) / 2;
-            g.fillEllipse(offX, offY, rx, ry);
-            g.lineStyle(1, 0x5d4037, finalAlpha * 0.5);
-            g.strokeEllipse(offX, offY, rx, ry);
-
-            // 繪製一個簡單的「骨頭」圖案 (兩端圓球 + 中間桿子)
-            g.lineStyle(3, 0xffffff, finalAlpha);
-            g.lineBetween(offX - 10, offY, offX + 10, offY);
-            g.fillStyle(0xffffff, finalAlpha);
-            g.fillCircle(offX - 11, offY - 2, 4);
-            g.fillCircle(offX - 11, offY + 2, 4);
-            g.fillCircle(offX + 11, offY - 2, 4);
-            g.fillCircle(offX + 11, offY + 2, 4);
+            // [核心修正] 呼叫專屬角色渲染器繪製屍體，達成自訂外觀效果
+            CharacterRenderer.renderCorpse(g, offX, offY, ent);
         } else if (ent.type === 'campfire') {
             const cfg = UI_CONFIG.ResourceRenderer.Campfire;
             g.fillStyle(cfg.groundColor, finalAlpha);
@@ -1993,16 +1986,21 @@ export class MainScene extends Phaser.Scene {
     }
 
     updateUnitLabel(id, unit, x, y) {
-        if (!unit.config || unit.config.camp !== 'enemy') return;
+        if (!unit.config) return;
 
-        const cfg = UI_CONFIG.NPCLabel || { fontSize: "bold 14px Arial", enemyColor: "#ff4444", offsetY: -65 };
-        const labelStr = `${unit.config.name || '敵人'} (Lv. ${unit.config.lv || 1})`;
+        const camp = unit.config.camp || 'neutral';
+        // 僅顯示敵人與中立生物的標籤，玩家村民不顯示
+        if (camp !== 'enemy' && camp !== 'neutral') return;
+
+        const cfg = UI_CONFIG.NPCLabel || { fontSize: "bold 14px Arial", enemyColor: "#ff4444", neutralColor: "#4caf50", offsetY: -35 };
+        const labelStr = `${unit.config.name || 'NPC'} (Lv. ${unit.config.lv || 1})`;
+        const color = camp === 'enemy' ? cfg.enemyColor : cfg.neutralColor;
 
         let label = this.nameLabels.get(id);
         if (!label) {
             label = this.add.text(x, y + cfg.offsetY, labelStr, {
                 font: cfg.fontSize,
-                fill: cfg.enemyColor,
+                fill: color,
                 align: 'center'
             }).setOrigin(0.5, 0.5);
 
@@ -2015,6 +2013,7 @@ export class MainScene extends Phaser.Scene {
         // 徹底穩定化：直接使用整數座標，不添加任何 breathing 偏移
         label.setPosition(Math.round(x), Math.round(y + cfg.offsetY));
         if (label.text !== labelStr) label.setText(labelStr);
+        if (label.style.fill !== color) label.setFill(color); // 確保顏色正確切換
         if (!label.visible) label.setVisible(true);
     }
 

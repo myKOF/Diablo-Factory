@@ -239,15 +239,21 @@ export class GameEngine {
 
             // 每秒執行一次工人分配邏輯
             this.state.assignmentTimer += deltaTime;
-            if (this.state.assignmentTimer >= 1.0) {
+            if (this.state.assignmentTimer >= 1.0 || this.state.needsGridUpdate) {
                 this.updateWorkerAssignments();
                 this.updateSpatialGrid(); // 週期性全量刷新空間格網 (保險起見)
                 this.state.assignmentTimer = 0;
+                this.state.needsGridUpdate = false;
             }
         } catch (err) {
             console.error("Logic Loop Error:", err);
-            // [核心修補] 加入詳細錯誤捕捉，防止崩潰靜默
+            // [核心修補] 加入詳細錯誤捕捉與堆疊日誌，幫助排查 TypeErrors
             this.addLog(`[系統錯誤] 邏輯循環異常: ${err.message}`, 'SYSTEM');
+            if (err.stack) {
+                // 僅紀錄前兩行堆疊以防日誌過長
+                const shortStack = err.stack.split('\n').slice(0, 2).join(' | ');
+                this.addLog(`[錯誤堆疊] ${shortStack}`, 'SYSTEM');
+            }
         }
     }
 
@@ -1578,6 +1584,7 @@ export class GameEngine {
                 if (target) {
                     if (!v.gatherPoint || v._lastTargetId !== (target.id || `${target.gx}_${target.gy}`)) {
                         v._lastTargetId = (target.id || `${target.gx}_${target.gy}`);
+                        GameEngine.addLog(`[尋路更新] ${v.configName || '工人'} 定位目標資源...`, 'PATH');
 
                         if (target.type === 'farmland' || target.type === 'tree_plantation') {
                             v.gatherPoint = {
@@ -1615,10 +1622,16 @@ export class GameEngine {
                             v.pathTarget = null;
                             v.gatherPoint = null;
                         } else {
+                            GameEngine.addLog(`[任務啟動] ${v.configName || '工人'} 已抵達資源點並開始採集 ${target.name || target.type}`, 'TASK');
                             v.state = 'GATHERING'; v.targetId = target; v.gatherTimer = 0; v.pathTarget = null;
-                            v.gatherPoint = null; // 重置讓下次回來可重新分配位置
+                            v.gatherPoint = null; 
                         }
                     } else {
+                        // [尋路日誌] 僅在目標改變時輸出一次，減少洗頻
+                        if (!v._lastLogPath || v._lastLogPath !== (target.id || 'target')) {
+                            GameEngine.addLog(`[尋路目標] ${v.configName || '工人'} 正在前往目標 (${Math.round(v.gatherPoint.x)}, ${Math.round(v.gatherPoint.y)})`, 'PATH');
+                            v._lastLogPath = (target.id || 'target');
+                        }
                         this.moveDetailed(v, v.gatherPoint.x, v.gatherPoint.y, moveSpeed, dt, ignoreEnts);
                     }
                 } else { v.state = 'IDLE'; v.pathTarget = null; v.gatherPoint = null; v.workOffset = null; }
@@ -1643,7 +1656,7 @@ export class GameEngine {
                         // 1. 區塊型資源採集 (MapDataSystem)
                         const consumed = this.state.mapData.consumeResource(v.targetId.gx, v.targetId.gy, harvestTotal);
                         v.cargo = consumed;
-                        v.cargoType = v.type; // [修正] 明確記錄身上背的是什麼資源類型
+                        v.cargoType = v.type || 'food'; // [防護修正] 確保 cargoType 絕對有弦字串值，防止 toLowerCase 出錯
                         this.state.renderVersion++; // [核心修復] 通知渲染層數據已變動，強行刷新標籤與資源狀態
 
                         if (consumed <= 0) {
@@ -1656,42 +1669,56 @@ export class GameEngine {
                         }
                         v.pathTarget = null;
                         v.gatherTimer = 0;
-                    } else if (this.state.mapEntities.includes(v.targetId)) {
-                        // 2. 實體型資源採集 (如農田/樹木田)
-                        const canTake = Math.min(harvestTotal, v.targetId.amount);
-                        v.targetId.amount -= canTake;
-
-                        // 農田類直接入庫
-                        if (v.targetId.type === 'farmland') this.state.resources.food += canTake;
-                        else if (v.targetId.type === 'tree_plantation') this.state.resources.wood += canTake;
-
-                        v.cargo = 0;
-                        v.cargoType = null;
-                        v.gatherTimer = 0;
-                        if (v.targetId.amount <= 0) {
-                            this.addLog(`${v.targetId.name || '資源點'} 已採集完畢。`, 'SYSTEM');
-                            if (v.targetId.type === 'corpse') {
-                                // [核心優化] 屍體採完後徹底移除，釋放空間
-                                this.state.mapEntities = this.state.mapEntities.filter(e => e !== v.targetId);
-                                GameEngine.updatePathfindingGrid();
-                            } else {
-                                // [核心修復] 農田等不可移動資源不刪除，而是轉為施工中狀態
-                                const resEnt = v.targetId;
-                                resEnt.isUnderConstruction = true;
-                                resEnt.buildProgress = 0;
-                                resEnt.name = "施工中 (" + (resEnt.type === 'farmland' ? "農田" : "樹木田") + ")";
-                                GameEngine.updatePathfindingGrid();
-                            }
-
-                            v.targetId = null;
-                            v.gatherPoint = null;
-                            this.restoreVillagerTask(v);
-                        }
                     } else {
-                        // 目標無效
-                        v.state = 'IDLE';
-                        v.pathTarget = null;
-                        v.targetId = null;
+                        // 2. 實體型資源採集 (如農田/樹木田/屍體)
+                        // [核心修正] 確保 targetId 能正確對應到實體物件
+                        const targetEnt = (typeof v.targetId === 'string') ? 
+                            this.state.mapEntities.find(e => e.id === v.targetId) : 
+                            (this.state.mapEntities.includes(v.targetId) ? v.targetId : null);
+
+                        if (targetEnt) {
+                            const canTake = Math.min(harvestTotal, targetEnt.amount);
+                            targetEnt.amount -= canTake;
+                            
+                            if (targetEnt.type === 'corpse') {
+                                GameEngine.addLog(`[戰鬥資訊] 採集屍體資源：${v.configName || '工人'} 正在採集 ${targetEnt.name || '屍體'} (獲得 ${targetEnt.resType} x${canTake})`, 'GATHER');
+                                v.cargo += canTake;
+                                v.cargoType = targetEnt.resType || 'food';
+                                if (v.cargo >= 5 || targetEnt.amount <= 0) {
+                                    GameEngine.addLog(`[採集完成] ${v.configName || '工人'} 已採得充足 ${v.cargoType.toUpperCase()}，正在返回基地`, 'TASK');
+                                    v.state = 'MOVING_TO_BASE';
+                                }
+                            } else {
+                                if (targetEnt.type === 'farmland') this.state.resources.food += canTake;
+                                else if (targetEnt.type === 'tree_plantation') this.state.resources.wood += canTake;
+                                v.cargo = 0;
+                                v.cargoType = null;
+                            }
+                            
+                            v.gatherTimer = 0;
+                            if (targetEnt.amount <= 0) {
+                                this.addLog(`${targetEnt.name || '資源點'} 已採集完畢。`, 'SYSTEM');
+                                if (targetEnt.type === 'corpse') {
+                                    console.log(`[GatherLog] Corpse ${targetEnt.id} exhausted, removing.`);
+                                    this.state.mapEntities = this.state.mapEntities.filter(e => e !== targetEnt);
+                                    GameEngine.updatePathfindingGrid();
+                                    this.state.renderVersion++; // [核心修復] 通知渲染層實體已移除，刷新地圖
+                                } else {
+                                    targetEnt.isUnderConstruction = true;
+                                    targetEnt.buildProgress = 0;
+                                    targetEnt.name = "施工中 (" + (targetEnt.type === 'farmland' ? "農田" : "樹木田") + ")";
+                                    GameEngine.updatePathfindingGrid();
+                                }
+                                v.targetId = null;
+                                v.gatherPoint = null;
+                                this.restoreVillagerTask(v);
+                            }
+                        } else {
+                            // 目標已消失或類型不符
+                            console.log(`[GatherLog] Target ${v.targetId} not found in mapEntities, resetting task.`);
+                            v.state = 'IDLE';
+                            v.targetId = null;
+                        }
                     }
                 }
                 break;
@@ -1766,10 +1793,12 @@ export class GameEngine {
                         v.nextStateAfterDeposit = null;
                         if (v.nextTypeAfterDeposit) { v.type = v.nextTypeAfterDeposit; v.nextTypeAfterDeposit = null; }
                         if (v.nextTargetAfterDeposit) { v.targetId = v.nextTargetAfterDeposit; v.nextTargetAfterDeposit = null; }
+                        GameEngine.addLog(`[存入完成] ${v.configName || '工人'} 任務恢復，前往資源點`, 'TASK');
                     } else if (v.isRecalled) {
                         v.state = 'IDLE'; v.isRecalled = false; v.idleTarget = null;
                     } else {
                         v.state = 'MOVING_TO_RESOURCE';
+                        GameEngine.addLog(`[存入完成] ${v.configName || '工人'} 已清空背包，繼續採集`, 'TASK');
                     }
                 } else {
                     this.moveDetailed(v, v.depositPoint.x, v.depositPoint.y, moveSpeed, dt, ignoreEnts);
@@ -2481,7 +2510,7 @@ export class GameEngine {
         // --- 核心優化：優先搜尋建築實體資源 (農田/樹木田) ---
         const entities = this.state.mapEntities.filter(e =>
             !e.isUnderConstruction && e.amount > 0 &&
-            ((targetType === 3 && e.type === 'farmland') || (targetType === 1 && e.type === 'tree_plantation'))
+            ((targetType === 3 && (e.type === 'farmland' || e.type === 'corpse')) || (targetType === 1 && e.type === 'tree_plantation'))
         );
         if (entities.length > 0) {
             entities.sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y));
@@ -2643,10 +2672,12 @@ export class GameEngine {
     }
 
     static depositResource(type, amount) {
+        if (amount <= 0) return; // [防護] 防止 0 量存款導致的日誌洪流
+        if (typeof type !== 'string') type = 'food'; // [極端防護] 避免 null 或 undefined 造成的 toLowerCase 崩潰
         const resKey = type.toLowerCase();
         if (this.state.resources.hasOwnProperty(resKey)) this.state.resources[resKey] += amount;
-        else if (type === 'FOOD') this.state.resources.food += amount;
-        this.addLog(`存入了 ${amount} 單位的 ${type}。`);
+        else if (resKey === 'food') this.state.resources.food += amount;
+        this.addLog(`[資源繳庫] 工人存入了 ${amount} 單位的 ${type.toUpperCase()}`, 'TASK');
     }
 
     static setCommand(event, commandType) {
