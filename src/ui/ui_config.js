@@ -149,10 +149,10 @@ export const UI_CONFIG = {
             outlineWidth: 3
         }
     },
-    // -- 屍體渲染配置 (CorpseRenderer) ---------------------------
+    // -- 屍體外觀渲染配置 (CorpseRenderer) ---------------------------
     CorpseRenderer: {
         sheep: {
-            bodyColor: 0xffffff,
+            bodyColor: "#e39002ff",
             bodyWidth: 50,         // 增加寬度 (原 32)
             bodyHeight: 30,        // 增加高度 (原 18)
             offsetY: 0,
