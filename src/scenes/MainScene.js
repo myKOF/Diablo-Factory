@@ -2300,8 +2300,9 @@ export class MainScene extends Phaser.Scene {
                 const cfg = GameEngine.getEntityConfig(e.type);
                 let uw = 1, uh = 1;
                 if (e.type === 'corpse') {
-                    // [核心修正] 屍體點擊範圍優化
-                    uw = 0.8; uh = 0.8;
+                    // [核心修復] 屍體左鍵點擊範圍應與 UI_CONFIG 及右鍵判定同步
+                    const cScale = (UI_CONFIG.ResourceSelection && UI_CONFIG.ResourceSelection.corpseSelectionScale) || 0.8;
+                    uw = cScale; uh = cScale;
                 } else if (cfg && cfg.size) {
                     const match = cfg.size.toString().match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
                     if (match) { uw = parseFloat(match[1]); uh = parseFloat(match[2]); }

@@ -764,14 +764,18 @@ export class CharacterRenderer {
         this.setCtxStyle(ctx, 0x000000, 1);
         ctx.fillRect(headX + 2 * (unitData.facing || 1), y - 6 + bob, 2, 2);
 
-        // 5. 選取圈 (使用橙色樣式)
+        // 5. 選取圈 (依據狀態切換橙色/紅色樣式)
         const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
         const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
         const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
+        const isTargetedByPlayerArmy = window.GAME_STATE &&
+            window.GAME_STATE.units.villagers.some(u => u.targetId === unitData.id);
 
-        if (isSelected || isHovered) {
+        if (isSelected || isHovered || isTargetedByPlayerArmy) {
             const neutralCfg = UI_CONFIG.NeutralSelection || { selectionRingColor: 0xff9100 };
-            this.drawSelectionRing(ctx, x, y, time, neutralCfg.selectionRingColor);
+            // 如果正被我方集火，則套用紅框；否則維持中立橘框
+            const circleColor = isTargetedByPlayerArmy ? 0xf44336 : neutralCfg.selectionRingColor;
+            this.drawSelectionRing(ctx, x, y, time, circleColor);
         }
     }
 }

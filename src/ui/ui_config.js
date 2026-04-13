@@ -142,7 +142,7 @@ export const UI_CONFIG = {
             color: "#81d4fa",
             offsetX: 0,
             offsetY: 0,
-            corpseOffsetY: 25,     // 屍體資源量顯示偏移
+            corpseOffsetY: 15,     // 屍體資源量顯示偏移
             align: 'center',
             outlineColor: "#000000",
             outlineAlpha: 0.8,
@@ -153,22 +153,22 @@ export const UI_CONFIG = {
     CorpseRenderer: {
         sheep: {
             bodyColor: 0xffffff,
-            bodyWidth: 42,         // 增加寬度 (原 32)
-            bodyHeight: 24,        // 增加高度 (原 18)
+            bodyWidth: 50,         // 增加寬度 (原 32)
+            bodyHeight: 30,        // 增加高度 (原 18)
             offsetY: 0,
             rotation: 0.25
         },
         wolf: {
             bodyColor: 0x546e7a,
-            bodyWidth: 36,
-            bodyHeight: 12,
+            bodyWidth: 50,
+            bodyHeight: 20,
             offsetY: 8,
             rotation: 0.25
         },
         bear: {
             bodyColor: 0x4e342e,
-            bodyWidth: 45,
-            bodyHeight: 24,
+            bodyWidth: 60,
+            bodyHeight: 30,
             offsetY: 8,
             rotation: 0.25
         },
@@ -433,7 +433,7 @@ export const UI_CONFIG = {
         glowKnockOut: true,            // [重要] 是否隱藏本體圖形 (只留外框)
         glowQuality: 6,               // 發光品質
         selectionScale: 1,           // 僅縮放發光外框的大小，不改變物體圖形
-        corpseSelectionScale: 2,   // [新增] 屍體特有的選取框比例 (寬高係數)
+        corpseSelectionScale: 2.5,   // [新增] 屍體特有的選取框比例 (寬高係數)
         depth: 15                      // 顯示深度
     },
     // -- 建築指令選單 ---------------------------

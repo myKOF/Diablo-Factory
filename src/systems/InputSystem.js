@@ -303,9 +303,18 @@ export class InputSystem {
             const TS = GameEngine.TILE_SIZE;
             GameEngine.state.mapEntities.forEach(e => {
                 const fp = GameEngine.getFootprint(e.type);
-                const w = fp.uw * TS, h = fp.uh * TS;
-                if (pointer.worldX >= e.x - w / 2 - 10 && pointer.worldX <= e.x + w / 2 + 10 &&
-                    pointer.worldY >= e.y - h / 2 - 10 && pointer.worldY <= e.y + h / 2 + 10) {
+                let w = fp.uw * TS, h = fp.uh * TS;
+                let padding = 10;
+
+                if (e.type === 'corpse') {
+                    const cScale = (UI_CONFIG.ResourceSelection && UI_CONFIG.ResourceSelection.corpseSelectionScale) || 0.8;
+                    w = cScale * TS;
+                    h = cScale * TS;
+                    padding = 5; 
+                }
+
+                if (pointer.worldX >= e.x - w / 2 - padding && pointer.worldX <= e.x + w / 2 + padding &&
+                    pointer.worldY >= e.y - h / 2 - padding && pointer.worldY <= e.y + h / 2 + padding) {
                     clickedEntity = e;
                 }
             });

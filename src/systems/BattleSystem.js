@@ -89,7 +89,7 @@ export class BattleSystem {
             unit.chaseFrame++;
             const unitCamp = unit.camp || (unit.config && unit.config.camp) || 'player';
             const targetCamp = target.camp || (target.config && target.config.camp) || 'player';
-            const isEnemy = unitCamp !== targetCamp && targetCamp !== 'neutral';
+            const isEnemy = unitCamp !== targetCamp;
 
             // [優化] 跟隨距離：友軍跟隨保持在大約 80px (1.5 - 2 格) 的舒適距離，不用貼死
             const stopRange = isEnemy ? range : Math.max(range, 80);
