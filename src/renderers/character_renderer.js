@@ -38,14 +38,17 @@ export class CharacterRenderer {
 
         const isTargetedByPlayerArmy = window.GAME_STATE &&
             window.GAME_STATE.units.villagers.some(u => u.targetId === unitData.id);
+        const isRally = !!unitData.isRallyTarget;
 
-        if (isSelected || isHovered || isTargetedByPlayerArmy) {
-            const circleColor = (isEnemy || isTargetedByPlayerArmy) ? 0xf44336 : 0x4caf50;
+        if (isSelected || isHovered || isTargetedByPlayerArmy || isRally) {
+            const circleColor = (isEnemy && isTargetedByPlayerArmy) ? 0xf44336 : 0x4caf50;
             this.drawSelectionRing(ctx, x, y, time, circleColor);
         }
 
         const isCombatMove = state === 'MOVE' || state === 'CHASE';
-        const isMoving = state.includes('MOVING') || isCombatMove; // 精確判斷是否正在移動
+        // [核心修正] 僅針對「跟隨/追擊」且「無目標座標」的情況停止動畫，避免影響一般任務工人
+        const isChaseReached = isCombatMove && !unitData.idleTarget && !unitData.pathTarget && !unitData.fullPath;
+        const isMoving = (state.includes('MOVING') || isCombatMove) && !isChaseReached; 
         const isWandering = !!unitData.idleTarget && !isCombatMove; // 判斷是否正在閒晃 (排除戰鬥衝刺)
 
         // 計算動畫頻率與振幅
@@ -134,7 +137,7 @@ export class CharacterRenderer {
         try {
             const model = (unitData.sourceModel || 'villager').toLowerCase();
             const corpseCfg = UI_CONFIG.CorpseRenderer || {};
-            
+
             // [極度防禦] 確保 cfg 絕對不為 null/undefined，並帶有合理的預設值
             let cfg = corpseCfg[model] || corpseCfg.default;
             if (!cfg) {
@@ -144,56 +147,56 @@ export class CharacterRenderer {
             // 1. 繪製底部陰影
             this.drawShadow(ctx, x, y);
 
-        // 2. 繪製地面積血 (修正：Phaser 使用 fillCircle)
-        this.setCtxStyle(ctx, 0xb71c1c, 0.4); 
-        if (ctx.fillCircle) {
-            ctx.fillCircle(x - 10, y + 6, 5);
-            ctx.fillCircle(x + 6, y + 2, 3);
-        } else if (ctx.beginPath) {
-            ctx.beginPath();
-            ctx.arc(x - 10, y + 6, 5, 0, Math.PI * 2);
-            ctx.arc(x + 6, y + 2, 3, 0, Math.PI * 2);
-            ctx.fill();
-        }
-
-        // 3. 繪製屍體主體
-        let bodyColor = cfg.bodyColor; 
-        let bodyWidth = cfg.bodyWidth;
-        let bodyHeight = cfg.bodyHeight;
-
-        // Phaser Graphics 不支援 ctx.save/translate 作為座標變換，需手動計算或使用其內部機制
-        // 這裡我們偵測是否有 save 方法且非 Phaser Graphics (Phaser Graphics 的 save 是存樣式)
-        const isPhaser = !!ctx.batchFillRect || !!ctx.fillEllipse;
-
-        if (!isPhaser && ctx.save) {
-            ctx.save();
-            ctx.translate(x, y + cfg.offsetY);
-            ctx.rotate(cfg.rotation); 
-            this.setCtxStyle(ctx, bodyColor, 1.0);
-            if (ctx.beginPath) {
+            // 2. 繪製地面積血 (修正：Phaser 使用 fillCircle)
+            this.setCtxStyle(ctx, 0xb71c1c, 0.4);
+            if (ctx.fillCircle) {
+                ctx.fillCircle(x - 10, y + 6, 5);
+                ctx.fillCircle(x + 6, y + 2, 3);
+            } else if (ctx.beginPath) {
                 ctx.beginPath();
-                if (ctx.ellipse) ctx.ellipse(0, 0, bodyWidth / 2, bodyHeight / 2, 0, 0, Math.PI * 2);
-                else ctx.rect(-bodyWidth/2, -bodyHeight/2, bodyWidth, bodyHeight);
+                ctx.arc(x - 10, y + 6, 5, 0, Math.PI * 2);
+                ctx.arc(x + 6, y + 2, 3, 0, Math.PI * 2);
                 ctx.fill();
             }
-            ctx.restore();
-        } else {
-            // Phaser Graphics 渲染路徑
-            this.setCtxStyle(ctx, bodyColor, 1.0);
-            const py = y + cfg.offsetY;
-            if (ctx.fillEllipse) {
-                ctx.fillEllipse(x, py, bodyWidth, bodyHeight);
-                // 輪廓線
-                this.setCtxStyle(ctx, 0x000000, 0.3);
-                ctx.strokeEllipse(x, py, bodyWidth, bodyHeight);
+
+            // 3. 繪製屍體主體
+            let bodyColor = cfg.bodyColor;
+            let bodyWidth = cfg.bodyWidth;
+            let bodyHeight = cfg.bodyHeight;
+
+            // Phaser Graphics 不支援 ctx.save/translate 作為座標變換，需手動計算或使用其內部機制
+            // 這裡我們偵測是否有 save 方法且非 Phaser Graphics (Phaser Graphics 的 save 是存樣式)
+            const isPhaser = !!ctx.batchFillRect || !!ctx.fillEllipse;
+
+            if (!isPhaser && ctx.save) {
+                ctx.save();
+                ctx.translate(x, y + cfg.offsetY);
+                ctx.rotate(cfg.rotation);
+                this.setCtxStyle(ctx, bodyColor, 1.0);
+                if (ctx.beginPath) {
+                    ctx.beginPath();
+                    if (ctx.ellipse) ctx.ellipse(0, 0, bodyWidth / 2, bodyHeight / 2, 0, 0, Math.PI * 2);
+                    else ctx.rect(-bodyWidth / 2, -bodyHeight / 2, bodyWidth, bodyHeight);
+                    ctx.fill();
+                }
+                ctx.restore();
             } else {
-                ctx.fillRect(x - bodyWidth/2, py - bodyHeight/2, bodyWidth, bodyHeight);
+                // Phaser Graphics 渲染路徑
+                this.setCtxStyle(ctx, bodyColor, 1.0);
+                const py = y + cfg.offsetY;
+                if (ctx.fillEllipse) {
+                    ctx.fillEllipse(x, py, bodyWidth, bodyHeight);
+                    // 輪廓線
+                    this.setCtxStyle(ctx, 0x000000, 0.3);
+                    ctx.strokeEllipse(x, py, bodyWidth, bodyHeight);
+                } else {
+                    ctx.fillRect(x - bodyWidth / 2, py - bodyHeight / 2, bodyWidth, bodyHeight);
+                }
+
+                // 加上一點血跡裝飾
+                this.setCtxStyle(ctx, 0xd32f2f, 0.6);
+                if (ctx.fillCircle) ctx.fillCircle(x - 5, py - 2, 4);
             }
-            
-            // 加上一點血跡裝飾
-            this.setCtxStyle(ctx, 0xd32f2f, 0.6);
-            if (ctx.fillCircle) ctx.fillCircle(x - 5, py - 2, 4);
-        }
         } catch (e) {
             if (window.GameEngine) window.GameEngine.addLog(`[渲染錯誤] 屍體繪製異常: ${e.message}`, 'SYSTEM');
         }
@@ -765,10 +768,10 @@ export class CharacterRenderer {
         const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
         const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
         const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
-        
+
         if (isSelected || isHovered) {
-             const neutralCfg = UI_CONFIG.NeutralSelection || { selectionRingColor: 0xff9100 };
-             this.drawSelectionRing(ctx, x, y, time, neutralCfg.selectionRingColor);
+            const neutralCfg = UI_CONFIG.NeutralSelection || { selectionRingColor: 0xff9100 };
+            this.drawSelectionRing(ctx, x, y, time, neutralCfg.selectionRingColor);
         }
     }
 }

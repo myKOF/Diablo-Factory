@@ -201,10 +201,9 @@ export class InputSystem {
         let clickedTarget = null;
         let targetType = 'GROUND';
 
-        // 1. 檢查是否點擊到敵方單位 (優先級最高)
+        // 1. 檢查是否點擊到單位 (敵友皆可，優先級最高)
         GameEngine.state.units.villagers.forEach(v => {
-            const camp = (v.config && v.config.camp) || v.camp || 'player';
-            if ((camp === 'enemy' || camp === 'neutral') && v.hp > 0) {
+            if (v.hp > 0) {
                 const d = Math.hypot(v.x - pos.x, v.y - pos.y);
                 if (d < 40) { // 稍微放寬 NPC 集結點點擊範圍
                     clickedTarget = v;
@@ -235,11 +234,22 @@ export class InputSystem {
         if (!clickedTarget) {
             GameEngine.state.mapEntities.forEach(e => {
                 const fp = GameEngine.getFootprint(e.type);
-                const w = fp.uw * TS, h = fp.uh * TS;
-                if (pos.x >= e.x - w / 2 - 5 && pos.x <= e.x + w / 2 + 5 &&
-                    pos.y >= e.y - h / 2 - 5 && pos.y <= e.y + h / 2 + 5) {
+                // [需求修正] 屍體點擊範圍動態讀取 UI_CONFIG.corpseSelectionScale 並擴大
+                let w = (fp.uw * TS);
+                let h = (fp.uh * TS);
+                let padding = 10;
+
+                if (e.type === 'corpse') {
+                    const cScale = (UI_CONFIG.ResourceSelection && UI_CONFIG.ResourceSelection.corpseSelectionScale) || 0.8;
+                    w = cScale * TS;
+                    h = cScale * TS;
+                    padding = 5; // 已經根據比例擴大了，墊片可以小一點
+                }
+
+                if (pos.x >= e.x - w / 2 - padding && pos.x <= e.x + w / 2 + padding &&
+                    pos.y >= e.y - h / 2 - padding && pos.y <= e.y + h / 2 + padding) {
                     clickedTarget = e;
-                    targetType = 'BUILDING';
+                    targetType = (e.type === 'corpse') ? 'RESOURCE' : 'BUILDING';
                 }
             });
         }

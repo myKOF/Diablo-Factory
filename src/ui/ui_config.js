@@ -433,6 +433,7 @@ export const UI_CONFIG = {
         glowKnockOut: true,            // [重要] 是否隱藏本體圖形 (只留外框)
         glowQuality: 6,               // 發光品質
         selectionScale: 1,           // 僅縮放發光外框的大小，不改變物體圖形
+        corpseSelectionScale: 2,   // [新增] 屍體特有的選取框比例 (寬高係數)
         depth: 15                      // 顯示深度
     },
     // -- 建築指令選單 ---------------------------

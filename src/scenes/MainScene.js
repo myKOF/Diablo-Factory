@@ -342,8 +342,8 @@ export class MainScene extends Phaser.Scene {
             const isResource = !!(clickedTarget.gx !== undefined && clickedTarget.gy !== undefined) ||
                 (clickedTarget.resourceType) ||
                 (clickedTarget.type === 'farmland' || clickedTarget.type === 'tree_plantation');
-            const isEnemy = (clickedTarget.config && (clickedTarget.config.camp === 'enemy' || clickedTarget.config.camp === 'neutral')) || 
-                           clickedTarget.camp === 'enemy' || clickedTarget.camp === 'neutral' || clickedTarget.isEnemy;
+            const isEnemy = (clickedTarget.config && (clickedTarget.config.camp === 'enemy' || clickedTarget.config.camp === 'neutral')) ||
+                clickedTarget.camp === 'enemy' || clickedTarget.camp === 'neutral' || clickedTarget.isEnemy;
 
 
             // [核心修復] 不再強制強制切換為目標中心座標。使用帶有偏移的點擊座標 (wx, wy) 作為基準，
@@ -877,6 +877,15 @@ export class MainScene extends Phaser.Scene {
             });
         }
 
+        // [核心需求] 支援屍體選取框 (橘色，由玩家點擊觸發)
+        const selectedResId = GameEngine.state.selectedResourceId;
+        if (selectedResId && selectedResId.startsWith('corpse_')) {
+            const ent = GameEngine.state.mapEntities.find(e => e.id === selectedResId);
+            if (ent) {
+                this.drawSingleSelectionBox(g, ent, 0xff9800);
+            }
+        }
+
         // 2. [資源與目標] 物件描邊效果 (使用 FX Sprite 管理)
         this.updateResourceFX();
     }
@@ -901,7 +910,7 @@ export class MainScene extends Phaser.Scene {
 
         if (!this._villagerMap) this._villagerMap = new Map();
         if (!this._activeTargets) this._activeTargets = new Map();
-        
+
         const activeTargets = this._activeTargets;
         activeTargets.clear();
 
@@ -924,18 +933,26 @@ export class MainScene extends Phaser.Scene {
         // 1. 手動選中的資源 (檢查可見性)
         const selectedResId = state.selectedResourceId;
         if (selectedResId) {
-            const parts = selectedResId.split('_');
-            const gx = parseInt(parts[0]), gy = parseInt(parts[1]);
-            const res = GameEngine.state.mapData.getResource(gx, gy);
-            if (res && res.type !== 0) {
-                const TS = GameEngine.TILE_SIZE;
-                const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
-                // 僅在畫面內時處理 FX，減少 Shader 渲染量
-                if (worldView.contains(rx, ry)) {
-                    activeTargets.set(selectedResId + "_sel", { entity: { ...res, gx, gy }, fxType: 'sel', config: cfgRes });
+            // [新增] 支援屍體 (mapEntities) 的選取高亮
+            if (selectedResId.startsWith('corpse_')) {
+                const corpse = buildingMap.get(selectedResId);
+                if (corpse && worldView.contains(corpse.x, corpse.y)) {
+                    // 使用 cfgRes 渲染通用的選取效果
+                    activeTargets.set(selectedResId + "_sel", { entity: corpse, fxType: 'sel', config: cfgRes });
                 }
-            } else {
-                state.selectedResourceId = null;
+            } else if (selectedResId.includes('_')) {
+                const parts = selectedResId.split('_');
+                const gx = parseInt(parts[0]), gy = parseInt(parts[1]);
+                const res = GameEngine.state.mapData.getResource(gx, gy);
+                if (res && res.type !== 0) {
+                    const TS = GameEngine.TILE_SIZE;
+                    const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
+                    if (worldView.contains(rx, ry)) {
+                        activeTargets.set(selectedResId + "_sel", { entity: { ...res, gx, gy }, fxType: 'sel', config: cfgRes });
+                    }
+                } else {
+                    state.selectedResourceId = null;
+                }
             }
         }
 
@@ -980,20 +997,28 @@ export class MainScene extends Phaser.Scene {
                 let isRes = false;
 
                 if (rp.targetType === 'RESOURCE') {
-                    const parts = rp.targetId.split('_'); // 'res_gx_gy'
-                    if (parts.length >= 3) {
-                        const gx = parseInt(parts[1]), gy = parseInt(parts[2]);
-                        const res = GameEngine.state.mapData.getResource(gx, gy);
-                        if (res && res.type !== 0) {
-                            const TS = GameEngine.TILE_SIZE;
-                            const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
-                            if (worldView.contains(rx, ry)) {
-                                target = { ...res, gx, gy, x: rx, y: ry };
-                                isRes = true;
+                    if (rp.targetId.startsWith('res_')) {
+                        const parts = rp.targetId.split('_'); // 'res_gx_gy'
+                        if (parts.length >= 3) {
+                            const gx = parseInt(parts[1]), gy = parseInt(parts[2]);
+                            const res = GameEngine.state.mapData.getResource(gx, gy);
+                            if (res && res.type !== 0) {
+                                const TS = GameEngine.TILE_SIZE;
+                                const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
+                                if (worldView.contains(rx, ry)) {
+                                    target = { ...res, gx, gy, x: rx, y: ry };
+                                    isRes = true;
+                                }
                             }
                         }
+                    } else if (rp.targetId.startsWith('corpse_')) {
+                        const corpse = buildingMap.get(rp.targetId);
+                        if (corpse && worldView.contains(corpse.x, corpse.y)) {
+                            target = corpse;
+                            isRes = true;
+                        }
                     }
-                } else if (rp.targetType === 'UNIT') {
+                } else if (rp.targetType === 'UNIT' || rp.targetType === 'BUILDING') {
                     target = villagerMap.get(rp.targetId) || buildingMap.get(rp.targetId);
                 }
 
@@ -1006,6 +1031,11 @@ export class MainScene extends Phaser.Scene {
                             fxType: 'target',
                             config: isRes ? cfgRes : cfgBld
                         });
+
+                        // [新增] 如果集結目標是屍體，額外畫出橘色方框 (解決圖 1 遺漏問題)
+                        if (rp.targetId && rp.targetId.startsWith('corpse_')) {
+                            this.drawSingleSelectionBox(this.selectionGraphics, target, 0xff9800);
+                        }
                     }
                 }
             }
@@ -1107,10 +1137,14 @@ export class MainScene extends Phaser.Scene {
     drawSingleSelectionBox(g, ent, color) {
         const TS = GameEngine.TILE_SIZE;
         const cfg = GameEngine.getEntityConfig(ent.type);
-        if (!cfg) return;
+        if (!cfg && ent.type !== 'corpse') return; // [修正] 支援屍體等無配置實體
 
         let uw = 1, uh = 1;
-        if (cfg.size) {
+        if (ent.type === 'corpse') {
+            const rCfg = UI_CONFIG.ResourceSelection || {};
+            const cScale = rCfg.corpseSelectionScale || 0.8;
+            uw = cScale; uh = cScale; 
+        } else if (cfg.size) {
             const cleanSize = cfg.size.toString().replace(/['"]/g, '');
             const match = cleanSize.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
             if (match) { uw = parseFloat(match[1]); uh = parseFloat(match[2]); }
@@ -1120,9 +1154,18 @@ export class MainScene extends Phaser.Scene {
         const h = uh * TS;
 
         g.lineStyle(4, color, 1);
-        g.strokeRect(ent.x - w / 2 - 2, ent.y - h / 2 - 2, w + 4, h + 4);
-        g.lineStyle(1.5, 0xffffff, 1);
-        g.strokeRect(ent.x - w / 2 - 0, ent.y - h / 2 - 0, w, h);
+        if (ent.type === 'corpse') {
+            // [需求修正] 屍體改用圓形選取框，與 NPC 保持一致
+            const radius = Math.max(w, h) / 2 + 2;
+            g.strokeCircle(ent.x, ent.y, radius);
+            // 內圈裝飾
+            g.lineStyle(2, 0xffffff, 0.4);
+            g.strokeCircle(ent.x, ent.y, radius - 4);
+        } else {
+            g.strokeRect(ent.x - w / 2 - 2, ent.y - h / 2 - 2, w + 4, h + 4);
+            g.lineStyle(1.5, 0xffffff, 1);
+            g.strokeRect(ent.x - w / 2 - 0, ent.y - h / 2 - 0, w, h);
+        }
     }
 
     /**
@@ -1576,12 +1619,12 @@ export class MainScene extends Phaser.Scene {
             amtTxt.setVisible(true);
             const aox = resCfg.amount.offsetX || 0;
             let aoy = resCfg.amount.offsetY || 0;
-            
+
             // [核心修復] 針對屍體類型資源，套用專屬偏移以避免遮擋模型
             if (ent.isCorpse && resCfg.amount.corpseOffsetY !== undefined) {
                 aoy = resCfg.amount.corpseOffsetY;
             }
-            
+
             amtTxt.setPosition(visualX + aox, visualY + aoy);
             if (cache.amount !== ent.amount) {
                 amtTxt.setText(amtStr);
@@ -2256,7 +2299,10 @@ export class MainScene extends Phaser.Scene {
             for (const e of sortedBuildings) {
                 const cfg = GameEngine.getEntityConfig(e.type);
                 let uw = 1, uh = 1;
-                if (cfg && cfg.size) {
+                if (e.type === 'corpse') {
+                    // [核心修正] 屍體點擊範圍優化
+                    uw = 0.8; uh = 0.8;
+                } else if (cfg && cfg.size) {
                     const match = cfg.size.toString().match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
                     if (match) { uw = parseFloat(match[1]); uh = parseFloat(match[2]); }
                 }
@@ -2268,11 +2314,16 @@ export class MainScene extends Phaser.Scene {
             }
 
             if (clickedB && !isShift) {
-                // 基礎選取標記 (進階選取與雙擊偵測已移至 UIManager.handleWorldClick 統一管理)
-                // 這裡僅保留 Log 輸出與標籤顯示邏輯
-                if (window.UIManager) window.UIManager.showContextMenu(clickedB);
-
-                GameEngine.addLog(`[選取] 建築：${clickedB.name || clickedB.type}`);
+                if (clickedB.type === 'corpse') {
+                    // [核心修正] 屍體選取連動至資源高亮系統
+                    GameEngine.state.selectedResourceId = clickedB.id;
+                    GameEngine.state.selectedUnitIds = [];
+                    GameEngine.state.selectedBuildingId = null;
+                    GameEngine.state.selectedBuildingIds = [];
+                } else if (window.UIManager) {
+                    window.UIManager.showContextMenu(clickedB);
+                }
+                GameEngine.addLog(`[選取] ${clickedB.type === 'corpse' ? '資源' : '建築'}：${clickedB.name || clickedB.type}`);
             } else if (!isShift) {
                 GameEngine.state.selectedUnitIds = [];
                 GameEngine.state.selectedResourceId = null;

@@ -802,7 +802,8 @@ export class GameEngine {
             // 1. 尋找集結點鎖定的目標旗標實體
             let targetEnt = null;
             if (rp.targetId) {
-                if (rp.targetType === 'RESOURCE') {
+                // [核心修正] 區分 網格型資源 (res_) 與 實體型資源 (corpse_ / buildings)
+                if (rp.targetType === 'RESOURCE' && rp.targetId.startsWith('res_')) {
                     const parts = rp.targetId.split('_');
                     const gx = parseInt(parts[1]), gy = parseInt(parts[2]);
                     const res = this.state.mapData.getResource(gx, gy);
@@ -816,27 +817,33 @@ export class GameEngine {
                         };
                     }
                 } else {
+                    // 從單位或地圖實體(包含屍體)中尋找
                     targetEnt = this.state.units.villagers.find(u => u.id === rp.targetId) ||
-                        this.state.mapEntities.find(e => {
-                            const eid = e.id || `${e.type}_${e.x}_${e.y}`;
-                            return eid === rp.targetId;
-                        });
+                        this.state.mapEntities.find(e => (e.id || `${e.type}_${e.x}_${e.y}`) === rp.targetId);
                 }
             }
 
             // 2. 根據目標實體類型決定初始行為
             if (targetEnt && isVillager) {
-                if (targetEnt.isUnderConstruction) {
+                if (targetEnt.hp !== undefined) {
+                    // [核心修正] 如果集結點鎖定的是單位 (無論敵友)，設為追隨/追擊模式
+                    v.state = 'CHASE';
+                    v.targetId = targetEnt.id;
+                    v.isPlayerLocked = true;
+                    const camp = targetEnt.camp || (targetEnt.config && targetEnt.config.camp) || 'player';
+                    GameEngine.addLog(`[集結] 已鎖定目標 ${targetEnt.configName || '單位'}(${camp}) 進行追隨。`);
+                } else if (targetEnt.isUnderConstruction) {
                     v.state = 'MOVING_TO_CONSTRUCTION';
                     v.constructionTarget = targetEnt;
                     v.isPlayerLocked = true;
                     GameEngine.addLog(`[集結] 已自動指派至建造任務。`);
-                } else if (targetEnt.type === 'RESOURCE') {
+                } else if (targetEnt.type === 'RESOURCE' || targetEnt.type === 'corpse') {
+                    // [核心修正] 支援屍體集結連動
                     v.state = 'MOVING_TO_RESOURCE';
                     v.targetId = targetEnt;
-                    v.type = targetEnt.resourceType;
+                    v.type = targetEnt.resourceType || targetEnt.resType; // 核心支援不同欄位名
                     v.isPlayerLocked = true;
-                    GameEngine.addLog(`[集結] 已自動指派至採集任務。`);
+                    GameEngine.addLog(`[集結] 已自動指派至採集 ${targetEnt.name || '資源'}。`);
                 } else if (['farmland', 'tree_plantation'].includes(targetEnt.type)) {
                     v.state = 'MOVING_TO_RESOURCE';
                     v.targetId = targetEnt;
@@ -1679,14 +1686,16 @@ export class GameEngine {
                         if (targetEnt) {
                             const canTake = Math.min(harvestTotal, targetEnt.amount);
                             targetEnt.amount -= canTake;
+                            this.state.renderVersion++; // [核心修復] 即時更新地圖上的資源數值顯示 (HP/數量標籤)
                             
                             if (targetEnt.type === 'corpse') {
                                 GameEngine.addLog(`[戰鬥資訊] 採集屍體資源：${v.configName || '工人'} 正在採集 ${targetEnt.name || '屍體'} (獲得 ${targetEnt.resType} x${canTake})`, 'GATHER');
                                 v.cargo += canTake;
-                                v.cargoType = targetEnt.resType || 'food';
+                                v.cargoType = targetEnt.resType || 'FOOD';
                                 if (v.cargo >= 5 || targetEnt.amount <= 0) {
                                     GameEngine.addLog(`[採集完成] ${v.configName || '工人'} 已採得充足 ${v.cargoType.toUpperCase()}，正在返回基地`, 'TASK');
                                     v.state = 'MOVING_TO_BASE';
+                                    if (targetEnt.amount <= 0) v._lastTaskWasCorpse = true; // [核心需求] 標記採集完畢
                                 }
                             } else {
                                 if (targetEnt.type === 'farmland') this.state.resources.food += canTake;
@@ -1703,6 +1712,7 @@ export class GameEngine {
                                     this.state.mapEntities = this.state.mapEntities.filter(e => e !== targetEnt);
                                     GameEngine.updatePathfindingGrid();
                                     this.state.renderVersion++; // [核心修復] 通知渲染層實體已移除，刷新地圖
+                                    v._lastTaskWasCorpse = true; // 確保標記
                                 } else {
                                     targetEnt.isUnderConstruction = true;
                                     targetEnt.buildProgress = 0;
@@ -1711,7 +1721,13 @@ export class GameEngine {
                                 }
                                 v.targetId = null;
                                 v.gatherPoint = null;
-                                this.restoreVillagerTask(v);
+                                
+                                // [核心需求] 屍體採完不自動尋找新目標，除非本來就在 MOVING_TO_BASE 流程中
+                                if (targetEnt.type !== 'corpse') {
+                                    this.restoreVillagerTask(v);
+                                } else if (v.state !== 'MOVING_TO_BASE') {
+                                    v.state = 'IDLE';
+                                }
                             }
                         } else {
                             // 目標已消失或類型不符
@@ -1794,8 +1810,14 @@ export class GameEngine {
                         if (v.nextTypeAfterDeposit) { v.type = v.nextTypeAfterDeposit; v.nextTypeAfterDeposit = null; }
                         if (v.nextTargetAfterDeposit) { v.targetId = v.nextTargetAfterDeposit; v.nextTargetAfterDeposit = null; }
                         GameEngine.addLog(`[存入完成] ${v.configName || '工人'} 任務恢復，前往資源點`, 'TASK');
-                    } else if (v.isRecalled) {
-                        v.state = 'IDLE'; v.isRecalled = false; v.idleTarget = null;
+                    } else if (v.isRecalled || v._lastTaskWasCorpse) {
+                        // [核心修復] 完成屍體任務後，強制進入鎖定閒置狀態，防止自動採集系統將其指派去採果樹
+                        v.state = 'IDLE'; 
+                        v.isRecalled = false; 
+                        v.idleTarget = null;
+                        v.isPlayerLocked = v._lastTaskWasCorpse; // 如果是屍體任務結束，保持鎖定以待命
+                        v._lastTaskWasCorpse = false; 
+                        if (v.isPlayerLocked) GameEngine.addLog(`[存入完成] ${v.configName || '工人'} 已存完屍體資源，目前原地待命`, 'TASK');
                     } else {
                         v.state = 'MOVING_TO_RESOURCE';
                         GameEngine.addLog(`[存入完成] ${v.configName || '工人'} 已清空背包，繼續採集`, 'TASK');
@@ -2025,8 +2047,8 @@ export class GameEngine {
         const isSelected = (this.state.selectedUnitIds || []).includes(v.id);
 
         // 手動指令連動保護：若已有手動任務且正在執行中，不要進入自動分配邏輯重置為 IDLE
-        // [呼叫優化] 選中者無視此保護，強制檢查是否有建設任務需求
-        if (!isSelected && v.isPlayerLocked && (v.state.startsWith('MOVING_TO') || v.state === 'GATHERING' || v.state === 'CONSTRUCTING')) {
+        // [核心修復] 如果狀態是 IDLE 但處於 isPlayerLocked，代表是玩家手動命令後的待命狀態，不可被自動分配接管
+        if (!isSelected && v.isPlayerLocked && (v.state.startsWith('MOVING_TO') || v.state === 'GATHERING' || v.state === 'CONSTRUCTING' || v.state === 'IDLE')) {
             return;
         }
 

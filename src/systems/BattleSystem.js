@@ -18,8 +18,12 @@ export class BattleSystem {
      */
     static update(state, dt, TILE_SIZE) {
         if (!state || !state.units) return;
-        
+
         try {
+            // 0. 重置渲染旗標 (集結點高亮)
+            const allUnits = [...(state.units.villagers || []), ...(state.units.npcs || [])];
+            allUnits.forEach(u => u.isRallyTarget = false);
+
             this.scanTimer += dt;
             const shouldScan = this.scanTimer >= this.scanInterval;
             if (shouldScan) this.scanTimer = 0;
@@ -28,7 +32,7 @@ export class BattleSystem {
             const villagers = state.units.villagers || [];
             const npcs = state.units.npcs || [];
             const allAliveUnits = [...villagers, ...npcs].filter(u => u && u.hp > 0);
-            
+
             allAliveUnits.forEach(unit => {
                 this.processCombat(unit, dt, state, TILE_SIZE, shouldScan);
             });
@@ -58,6 +62,7 @@ export class BattleSystem {
 
         if (!unit.targetId || typeof unit.targetId === 'object') {
             if (unit.state === 'ATTACK' || unit.state === 'CHASE') {
+                // 如果是手動設定的單位追隨點，但目標丟失，退回 IDLE
                 unit.state = 'IDLE';
                 unit.isPlayerLocked = false;
             }
@@ -65,8 +70,8 @@ export class BattleSystem {
         }
 
         const target = this.findEntityById(unit.targetId, state);
-        // [核心修正] 如果目標不存在、已死亡、或已經是屍體（資源點），則解除戰鬥鎖定
-        if (!target || !(target.hp > 0) || target.isCorpse) {
+        // [核心修正] 如果目標不存在或已是資源點，則解除鎖定。如果是友軍單位則允許跟隨 (HP可無效或存續)。
+        if (!target || target.isCorpse) {
             unit.targetId = null;
             if (unit.state === 'ATTACK' || unit.state === 'CHASE') {
                 unit.state = 'IDLE';
@@ -82,15 +87,32 @@ export class BattleSystem {
         if (unit.state === 'CHASE') {
             if (unit.chaseFrame === undefined) unit.chaseFrame = 0;
             unit.chaseFrame++;
+            const unitCamp = unit.camp || (unit.config && unit.config.camp) || 'player';
+            const targetCamp = target.camp || (target.config && target.config.camp) || 'player';
+            const isEnemy = unitCamp !== targetCamp && targetCamp !== 'neutral';
 
-            if (dist <= range) {
-                unit.state = 'ATTACK';
-                unit.pathTarget = null;
-                unit.idleTarget = null;
-                unit.chaseFrame = 0;
-            } else if (unit.chaseFrame >= 15 || !unit.idleTarget) {
+            // [優化] 跟隨距離：友軍跟隨保持在大約 80px (1.5 - 2 格) 的舒適距離，不用貼死
+            const stopRange = isEnemy ? range : Math.max(range, 80);
+
+            if (dist <= stopRange) {
+                if (isEnemy && target.hp > 0) {
+                    unit.state = 'ATTACK';
+                    unit.pathTarget = null;
+                    unit.idleTarget = null;
+                    unit.chaseFrame = 0;
+                } else {
+                    // 友軍或已死目標：保持 CHASE 狀態但停止移動 (達到跟隨距離)
+                    unit.idleTarget = null;
+                    unit.pathTarget = null;
+                    // [視覺] 標記目標為集結點，供渲染器畫出綠圈
+                    if (!isEnemy) target.isRallyTarget = true;
+                }
+            } else if (dist > stopRange && (unit.chaseFrame >= 15 || !unit.idleTarget)) {
+                // [核心修正] 只有距離大於停止距離時，才允許更新/重設 idleTarget，避免動畫殘留
                 unit.idleTarget = { x: target.x, y: target.y };
                 unit.chaseFrame = 0;
+                // [視覺] 長距離移動中也標記，確保視覺連貫
+                if (!isEnemy) target.isRallyTarget = true;
             }
         } else if (unit.state === 'ATTACK') {
             if (dist > range * 1.5) {
@@ -126,8 +148,8 @@ export class BattleSystem {
     static autoSeeking(unit, state, TILE_SIZE) {
         if (!unit.config) return;
 
-        const isInitiative = unit.initiative_attack !== undefined ? 
-            Number(unit.initiative_attack) === 1 : 
+        const isInitiative = unit.initiative_attack !== undefined ?
+            Number(unit.initiative_attack) === 1 :
             (unit.config.camp === 'enemy');
 
         if (!isInitiative) return;
@@ -194,7 +216,7 @@ export class BattleSystem {
     static applyDamage(target, dmg, state, attackerId = null) {
         // [核心防護] 確保不會對屍體或無效目標造成傷害與跳字
         if (!target || !(target.hp > 0) || target.isCorpse) return;
-        
+
         target.hp -= dmg;
         target.hitTimer = 1.0;
 
@@ -243,29 +265,31 @@ export class BattleSystem {
         categories.forEach(cat => {
             const list = state.units[cat];
             if (!Array.isArray(list)) return;
-            
+
             for (let i = list.length - 1; i >= 0; i--) {
                 const u = list[i];
                 if (u && u.hp <= 0) {
                     const deadId = u.id;
                     const produce = u.produce_resource || (u.config && u.config.produce_resource);
-                    
+
                     if (produce) {
                         const corpse = this.spawnCorpse(u, state);
                         if (corpse) {
-                            // 轉移攻擊該單位的工人的目標 (核心修復：支援物件與 ID 字串比對)
+                            // 轉移攻擊該單位的工人的目標 + 招募周圍閒置工人一同採集 (核心修復：擴大採集隊伍)
                             state.units.villagers.forEach(v => {
                                 const vTarget = v.targetId;
                                 const isTargetingMe = (vTarget === deadId) || (vTarget && typeof vTarget === 'object' && vTarget.id === deadId);
-                                
-                                if (isTargetingMe) {
+                                const isNearbyIdle = v.state === 'IDLE' && this.getDist(v, u) < 200; // 招募周圍 200px 內的閒置工人
+
+                                if (isTargetingMe || isNearbyIdle) {
                                     v.targetId = corpse.id; // 改為追蹤新的屍體 ID
                                     v.type = corpse.resType;
                                     v.state = 'MOVING_TO_RESOURCE';
                                     v.pathTarget = null;
                                     v.isPlayerLocked = true;
                                     if (typeof GameEngine !== 'undefined') {
-                                        GameEngine.addLog(`[採集轉移] ${v.configName || '工人'} 已轉為採集 ${corpse.name}`, 'TASK');
+                                        const logRes = isTargetingMe ? `[採集轉移] ${v.configName || '工人'} 已轉為採集 ${corpse.name}` : `[採集支援] ${v.configName || '工人'} 已加入採集 ${corpse.name}`;
+                                        GameEngine.addLog(logRes, 'TASK');
                                     }
                                 }
                             });
@@ -282,11 +306,11 @@ export class BattleSystem {
                     }
                     if (state.renderVersion !== undefined) state.renderVersion++;
                     state.needsGridUpdate = true; // [核心優化] 強制即時重新計算空間網格，確保屍體立即出現
-                    
+
                     if (typeof GameEngine !== 'undefined') {
                         GameEngine.addLog(`[戰鬥資訊] 目標死亡：${u.configName || '單位'} 已倒下，產生屍體中...`, 'SYSTEM');
                     }
-                    
+
                     list.splice(i, 1);
                 }
             }
@@ -302,7 +326,7 @@ export class BattleSystem {
 
         const [rType, rAmount] = resEntry;
         const corpseId = `corpse_${unit.id}_${Date.now()}`;
-        
+
         const corpse = {
             id: corpseId,
             x: unit.x || 0,
@@ -328,10 +352,10 @@ export class BattleSystem {
     static findEntityById(id, state) {
         if (!id || !state) return null;
         if (typeof id === 'object') return id;
-        
+
         return (state.units.villagers || []).find(u => u.id === id) ||
-               (state.units.npcs || []).find(u => u.id === id) ||
-               (state.mapEntities || []).find(e => e.id === id);
+            (state.units.npcs || []).find(u => u.id === id) ||
+            (state.mapEntities || []).find(e => e.id === id);
     }
 
     static getDist(a, b) {
