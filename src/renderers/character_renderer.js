@@ -32,12 +32,10 @@ export class CharacterRenderer {
 
         const state = unitData.state || 'IDLE';
         const isEnemy = (unitData.config && unitData.config.camp === 'enemy') || unitData.camp === 'enemy';
-        const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
-        const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
-        const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
+        const isSelected = window.GAME_STATE?.selectedUnitIds?.includes(unitData.id) || false;
+        const isHovered = window.GAME_STATE?.hoveredId === unitData.id;
 
-        const isTargetedByPlayerArmy = window.GAME_STATE &&
-            window.GAME_STATE.units.villagers.some(u => u.targetId === unitData.id);
+        const isTargetedByPlayerArmy = window.GAME_STATE?.units?.villagers?.some(u => u.targetId === unitData.id) || false;
         const isRally = !!unitData.isRallyTarget;
 
         if (isSelected || isHovered || isTargetedByPlayerArmy || isRally) {
@@ -425,8 +423,7 @@ export class CharacterRenderer {
         const isEnemy = (unitData.config && unitData.config.camp === 'enemy') || unitData.camp === 'enemy';
         const isNeutral = (unitData.config && unitData.config.camp === 'neutral') || unitData.camp === 'neutral';
         const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
-        const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
-        const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
+        const isHovered = window.GAME_STATE && window.GAME_STATE.hoveredId === unitData.id;
 
         const isTargetedByPlayerArmy = window.GAME_STATE &&
             window.GAME_STATE.units.villagers.some(u => u.targetId === unitData.id);
@@ -766,8 +763,7 @@ export class CharacterRenderer {
 
         // 5. 選取圈 (依據狀態切換橙色/紅色樣式)
         const isSelected = window.GAME_STATE && window.GAME_STATE.selectedUnitIds && window.GAME_STATE.selectedUnitIds.includes(unitData.id);
-        const pointer = window.PhaserScene && window.PhaserScene.input.activePointer;
-        const isHovered = pointer ? Math.hypot(x - pointer.worldX, y - pointer.worldY) < 40 : false;
+        const isHovered = window.GAME_STATE && window.GAME_STATE.hoveredId === unitData.id;
         const isTargetedByPlayerArmy = window.GAME_STATE &&
             window.GAME_STATE.units.villagers.some(u => u.targetId === unitData.id);
 

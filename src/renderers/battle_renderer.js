@@ -87,11 +87,9 @@ export class BattleRenderer {
             if (unit.hitTimer > 0) unit.hitTimer -= dt;
 
             // 1. 判斷顯示條件：受擊中 OR 滑鼠懸停 OR 目前選中
-            const distToPointer = Math.hypot(rx - pointer.worldX, ry - pointer.worldY);
-            const isHovered = distToPointer < 40;
+            const isHovered = window.GAME_STATE?.hoveredId === unit.id;
             const isSelected = selectedIds.includes(unit.id);
-            const isTargetedByPlayerArmy = window.GAME_STATE &&
-                window.GAME_STATE.units.villagers.some(u => u.targetId === unit.id);
+            const isTargetedByPlayerArmy = window.GAME_STATE?.units?.villagers?.some(u => u.targetId === unit.id) || false;
 
             // 如果符合任一條件（受擊、懸停、選中、正在戰鬥、或是我方單位集火目標），渲染血條
             const isInCombat = (unit.state === 'CHASE' || unit.state === 'ATTACK');
