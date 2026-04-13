@@ -953,13 +953,24 @@ export class MainScene extends Phaser.Scene {
             const u = villagerMap.get(uid);
             if (!u) return;
 
-            // 資源採集目標
-            if (u.targetId && u.targetId.gx !== undefined) {
-                const res = GameEngine.state.mapData.getResource(u.targetId.gx, u.targetId.gy);
-                if (res && res.type !== 0) {
-                    const rx = u.targetId.gx * TS + TS / 2, ry = u.targetId.gy * TS + TS / 2;
-                    if (worldView.contains(rx, ry)) {
-                        activeTargets.set(`${u.targetId.gx}_${u.targetId.gy}_target`, { entity: { ...res, gx: u.targetId.gx, gy: u.targetId.gy }, fxType: 'target', config: cfgRes });
+            // 資源採集目標 (大地圖 TILE 資源或屍體實體)
+            if (u.targetId) {
+                if (u.targetId.gx !== undefined) {
+                    const res = GameEngine.state.mapData.getResource(u.targetId.gx, u.targetId.gy);
+                    if (res && res.type !== 0) {
+                        const rx = u.targetId.gx * TS + TS / 2, ry = u.targetId.gy * TS + TS / 2;
+                        if (worldView.contains(rx, ry)) {
+                            activeTargets.set(`${u.targetId.gx}_${u.targetId.gy}_target`, { entity: { ...res, gx: u.targetId.gx, gy: u.targetId.gy }, fxType: 'target', config: cfgRes });
+                        }
+                    }
+                } else {
+                    // [Requirement 2] 支援屍體實體之採集目標描邊
+                    const tEntId = (typeof u.targetId === 'string') ? u.targetId : u.targetId.id;
+                    const tEnt = buildingMap.get(tEntId);
+                    if (tEnt && tEnt.type === 'corpse' && worldView.contains(tEnt.x, tEnt.y)) {
+                        activeTargets.set(tEntId + "_target", { entity: tEnt, fxType: 'target', config: cfgRes });
+                        // 同時畫出橘色基礎方框增強視覺反饋 (Requirement 2)
+                        this.drawSingleSelectionBox(this.selectionGraphics, tEnt, 0xff9800);
                     }
                 }
             }
@@ -993,8 +1004,8 @@ export class MainScene extends Phaser.Scene {
                             const gx = parseInt(parts[1]), gy = parseInt(parts[2]);
                             const res = GameEngine.state.mapData.getResource(gx, gy);
                             if (res && res.type !== 0) {
+                                const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
                                 if (worldView.contains(rx, ry)) {
-                                    const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
                                     target = { ...res, gx, gy, x: rx, y: ry };
                                     isRes = true;
                                 }

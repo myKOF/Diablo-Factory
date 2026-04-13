@@ -11,7 +11,7 @@ export class UIManager {
     static activeBuilding = null;
     static logHeight = 200; // 預設日誌高度
     static isResizingLog = false;
-    static logFilters = { COMMON: true, PATH: true, INPUT: true, BATTLE: true, SYSTEM: true, TASK: true, GATHER: true }; // 日誌篩選器
+    static logFilters = { COMMON: false, PATH: false, INPUT: false, BATTLE: false, SYSTEM: false, TASK: false, GATHER: false }; // 日誌篩選器
     static startY = 0;
     static startHeight = 200;
     static leftMouseDownPos = null; // 記錄左鍵按下位置，用於過濾框選後的誤觸
@@ -287,16 +287,40 @@ export class UIManager {
         `;
 
         const categories = { COMMON: "一般訊息", PATH: "尋路訊息", INPUT: "右鍵行為訊息", BATTLE: "戰鬥訊息", SYSTEM: "系統訊息", TASK: "任務訊息", GATHER: "採集訊息" };
+        
+        // --- [新增] 全選/取消全選功能 ---
+        const masterItem = document.createElement("label");
+        masterItem.style.cssText = `display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ffeb3b; cursor: pointer; border-bottom: 1.5px solid rgba(255,255,255,0.15); padding-bottom: 6px; margin-bottom: 4px; font-weight: bold;`;
+        const masterCheckbox = document.createElement("input");
+        masterCheckbox.type = "checkbox";
+        masterCheckbox.checked = Object.values(this.logFilters).every(v => v);
+        masterCheckbox.onchange = (e) => {
+            e.stopPropagation();
+            const checked = masterCheckbox.checked;
+            Object.keys(this.logFilters).forEach(k => {
+                this.logFilters[k] = checked;
+            });
+            // 更新下方所有 checkbox 的視覺狀態
+            filterMenu.querySelectorAll('input.category-check').forEach(cb => cb.checked = checked);
+            this.updateValues(true);
+        };
+        masterItem.appendChild(masterCheckbox);
+        masterItem.appendChild(document.createTextNode("全選 / 取消全選"));
+        filterMenu.appendChild(masterItem);
+
         Object.entries(categories).forEach(([key, label]) => {
             const item = document.createElement("label");
             item.style.cssText = `display: flex; align-items: center; gap: 8px; font-size: 13px; color: #fff; cursor: pointer;`;
             const checkbox = document.createElement("input");
             checkbox.type = "checkbox";
+            checkbox.className = "category-check"; // 加入類名便於批次控制
             checkbox.checked = this.logFilters[key];
             checkbox.onchange = (e) => {
                 e.stopPropagation();
                 this.logFilters[key] = checkbox.checked;
-                this.updateValues(true); // 強制更新
+                // 更新 master checkbox 狀態
+                masterCheckbox.checked = Object.values(this.logFilters).every(v => v);
+                this.updateValues(true);
             };
             item.appendChild(checkbox);
             item.appendChild(document.createTextNode(label));
