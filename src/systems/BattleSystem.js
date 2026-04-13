@@ -275,6 +275,17 @@ export class BattleSystem {
                     if (produce) {
                         const corpse = this.spawnCorpse(u, state);
                         if (corpse) {
+                            // [核心修復] 自動轉移建築集結點：若集結點此時鎖定在該死亡單位，則自動轉移至新產生的屍體實體
+                            state.mapEntities.forEach(ent => {
+                                if (ent.rallyPoint && ent.rallyPoint.targetId === deadId) {
+                                    ent.rallyPoint.targetId = corpse.id;
+                                    ent.rallyPoint.targetType = 'RESOURCE'; 
+                                    if (typeof GameEngine !== 'undefined') {
+                                        GameEngine.addLog(`[集結轉移] ${ent.name} 的集結目標已由單位轉移至 ${corpse.name}`, 'TASK');
+                                    }
+                                }
+                            });
+
                             // 轉移攻擊該單位的工人的目標 + 招募周圍閒置工人一同採集 (核心修復：擴大採集隊伍)
                             state.units.villagers.forEach(v => {
                                 const vTarget = v.targetId;
