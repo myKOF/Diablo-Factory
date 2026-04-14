@@ -288,6 +288,9 @@ export class BattleSystem {
 
                             // 轉移攻擊該單位的工人的目標 + 招募周圍閒置工人一同採集 (核心修復：擴大採集隊伍)
                             state.units.villagers.forEach(v => {
+                                // [核心需求] 僅限工人(villagers)執行死亡後的自動採集轉移，戰鬥單位維持原狀
+                                if (v.config && v.config.type !== 'villagers') return;
+
                                 const vTarget = v.targetId;
                                 const isTargetingMe = (vTarget === deadId) || (vTarget && typeof vTarget === 'object' && vTarget.id === deadId);
                                 const isNearbyIdle = v.state === 'IDLE' && this.getDist(v, u) < 200; // 招募周圍 200px 內的閒置工人

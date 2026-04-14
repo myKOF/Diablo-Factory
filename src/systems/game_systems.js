@@ -870,10 +870,11 @@ export class GameEngine {
                     v._isRallyMovement = true;
                 }
             } else if (targetEnt && !isVillager) {
-                if (targetEnt.hp !== undefined && (targetEnt.config.camp === 'enemy' || targetEnt.camp === 'enemy')) {
+                const targetCamp = (targetEnt.config && targetEnt.config.camp) || targetEnt.camp || 'neutral';
+                if (targetEnt.hp !== undefined && (targetCamp === 'enemy' || targetCamp === 'neutral')) {
                     v.state = 'CHASE';
                     v.targetId = targetEnt.id;
-                    GameEngine.addLog(`[集結] 戰鬥單位正在追擊敵軍！`);
+                    GameEngine.addLog(`[集結] 戰鬥單位正在攻擊目標 (${targetCamp === 'neutral' ? '中立物種' : '敵對目標'})！`);
                 } else {
                     v.idleTarget = this.findAvailableRallySpot(rp);
                     v._isRallyMovement = true;
