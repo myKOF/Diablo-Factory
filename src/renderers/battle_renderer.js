@@ -42,7 +42,7 @@ export class BattleRenderer {
                 fill: '#ff5252',
                 stroke: '#000000',
                 strokeThickness: 4
-            }).setOrigin(0.5, 0.5).setDepth(200);
+            }).setOrigin(0.5, 0.5).setDepth(5000000);
         }
 
         popup.setText(`-${amount}`);

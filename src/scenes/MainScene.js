@@ -77,7 +77,7 @@ export class MainScene extends Phaser.Scene {
             const centerY = minGY * TS + boundsH / 2;
 
             this.backgroundSprite = this.add.tileSprite(centerX, centerY, boundsW, boundsH, 'ground_texture');
-            this.backgroundSprite.setDepth(-10); // 確保在格線與所有實體之下
+            this.backgroundSprite.setDepth(-10000); // 確保在最底層
 
             // 應用自訂參數
             const gridCfg = UI_CONFIG.Grid;
@@ -108,23 +108,23 @@ export class MainScene extends Phaser.Scene {
 
         // 預覽配置 (用於建築放置)
         this.placementPreview = this.add.graphics();
-        this.placementPreview.setDepth(100);
+        this.placementPreview.setDepth(2000000);
 
         // 動態 HUD 繪圖層 (進度條、生產列)
         this.hudGraphics = this.add.graphics();
-        this.hudGraphics.setDepth(15000);
+        this.hudGraphics.setDepth(2500000);
 
         // 選取高亮層
         this.selectionGraphics = this.add.graphics();
-        this.selectionGraphics.setDepth(10000); // 提昇至遊戲實體之上
+        this.selectionGraphics.setDepth(1800000); // 提昇至遊戲實體之上
 
         // 框選 marquee 層
         this.marqueeGraphics = this.add.graphics();
-        this.marqueeGraphics.setDepth(30000); // 置頂顯示
+        this.marqueeGraphics.setDepth(3000000); // 置頂顯示
 
         // 尋路目標提示層 (位於單位之下)
         this.targetGraphics = this.add.graphics();
-        this.targetGraphics.setDepth(1); // 確保在所有實體之下 (depth 以 Y 為準)
+        this.targetGraphics.setDepth(10); // 確保在所有實體之下 (depth 以 Y 為準)
 
         // 相機控制
         this.lastCamX = -9999;
@@ -219,6 +219,25 @@ export class MainScene extends Phaser.Scene {
         });
 
         graphics.destroy();
+    }
+
+    drawEntity(g, ent, alpha) {
+        const cfg = GameEngine.getEntityConfig(ent.type);
+        if (!cfg) return;
+        g.clear();
+        const TS = GameEngine.TILE_SIZE;
+        let uw = 1, uh = 1;
+        if (cfg.size) {
+            const match = cfg.size.toString().match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
+            if (match) { uw = parseFloat(match[1]); uh = parseFloat(match[2]); }
+        }
+        const color = typeof cfg.color === 'string' ? parseInt(cfg.color.replace('#', ''), 16) : (cfg.color || 0x888888);
+        const w = uw * TS;
+        const h = uh * TS;
+        g.fillStyle(color, alpha);
+        g.fillRect(-w / 2, -h / 2, w, h);
+        g.lineStyle(2, 0xffffff, alpha * 0.5);
+        g.strokeRect(-w / 2, -h / 2, w, h);
     }
 
     setupCamera() {
@@ -890,7 +909,7 @@ export class MainScene extends Phaser.Scene {
 
         const state = GameEngine.state;
         const cam = this.cameras.main;
-        const worldView = cam.worldView; // 緩存世界視圖範圍
+        const worldView = cam.worldView; 
         const TS = GameEngine.TILE_SIZE;
 
         const cfgRes = UI_CONFIG.ResourceSelection || {
@@ -1044,23 +1063,23 @@ export class MainScene extends Phaser.Scene {
         // 4. 滑鼠懸停對象 (Requirement 1 & 2)
         const hoveredId = state.hoveredId;
         if (hoveredId && !activeTargets.has(hoveredId + "_sel") && !activeTargets.has(hoveredId + "_const")) {
-             const cfgHover = { ...cfgRes, glowAlpha: 0.2, glowOuterStrength: 5 };
-             if (hoveredId.includes('_') && !hoveredId.startsWith('corpse_') && !hoveredId.startsWith('unit_')) {
-                 const parts = hoveredId.split('_');
-                 const gx = parseInt(parts[0]), gy = parseInt(parts[1]);
-                 const res = GameEngine.state.mapData.getResource(gx, gy);
-                 if (res && res.type !== 0) {
-                     const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
-                     if (worldView.contains(rx, ry)) {
-                         activeTargets.set(hoveredId + "_hover", { entity: { ...res, gx, gy }, fxType: 'sel', config: cfgHover });
-                     }
-                 }
-             } else {
-                 const ent = buildingMap.get(hoveredId);
-                 if (ent && worldView.contains(ent.x, ent.y)) {
-                     activeTargets.set(hoveredId + "_hover", { entity: ent, fxType: 'sel', config: cfgHover });
-                 }
-             }
+            const cfgHover = { ...cfgRes, glowAlpha: 0.2, glowOuterStrength: 5 };
+            if (hoveredId.includes('_') && !hoveredId.startsWith('corpse_') && !hoveredId.startsWith('unit_')) {
+                const parts = hoveredId.split('_');
+                const gx = parseInt(parts[0]), gy = parseInt(parts[1]);
+                const res = GameEngine.state.mapData.getResource(gx, gy);
+                if (res && res.type !== 0) {
+                    const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
+                    if (worldView.contains(rx, ry)) {
+                        activeTargets.set(hoveredId + "_hover", { entity: { ...res, gx, gy }, fxType: 'sel', config: cfgHover });
+                    }
+                }
+            } else {
+                const ent = buildingMap.get(hoveredId);
+                if (ent && worldView.contains(ent.x, ent.y)) {
+                    activeTargets.set(hoveredId + "_hover", { entity: ent, fxType: 'sel', config: cfgHover });
+                }
+            }
         }
 
         // 5. 建立或更新所需的 FX Sprite
@@ -1079,7 +1098,8 @@ export class MainScene extends Phaser.Scene {
                 if (!textureKey || !this.textures.exists(textureKey)) return;
 
                 fxSprite = this.add.sprite(0, 0, textureKey);
-                fxSprite.setDepth(config.depth || 15);
+                const baseDepth = (entity.y !== undefined) ? entity.y : (entity.gy !== undefined ? (entity.gy * TS + TS / 2) : 0);
+                fxSprite.setDepth(500000 + baseDepth + 10); // 置於物體上方
 
                 if (fxSprite.postFX) {
                     const colorStr = (fxType === 'target') ? (config.targetColor || config.glowColor) : config.glowColor;
@@ -1104,7 +1124,6 @@ export class MainScene extends Phaser.Scene {
             }
 
             // 更新位置與縮放
-            const TS = GameEngine.TILE_SIZE;
             if (entity.gx !== undefined && typeof entity.type === 'number') {
                 const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
                 const resCfg = GameEngine.state.resourceConfigs.find(c => c.type === typeMap[entity.type] && c.lv === (entity.level || 1));
@@ -1165,7 +1184,7 @@ export class MainScene extends Phaser.Scene {
         if (ent.type === 'corpse') {
             const rCfg = UI_CONFIG.ResourceSelection || {};
             const cScale = rCfg.corpseSelectionScale || 0.8;
-            uw = cScale; uh = cScale; 
+            uw = cScale; uh = cScale;
         } else if (cfg.size) {
             const cleanSize = cfg.size.toString().replace(/['"]/g, '');
             const match = cleanSize.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
@@ -1348,13 +1367,13 @@ export class MainScene extends Phaser.Scene {
                     displayObj = this.add.image(ent.x, ent.y, textureKey);
                     this.entities.set(id, displayObj);
                     this.entityGroup.add(displayObj);
-                    displayObj.setDepth(ent.y); // Requirement 3: Y-axis sorting
+                    displayObj.setDepth(500000 + ent.y); // Requirement 3: Y-axis sorting + Huge Offset
                 } else if (!textureKey && !['campfire'].includes(ent.type)) {
                     displayObj = this.add.graphics();
                     this.drawEntity(displayObj, ent, 1.0);
                     this.entities.set(id, displayObj);
                     this.entityGroup.add(displayObj);
-                    displayObj.setDepth(ent.y); // Requirement 3: Y-axis sorting
+                    displayObj.setDepth(500000 + ent.y); // Requirement 3: Y-axis sorting + Huge Offset
                 }
                 newlyCreatedCount++;
             }
@@ -1461,7 +1480,7 @@ export class MainScene extends Phaser.Scene {
                     img.setPosition(res.gx * TS + TS / 2, res.gy * TS + TS / 2);
                     img.setTint(vTint);
                     img.setVisible(true);
-                    img.setDepth(res.gy * TS + TS / 2); // Requirement 3: Y-axis sorting
+                    img.setDepth(500000 + res.gy * TS + TS / 2); // Requirement 3: Y-axis sorting + Huge Offset
 
                     bobInfo = { type: typeStr, lv: res.level, bob: img };
                     this.resourceBobs.set(key, bobInfo);
@@ -1503,7 +1522,7 @@ export class MainScene extends Phaser.Scene {
         }
         // 若池中無對象，新創一個 Image (資源貼圖皆以 tex_ 為前綴)
         const img = this.add.image(0, 0, `tex_${type}`);
-        img.setDepth(8);
+        img.setDepth(500000); 
         this.resourceGroup.add(img);
         return img;
     }
@@ -1528,9 +1547,8 @@ export class MainScene extends Phaser.Scene {
                 blendMode: cfg.blendMode,
                 frequency: cfg.frequency,
                 x: { min: -cfg.spreadX, max: cfg.spreadX },
-                y: { min: cfg.offsetY, max: 0 }
             });
-            emitter.setDepth(15);
+            emitter.setDepth(500000 + ent.y + 20); 
             this.emitters.set(id, emitter);
         }
         if (emitter.x !== ent.x || emitter.y !== ent.y) emitter.setPosition(ent.x, ent.y);
@@ -1578,7 +1596,7 @@ export class MainScene extends Phaser.Scene {
                 align: 'center'
             }).setOrigin(0.5, 0.5);
             nameTxt.setStroke(this.hexToCssRgba(cfg.name.outlineColor || "#000000", cfg.name.outlineAlpha || 0.8), cfg.name.outlineWidth || 2);
-            nameTxt.setDepth(20000 + ent.y); // Stay on top, sort by Y
+            nameTxt.setDepth(1000000 + ent.y); // Stay on top
             this.nameLabels.set(id, nameTxt);
         }
 
@@ -1609,7 +1627,7 @@ export class MainScene extends Phaser.Scene {
                     align: 'center'
                 }).setOrigin(0.5, 0.5);
                 lvTxt.setStroke(this.hexToCssRgba(cfg.level.outlineColor, cfg.level.outlineAlpha), cfg.level.outlineWidth);
-                lvTxt.setDepth(20001 + ent.y); // Stay on top, sort by Y
+                lvTxt.setDepth(1000001 + ent.y); // Stay on top
                 this.levelLabels.set(id, lvTxt);
             }
             lvTxt.setVisible(true);
@@ -1636,7 +1654,7 @@ export class MainScene extends Phaser.Scene {
                     align: 'center'
                 }).setOrigin(0.5, 0.5);
                 amtTxt.setStroke(this.hexToCssRgba(resCfg.amount.outlineColor || "#000000", resCfg.amount.outlineAlpha || 0.8), resCfg.amount.outlineWidth || 2);
-                amtTxt.setDepth(19999 + ent.y); // Stay on top, sort by Y
+                amtTxt.setDepth(999999 + ent.y); // Stay on top
                 this.resourceLabels.set(id, amtTxt);
             }
             amtTxt.setVisible(true);
@@ -1965,7 +1983,7 @@ export class MainScene extends Phaser.Scene {
         let iconTxt = this.unitIconTexts.get(id);
         if (!iconTxt) {
             iconTxt = this.add.text(bx + 15, by + 17, emoji, { fontSize: '18px' }).setOrigin(0.5);
-            iconTxt.setDepth(100);
+            iconTxt.setDepth(1500000);
             this.unitIconTexts.set(id, iconTxt);
         }
         if (iconTxt.text !== emoji) iconTxt.setText(emoji);
@@ -1985,7 +2003,7 @@ export class MainScene extends Phaser.Scene {
                 fontFamily: 'Arial',
                 color: '#ffffff'
             }).setOrigin(0.5);
-            qTxt.setDepth(101);
+            qTxt.setDepth(1500001);
             this.queueTexts.set(id, qTxt);
         }
         if (qTxt.text !== queueStr) qTxt.setText(queueStr);
@@ -2031,7 +2049,7 @@ export class MainScene extends Phaser.Scene {
                 if (Math.abs(v.y - v.renderY) < 0.1) v.renderY = v.y;
 
                 sprite.clear();
-                sprite.setDepth(v.renderY); // Requirement 3: Y-axis sorting
+                sprite.setDepth(500000 + v.renderY); // Requirement 3: Y-axis sorting
                 CharacterRenderer.render(sprite, v.renderX, v.renderY, v, this.time.now);
 
                 // 更新單位的姓名與等級標籤 (Phaser Text 方案)
@@ -2072,7 +2090,7 @@ export class MainScene extends Phaser.Scene {
 
             label.setStroke('#000000', 3);
             label.setShadow(1, 1, 'rgba(0,0,0,0.6)', 2);
-            label.setDepth(20010 + unit.y); // NPC Labels on top
+            label.setDepth(1000010 + unit.y); // NPC Labels on top
             this.nameLabels.set(id, label);
         }
 
@@ -2428,7 +2446,7 @@ export class MainScene extends Phaser.Scene {
             const typeName = typeNameMap[info.type];
             const resCfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (info.lv || 1));
             const ms = (resCfg && resCfg.model_size) ? resCfg.model_size : { x: 1, y: 1 };
-            
+
             const vWidth = 100 * ms.x, vHeight = 100 * ms.y; // 稍微寬鬆的資源碰撞
 
             if (pointer.worldX >= rx - vWidth / 2 && pointer.worldX <= rx + vWidth / 2 &&
