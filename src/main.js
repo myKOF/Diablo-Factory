@@ -25,6 +25,34 @@ window.onload = () => {
     initGame();
 };
 
+// 實作數據透視介面
+window.render_game_to_text = () => {
+    // 假設你的遊戲狀態存在 state 或 scene 中
+    const scene = window.game.scene.scenes[0];
+    if (!scene) return JSON.stringify({ error: "Scene not found" });
+
+    const payload = {
+        timestamp: Date.now(),
+        mode: scene.state?.currentMode || "Unknown",
+        player: {
+            x: Math.round(scene.player?.x || 0),
+            y: Math.round(scene.player?.y || 0),
+            state: scene.player?.state
+        },
+        // 僅回傳視口內的關鍵實體，節省 Token
+        entities: (scene.entities || []).filter(e => e.active).map(e => ({
+            id: e.id,
+            type: e.type,
+            x: Math.round(e.x),
+            y: Math.round(e.y)
+        })),
+        resources: scene.resources || {},
+        errors: window.console_errors || [] // 配合錯誤捕捉
+    };
+
+    return JSON.stringify(payload);
+};
+
 function initResizeHandler() {
     const container = document.getElementById("game_container");
     if (!container) return;
@@ -40,7 +68,7 @@ function initResizeHandler() {
         const scale = Math.min(scaleX, scaleY);
 
         container.style.transform = `scale(${scale})`;
-        
+
         // 將容器置中
         const left = (ww - (baseW * scale)) / 2;
         const top = (wh - (baseH * scale)) / 2;

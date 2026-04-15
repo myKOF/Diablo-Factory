@@ -35,3 +35,11 @@ yarn-debug.log*
 yarn-error.log*
 logs/
 *.log
+
+# 測試與自動化產出
+/tmp/
+/screenshots/
+*.log
+.logs/
+playwright-report/
+test-results/
