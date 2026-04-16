@@ -231,8 +231,87 @@ export class BattleRenderer {
                 // 核心濺射感
                 g.fillStyle(0xffffff, 0.5);
                 g.fillCircle(rx, ry, size * 0.5);
+            } else if (p.type === 4) {
+                // -- 遠程投石車拋物線火焰投石 --
+                const cfg = UI_CONFIG.effects.flamingBoulder;
+                const arrowCfg = vCfg.arrow; // 重用拋物線參數
+                const arcH = Math.min(arrowCfg.arcHeightMax * 1.8, p.totalDistance * arrowCfg.arcHeightFactor * 1.5); // 投石車弧度更高
+                const offset = Math.sin(Math.PI * (p.progress || 0)) * arcH;
+                ry -= offset;
+
+                // 1. 繪製煙霧拖尾 (底層：焦黑煙塵)
+                if (!p.historySmoke) p.historySmoke = [];
+                // 頻率控制：每幀產生煙霧
+                p.historySmoke.push({ x: rx, y: ry, life: cfg.smoke.lifespan, seed: Math.random() });
+                
+                for (let i = p.historySmoke.length - 1; i >= 0; i--) {
+                    const s = p.historySmoke[i];
+                    s.life -= dt * 1000;
+                    if (s.life <= 0) {
+                        p.historySmoke.splice(i, 1);
+                        continue;
+                    }
+                    const ratio = 1 - (s.life / cfg.smoke.lifespan);
+                    const alpha = cfg.smoke.alpha.start * (1 - ratio);
+                    const scale = cfg.smoke.scale.start + (cfg.smoke.scale.end - cfg.smoke.scale.start) * ratio;
+                    
+                    g.fillStyle(this.parseColor(cfg.smoke.tint), alpha);
+                    // 煙霧隨機擴散與微弱上升 (gravityY)
+                    const driftX = Math.sin(ratio * 5 + s.seed) * 10;
+                    const driftY = ratio * cfg.smoke.gravityY * 0.5;
+                    g.fillCircle(s.x + driftX, s.y + driftY, 12 * scale);
+                }
+
+                // 2. 繪製火焰拖尾 (上層：高熱火焰)
+                if (!p.historyFire) p.historyFire = [];
+                p.historyFire.push({ x: rx, y: ry, life: cfg.fire.lifespan, seed: Math.random() });
+
+                for (let i = p.historyFire.length - 1; i >= 0; i--) {
+                    const f = p.historyFire[i];
+                    f.life -= dt * 1000;
+                    if (f.life <= 0) {
+                        p.historyFire.splice(i, 1);
+                        continue;
+                    }
+                    const ratio = 1 - (f.life / cfg.fire.lifespan);
+                    const alpha = cfg.fire.alpha.start * (1 - ratio);
+                    const scale = cfg.fire.scale.start + (cfg.fire.scale.end - cfg.fire.scale.start) * ratio;
+                    
+                    // 顏色插值：白 -> 黃 -> 紅
+                    let color;
+                    if (ratio < 0.5) {
+                        color = this.lerpColor(cfg.fire.tint[0], cfg.fire.tint[1], ratio * 2);
+                    } else {
+                        color = this.lerpColor(cfg.fire.tint[1], cfg.fire.tint[2], (ratio - 0.5) * 2);
+                    }
+
+                    g.fillStyle(color, alpha);
+                    // 火焰向上飄升 (gravityY: -100)
+                    const driftY = ratio * cfg.fire.gravityY * 0.4;
+                    g.fillCircle(f.x + (Math.random() - 0.5) * 5, f.y + driftY, 8 * scale);
+                }
+
+                // 3. 核心投出的巨石
+                g.fillStyle(0x333333, 1);
+                g.fillCircle(rx, ry, 7);
+                g.fillStyle(0xff8800, 1); // 表面焦紅
+                g.fillCircle(rx, ry, 5);
+                g.fillStyle(0xffff00, 0.8); // 核心亮點
+                g.fillCircle(rx, ry, 2);
             }
         });
+    }
+
+    /**
+     * 線性插值顏色
+     */
+    static lerpColor(c1, c2, r) {
+        const r1 = (c1 >> 16) & 255, g1 = (c1 >> 8) & 255, b1 = c1 & 255;
+        const r2 = (c2 >> 16) & 255, g2 = (c2 >> 8) & 255, b2 = c2 & 255;
+        const rr = r1 + (r2 - r1) * r;
+        const rg = g1 + (g2 - g1) * r;
+        const rb = b1 + (b2 - b1) * r;
+        return (Math.round(rr) << 16) | (Math.round(rg) << 8) | Math.round(rb);
     }
 
     static parseColor(c) {

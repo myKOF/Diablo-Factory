@@ -29,6 +29,17 @@ export class CharacterRenderer {
         if (model === 'sheep') {
             return this.renderSheep(ctx, x, y, unitData, time);
         }
+        if (model === 'catapult') {
+            // [新增] 投石車單位渲染
+            const isSelected = window.GAME_STATE?.selectedUnitIds?.includes(unitData.id) || false;
+            const isHovered = window.GAME_STATE?.hoveredId === unitData.id;
+            const isTargeted = window.GAME_STATE?.units?.villagers?.some(u => u.targetId === unitData.id);
+            if (isSelected || isHovered || isTargeted) {
+                const color = (unitData.camp === 'enemy' || isTargeted) ? 0xf44336 : 0x4caf50;
+                this.drawSelectionRing(ctx, x, y, time, color, 30); // 更大的選取圈
+            }
+            return this.renderCatapult(ctx, x, y, unitData, time);
+        }
 
         const state = unitData.state || 'IDLE';
         const isEnemy = (unitData.config && unitData.config.camp === 'enemy') || unitData.camp === 'enemy';
@@ -662,6 +673,63 @@ export class CharacterRenderer {
         else if (ctx.fill) ctx.fill();
     }
 
+    static renderCatapult(ctx, x, y, unitData, time) {
+        const t = time * 0.01;
+        const state = unitData.state || 'IDLE';
+        const isMoving = state === 'MOVE' || state === 'CHASE' || state.includes('MOVING');
+        const isAttacking = state === 'ATTACK';
+        const facing = unitData.facing || 1;
+
+        // 1. 繪製陰影
+        this.drawShadow(ctx, x, y);
+
+        // 2. 繪製主框架 (木製底盤)
+        this.setCtxStyle(ctx, 0x5d4037, 1);
+        ctx.fillRect(x - 16, y - 4, 32, 12);
+        
+        // 3. 繪製輪子 (四個簡單輪子)
+        this.setCtxStyle(ctx, 0x3e2723, 1);
+        const wheelY = y + 8;
+        const wheelBob = isMoving ? Math.sin(t * 10) * 2 : 0;
+        
+        if (ctx.fillCircle) {
+            ctx.fillCircle(x - 12, wheelY + wheelBob, 6);
+            ctx.fillCircle(x + 12, wheelY - wheelBob, 6);
+            this.setCtxStyle(ctx, 0x5d4037, 1);
+            ctx.fillCircle(x - 12, wheelY + wheelBob, 2);
+            ctx.fillCircle(x + 12, wheelY - wheelBob, 2);
+        } else {
+            ctx.fillRect(x - 16, wheelY - 4, 8, 8);
+            ctx.fillRect(x + 8, wheelY - 4, 8, 8);
+        }
+
+        // 4. 繪製拋石臂架
+        this.setCtxStyle(ctx, 0x4e342e, 1);
+        ctx.fillRect(x - 2, y - 20, 4, 18);
+
+        // 5. 繪製拋石臂 (Pivot point at x, y-10)
+        const armPivotY = y - 10;
+        const armAngle = isAttacking ? -0.4 + Math.sin(t * 12) * 0.8 : -0.2;
+        this.drawRectRotated(ctx, x, armPivotY, -2, -28, 4, 30, armAngle, 0x5d4037);
+
+        // 6. 繪製投石勺 (前端)
+        const armLen = 28;
+        const scoopX = x + Math.cos(armAngle - Math.PI / 2) * armLen;
+        const scoopY = armPivotY + Math.sin(armAngle - Math.PI / 2) * armLen;
+        
+        this.setCtxStyle(ctx, 0x3e2723, 1);
+        if (ctx.fillCircle) {
+            ctx.fillCircle(scoopX, scoopY, 8);
+            // 彈藥載入視覺 (如果正在準備投射)
+            if (isAttacking && Math.sin(t * 12) < 0) {
+                this.setCtxStyle(ctx, 0xffaa00, 1);
+                ctx.fillCircle(scoopX, scoopY, 5);
+            }
+        } else {
+            ctx.fillRect(scoopX - 6, scoopY - 6, 12, 12);
+        }
+    }
+
     static setCtxStyle(ctx, color, alpha) {
         if (ctx.fillStyle !== undefined && typeof ctx.fillStyle === 'string') {
             const r = (color >> 16) & 255;
@@ -673,9 +741,9 @@ export class CharacterRenderer {
         }
     }
 
-    static drawSelectionRing(ctx, x, y, time, color = 0x4caf50) {
+    static drawSelectionRing(ctx, x, y, time, color = 0x4caf50, customRadius = null) {
         const alpha = 0.8;
-        const radius = 22;
+        const radius = customRadius || 22;
         // 加入輕微的呼吸律動感，提升質感
         const pulse = Math.sin(time * 0.005) * 2;
 

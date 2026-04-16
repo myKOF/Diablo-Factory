@@ -190,7 +190,7 @@ export class BattleSystem {
         if (attackType === 1) {
             this.applyDamage(target, dmg, state, attacker.id);
         } else {
-            if (!state.projectiles) state.projectiles = [];
+            const dist = Math.hypot(target.x - attacker.x, target.y - attacker.y);
             const p = {
                 id: 'proj_' + Date.now() + Math.random(),
                 type: attackType,
@@ -201,13 +201,14 @@ export class BattleSystem {
                 startX: attacker.x,
                 startY: attacker.y,
                 damage: dmg,
-                speed: attackType === 2 ? (this.VISUAL_CONFIG.arrow?.speed || 400) : (this.VISUAL_CONFIG.fireball?.speed || 300),
+                speed: attackType === 2 ? (this.VISUAL_CONFIG.arrow?.speed || 400) : 
+                       (attackType === 4 ? (UI_CONFIG.Combat.fireball?.speed || 450) : (this.VISUAL_CONFIG.fireball?.speed || 300)),
                 lastX: target.x,
                 lastY: target.y,
                 progress: 0,
-                duration: 0
+                duration: 0,
+                totalDistance: dist // 新增：用於拋物線高度計算
             };
-            const dist = Math.hypot(target.x - attacker.x, target.y - attacker.y);
             p.duration = dist / p.speed;
             state.projectiles.push(p);
         }

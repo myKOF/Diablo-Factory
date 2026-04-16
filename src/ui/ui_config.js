@@ -510,5 +510,39 @@ export const UI_CONFIG = {
         glowColor: "#ff9100",           // 橘色外框 (橘黃)
         hpFillColor: "#ff9100",         // 橘色血條
         selectionRingColor: 0xff9100    // 橘色選取圈
+    },
+
+    // -- 投石車攻擊特效相關配置 (Effects) ---------------------------------------
+    effects: {
+        // [保留] 前面的採礦與灰塵設定 (預留擴展空間)
+
+        // 3. 投石車火球拖尾 (複合特效)
+        flamingBoulder: {
+            // 上層：高熱火焰拖尾
+            fire: {
+                speed: { min: 10, max: 30 },        // 速度放慢，讓火焰留在軌跡上
+                angle: { min: 0, max: 360 },        // 微弱的向外擴散
+                gravityY: -100,                     // 火焰極輕，明顯向上飄升
+                scale: { start: 1, end: 0 },      // 從大火縮小至消失
+                alpha: { start: 1, end: 0 },        // 透明度漸弱
+                lifespan: 300,                      // 存活極短，製造「閃爍」感
+                blendMode: 'ADD',                   // 核心：發光疊加
+                tint: [0xffffff, 0xffaa00, 0xff0000], // 白 -> 黃 -> 紅 (高溫退散)
+                frequency: 15                       // 高頻率噴發，形成連續火線
+            },
+
+            // 底層：焦黑煙塵拖尾
+            smoke: {
+                speed: { min: 5, max: 20 },
+                angle: { min: 0, max: 360 },
+                gravityY: -20,                      // 煙霧較重，微向上飄
+                scale: { start: 0.3, end: 1.5 },    // 核心：煙霧會隨著時間「膨脹散開」
+                alpha: { start: 0.5, end: 0 },      // 半透明開始
+                lifespan: 700,                      // 存活較長，留在空中
+                blendMode: 'NORMAL',                // 正常遮罩，用來蓋住背景
+                tint: 0x222222,                     // 接近黑色的深灰
+                frequency: 30                       // 噴發頻率比火低，節省效能
+            }
+        }
     }
 };

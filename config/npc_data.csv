@@ -2,7 +2,7 @@
 1=近戰攻擊
 2=遠程拋物線弓箭子彈飛行
 3=遠程直線火球魔法子彈飛行
-4=遠程投石車火焰投石特效",中文注釋說明，參考用
+4=遠程投石車拋物線火焰投石特效",中文注釋說明，參考用
 id,name,model,pixel_size,type,camp,population,resource,collection_speed,collection_resource,produce_resource,lv,hp,attack,idle_speed,fighting_speed,attack_speed,range,patrol_range,field_vision,initiative_attack,attack_type,annotation
 1,villagers,meles,{10*10},villagers,player,1,{food=20},3,5,,1,50,5,3,12,0.75,3,0,30,0,1,村民NPC
 2,female villagers,female,{10*10},villagers,player,1,{food=20},3,5,,1,50,5,3,12,0.75,3,0,30,0,1,村民NPC
