@@ -41,12 +41,12 @@
 ## [代碼收斂與自動化驗證]
 - **代碼洗滌**：任務結束前，刪除未引用變數與除錯 Log。
 - **自動自測**：存檔後必須自動啟動 Playwright 進行功能驗證。
-- **進程自毀**：測試結束必須執行 `finally { process.exit(); }`，禁止殘留進程。
+- **進程與視窗自毀**：測試成功或結束後，腳本必須強制執行 `await browser.close();` 關閉所有開啟的測試網頁與瀏覽器實體，並以 `finally { process.exit(); }` 徹底了結，嚴禁殘留任何背景進程或需手動關閉的分頁。
 
 ## [無痕測試與自動清理協議]
 1. **領地限制 (Sandbox)**：所有測試截圖、Log 檔案與臨時數據必須統一存放於 `/tmp/` 資料夾。嚴禁將產出物置於 `src/` 或根目錄。
 2. **Git 守門員**：Agent 執行任何 `git add` 前，必須檢查是否存在 `.gitignore` 以外的測試遺留檔，若有則立即刪除。
 3. **自動銷毀機制 (Self-Destruct)**：
-   - 測試腳本必須包含 `finally { fs.rmSync('tmp/', { recursive: true, force: true }); }` 邏輯。
+   - 測試腳本的 `finally` 區塊必須包含雙重清理邏輯：先關閉網頁 `if (browser) { await browser.close(); }`，再清理殘留檔案 `fs.rmSync('tmp/', { recursive: true, force: true });`。
    - 僅在「測試失敗 (Failed)」時，允許保留最後一份截圖與 Log 於 `/tmp/` 供 Debug，但必須在下次啟動任務時優先清空。
 4. **無感日誌**：所有除錯用的 `console.log` 必須在 `verify_build.cjs` 通過後自動抹除，嚴禁提交含 `console.log` 的代碼。

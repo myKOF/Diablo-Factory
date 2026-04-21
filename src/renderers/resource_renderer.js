@@ -14,6 +14,10 @@ export class ResourceRenderer {
         this.generateIronMineTexture(scene);
         this.generateCoalMineTexture(scene);
         this.generateRareHerbTexture(scene);
+        this.generateCrystalOreTexture(scene);
+        this.generateCopperOreTexture(scene);
+        this.generateSilverOreTexture(scene);
+        this.generateMithrilOreTexture(scene);
         this.generateWolfCorpseTexture(scene);
         this.generateBearCorpseTexture(scene);
     }
@@ -175,9 +179,17 @@ export class ResourceRenderer {
         g.fillStyle(this.toNum(cfg.leafColor), 1);
         for (let i = 0; i < 3; i++) {
             const angle = (i * 120) * (Math.PI / 180);
-            g.beginPath();
-            g.ellipse(cx + Math.cos(angle) * 15, cy + Math.sin(angle) * 15, 12, 6, angle);
-            g.fillPath(); g.strokePath();
+            const px = cx + Math.cos(angle) * 15;
+            const py = cy + Math.sin(angle) * 15;
+            const dist = 12;
+            const perp = angle + Math.PI / 2;
+            const pts = [
+                { dx: Math.cos(angle) * dist, dy: Math.sin(angle) * dist },
+                { dx: Math.cos(perp) * 6, dy: Math.sin(perp) * 6 },
+                { dx: Math.cos(angle) * -dist, dy: Math.sin(angle) * -dist },
+                { dx: Math.cos(perp) * -6, dy: Math.sin(perp) * -6 }
+            ];
+            this.drawPolygon(g, pts, px, py, this.toNum(cfg.leafColor), this.toNum(cfg.outlineColor), 1, cfg.outlineWidth);
         }
         g.fillStyle(this.toNum(cfg.flowerColor), 1);
         g.fillCircle(cx, cy, 6); g.strokeCircle(cx, cy, 6);
@@ -209,6 +221,63 @@ export class ResourceRenderer {
         g.fillEllipse(cx, cy + 5, 50, 30); g.strokeEllipse(cx, cy + 5, 50, 30);
         g.fillCircle(cx - 35, cy, 16); g.strokeCircle(cx - 35, cy, 16);
         g.generateTexture('tex_bear_corpse', cw, ch);
+        g.destroy();
+    }
+
+    static generateCrystalOreTexture(scene) {
+        if (scene.textures.exists('tex_crystal_ore')) return;
+        const cw = 120, ch = 120, cx = cw / 2, cy = ch / 2;
+        const g = scene.make.graphics({ x: 0, y: 0, add: false });
+        const cfg = UI_CONFIG.ResourceRenderer.CrystalOreMine;
+        const crystals = [
+            { points: [{dx:0, dy:-30}, {dx:15, dy:-10}, {dx:10, dy:20}, {dx:-10, dy:20}, {dx:-15, dy:-10}], x: cx, y: cy, color: this.toNum(cfg.colors[0]) },
+            { points: [{dx:0, dy:-20}, {dx:12, dy:0}, {dx:0, dy:15}, {dx:-12, dy:0}], x: cx - 20, y: cy + 10, color: this.toNum(cfg.colors[1]) },
+            { points: [{dx:0, dy:-18}, {dx:10, dy:0}, {dx:0, dy:12}, {dx:-10, dy:0}], x: cx + 18, y: cy + 12, color: this.toNum(cfg.colors[2]) }
+        ];
+        crystals.forEach(c => this.drawPolygon(g, c.points, c.x, c.y, c.color, this.toNum(cfg.outlineColor), 1, cfg.outlineWidth));
+        g.generateTexture('tex_crystal_ore', cw, ch);
+        g.destroy();
+    }
+
+    static generateCopperOreTexture(scene) {
+        if (scene.textures.exists('tex_copper_ore')) return;
+        const cw = 120, ch = 120, cx = cw / 2, cy = ch / 2;
+        const g = scene.make.graphics({ x: 0, y: 0, add: false });
+        const cfg = UI_CONFIG.ResourceRenderer.CopperOreMine;
+        const rocks = [
+            { points: [{dx:-22, dy:8}, {dx:-5, dy:-25}, {dx:25, dy:-5}, {dx:15, dy:15}], x: cx, y: cy, color: this.toNum(cfg.colors[0]) },
+            { points: [{dx:-12, dy:3}, {dx:-6, dy:-15}, {dx:10, dy:0}, {dx:8, dy:10}], x: cx + 12, y: cy + 5, color: this.toNum(cfg.colors[2]) }
+        ];
+        rocks.forEach(r => this.drawPolygon(g, r.points, r.x, r.y, r.color, this.toNum(cfg.outlineColor), 1, cfg.outlineWidth));
+        g.generateTexture('tex_copper_ore', cw, ch);
+        g.destroy();
+    }
+
+    static generateSilverOreTexture(scene) {
+        if (scene.textures.exists('tex_silver_ore')) return;
+        const cw = 120, ch = 120, cx = cw / 2, cy = ch / 2;
+        const g = scene.make.graphics({ x: 0, y: 0, add: false });
+        const cfg = UI_CONFIG.ResourceRenderer.SilverOreMine;
+        const rocks = [
+            { points: [{dx:-25, dy:10}, {dx:0, dy:-28}, {dx:25, dy:10}, {dx:0, dy:20}], x: cx, y: cy, color: this.toNum(cfg.colors[0]) },
+            { points: [{dx:-10, dy:0}, {dx:10, dy:0}, {dx:0, dy:-15}], x: cx - 15, y: cy + 10, color: this.toNum(cfg.colors[1]) }
+        ];
+        rocks.forEach(r => this.drawPolygon(g, r.points, r.x, r.y, r.color, this.toNum(cfg.outlineColor), 1, cfg.outlineWidth));
+        g.generateTexture('tex_silver_ore', cw, ch);
+        g.destroy();
+    }
+
+    static generateMithrilOreTexture(scene) {
+        if (scene.textures.exists('tex_mithril_ore')) return;
+        const cw = 120, ch = 120, cx = cw / 2, cy = ch / 2;
+        const g = scene.make.graphics({ x: 0, y: 0, add: false });
+        const cfg = UI_CONFIG.ResourceRenderer.MithrilOreMine;
+        const crystals = [
+            { points: [{dx:0, dy:-35}, {dx:20, dy:0}, {dx:0, dy:25}, {dx:-20, dy:0}], x: cx, y: cy, color: this.toNum(cfg.colors[0]) },
+            { points: [{dx:0, dy:-15}, {dx:15, dy:0}, {dx:0, dy:15}, {dx:-15, dy:0}], x: cx + 15, y: cy + 15, color: this.toNum(cfg.colors[2]) }
+        ];
+        crystals.forEach(c => this.drawPolygon(g, c.points, c.x, c.y, c.color, this.toNum(cfg.outlineColor), 1, cfg.outlineWidth));
+        g.generateTexture('tex_mithril_ore', cw, ch);
         g.destroy();
     }
 

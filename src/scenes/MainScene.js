@@ -105,6 +105,7 @@ export class MainScene extends Phaser.Scene {
         this.resourcePools = { 
             'tree': [], 'stone': [], 'food': [], 'gold_ore': [], 
             'iron_ore': [], 'coal': [], 'magic_herb': [], 
+            'crystal_ore': [], 'copper_ore': [], 'silver_ore': [], 'mithril_ore': [],
             'wolf_corpse': [], 'bear_corpse': [] 
         };
         // 建立專用群組
@@ -1184,7 +1185,8 @@ export class MainScene extends Phaser.Scene {
         const typeMap = { 
             1: 'tex_tree', 2: 'tex_stone', 3: 'tex_food', 4: 'tex_gold_ore',
             5: 'tex_iron_ore', 6: 'tex_coal', 7: 'tex_magic_herb',
-            8: 'tex_wolf_corpse', 9: 'tex_bear_corpse'
+            8: 'tex_wolf_corpse', 9: 'tex_bear_corpse',
+            10: 'tex_crystal_ore', 11: 'tex_copper_ore', 12: 'tex_silver_ore', 13: 'tex_mithril_ore'
         };
         return typeMap[typeNum] || 'tex_tree';
     }
@@ -1458,7 +1460,8 @@ export class MainScene extends Phaser.Scene {
         const typeMap = { 
             1: 'tree', 2: 'stone', 3: 'food', 4: 'gold_ore', 
             5: 'iron_ore', 6: 'coal', 7: 'magic_herb', 
-            8: 'wolf_corpse', 9: 'bear_corpse' 
+            8: 'wolf_corpse', 9: 'bear_corpse',
+            10: 'crystal_ore', 11: 'copper_ore', 12: 'silver_ore', 13: 'mithril_ore'
         };
         const typeNameMap = { 
             1: 'SCENE_WOOD', 
@@ -1469,7 +1472,11 @@ export class MainScene extends Phaser.Scene {
             6: 'SCENE_COAL',
             7: 'SCENE_MAGIC_HERB',
             8: 'SCENE_WOLF_CORPSE',
-            9: 'SCENE_BEAR_CORPSE'
+            9: 'SCENE_BEAR_CORPSE',
+            10: 'SCENE_CRYSTAL_ORE',
+            11: 'SCENE_COPPER_ORE',
+            12: 'SCENE_SILVER_ORE',
+            13: 'SCENE_MITHRIL_ORE'
         };
 
         // 1. 放置/更新資源
@@ -1747,6 +1754,10 @@ export class MainScene extends Phaser.Scene {
         if (type.includes('iron')) return 'tex_iron_ore';
         if (type.includes('coal')) return 'tex_coal';
         if (type.includes('herb')) return 'tex_magic_herb';
+        if (type.includes('crystal')) return 'tex_crystal_ore';
+        if (type.includes('copper')) return 'tex_copper_ore';
+        if (type.includes('silver')) return 'tex_silver_ore';
+        if (type.includes('mithril')) return 'tex_mithril_ore';
         if (type.includes('wolf')) return 'tex_wolf_corpse';
         if (type.includes('bear')) return 'tex_bear_corpse';
 
@@ -2492,7 +2503,11 @@ export class MainScene extends Phaser.Scene {
                 'coal': 'SCENE_COAL',
                 'magic_herb': 'SCENE_MAGIC_HERB',
                 'wolf_corpse': 'SCENE_WOLF_CORPSE',
-                'bear_corpse': 'SCENE_BEAR_CORPSE'
+                'bear_corpse': 'SCENE_BEAR_CORPSE',
+                'crystal_ore': 'SCENE_CRYSTAL_ORE',
+                'copper_ore': 'SCENE_COPPER_ORE',
+                'silver_ore': 'SCENE_SILVER_ORE',
+                'mithril_ore': 'SCENE_MITHRIL_ORE'
             };
             const typeName = typeNameMap[info.type];
             const resCfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (info.lv || 1));

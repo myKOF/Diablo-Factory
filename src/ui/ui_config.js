@@ -206,52 +206,89 @@ export const UI_CONFIG = {
             outlineWidth: 2
         }
     },
-    // -- 自然資源渲染配置（ResourceRenderer）--------------------
+    // -- 自然資源與實體幾何渲染配置（ResourceRenderer）--------------------
+    // 控制渲染器在生成材質時的多邊形顏色、粗細與隨機變異範圍
     ResourceRenderer: {
         Tree: {
-            trunkColor: "#5d4037",
-            leafColors: ["#1b5e20", "#2e7d32", "#43a047"],
-            outlineColor: "#051b07",
+            trunkColor: "#795548",
+            leafColors: ["#2e7d32", "#388e3c", "#43a047"],
+            outlineColor: "#1b2d00",
             outlineWidth: 2,
-            visualVariation: { minScale: 0.9, maxScale: 1.2, tintRange: 0.5 }
+            visualVariation: { tintRange: 0.2, minScale: 0.8, maxScale: 1.3 }
         },
         Rock: {
-            colors: ["#424242", "#212121", "#616161"],
-            outlineColor: "#000000",
+            colors: ["#757575", "#9e9e9e", "#bdbdbd"],
+            outlineColor: "#212121",
             outlineWidth: 2,
-            visualVariation: { minScale: 0.9, maxScale: 1.2, tintRange: 0.5 }
+            visualVariation: { tintRange: 0.15, minScale: 0.7, maxScale: 1.2 }
         },
         BerryBush: {
-            leafColor: "#ffa000",
-            berryColor: "#d50000",
-            outlineColor: "#dd5f17ec",
+            leafColor: "#2e7d32",
+            berryColor: "#ff5252",
+            outlineColor: "#1b2d00",
             outlineWidth: 2,
-            visualVariation: { minScale: 0.9, maxScale: 1.2, tintRange: 0.3 }
+            visualVariation: { tintRange: 0.1, minScale: 0.9, maxScale: 1.1 }
         },
         GoldOreMine: {
-            colors: ["#ffd700", "#ffa000", "#ffea00"],
-            outlineColor: "#4e342e",
+            colors: ["#ffd740", "#ffc400", "#ffb300"],
+            outlineColor: "#3e2723",
             outlineWidth: 2,
-            visualVariation: { minScale: 0.9, maxScale: 1.2, tintRange: 0.3 }
+            visualVariation: { tintRange: 0.15, minScale: 0.8, maxScale: 1.25 }
         },
         IronMine: {
-            colors: ["#90a4ae", "#78909c", "#546e7a"],
+            colors: ["#78909c", "#90a4ae", "#b0bec5"],
             outlineColor: "#263238",
             outlineWidth: 2,
-            visualVariation: { minScale: 0.9, maxScale: 1.2, tintRange: 0.2 }
+            visualVariation: { tintRange: 0.15, minScale: 0.8, maxScale: 1.2 }
         },
         CoalMine: {
-            colors: ["#424242", "#212121", "#000000"],
+            colors: ["#212121", "#373737", "#424242"],
             outlineColor: "#000000",
             outlineWidth: 2,
-            visualVariation: { minScale: 0.9, maxScale: 1.1, tintRange: 0.1 }
+            visualVariation: { tintRange: 0.1, minScale: 0.8, maxScale: 1.15 }
         },
         RareHerb: {
-            leafColor: "#81c784",
+            leafColor: "#43a047",
             flowerColor: "#e91e63",
             outlineColor: "#1b5e20",
             outlineWidth: 1.5,
-            visualVariation: { minScale: 0.8, maxScale: 1.1, tintRange: 0.4 }
+            visualVariation: { tintRange: 0.2, minScale: 0.7, maxScale: 1.1 }
+        },
+        CrystalOreMine: {
+            colors: ["#b3e5fc", "#81d4fa", "#4fc3f7"],
+            outlineColor: "#01579b",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.2, minScale: 0.8, maxScale: 1.3 }
+        },
+        CopperOreMine: {
+            colors: ["#a1887f", "#8d6e63", "#795548"],
+            outlineColor: "#3e2723",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.15, minScale: 0.8, maxScale: 1.2 }
+        },
+        SilverOreMine: {
+            colors: ["#e0e0e0", "#bdbdbd", "#9e9e9e"],
+            outlineColor: "#424242",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.1, minScale: 0.8, maxScale: 1.2 }
+        },
+        MithrilOreMine: {
+            colors: ["#e0f7fa", "#b2ebf2", "#80deea"],
+            outlineColor: "#006064",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.3, minScale: 0.9, maxScale: 1.4 }
+        },
+        WolfCorpse: {
+            furColor: "#757575",
+            outlineColor: "#212121",
+            outlineWidth: 1.5,
+            visualVariation: { tintRange: 0.1, minScale: 1.0, maxScale: 1.0 }
+        },
+        BearCorpse: {
+            furColor: "#5d4037",
+            outlineColor: "#212121",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.1, minScale: 1.0, maxScale: 1.0 }
         },
         Campfire: {
             groundColor: "#8f4c00d8",
@@ -270,6 +307,7 @@ export const UI_CONFIG = {
             }
         }
     },
+
     // -- 建築施工進度條（BuildingProgressBar）-------------------
     BuildingProgressBar: {
         widthScale: 0.95,
@@ -330,67 +368,6 @@ export const UI_CONFIG = {
         DEFAULT: "#ad9191ff" // 預設籃子顏色
     },
 
-    // -- 大地圖資源幾何渲染參數 (ResourceRenderer) -------------------------
-    // 控制渲染器在生成材質時的多邊形顏色、粗細與隨機變異範圍
-    ResourceRenderer: {
-        Tree: {
-            trunkColor: "#795548",
-            leafColors: ["#2e7d32", "#388e3c", "#43a047"],
-            outlineColor: "#1b2d00",
-            outlineWidth: 2,
-            visualVariation: { tintRange: 0.2, minScale: 0.8, maxScale: 1.3 }
-        },
-        Rock: {
-            colors: ["#757575", "#9e9e9e", "#bdbdbd"],
-            outlineColor: "#212121",
-            outlineWidth: 2,
-            visualVariation: { tintRange: 0.15, minScale: 0.7, maxScale: 1.2 }
-        },
-        BerryBush: {
-            leafColor: "#2e7d32",
-            berryColor: "#ff5252",
-            outlineColor: "#1b2d00",
-            outlineWidth: 2,
-            visualVariation: { tintRange: 0.1, minScale: 0.9, maxScale: 1.1 }
-        },
-        GoldOreMine: {
-            colors: ["#ffd740", "#ffc400", "#ffb300"],
-            outlineColor: "#3e2723",
-            outlineWidth: 2,
-            visualVariation: { tintRange: 0.15, minScale: 0.8, maxScale: 1.25 }
-        },
-        IronMine: {
-            colors: ["#78909c", "#90a4ae", "#b0bec5"],
-            outlineColor: "#263238",
-            outlineWidth: 2,
-            visualVariation: { tintRange: 0.15, minScale: 0.8, maxScale: 1.2 }
-        },
-        CoalMine: {
-            colors: ["#212121", "#373737", "#424242"],
-            outlineColor: "#000000",
-            outlineWidth: 2,
-            visualVariation: { tintRange: 0.1, minScale: 0.8, maxScale: 1.15 }
-        },
-        RareHerb: {
-            leafColor: "#43a047",
-            flowerColor: "#e91e63",
-            outlineColor: "#1b5e20",
-            outlineWidth: 1.5,
-            visualVariation: { tintRange: 0.2, minScale: 0.7, maxScale: 1.1 }
-        },
-        WolfCorpse: {
-            furColor: "#757575",
-            outlineColor: "#212121",
-            outlineWidth: 1.5,
-            visualVariation: { tintRange: 0.1, minScale: 1.0, maxScale: 1.0 }
-        },
-        BearCorpse: {
-            furColor: "#5d4037",
-            outlineColor: "#212121",
-            outlineWidth: 2,
-            visualVariation: { tintRange: 0.1, minScale: 1.0, maxScale: 1.0 }
-        }
-    },
     // -- NPC及敵人 文字標籤顯示 (NPCLabel) ----------------------------------
     NPCLabel: {
         fontSize: "bold 14px Arial",
