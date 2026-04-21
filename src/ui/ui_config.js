@@ -45,10 +45,15 @@ export const UI_CONFIG = {
         fontColor: "#ffca28",  // 資源數字的顏色（金黃色）
         glass: true,           // 啟用毛玻璃質感背景
         labels: {
-            gold: "🪙 黃金：",
+            gold_ore: "🪙 金礦：",
             wood: "🪵 木材：",
             stone: "🪨 石頭：",
-            food: "🍖 食物：",
+            fruit: "🍓 水果：",
+            iron_ore: "⛓️ 鐵礦：",
+            coal: "💎 煤炭：",
+            magic_herb: "🌿 草藥：",
+            wolf_hide: "🐺 狼皮：",
+            bear_pelt: "🐻 熊皮：",
             healthPotion: "🧪 藥水：",
             soulFragment: "👻 靈魂：",
             villagerCount: "👨‍🌾 村民："
@@ -223,11 +228,30 @@ export const UI_CONFIG = {
             outlineWidth: 2,
             visualVariation: { minScale: 0.9, maxScale: 1.2, tintRange: 0.3 }
         },
-        GoldMine: {
+        GoldOreMine: {
             colors: ["#ffd700", "#ffa000", "#ffea00"],
             outlineColor: "#4e342e",
             outlineWidth: 2,
             visualVariation: { minScale: 0.9, maxScale: 1.2, tintRange: 0.3 }
+        },
+        IronMine: {
+            colors: ["#90a4ae", "#78909c", "#546e7a"],
+            outlineColor: "#263238",
+            outlineWidth: 2,
+            visualVariation: { minScale: 0.9, maxScale: 1.2, tintRange: 0.2 }
+        },
+        CoalMine: {
+            colors: ["#424242", "#212121", "#000000"],
+            outlineColor: "#000000",
+            outlineWidth: 2,
+            visualVariation: { minScale: 0.9, maxScale: 1.1, tintRange: 0.1 }
+        },
+        RareHerb: {
+            leafColor: "#81c784",
+            flowerColor: "#e91e63",
+            outlineColor: "#1b5e20",
+            outlineWidth: 1.5,
+            visualVariation: { minScale: 0.8, maxScale: 1.1, tintRange: 0.4 }
         },
         Campfire: {
             groundColor: "#8f4c00d8",
@@ -278,7 +302,13 @@ export const UI_CONFIG = {
         WOOD: "#388e3c",
         STONE: "#757575",
         FOOD: "#fd8763ff",
-        GOLD: "#e4b20dea",
+        FRUIT: "#fd8763ff",
+        GOLD_ORE: "#e4b20dea",
+        IRON_ORE: "#b0bec5",
+        COAL: "#424242",
+        MAGIC_HERB: "#81c784",
+        WOLF_HIDE: "#a1887f",
+        BEAR_PELT: "#5d4037",
         SWORDSMAN: "#b0bec5",
         MAGE: "#9575cd",
         ARCHER: "#81c784",
@@ -290,8 +320,76 @@ export const UI_CONFIG = {
         WOOD: "#1ce026ff",
         STONE: "#acacacff",
         FOOD: "#ff5816ff",
-        GOLD: "#ffe047ff",
+        FRUIT: "#ff5816ff",
+        GOLD_ORE: "#ffe047ff",
+        IRON_ORE: "#90a4aeff",
+        COAL: "#212121ff",
+        MAGIC_HERB: "#b9f6ca",
+        WOLF_HIDE: "#d7ccc8",
+        BEAR_PELT: "#8d6e63",
         DEFAULT: "#ad9191ff" // 預設籃子顏色
+    },
+
+    // -- 大地圖資源幾何渲染參數 (ResourceRenderer) -------------------------
+    // 控制渲染器在生成材質時的多邊形顏色、粗細與隨機變異範圍
+    ResourceRenderer: {
+        Tree: {
+            trunkColor: "#795548",
+            leafColors: ["#2e7d32", "#388e3c", "#43a047"],
+            outlineColor: "#1b2d00",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.2, minScale: 0.8, maxScale: 1.3 }
+        },
+        Rock: {
+            colors: ["#757575", "#9e9e9e", "#bdbdbd"],
+            outlineColor: "#212121",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.15, minScale: 0.7, maxScale: 1.2 }
+        },
+        BerryBush: {
+            leafColor: "#2e7d32",
+            berryColor: "#ff5252",
+            outlineColor: "#1b2d00",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.1, minScale: 0.9, maxScale: 1.1 }
+        },
+        GoldOreMine: {
+            colors: ["#ffd740", "#ffc400", "#ffb300"],
+            outlineColor: "#3e2723",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.15, minScale: 0.8, maxScale: 1.25 }
+        },
+        IronMine: {
+            colors: ["#78909c", "#90a4ae", "#b0bec5"],
+            outlineColor: "#263238",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.15, minScale: 0.8, maxScale: 1.2 }
+        },
+        CoalMine: {
+            colors: ["#212121", "#373737", "#424242"],
+            outlineColor: "#000000",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.1, minScale: 0.8, maxScale: 1.15 }
+        },
+        RareHerb: {
+            leafColor: "#43a047",
+            flowerColor: "#e91e63",
+            outlineColor: "#1b5e20",
+            outlineWidth: 1.5,
+            visualVariation: { tintRange: 0.2, minScale: 0.7, maxScale: 1.1 }
+        },
+        WolfCorpse: {
+            furColor: "#757575",
+            outlineColor: "#212121",
+            outlineWidth: 1.5,
+            visualVariation: { tintRange: 0.1, minScale: 1.0, maxScale: 1.0 }
+        },
+        BearCorpse: {
+            furColor: "#5d4037",
+            outlineColor: "#212121",
+            outlineWidth: 2,
+            visualVariation: { tintRange: 0.1, minScale: 1.0, maxScale: 1.0 }
+        }
     },
     // -- NPC及敵人 文字標籤顯示 (NPCLabel) ----------------------------------
     NPCLabel: {
@@ -313,6 +411,23 @@ export const UI_CONFIG = {
         textureAlpha: 0.75, // 透明度
         textureScale: 0.2, // 尺寸密度 
         textureTint: "#ffffff" //貼圖混色
+    },
+    // -- 倉庫選單 (WarehousePanel) ----------------------------------
+    WarehouseButton: {
+        anchor: "BOTTOM_LEFT",
+        offsetX: 80, offsetY: 80,
+        width: 60, height: 60,
+        fontSize: "30px",
+        bgColor: "#1e1e1e",
+        bgAlpha: 0.8,
+        borderColor: "#fbc02d",
+        icon: "📦"
+    },
+    WarehousePanel: {
+        anchor: "CENTER",
+        width: 600, height: "auto",
+        title: "📦 資源倉庫",
+        glass: true
     },
     // -- 設置選單 (SettingsPanel) ----------------------------------
     SettingsButton: {

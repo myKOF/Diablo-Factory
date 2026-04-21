@@ -13,7 +13,7 @@ export class GameEngine {
     static TILE_SIZE = 20; // 基礎座標單位
 
     static state = {
-        resources: { healthpotion: 0, soul: 100, gold: 100, wood: 200, stone: 0, food: 0, mana: 0 },
+        resources: { fruit: 0, wood: 0, stone: 0, gold_ore: 0, iron_ore: 0, coal: 0, magic_herb: 0, wolf_hide: 0, bear_pelt: 0, gold_ingots: 0, healthpotion: 0, soul: 100, mana: 0 },
         buildings: { village: 1, farmhouse: 0 },
         units: { villagers: [], priest: 0, mage: 0, archmage: 0, swordsman: 0, archer: 0 },
         mapEntities: [],
@@ -25,6 +25,7 @@ export class GameEngine {
         placingType: null,
         previewPos: null,
         buildingMode: 'NONE', // 'NONE', 'DRAG', 'STAMP', 'LINE'
+        buildingSpacing: 1, // [新功能] 建築批量放置間距
         lineStartPos: null,
         linePreviewEntities: [],
         // 生產隊列已移至各城鎮中心實體上 (entity.queue / entity.productionTimer)
@@ -57,7 +58,12 @@ export class GameEngine {
 
 
     static RESOURCE_NAMES = {
-        gold: "黃金",
+        gold_ore: "金礦",
+        iron_ore: "鐵礦",
+        coal: "煤炭",
+        magic_herb: "高級草藥",
+        wolf_hide: "狼皮",
+        bear_pelt: "熊皮",
         wood: "木材",
         stone: "石頭",
         food: "食物",
@@ -79,7 +85,8 @@ export class GameEngine {
             this.loadSystemConfig(),
             this.loadResourceConfig(),
             this.loadBuildingConfig(),
-            this.loadStringsConfig()
+            this.loadStringsConfig(),
+            this.loadIngredientConfig()
         ]).catch(e => console.error(e));
         this.state.pathfinding = new PathfindingSystem();
         this.state.pathfinding.tileSize = this.TILE_SIZE;
@@ -345,7 +352,7 @@ export class GameEngine {
      * 解析 "{food=100,wood=200}" 格式為成本對象 {food: 100, wood: 200, ...}
      */
     static parseResourceCosts(str) {
-        const costs = { food: 0, wood: 0, stone: 0, gold: 0, soul: 0, mana: 0, healthpotion: 0 };
+        const costs = {};
         if (!str || typeof str !== 'string' || !str.includes('=')) return costs;
         const clean = str.replace(/[\{\}"']/g, '').trim();
         const pairs = clean.split(',');
@@ -353,7 +360,7 @@ export class GameEngine {
             const [rk, rv] = p.split('=');
             if (rk && rv) {
                 const key = rk.trim().toLowerCase();
-                const amount = parseInt(rv.trim());
+                const amount = parseFloat(rv.trim());
                 if (!isNaN(amount)) costs[key] = amount;
             }
         });
@@ -375,7 +382,6 @@ export class GameEngine {
                 idxFightingSpeed = hIdx('fighting_speed'),
                 idxIdleSpeed = hIdx('idle_speed'),
                 idxColSpeed = hIdx('collection_speed'),
-                idxColAmt = hIdx('collection_resource'),
                 idxNeed = hIdx('need_resource'),
                 idxLv = hIdx('lv'),
                 idxHp = hIdx('hp'),
@@ -414,7 +420,6 @@ export class GameEngine {
                     combatSpeed: parseFloat(row[idxFightingSpeed]) || 5.5, // 備援欄位：兼容 spawnNPC 的調用
                     idle_speed: parseFloat(row[idxIdleSpeed]) || 2.5,
                     collection_speed: parseFloat(row[idxColSpeed]) || 3,
-                    collection_resource: parseFloat(row[idxColAmt]) || 5,
                     need_resource: row[idxNeed],
                     lv: parseInt(row[idxLv]) || 1,
                     hp: parseInt(row[idxHp]) || 100,
@@ -469,9 +474,7 @@ export class GameEngine {
                     for (let r in this.state.resources) this.state.resources[r] = 0;
                     // 套用初始資源
                     Object.entries(costs).forEach(([rk, rv]) => {
-                        if (this.state.resources.hasOwnProperty(rk)) {
-                            this.state.resources[rk] = rv;
-                        }
+                        this.state.resources[rk] = rv;
                     });
                 } else if (val.includes('*')) {
                     const clean = val.replace(/[\{\}]/g, '');
@@ -495,7 +498,7 @@ export class GameEngine {
     }
 
     static RESOURCE_NAMES = {
-        gold: "黃金", wood: "木材", stone: "石頭", food: "食物",
+        gold_ore: "金礦", gold_ingots: "金錠", wood: "木材", stone: "石頭", fruit: "水果", food: "食物",
         healthpotion: "生命藥水", soul: "靈魂碎片", mana: "法力"
     };
 
@@ -541,7 +544,7 @@ export class GameEngine {
             const { rows, headerIdx, headers } = data;
             const findHIdx = (key) => headers.findIndex(h => h.toLowerCase().trim() === key.toLowerCase());
             const idxName = findHIdx('name'), idxModel = findHIdx('model'), idxType = findHIdx('type');
-            const idxYield = findHIdx('collection_speed'), idxDensity = findHIdx('density');
+            const idxColRes = findHIdx('collection_resource'), idxIngredients = findHIdx('ingredients'), idxDensity = findHIdx('density');
             const idxLv = findHIdx('lv'), idxSize = findHIdx('size'), idxModelSize = findHIdx('model_size'), idxPixelSize = findHIdx('pixel_size');
 
             this.state.resourceConfigs = [];
@@ -582,15 +585,58 @@ export class GameEngine {
                     }
                 }
 
+                let parsedIngredients = {};
+                let totalAmount = 100;
+                if (idxIngredients !== -1 && row[idxIngredients]) {
+                    parsedIngredients = this.parseResourceCosts(row[idxIngredients]);
+                    totalAmount = Object.values(parsedIngredients).reduce((acc, val) => acc + val, 0);
+                }
+
                 this.state.resourceConfigs.push({
                     name: row[idxName].trim(), model: row[idxModel].trim(), type: row[idxType].trim().toUpperCase(),
-                    amount: parseInt(row[idxYield]) || 100, density: parseInt(row[idxDensity]) || 5,
+                    amount: totalAmount, 
+                    ingredients: parsedIngredients,
+                    collection_resource: parseInt(row[idxColRes]) || 5,
+                    density: parseInt(row[idxDensity]) || 5,
                     lv: parseInt(row[idxLv]) || 1, size: (idxSize !== -1 && row[idxSize]) ? row[idxSize].trim() : '{1,1}',
                     model_size: parsedModelSize,
                     pixel_size: pixelSize
                 });
             }
         } catch (e) { }
+    }
+
+    static async loadIngredientConfig() {
+        try {
+            const text = await this.fetchCSVText('config/Ingredients.csv');
+            const data = this.parseCSV(text);
+            if (!data) return;
+            const { rows, headerIdx, headers } = data;
+            const findHIdx = (key) => headers.findIndex(h => h.toLowerCase().trim() === key.toLowerCase());
+            const idxId = findHIdx('id'), idxName = findHIdx('name'), idxIcon = findHIdx('icon');
+            const idxType = findHIdx('type'), idxLv = findHIdx('lv');
+            const idxNeed = findHIdx('need_ingredients'), idxStack = findHIdx('stack');
+
+            this.state.ingredientConfigs = {};
+            for (let i = headerIdx + 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row[idxId] || !row[idxType]) continue;
+                
+                const id = parseInt(row[idxId]);
+                const type = row[idxType].trim();
+                
+                this.state.ingredientConfigs[type] = {
+                    id: id,
+                    name: row[idxName] ? row[idxName].trim() : type,
+                    icon: row[idxIcon] ? row[idxIcon].trim() : '',
+                    type: type,
+                    lv: parseInt(row[idxLv]) || 1,
+                    need_ingredients: this.parseResourceCosts(row[idxNeed] || ''),
+                    stack: parseInt(row[idxStack]) || 1000
+                };
+            }
+            console.log("材料需求表加載成功:", Object.keys(this.state.ingredientConfigs).length);
+        } catch (e) { console.error("加載 Ingredients.csv 失敗:", e); }
     }
 
     static getEntityConfig(type, lv = 1) {
@@ -1204,12 +1250,18 @@ export class GameEngine {
                 const fp = getFootprint(cfg.model);
                 const resCfg = UI_CONFIG.ResourceRenderer;
 
-                // 資源模型映射 (1: Tree, 2: Stone, 3: Food, 4: Gold)
+                // 資源模型映射 (1: Tree, 2: Stone, 3: Food/Fruit, 4: Gold)
                 let typeNum = 0;
-                if (cfg.type === 'WOOD') typeNum = 1;
-                else if (cfg.type === 'STONE') typeNum = 2;
-                else if (cfg.type === 'FOOD') typeNum = 3;
-                else if (cfg.type === 'GOLD') typeNum = 4;
+                const upperType = (cfg.type || "").toUpperCase();
+                if (upperType === 'SCENE_WOOD') typeNum = 1;
+                else if (upperType === 'SCENE_STONE') typeNum = 2;
+                else if (upperType === 'SCENE_FRUIT') typeNum = 3;
+                else if (upperType === 'SCENE_GOLD_ORE' || upperType === 'SCENE_GOLD') typeNum = 4;
+                else if (upperType === 'SCENE_IRON_ORE') typeNum = 5;
+                else if (upperType === 'SCENE_COAL') typeNum = 6;
+                else if (upperType === 'SCENE_MAGIC_HERB') typeNum = 7;
+                else if (upperType === 'SCENE_WOLF_CORPSE') typeNum = 8;
+                else if (upperType === 'SCENE_BEAR_CORPSE') typeNum = 9;
 
                 for (let i = 0; i < pool.length && count < cfg.density; i++) {
                     const { gx, gy } = pool[i];
@@ -1229,9 +1281,16 @@ export class GameEngine {
                     let vTint = 0xffffff;
                     let vScale = 100; // 1.0 進位縮放 (用 8bit 存)
                     let varCfg = null;
-                    if (cfg.type === 'WOOD') varCfg = resCfg.Tree.visualVariation;
-                    else if (cfg.type === 'STONE') varCfg = resCfg.Rock.visualVariation;
-                    else if (cfg.type === 'FOOD') varCfg = resCfg.BerryBush.visualVariation;
+                    const uType = (cfg.type || "").toUpperCase();
+                    if (uType === 'SCENE_WOOD') varCfg = resCfg.Tree.visualVariation;
+                    else if (uType === 'SCENE_STONE') varCfg = resCfg.Rock.visualVariation;
+                    else if (uType === 'SCENE_FRUIT') varCfg = resCfg.BerryBush.visualVariation;
+                    else if (uType === 'SCENE_GOLD_ORE' || uType === 'SCENE_GOLD') varCfg = resCfg.GoldOreMine.visualVariation;
+                    else if (uType === 'SCENE_IRON_ORE') varCfg = resCfg.IronMine.visualVariation;
+                    else if (uType === 'SCENE_COAL') varCfg = resCfg.CoalMine.visualVariation;
+                    else if (uType === 'SCENE_MAGIC_HERB') varCfg = resCfg.RareHerb.visualVariation;
+                    else if (uType === 'SCENE_WOLF_CORPSE') varCfg = resCfg.WolfCorpse.visualVariation;
+                    else if (uType === 'SCENE_BEAR_CORPSE') varCfg = resCfg.BearCorpse.visualVariation;
 
                     if (varCfg) {
                         const brightness = 1.0 - (Math.random() * varCfg.tintRange);
@@ -1378,7 +1437,17 @@ export class GameEngine {
 
         // 2. 注入資源碰撞 (MapDataSystem)
         if (this.state.mapData) {
-            const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+            const typeMap = { 
+                1: 'SCENE_WOOD', 
+                2: 'SCENE_STONE', 
+                3: 'SCENE_FRUIT', 
+                4: 'SCENE_GOLD_ORE',
+                5: 'SCENE_IRON_ORE',
+                6: 'SCENE_COAL',
+                7: 'SCENE_MAGIC_HERB',
+                8: 'SCENE_WOLF_CORPSE',
+                9: 'SCENE_BEAR_CORPSE'
+            };
             for (let i = 0; i < this.state.mapData.totalTiles; i++) {
                 const typeNum = this.state.mapData.typeGrid[i];
                 if (typeNum !== 0) {
@@ -1537,6 +1606,7 @@ export class GameEngine {
 
         switch (v.state) {
             case 'IDLE':
+                if (v.vTint !== 0xffffff) v.vTint = 0xffffff;
                 if (v.idleTarget) {
                     this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt, ignoreEnts);
                     // 抵達目標判定 (放寬至 10px 以涵蓋偏移誤差)
@@ -1642,9 +1712,15 @@ export class GameEngine {
                         }
                         this.moveDetailed(v, v.gatherPoint.x, v.gatherPoint.y, moveSpeed, dt, ignoreEnts);
                     }
-                } else { v.state = 'IDLE'; v.pathTarget = null; v.gatherPoint = null; v.workOffset = null; }
+                } else { v.state = 'IDLE'; v.pathTarget = null; v.gatherPoint = null; v.workOffset = null; v.vTint = 0xffffff; }
                 break;
             case 'GATHERING':
+                // 採集時根據資源類型變色
+                const gatherCol = (v.cargoType === 'fruit' || v.type === 'FOOD') ? 0xff80ab : 
+                                 (v.cargoType === 'wood' || v.type === 'WOOD') ? 0x8d6e63 :
+                                 (v.cargoType === 'stone' || v.type === 'STONE') ? 0x9e9e9e :
+                                 (v.cargoType === 'gold_ore' || v.type === 'GOLD') ? 0xffd54f : 0xffffff;
+                v.vTint = gatherCol;
                 v.gatherTimer += dt;
                 const harvestTime = v.config.collection_speed || 2; // 採集時間 (秒)
 
@@ -1657,14 +1733,74 @@ export class GameEngine {
                 }
 
                 if (v.gatherTimer >= harvestTime) {
-                    const harvestTotal = v.config.collection_resource || 20; // 每次採集的數量 (修正欄位名)
+                    let harvestTotal = 5; // 預設值
+                    if (v.targetId.gx !== undefined && v.targetId.gy !== undefined) {
+                        const res = this.state.mapData.getResource(v.targetId.gx, v.targetId.gy);
+                        if (res) {
+                            const typeMap = { 
+                1: 'SCENE_WOOD', 
+                2: 'SCENE_STONE', 
+                3: 'SCENE_FRUIT', 
+                4: 'SCENE_GOLD_ORE',
+                5: 'SCENE_IRON_ORE',
+                6: 'SCENE_COAL',
+                7: 'SCENE_MAGIC_HERB',
+                8: 'SCENE_WOLF_CORPSE',
+                9: 'SCENE_BEAR_CORPSE'
+            };
+                            const typeName = typeMap[res.type];
+                            const cfg = this.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
+                            if (cfg && cfg.collection_resource) harvestTotal = cfg.collection_resource;
+                        }
+                    } else {
+                        let targetEnt = (typeof v.targetId === 'string') ? 
+                            this.state.mapEntities.find(e => e.id === v.targetId) : 
+                            (this.state.mapEntities.includes(v.targetId) ? v.targetId : null);
+                        if (targetEnt) {
+                            const cfg = GameEngine.getEntityConfig(targetEnt.type, targetEnt.lv || 1);
+                            if (cfg && cfg.collection_resource) {
+                                harvestTotal = cfg.collection_resource;
+                            }
+                        }
+                    }
 
                     // 區分是「區塊型資源 (MapData)」還是「實體型資源 (如農田)」
                     if (v.targetId.gx !== undefined && v.targetId.gy !== undefined) {
                         // 1. 區塊型資源採集 (MapDataSystem)
                         const consumed = this.state.mapData.consumeResource(v.targetId.gx, v.targetId.gy, harvestTotal);
                         v.cargo = consumed;
-                        v.cargoType = v.type || 'food'; // [防護修正] 確保 cargoType 絕對有弦字串值，防止 toLowerCase 出錯
+                        
+                        // 動態決定採集到的材料種類 (Ingredient)
+                        let targetCargoType = v.type || 'food';
+                        const res = this.state.mapData.getResource(v.targetId.gx, v.targetId.gy);
+                        // res.type 如果是舊版的還會殘留，這裏我們抓取 config
+                        const typeMap = { 
+                1: 'SCENE_WOOD', 
+                2: 'SCENE_STONE', 
+                3: 'SCENE_FRUIT', 
+                4: 'SCENE_GOLD_ORE',
+                5: 'SCENE_IRON_ORE',
+                6: 'SCENE_COAL',
+                7: 'SCENE_MAGIC_HERB',
+                8: 'SCENE_WOLF_CORPSE',
+                9: 'SCENE_BEAR_CORPSE'
+            };
+                        // 這個 resource 的原始 mapping 對應
+                        // 如果資源已被採光，res 可能是 null，但目標原本有 type
+                        if (v.targetId.gx !== undefined) {
+                            // 使用目標先前的記憶或剛才取得的
+                            const tType = res ? res.type : v.targetId._lastResType;
+                            v.targetId._lastResType = tType;
+                            if (tType) {
+                                const typeName = typeMap[tType];
+                                const cfg = this.state.resourceConfigs.find(c => c.type === typeName);
+                                if (cfg && cfg.ingredients && Object.keys(cfg.ingredients).length > 0) {
+                                    targetCargoType = Object.keys(cfg.ingredients)[0];
+                                }
+                            }
+                        }
+                        v.cargoType = targetCargoType;
+
                         this.state.renderVersion++; // [核心修復] 通知渲染層數據已變動，強行刷新標籤與資源狀態
 
                         if (consumed <= 0) {
@@ -1672,8 +1808,10 @@ export class GameEngine {
                             v.targetId = null;
                             v.gatherPoint = null;
                             v.state = 'MOVING_TO_RESOURCE';
+                            v.vTint = 0xffffff;
                         } else {
                             v.state = 'MOVING_TO_BASE';
+                            // 保持變色，直到放回基地
                         }
                         v.pathTarget = null;
                         v.gatherTimer = 0;
@@ -1805,6 +1943,7 @@ export class GameEngine {
                     this.depositResource(v.cargoType || v.type, v.cargo);
                     v.cargo = 0; v.cargoType = null; v.pathTarget = null;
                     v.depositPoint = null; v._lastBaseId = null; // 重置狀態
+                    v.vTint = 0xffffff; // 繳庫後恢復原色
                     if (v.nextStateAfterDeposit) {
                         v.state = v.nextStateAfterDeposit;
                         v.nextStateAfterDeposit = null;
@@ -2141,6 +2280,8 @@ export class GameEngine {
         const startGx = Math.floor(x / grid.cellSize);
         const startGy = Math.floor(y / grid.cellSize);
 
+        const depositTypes = ['village', 'town_center', 'barn', 'timber_factory', 'stone_factory', 'gold_mining_factory'];
+
         let nearest = null;
         let minDist = Infinity;
 
@@ -2154,7 +2295,7 @@ export class GameEngine {
                     if (cell) {
                         cell.forEach(e => {
                             if (e.isUnderConstruction) return;
-                            if (e.type === 'village') {
+                            if (depositTypes.includes(e.type)) {
                                 const d = Math.hypot(e.x - x, e.y - y);
                                 if (d < minDist) { minDist = d; nearest = e; }
                             }
@@ -2167,7 +2308,7 @@ export class GameEngine {
 
         // 如果附近沒找到，回退到全量搜尋防止 Bug
         this.state.mapEntities.forEach(e => {
-            if (e.isUnderConstruction || e.type !== 'village') return;
+            if (e.isUnderConstruction || !depositTypes.includes(e.type)) return;
             const d = Math.hypot(e.x - x, e.y - y);
             if (d < minDist) { minDist = d; nearest = e; }
         });
@@ -2417,7 +2558,17 @@ export class GameEngine {
             const TS = this.TILE_SIZE;
             const searchGx = Math.floor(x / TS);
             const searchGy = Math.floor(y / TS);
-            const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+            const typeMap = { 
+                1: 'SCENE_WOOD', 
+                2: 'SCENE_STONE', 
+                3: 'SCENE_FRUIT', 
+                4: 'SCENE_GOLD_ORE',
+                5: 'SCENE_IRON_ORE',
+                6: 'SCENE_COAL',
+                7: 'SCENE_MAGIC_HERB',
+                8: 'SCENE_WOLF_CORPSE',
+                9: 'SCENE_BEAR_CORPSE'
+            };
 
             // 搜尋週邊格子，判斷物理尺寸 (pixel_size) 是否碰撞
             for (let dy = -1; dy <= 1; dy++) {
@@ -2488,7 +2639,17 @@ export class GameEngine {
             const startGY = Math.floor((y - h / 2 + 5) / TS);
             const endGY = Math.floor((y + h / 2 - 5) / TS);
 
-            const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+            const typeMap = { 
+                1: 'SCENE_WOOD', 
+                2: 'SCENE_STONE', 
+                3: 'SCENE_FRUIT', 
+                4: 'SCENE_GOLD_ORE',
+                5: 'SCENE_IRON_ORE',
+                6: 'SCENE_COAL',
+                7: 'SCENE_MAGIC_HERB',
+                8: 'SCENE_WOLF_CORPSE',
+                9: 'SCENE_BEAR_CORPSE'
+            };
             for (let gy = startGY; gy <= endGY; gy++) {
                 for (let gx = startGX; gx <= endGX; gx++) {
                     const res = this.state.mapData.getResource(gx, gy);
@@ -2501,6 +2662,7 @@ export class GameEngine {
                             const rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
                             const rw = rcfg.pixel_size.w, rh = rcfg.pixel_size.h;
                             if (Math.abs(x - rx) < (w + rw) / 2 - 5 && Math.abs(y - ry) < (h + rh) / 2 - 5) {
+
                                 return false;
                             }
                         } else {
@@ -2521,10 +2683,15 @@ export class GameEngine {
         // 轉換類型名稱為數字 (1: WOOD, 2: STONE, 3: FOOD, 4: GOLD)
         let targetType = 0;
         const upper = typeOrName.toUpperCase();
-        if (upper === 'WOOD') targetType = 1;
-        else if (upper === 'STONE') targetType = 2;
-        else if (upper === 'FOOD') targetType = 3;
-        else if (upper === 'GOLD') targetType = 4;
+        if (upper === 'WOOD' || upper === 'SCENE_WOOD') targetType = 1;
+        else if (upper === 'STONE' || upper === 'SCENE_STONE') targetType = 2;
+        else if (upper === 'FOOD' || upper === 'FRUIT' || upper === 'SCENE_FRUIT') targetType = 3;
+        else if (upper === 'GOLD' || upper === 'GOLD_ORE' || upper === 'SCENE_GOLD_ORE') targetType = 4;
+        else if (upper === 'IRON' || upper === 'IRON_ORE' || upper === 'SCENE_IRON_ORE') targetType = 5;
+        else if (upper === 'COAL' || upper === 'SCENE_COAL') targetType = 6;
+        else if (upper === 'MAGIC_HERB' || upper === 'SCENE_MAGIC_HERB') targetType = 7;
+        else if (upper === 'WOLF' || upper === 'SCENE_WOLF_CORPSE') targetType = 8;
+        else if (upper === 'BEAR' || upper === 'SCENE_BEAR_CORPSE') targetType = 9;
 
         if (targetType === 0) return null;
 
@@ -2698,8 +2865,15 @@ export class GameEngine {
         if (amount <= 0) return; // [防護] 防止 0 量存款導致的日誌洪流
         if (typeof type !== 'string') type = 'food'; // [極端防護] 避免 null 或 undefined 造成的 toLowerCase 崩潰
         const resKey = type.toLowerCase();
-        if (this.state.resources.hasOwnProperty(resKey)) this.state.resources[resKey] += amount;
-        else if (resKey === 'food') this.state.resources.food += amount;
+        
+        if (this.state.resources.hasOwnProperty(resKey)) {
+            this.state.resources[resKey] += amount;
+        } else if (resKey === 'food') {
+            this.state.resources.food += amount;
+        } else {
+            // 自動納入新種類材料
+            this.state.resources[resKey] = (this.state.resources[resKey] || 0) + amount;
+        }
         this.addLog(`[資源繳庫] 工人存入了 ${amount} 單位的 ${type.toUpperCase()}`, 'TASK');
     }
 
@@ -3083,13 +3257,15 @@ export class GameEngine {
         const match = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
         const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
 
+        const spacing = this.state.buildingSpacing !== undefined ? this.state.buildingSpacing : 1;
+
         // 為了讓拉排更直覺，我們強迫它沿著主軸線排列
         const dx = endX - startX, dy = endY - startY;
         const positions = [];
 
         if (Math.abs(dx) > Math.abs(dy)) {
             // 水平排列
-            const step = uw * TS;
+            const step = (uw + spacing) * TS;
             const count = Math.floor(Math.abs(dx) / step) + 1;
             const dir = dx > 0 ? 1 : -1;
             for (let i = 0; i < count; i++) {
@@ -3097,7 +3273,7 @@ export class GameEngine {
             }
         } else {
             // 垂直排列
-            const step = uh * TS;
+            const step = (uh + spacing) * TS;
             const count = Math.floor(Math.abs(dy) / step) + 1;
             const dir = dy > 0 ? 1 : -1;
             for (let i = 0; i < count; i++) {

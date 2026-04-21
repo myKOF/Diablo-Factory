@@ -224,7 +224,7 @@ export class InputSystem {
                     x: gx * TS + TS / 2, 
                     y: gy * TS + TS / 2, 
                     type: 'RESOURCE_NODE',
-                    resourceType: ['NONE', 'WOOD', 'STONE', 'FOOD', 'GOLD'][res.type]
+                    resourceType: ['NONE', 'SCENE_WOOD', 'SCENE_STONE', 'SCENE_FRUIT', 'SCENE_GOLD_ORE', 'SCENE_IRON_ORE', 'SCENE_COAL', 'SCENE_MAGIC_HERB', 'SCENE_WOLF_CORPSE', 'SCENE_BEAR_CORPSE'][res.type]
                 };
                 targetType = 'RESOURCE';
             }
@@ -329,7 +329,17 @@ export class InputSystem {
                     const gx = searchGx + dx, gy = searchGy + dy;
                     const res = GameEngine.state.mapData.getResource(gx, gy);
                     if (!res) continue;
-                    const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+                    const typeMap = { 
+                        1: 'SCENE_WOOD', 
+                        2: 'SCENE_STONE', 
+                        3: 'SCENE_FRUIT', 
+                        4: 'SCENE_GOLD_ORE',
+                        5: 'SCENE_IRON_ORE',
+                        6: 'SCENE_COAL',
+                        7: 'SCENE_MAGIC_HERB',
+                        8: 'SCENE_WOLF_CORPSE',
+                        9: 'SCENE_BEAR_CORPSE'
+                    };
                     const typeName = typeMap[res.type];
                     const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
                     if (!cfg) continue;

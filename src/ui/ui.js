@@ -63,6 +63,29 @@ export class UIManager {
         });
         window.addEventListener("keydown", (e) => {
             if (e.key === "Escape") this.cancelBuildingMode();
+            if (e.key === "Tab") {
+                const state = GameEngine.state;
+                if (state.placingType && (state.buildingMode === 'DRAG' || state.buildingMode === 'LINE' || state.buildingMode === 'STAMP')) {
+                    e.preventDefault(); // 防止焦點切換
+                    
+                    if (state.buildingSpacing === undefined) state.buildingSpacing = 1;
+                    state.buildingSpacing++;
+                    if (state.buildingSpacing > 5) state.buildingSpacing = 0;
+                    
+                    // 如果正在拉線，即時更新預覽
+                    if (state.buildingMode === 'LINE' && state.lineStartPos && state.previewPos) {
+                        state.linePreviewEntities = GameEngine.getLinePositions(
+                            state.placingType, 
+                            state.lineStartPos.x, 
+                            state.lineStartPos.y, 
+                            state.previewPos.x, 
+                            state.previewPos.y
+                        );
+                    }
+                    
+                    GameEngine.addLog(`建築間距已切換為：${state.buildingSpacing} 格`, 'SYSTEM');
+                }
+            }
         });
         window.addEventListener("contextmenu", (e) => {
             // [核心修復] 無條件封鎖原生右鍵選單，防止它在一般地面右鍵（移動指令）時彈出並打斷事件流
@@ -373,6 +396,43 @@ export class UIManager {
         setPanel.style.pointerEvents = "auto";
         this.applyAnchorStyle(setPanel, UI_CONFIG.SettingsPanel);
         this.uiLayer.appendChild(setPanel);
+
+        // 5.5 倉庫按鈕與面板
+        const warehouseBtnCfg = UI_CONFIG.WarehouseButton;
+        if (warehouseBtnCfg) {
+            const warehouseBtn = document.createElement("div");
+            warehouseBtn.id = "warehouse_btn";
+            warehouseBtn.className = "panel glass-panel";
+            this.applyAnchorStyle(warehouseBtn, warehouseBtnCfg);
+            warehouseBtn.style.textAlign = "center";
+            warehouseBtn.style.lineHeight = `${warehouseBtnCfg.height}px`;
+            warehouseBtn.style.fontSize = warehouseBtnCfg.fontSize;
+            warehouseBtn.style.background = this.hexToRgba(warehouseBtnCfg.bgColor, warehouseBtnCfg.bgAlpha);
+            warehouseBtn.style.cursor = "pointer";
+            warehouseBtn.style.pointerEvents = "auto";
+            warehouseBtn.style.display = "flex";
+            warehouseBtn.style.alignItems = "center";
+            warehouseBtn.style.justifyContent = "center";
+            warehouseBtn.innerHTML = warehouseBtnCfg.icon || "📦";
+            warehouseBtn.onclick = (e) => {
+                e.stopPropagation();
+                this.toggleWarehousePanel();
+            };
+            this.uiLayer.appendChild(warehouseBtn);
+        }
+
+        const warehousePanelCfg = UI_CONFIG.WarehousePanel;
+        if (warehousePanelCfg) {
+            const warehousePanel = document.createElement("div");
+            warehousePanel.id = "warehouse_panel";
+            warehousePanel.className = "panel glass-panel";
+            warehousePanel.style.display = "none";
+            warehousePanel.style.zIndex = "1001";
+            warehousePanel.style.pointerEvents = "auto";
+            this.applyAnchorStyle(warehousePanel, warehousePanelCfg);
+            this.uiLayer.appendChild(warehousePanel);
+        }
+
 
         // 6. 座標顯示
         const coordsCfg = UI_CONFIG.CoordsDisplay;
@@ -900,7 +960,13 @@ export class UIManager {
         // 核心邏輯：明確區分「本身指令選單」與「他者 UI/地面」
         const menuEl = document.getElementById("context_menu");
         const distBtnEl = document.getElementById("destroy_btn");
-        const isSelfUI = (menuEl && menuEl.contains(e.target)) || (distBtnEl && distBtnEl.contains(e.target));
+        const warehousePanelEl = document.getElementById("warehouse_panel");
+        const warehouseBtnEl = document.getElementById("warehouse_btn");
+        const isSelfUI = (menuEl && menuEl.contains(e.target)) || 
+                         (distBtnEl && distBtnEl.contains(e.target)) ||
+                         (warehousePanelEl && warehousePanelEl.contains(e.target)) ||
+                         (warehouseBtnEl && warehouseBtnEl.contains(e.target));
+
 
         if (!isSelfUI) {
             this.hideContextMenu();
@@ -908,9 +974,12 @@ export class UIManager {
 
         // 點擊 UI 區域後的額外處理
         if (e.target.closest("#ui_layer")) {
-            if (!e.target.closest("#settings_btn") && !e.target.closest("#settings_panel")) {
+            if (!e.target.closest("#settings_btn") && !e.target.closest("#settings_panel") &&
+                !e.target.closest("#warehouse_btn") && !e.target.closest("#warehouse_panel")) {
                 this.hideSettingsPanel();
+                this.hideWarehousePanel();
             }
+
             // 如果點到的是具體的 UI 標籤或按鈕 (而非背景層)，則中止後續地圖交互邏輯
             if (e.target.id !== "ui_layer") return;
         }
@@ -1374,12 +1443,154 @@ export class UIManager {
         if (settings) settings.style.display = "none";
     }
 
+    static toggleWarehousePanel() {
+        const panel = document.getElementById("warehouse_panel");
+        if (!panel) return;
+
+        if (panel.style.display === "none") {
+            this.hideContextMenu(); // 先關閉其它選單
+            this.hideSettingsPanel();
+            this.renderWarehousePanel();
+            panel.style.display = "flex";
+            panel.style.flexDirection = "column";
+        } else {
+            panel.style.display = "none";
+        }
+    }
+
+    // 倉庫系統狀態緩存
+    static warehouseFilterValue = 1; // 1: 材料(Lv1), 2: 資源(Lv2+)
+    static warehouseSortById = false;
+
+    static setWarehouseFilter(lv) {
+        this.warehouseFilterValue = lv;
+        this.renderWarehousePanel();
+    }
+
+    static sortWarehouse() {
+        this.warehouseSortById = !this.warehouseSortById; // 切換排序狀態
+        this.renderWarehousePanel();
+    }
+
+    static renderWarehousePanel() {
+        const panel = document.getElementById("warehouse_panel");
+        const cfg = UI_CONFIG.WarehousePanel;
+
+        // 右上角關閉按鈕
+        let html = `
+            <div onclick="event.stopPropagation(); window.UIManager.toggleWarehousePanel()" 
+                 style="position: absolute; top: 15px; right: 20px; width: 30px; height: 30px; 
+                        display: flex; align-items: center; justify-content: center; 
+                        cursor: pointer; color: #fbc02d; font-size: 28px; transition: all 0.2s; z-index: 10;"
+                 onmouseover="this.style.transform='scale(1.2)'; this.style.color='#fff'" 
+                 onmouseout="this.style.transform='scale(1)'; this.style.color='#fbc02d'">
+                ×
+            </div>
+        `;
+
+        html += `<div class="title" style="text-align:center; font-size: 20px; border-bottom: 2px solid #8b6e4b; margin-bottom: 10px; padding-bottom: 10px; color: ${cfg.titleColor || '#fbc02d'};">${cfg.title}</div>`;
+
+        // 頁籤過濾區
+        const isLv1 = this.warehouseFilterValue === 1;
+        const colorLv1 = isLv1 ? '#fff' : '#aaa';
+        const bgLv1 = isLv1 ? '#3a2b16' : '#221a10';
+        
+        const isLv2 = this.warehouseFilterValue === 2;
+        const colorLv2 = isLv2 ? '#fff' : '#aaa';
+        const bgLv2 = isLv2 ? '#3a2b16' : '#221a10';
+
+        html += `
+            <div style="display:flex; justify-content:space-between; margin-bottom: 15px; gap: 10px;">
+                <div style="display:flex; gap: 10px;">
+                    <button onclick="window.UIManager.setWarehouseFilter(1); event.stopPropagation();" 
+                            style="padding: 5px 15px; border: 1px solid #8b6e4b; border-radius: 4px; background: ${bgLv1}; color: ${colorLv1}; cursor: pointer; transition: 0.2s; box-shadow: ${isLv1 ? 'inset 0 0 5px rgba(251,192,45,0.5)' : 'none'};">
+                        材料
+                    </button>
+                    <button onclick="window.UIManager.setWarehouseFilter(2); event.stopPropagation();" 
+                            style="padding: 5px 15px; border: 1px solid #8b6e4b; border-radius: 4px; background: ${bgLv2}; color: ${colorLv2}; cursor: pointer; transition: 0.2s; box-shadow: ${isLv2 ? 'inset 0 0 5px rgba(251,192,45,0.5)' : 'none'};">
+                        資源
+                    </button>
+                </div>
+                <button onclick="window.UIManager.sortWarehouse(); event.stopPropagation();" 
+                        style="padding: 5px 10px; border: 1px solid #6b5232; border-radius: 4px; background: ${this.warehouseSortById ? '#3a2b16' : '#221a10'}; color: #ddd; cursor: pointer; transition: 0.2s;" title="ID排序">
+                    ${this.warehouseSortById ? '↑' : '↓'}
+                </button>
+            </div>
+        `;
+
+        html += `<div style="display:flex; flex-wrap: wrap; gap:8px; padding: 15px; color: #e0e0e0; min-height: 200px; align-content: flex-start; justify-content: flex-start; background: rgba(0,0,0,0.3); border-radius: 8px; overflow-y: auto; max-height: 45vh;">`;
+
+        const ingredientIcons = {
+            wood: "🪵", stone: "🪨", gold: "💰", gold_ore: "🟡", food: "🍖", fruit: "🍎",
+            wolf_meat: "🥩", bear_meat: "🍗", wheat: "🌾", rice: "🍚",
+            crystal_ore: "💎", copper_ore: "🟫", iron_ore: "🔩", silver_ore: "⚪",
+            mithril_ore: "💠", "Wooden planks": "🪵", slate_slabs: "🧱", glass: "🥛",
+            crystal_ball: "🔮", copper_ingots: "🟧", copper_plates: "🛡️", iron_ingots: "⬛",
+            iron_plates: "⛓️", steel: "🧱", silver_ingots: "🥈", gold_ingots: "🥇", mithril_ingots: "🎖️"
+        };
+
+        const configs = { ...GameEngine.state.ingredientConfigs };
+        // 確保 wood, stone, gold 有配置資料以供顯示
+        ['wood', 'stone', 'gold'].forEach(resType => {
+            if (!configs[resType]) {
+                const baseId = resType === 'wood'? 6 : (resType==='stone'? 7 : (resType === 'gold' ? 12 : 999));
+                configs[resType] = { id: baseId, name: GameEngine.RESOURCE_NAMES[resType] || resType, icon: resType, type: resType, stack: 5000, lv: 1 };
+            }
+        });
+
+        let itemsForTab = Object.values(configs).filter(c => {
+            const amount = GameEngine.state.resources[c.type] || 0;
+            // 僅顯示有庫存的項目
+            if (amount <= 0) return false;
+
+            // 材料(Ingredients)為 Lv1，資源(Resources)為 Lv2+
+            return this.warehouseFilterValue === 2 ? c.lv >= 2 : c.lv === 1;
+        });
+
+        if (this.warehouseSortById) {
+            itemsForTab.sort((a, b) => a.id - b.id);
+        }
+
+        if (itemsForTab.length === 0) {
+            html += `<div style="width:100%; text-align:center; padding: 40px; color: #666; font-size: 14px;">此分類目前無任何物品</div>`;
+        } else {
+            itemsForTab.forEach(item => {
+                const amount = GameEngine.state.resources[item.type] || 0;
+                const isFull = amount >= item.stack;
+                const amtColor = isFull ? '#ff5252' : '#fff';
+                const displayIcon = ingredientIcons[item.type] || ingredientIcons[item.icon] || "📦";
+
+                // 緊湊的卡片：10宮格
+                html += `
+                    <div style="position: relative; width: calc(10% - 8px); aspect-ratio: 1; min-width: 44px; background: rgba(255,255,255,0.05); border: 1px solid rgba(139,110,75,0.5); border-radius: 4px; display:flex; justify-content:center; align-items:center; overflow: hidden; cursor: help;" title="${item.name} (ID:${item.id})\n數量: ${amount} / ${item.stack}">
+                        <div style="font-size: 24px; pointer-events: none;">${displayIcon}</div>
+                        <div style="position: absolute; bottom: 1px; right: 2px; font-size: 10px; font-family: monospace; color: ${amtColor}; font-weight: bold; text-shadow: 1px 1px 1px #000; pointer-events: none;">
+                            ${amount >= 1000 ? (amount/1000).toFixed(1)+'k' : amount}
+                        </div>
+                    </div>
+                `;
+            });
+        }
+        
+        html += `</div>`; // end grid
+
+        panel.innerHTML = html;
+    }
+
+    static hideWarehousePanel() {
+        const panel = document.getElementById("warehouse_panel");
+        if (panel) panel.style.display = "none";
+    }
+
     static hideContextMenu() {
         this.activeMenuEntity = null;
         const menu = document.getElementById("context_menu");
         if (menu) menu.style.display = "none";
         const destroyBtn = document.getElementById("destroy_btn");
         if (destroyBtn) destroyBtn.style.display = "none";
+
+        this.hideWarehousePanel(); // 關閉右鍵選單時順便把倉庫也關閉
+
 
         // 注意：這裡不再自動隱藏 settings_panel，避免 toggle 時發生衝突
     }
@@ -1414,13 +1625,13 @@ export class UIManager {
             const popCount = GameEngine.getCurrentPopulation();
             const maxPop = GameEngine.getMaxPopulation();
 
-            const stateStr = `${res.gold}|${res.wood}|${res.stone}|${res.food}|${popCount}|${maxPop}`;
+            const stateStr = `${res.gold_ore || 0}|${res.wood || 0}|${res.stone || 0}|${res.fruit || 0}|${popCount}|${maxPop}`;
             if (this.lastUIState.resources !== stateStr) {
                 rb.innerHTML = `
-                    <span>${labels.gold} ${res.gold}</span>
-                    <span>${labels.wood} ${res.wood}</span>
-                    <span>${labels.stone} ${res.stone}</span>
-                    <span>${labels.food} ${res.food}</span>
+                    <span>${labels.gold_ore} ${res.gold_ore || 0}</span>
+                    <span>${labels.wood} ${res.wood || 0}</span>
+                    <span>${labels.stone} ${res.stone || 0}</span>
+                    <span>${labels.fruit} ${res.fruit || 0}</span>
                     <span title="人口上限" style="${popCount >= maxPop ? 'color: #ff5252' : ''}">👥 ${popCount} / ${maxPop}</span>
                 `;
                 this.lastUIState.resources = stateStr;

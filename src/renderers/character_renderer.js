@@ -253,12 +253,13 @@ export class CharacterRenderer {
 
     static renderBody(ctx, x, y, data) {
         const colors = UI_CONFIG.VillagerColors;
-        const parseColor = (c) => {
-            if (!c) return 0x1e88e5;
-            // 重要：配置檔使用 #RRGGBBAA，若是 8 位則截斷 AA 部分，避免 32bit 位移出錯
+        const parseColor = (c, defaultColor = 0x1e88e5) => {
+            if (!c) return defaultColor;
+            // 處理 #RRGGBBAA 或 #RRGGBB 格式
             const cleaned = c.replace('#', '0x');
+            // 若為 10 位數 (0xRRGGBBAA)，截斷最後兩位 Alpha 值以符合 24-bit 顏色
             const val = parseInt(cleaned.length > 8 ? cleaned.substring(0, 8) : cleaned);
-            return isNaN(val) ? 0x1e88e5 : val;
+            return isNaN(val) ? defaultColor : val;
         };
 
         let clothColor = parseColor(colors.DEFAULT);
@@ -275,17 +276,24 @@ export class CharacterRenderer {
             // 普通單位依據工作狀態配色
             const state = data.state;
             const resType = (data.type || "").toUpperCase();
-            if (state === 'IDLE') {
+            if (data.vTint !== undefined && data.vTint !== 0xffffff) {
+                clothColor = data.vTint;
+            } else if (state === 'IDLE') {
                 clothColor = parseColor(colors.IDLE);
             } else if (state === 'CONSTRUCTING' || state === 'MOVING_TO_CONSTRUCTION') {
                 clothColor = parseColor(colors.CONSTRUCTING);
             } else if (state === 'ATTACK' || state === 'CHASE' || state === 'MOVE') {
                 clothColor = parseColor(colors.DEFAULT);
             } else {
-                if (resType === 'WOOD') clothColor = parseColor(colors.WOOD);
-                else if (resType === 'STONE') clothColor = parseColor(colors.STONE);
-                else if (resType === 'FOOD') clothColor = parseColor(colors.FOOD);
-                else if (resType === 'GOLD') clothColor = parseColor(colors.GOLD);
+                if (resType.includes('WOOD')) clothColor = parseColor(colors.WOOD, 0x388e3c);
+                else if (resType.includes('STONE')) clothColor = parseColor(colors.STONE, 0x757575);
+                else if (resType.includes('FOOD') || resType.includes('FRUIT')) clothColor = parseColor(colors.FRUIT || colors.FOOD, 0xfd8763);
+                else if (resType.includes('GOLD')) clothColor = parseColor(colors.GOLD_ORE, 0xe4b20d);
+                else if (resType.includes('IRON')) clothColor = parseColor(colors.IRON_ORE, 0x78909c);
+                else if (resType.includes('COAL')) clothColor = parseColor(colors.COAL, 0x212121);
+                else if (resType.includes('HERB')) clothColor = parseColor(colors.MAGIC_HERB, 0x81c784);
+                else if (resType.includes('WOLF')) clothColor = parseColor(colors.WOLF_HIDE, 0xa1887f);
+                else if (resType.includes('BEAR')) clothColor = parseColor(colors.BEAR_PELT, 0x5d4037);
                 else clothColor = parseColor(colors.DEFAULT);
             }
         }
@@ -388,19 +396,40 @@ export class CharacterRenderer {
             this.drawTool(ctx, x + 8, y + 15, 'BOW', angle);
             ctx.fillRect(x - 14, y + 5 + (isActuallyMoving || isAttacking ? 0 : Math.sin(t * breatheFreq) * 1), 4, 18);
         } else if (data.cargo > 0) {
-            const colors = UI_CONFIG.CargoColors || UI_CONFIG.VillagerColors;
-            const cargoType = (data.cargoType || data.type || "").toUpperCase();
-            const parseColor = (c) => {
-                if (!c) return 0x795548;
-                const cleaned = c.replace('#', '0x');
-                const val = parseInt(cleaned.length > 8 ? cleaned.substring(0, 8) : cleaned);
-                return isNaN(val) ? 0x795548 : val;
+            const cargoType = (data.cargoType || data.type || "DEFAULT").toUpperCase();
+            const cargoCfg = UI_CONFIG.CargoColors || {};
+            
+            // 統一顏色解析
+            const parse = (c, def = 0x795548) => {
+                if (!c) return def;
+                const clean = c.replace('#', '0x');
+                const v = parseInt(clean.length > 8 ? clean.substring(0, 8) : clean);
+                return isNaN(v) ? def : v;
             };
 
-            let resColor = parseColor(colors.DEFAULT || "#795548");
-            if (cargoType === 'WOOD') resColor = parseColor(colors.WOOD);
-            else if (cargoType === 'STONE') resColor = parseColor(colors.STONE);
-            else if (cargoType === 'FOOD') resColor = parseColor(colors.FOOD);
+            let resColor = parse(cargoCfg.DEFAULT);
+            if (cargoType.includes('WOOD') || cargoType.includes('TREE')) {
+                resColor = parse(cargoCfg.WOOD, 0x1ce026);
+            } else if (cargoType.includes('STONE') || cargoType.includes('ROCK')) {
+                resColor = parse(cargoCfg.STONE, 0xacacac);
+            } else if (cargoType.includes('FOOD') || cargoType.includes('FRUIT') || cargoType.includes('BERRY')) {
+                resColor = parse(cargoCfg.FRUIT || cargoCfg.FOOD, 0xff5816);
+            } else if (cargoType.includes('GOLD')) {
+                resColor = parse(cargoCfg.GOLD_ORE, 0xffe047);
+            } else if (cargoType.includes('IRON')) {
+                resColor = parse(cargoCfg.IRON_ORE, 0x90a4ae);
+            } else if (cargoType.includes('COAL')) {
+                resColor = parse(cargoCfg.COAL, 0x212121);
+            } else if (cargoType.includes('HERB')) {
+                resColor = parse(cargoCfg.MAGIC_HERB, 0xb9f6ca);
+            } else if (cargoType.includes('HIDE') || cargoType.includes('WOLF')) {
+                resColor = parse(cargoCfg.WOLF_HIDE, 0xd7ccc8);
+            } else if (cargoType.includes('PELT') || cargoType.includes('BEAR')) {
+                resColor = parse(cargoCfg.BEAR_PELT, 0x8d6e63);
+            }
+
+            // [核心修復] 必須在此確實套用顏色，覆蓋之前的皮膚色
+            this.setCtxStyle(ctx, resColor, 1);
             ctx.fillRect(x - 8, y + 10 + Math.sin(t * armFreq) * 2, 16, 12);
             // 加入頂部亮邊增加立體感
             this.setCtxStyle(ctx, 0xffffff, 0.3);
@@ -625,7 +654,14 @@ export class CharacterRenderer {
             this.drawRectRotated(ctx, x, y, 0, -15, 4, 25, angle, 0x5d4037);
             this.drawRectRotated(ctx, x, y, -8, -25, 20, 12, angle, 0x424242);
         } else if (type === 'BASKET') {
-            this.drawRectRotated(ctx, x, y, -8, 0, 16, 12, angle, 0x8d6e63);
+            const basketColor = UI_CONFIG.CargoColors?.DEFAULT;
+            const parseColor = (c) => {
+                if (!c) return 0x8d6e63;
+                const cleaned = c.replace('#', '0x');
+                const val = parseInt(cleaned.length > 8 ? cleaned.substring(0, 8) : cleaned);
+                return isNaN(val) ? 0x8d6e63 : val;
+            };
+            this.drawRectRotated(ctx, x, y, -8, 0, 16, 12, angle, parseColor(basketColor));
         } else if (type === 'SWORD') {
             this.drawRectRotated(ctx, x, y, 0, -5, 3, 10, angle, 0x795548); // 柄
             this.drawRectRotated(ctx, x, y, -3, -25, 9, 20, angle, 0x90a4ae); // 刃

@@ -102,7 +102,11 @@ export class MainScene extends Phaser.Scene {
         // 考量到資源物件有模型縮放 (model_size) 與視覺變形需求，改用 Image 對象池而非 Blitter。
         // Phaser 在幾千個 Image 下效能依然強勁。
         this.resourceBobs = new Map(); // 格網鍵值 (gx_gy) -> { type, bob, lv }
-        this.resourcePools = { 'tree': [], 'stone': [], 'food': [], 'gold': [] };
+        this.resourcePools = { 
+            'tree': [], 'stone': [], 'food': [], 'gold_ore': [], 
+            'iron_ore': [], 'coal': [], 'magic_herb': [], 
+            'wolf_corpse': [], 'bear_corpse': [] 
+        };
         // 建立專用群組
         this.resourceGroup = this.add.group();
 
@@ -1125,7 +1129,17 @@ export class MainScene extends Phaser.Scene {
 
             // 更新位置與縮放
             if (entity.gx !== undefined && typeof entity.type === 'number') {
-                const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+                const typeMap = { 
+                    1: 'SCENE_WOOD', 
+                    2: 'SCENE_STONE', 
+                    3: 'SCENE_FRUIT', 
+                    4: 'SCENE_GOLD_ORE',
+                    5: 'SCENE_IRON_ORE',
+                    6: 'SCENE_COAL',
+                    7: 'SCENE_MAGIC_HERB',
+                    8: 'SCENE_WOLF_CORPSE',
+                    9: 'SCENE_BEAR_CORPSE'
+                };
                 const resCfg = GameEngine.state.resourceConfigs.find(c => c.type === typeMap[entity.type] && c.lv === (entity.level || 1));
                 const idx = GameEngine.state.mapData.getIndex(entity.gx, entity.gy);
                 const varInfo = idx !== -1 ? GameEngine.state.mapData.variationGrid[idx] : 0xFFFFFF;
@@ -1167,7 +1181,11 @@ export class MainScene extends Phaser.Scene {
     }
 
     getTextureKeyFromType(typeNum) {
-        const typeMap = { 1: 'tex_tree', 2: 'tex_stone', 3: 'tex_food', 4: 'tex_gold' };
+        const typeMap = { 
+            1: 'tex_tree', 2: 'tex_stone', 3: 'tex_food', 4: 'tex_gold_ore',
+            5: 'tex_iron_ore', 6: 'tex_coal', 7: 'tex_magic_herb',
+            8: 'tex_wolf_corpse', 9: 'tex_bear_corpse'
+        };
         return typeMap[typeNum] || 'tex_tree';
     }
 
@@ -1437,8 +1455,22 @@ export class MainScene extends Phaser.Scene {
         const visibleKeys = new Set();
 
         // 核心映射
-        const typeMap = { 1: 'tree', 2: 'stone', 3: 'food', 4: 'gold' };
-        const typeNameMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+        const typeMap = { 
+            1: 'tree', 2: 'stone', 3: 'food', 4: 'gold_ore', 
+            5: 'iron_ore', 6: 'coal', 7: 'magic_herb', 
+            8: 'wolf_corpse', 9: 'bear_corpse' 
+        };
+        const typeNameMap = { 
+            1: 'SCENE_WOOD', 
+            2: 'SCENE_STONE', 
+            3: 'SCENE_FRUIT', 
+            4: 'SCENE_GOLD_ORE',
+            5: 'SCENE_IRON_ORE',
+            6: 'SCENE_COAL',
+            7: 'SCENE_MAGIC_HERB',
+            8: 'SCENE_WOLF_CORPSE',
+            9: 'SCENE_BEAR_CORPSE'
+        };
 
         // 1. 放置/更新資源
         for (let i = 0; i < resources.length; i++) {
@@ -1711,7 +1743,12 @@ export class MainScene extends Phaser.Scene {
         if (type.startsWith('tree') || type.startsWith('wood')) return 'tex_tree';
         if (type.startsWith('stone')) return 'tex_stone';
         if (type.startsWith('food')) return 'tex_food';
-        if (type.startsWith('gold')) return 'tex_gold';
+        if (type.includes('gold')) return 'tex_gold_ore';
+        if (type.includes('iron')) return 'tex_iron_ore';
+        if (type.includes('coal')) return 'tex_coal';
+        if (type.includes('herb')) return 'tex_magic_herb';
+        if (type.includes('wolf')) return 'tex_wolf_corpse';
+        if (type.includes('bear')) return 'tex_bear_corpse';
 
         return null;
     }
@@ -2310,7 +2347,11 @@ export class MainScene extends Phaser.Scene {
                     const gx = searchGx + dx, gy = searchGy + dy;
                     const res = GameEngine.state.mapData.getResource(gx, gy);
                     if (!res) continue;
-                    const typeMap = { 1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD' };
+                    const typeMap = { 
+                        1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD_ORE',
+                        5: 'IRON_ORE', 6: 'COAL', 7: 'MAGIC_HERB',
+                        8: 'WOLF_HIDE', 9: 'BEAR_PELT'
+                    };
                     const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeMap[res.type] && c.lv === (res.level || 1));
                     if (!cfg) continue;
                     const ms = cfg.model_size || { x: 1, y: 1 }, vWidth = 120 * ms.x, vHeight = 120 * ms.y, rx = gx * TS + TS / 2, ry = gy * TS + TS / 2;
@@ -2442,7 +2483,17 @@ export class MainScene extends Phaser.Scene {
             const ry = gy * TS + TS / 2;
 
             // 讀取資源模型大小進行近似碰撞
-            const typeNameMap = { 'tree': 'WOOD', 'stone': 'STONE', 'food': 'FOOD', 'gold': 'GOLD' };
+            const typeNameMap = { 
+                'tree': 'SCENE_WOOD', 
+                'stone': 'SCENE_STONE', 
+                'food': 'SCENE_FRUIT', 
+                'gold_ore': 'SCENE_GOLD_ORE',
+                'iron_ore': 'SCENE_IRON_ORE',
+                'coal': 'SCENE_COAL',
+                'magic_herb': 'SCENE_MAGIC_HERB',
+                'wolf_corpse': 'SCENE_WOLF_CORPSE',
+                'bear_corpse': 'SCENE_BEAR_CORPSE'
+            };
             const typeName = typeNameMap[info.type];
             const resCfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (info.lv || 1));
             const ms = (resCfg && resCfg.model_size) ? resCfg.model_size : { x: 1, y: 1 };
