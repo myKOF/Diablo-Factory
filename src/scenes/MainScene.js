@@ -1458,25 +1458,25 @@ export class MainScene extends Phaser.Scene {
 
         // 核心映射
         const typeMap = { 
-            1: 'tree', 2: 'stone', 3: 'food', 4: 'gold_ore', 
-            5: 'iron_ore', 6: 'coal', 7: 'magic_herb', 
+            1: 'tree', 2: 'stone', 3: 'food', 4: 'gold_mine', 
+            5: 'iron_mine', 6: 'coal_mine', 7: 'magic_herb', 
             8: 'wolf_corpse', 9: 'bear_corpse',
-            10: 'crystal_ore', 11: 'copper_ore', 12: 'silver_ore', 13: 'mithril_ore'
+            10: 'crystal_mine', 11: 'copper_mine', 12: 'silver_mine', 13: 'mithril_mine'
         };
         const typeNameMap = { 
             1: 'SCENE_WOOD', 
             2: 'SCENE_STONE', 
             3: 'SCENE_FRUIT', 
-            4: 'SCENE_GOLD_ORE',
-            5: 'SCENE_IRON_ORE',
-            6: 'SCENE_COAL',
+            4: 'SCENE_GOLD_MINE',
+            5: 'SCENE_IRON_MINE',
+            6: 'SCENE_COAL_MINE',
             7: 'SCENE_MAGIC_HERB',
             8: 'SCENE_WOLF_CORPSE',
             9: 'SCENE_BEAR_CORPSE',
-            10: 'SCENE_CRYSTAL_ORE',
-            11: 'SCENE_COPPER_ORE',
-            12: 'SCENE_SILVER_ORE',
-            13: 'SCENE_MITHRIL_ORE'
+            10: 'SCENE_CRYSTAL_MINE',
+            11: 'SCENE_COPPER_MINE',
+            12: 'SCENE_SILVER_MINE',
+            13: 'SCENE_MITHRIL_MINE'
         };
 
         // 1. 放置/更新資源
@@ -1750,14 +1750,14 @@ export class MainScene extends Phaser.Scene {
         if (type.startsWith('tree') || type.startsWith('wood')) return 'tex_tree';
         if (type.startsWith('stone')) return 'tex_stone';
         if (type.startsWith('food')) return 'tex_food';
-        if (type.includes('gold')) return 'tex_gold_ore';
-        if (type.includes('iron')) return 'tex_iron_ore';
-        if (type.includes('coal')) return 'tex_coal';
+        if (type.includes('gold')) return 'tex_gold_mine';
+        if (type.includes('iron')) return 'tex_iron_mine';
+        if (type.includes('coal')) return 'tex_coal_mine';
         if (type.includes('herb')) return 'tex_magic_herb';
-        if (type.includes('crystal')) return 'tex_crystal_ore';
-        if (type.includes('copper')) return 'tex_copper_ore';
-        if (type.includes('silver')) return 'tex_silver_ore';
-        if (type.includes('mithril')) return 'tex_mithril_ore';
+        if (type.includes('crystal')) return 'tex_crystal_mine';
+        if (type.includes('copper')) return 'tex_copper_mine';
+        if (type.includes('silver')) return 'tex_silver_mine';
+        if (type.includes('mithril')) return 'tex_mithril_mine';
         if (type.includes('wolf')) return 'tex_wolf_corpse';
         if (type.includes('bear')) return 'tex_bear_corpse';
 

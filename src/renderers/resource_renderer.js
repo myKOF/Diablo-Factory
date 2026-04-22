@@ -10,14 +10,14 @@ export class ResourceRenderer {
         this.generateTreeTexture(scene);
         this.generateRockTexture(scene);
         this.generateBerryBushTexture(scene);
-        this.generateGoldOreMineTexture(scene);
+        this.generateGoldMineTexture(scene);
         this.generateIronMineTexture(scene);
         this.generateCoalMineTexture(scene);
         this.generateRareHerbTexture(scene);
-        this.generateCrystalOreTexture(scene);
-        this.generateCopperOreTexture(scene);
-        this.generateSilverOreTexture(scene);
-        this.generateMithrilOreTexture(scene);
+        this.generateCrystalMineTexture(scene);
+        this.generateCopperMineTexture(scene);
+        this.generateSilverMineTexture(scene);
+        this.generateMithrilMineTexture(scene);
         this.generateWolfCorpseTexture(scene);
         this.generateBearCorpseTexture(scene);
     }
@@ -119,12 +119,12 @@ export class ResourceRenderer {
         g.destroy();
     }
  
-    static generateGoldOreMineTexture(scene) {
-        if (scene.textures.exists('tex_gold_ore')) return;
+    static generateGoldMineTexture(scene) {
+        if (scene.textures.exists('tex_gold_mine')) return;
  
         const cw = 120, ch = 120, cx = cw / 2, cy = ch / 2;
         const g = scene.make.graphics({ x: 0, y: 0, add: false });
-        const cfg = UI_CONFIG.ResourceRenderer.GoldOreMine;
+        const cfg = UI_CONFIG.ResourceRenderer.GoldMine;
  
         const crystals = [
             { points: [{dx:0, dy:-25}, {dx:18, dy:0}, {dx:0, dy:20}, {dx:-18, dy:0}], x: cx, y: cy, color: this.toNum(cfg.colors[0]) },
@@ -136,12 +136,12 @@ export class ResourceRenderer {
             this.drawPolygon(g, c.points, c.x, c.y, c.color, this.toNum(cfg.outlineColor), 1, cfg.outlineWidth);
         });
  
-        g.generateTexture('tex_gold_ore', cw, ch);
+        g.generateTexture('tex_gold_mine', cw, ch);
         g.destroy();
     }
 
     static generateIronMineTexture(scene) {
-        if (scene.textures.exists('tex_iron_ore')) return;
+        if (scene.textures.exists('tex_iron_mine')) return;
         const cw = 120, ch = 120, cx = cw / 2, cy = ch / 2;
         const g = scene.make.graphics({ x: 0, y: 0, add: false });
         const cfg = UI_CONFIG.ResourceRenderer.IronMine;
@@ -152,12 +152,12 @@ export class ResourceRenderer {
         rocks.forEach(r => this.drawPolygon(g, r.points, r.x, r.y, r.color, this.toNum(cfg.outlineColor), 1, cfg.outlineWidth));
         g.fillStyle(0xffffff, 0.4);
         g.fillCircle(cx - 5, cy - 5, 4);
-        g.generateTexture('tex_iron_ore', cw, ch);
+        g.generateTexture('tex_iron_mine', cw, ch);
         g.destroy();
     }
 
     static generateCoalMineTexture(scene) {
-        if (scene.textures.exists('tex_coal')) return;
+        if (scene.textures.exists('tex_coal_mine')) return;
         const cw = 120, ch = 120, cx = cw / 2, cy = ch / 2;
         const g = scene.make.graphics({ x: 0, y: 0, add: false });
         const cfg = UI_CONFIG.ResourceRenderer.CoalMine;
@@ -166,7 +166,7 @@ export class ResourceRenderer {
             { points: [{dx:-10, dy:5}, {dx:10, dy:5}, {dx:0, dy:-15}], x: cx - 15, y: cy + 10, color: this.toNum(cfg.colors[1]) }
         ];
         chunks.forEach(c => this.drawPolygon(g, c.points, c.x, c.y, c.color, this.toNum(cfg.outlineColor), 1, cfg.outlineWidth));
-        g.generateTexture('tex_coal', cw, ch);
+        g.generateTexture('tex_coal_mine', cw, ch);
         g.destroy();
     }
 
@@ -224,60 +224,60 @@ export class ResourceRenderer {
         g.destroy();
     }
 
-    static generateCrystalOreTexture(scene) {
-        if (scene.textures.exists('tex_crystal_ore')) return;
+    static generateCrystalMineTexture(scene) {
+        if (scene.textures.exists('tex_crystal_mine')) return;
         const cw = 120, ch = 120, cx = cw / 2, cy = ch / 2;
         const g = scene.make.graphics({ x: 0, y: 0, add: false });
-        const cfg = UI_CONFIG.ResourceRenderer.CrystalOreMine;
+        const cfg = UI_CONFIG.ResourceRenderer.CrystalMine;
         const crystals = [
             { points: [{dx:0, dy:-30}, {dx:15, dy:-10}, {dx:10, dy:20}, {dx:-10, dy:20}, {dx:-15, dy:-10}], x: cx, y: cy, color: this.toNum(cfg.colors[0]) },
             { points: [{dx:0, dy:-20}, {dx:12, dy:0}, {dx:0, dy:15}, {dx:-12, dy:0}], x: cx - 20, y: cy + 10, color: this.toNum(cfg.colors[1]) },
             { points: [{dx:0, dy:-18}, {dx:10, dy:0}, {dx:0, dy:12}, {dx:-10, dy:0}], x: cx + 18, y: cy + 12, color: this.toNum(cfg.colors[2]) }
         ];
         crystals.forEach(c => this.drawPolygon(g, c.points, c.x, c.y, c.color, this.toNum(cfg.outlineColor), 1, cfg.outlineWidth));
-        g.generateTexture('tex_crystal_ore', cw, ch);
+        g.generateTexture('tex_crystal_mine', cw, ch);
         g.destroy();
     }
 
-    static generateCopperOreTexture(scene) {
-        if (scene.textures.exists('tex_copper_ore')) return;
+    static generateCopperMineTexture(scene) {
+        if (scene.textures.exists('tex_copper_mine')) return;
         const cw = 120, ch = 120, cx = cw / 2, cy = ch / 2;
         const g = scene.make.graphics({ x: 0, y: 0, add: false });
-        const cfg = UI_CONFIG.ResourceRenderer.CopperOreMine;
+        const cfg = UI_CONFIG.ResourceRenderer.CopperMine;
         const rocks = [
             { points: [{dx:-22, dy:8}, {dx:-5, dy:-25}, {dx:25, dy:-5}, {dx:15, dy:15}], x: cx, y: cy, color: this.toNum(cfg.colors[0]) },
             { points: [{dx:-12, dy:3}, {dx:-6, dy:-15}, {dx:10, dy:0}, {dx:8, dy:10}], x: cx + 12, y: cy + 5, color: this.toNum(cfg.colors[2]) }
         ];
         rocks.forEach(r => this.drawPolygon(g, r.points, r.x, r.y, r.color, this.toNum(cfg.outlineColor), 1, cfg.outlineWidth));
-        g.generateTexture('tex_copper_ore', cw, ch);
+        g.generateTexture('tex_copper_mine', cw, ch);
         g.destroy();
     }
 
-    static generateSilverOreTexture(scene) {
-        if (scene.textures.exists('tex_silver_ore')) return;
+    static generateSilverMineTexture(scene) {
+        if (scene.textures.exists('tex_silver_mine')) return;
         const cw = 120, ch = 120, cx = cw / 2, cy = ch / 2;
         const g = scene.make.graphics({ x: 0, y: 0, add: false });
-        const cfg = UI_CONFIG.ResourceRenderer.SilverOreMine;
+        const cfg = UI_CONFIG.ResourceRenderer.SilverMine;
         const rocks = [
             { points: [{dx:-25, dy:10}, {dx:0, dy:-28}, {dx:25, dy:10}, {dx:0, dy:20}], x: cx, y: cy, color: this.toNum(cfg.colors[0]) },
             { points: [{dx:-10, dy:0}, {dx:10, dy:0}, {dx:0, dy:-15}], x: cx - 15, y: cy + 10, color: this.toNum(cfg.colors[1]) }
         ];
         rocks.forEach(r => this.drawPolygon(g, r.points, r.x, r.y, r.color, this.toNum(cfg.outlineColor), 1, cfg.outlineWidth));
-        g.generateTexture('tex_silver_ore', cw, ch);
+        g.generateTexture('tex_silver_mine', cw, ch);
         g.destroy();
     }
 
-    static generateMithrilOreTexture(scene) {
-        if (scene.textures.exists('tex_mithril_ore')) return;
+    static generateMithrilMineTexture(scene) {
+        if (scene.textures.exists('tex_mithril_mine')) return;
         const cw = 120, ch = 120, cx = cw / 2, cy = ch / 2;
         const g = scene.make.graphics({ x: 0, y: 0, add: false });
-        const cfg = UI_CONFIG.ResourceRenderer.MithrilOreMine;
+        const cfg = UI_CONFIG.ResourceRenderer.MithrilMine;
         const crystals = [
             { points: [{dx:0, dy:-35}, {dx:20, dy:0}, {dx:0, dy:25}, {dx:-20, dy:0}], x: cx, y: cy, color: this.toNum(cfg.colors[0]) },
             { points: [{dx:0, dy:-15}, {dx:15, dy:0}, {dx:0, dy:15}, {dx:-15, dy:0}], x: cx + 15, y: cy + 15, color: this.toNum(cfg.colors[2]) }
         ];
         crystals.forEach(c => this.drawPolygon(g, c.points, c.x, c.y, c.color, this.toNum(cfg.outlineColor), 1, cfg.outlineWidth));
-        g.generateTexture('tex_mithril_ore', cw, ch);
+        g.generateTexture('tex_mithril_mine', cw, ch);
         g.destroy();
     }
 

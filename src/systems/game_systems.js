@@ -1250,18 +1250,22 @@ export class GameEngine {
                 const fp = getFootprint(cfg.model);
                 const resCfg = UI_CONFIG.ResourceRenderer;
 
-                // 資源模型映射 (1: Tree, 2: Stone, 3: Food/Fruit, 4: Gold)
+                // 資源模型映射 (1: Tree, 2: Stone, 3: Food/Fruit, 4: Gold, 5: Iron, 6: Coal...)
                 let typeNum = 0;
                 const upperType = (cfg.type || "").toUpperCase();
                 if (upperType === 'SCENE_WOOD') typeNum = 1;
                 else if (upperType === 'SCENE_STONE') typeNum = 2;
                 else if (upperType === 'SCENE_FRUIT') typeNum = 3;
-                else if (upperType === 'SCENE_GOLD_ORE' || upperType === 'SCENE_GOLD') typeNum = 4;
-                else if (upperType === 'SCENE_IRON_ORE') typeNum = 5;
-                else if (upperType === 'SCENE_COAL') typeNum = 6;
+                else if (upperType === 'SCENE_GOLD_MINE' || upperType === 'SCENE_GOLD_ORE') typeNum = 4;
+                else if (upperType === 'SCENE_IRON_MINE' || upperType === 'SCENE_IRON_ORE') typeNum = 5;
+                else if (upperType === 'SCENE_COAL_MINE' || upperType === 'SCENE_COAL_ORE' || upperType === 'SCENE_COAL') typeNum = 6;
                 else if (upperType === 'SCENE_MAGIC_HERB') typeNum = 7;
                 else if (upperType === 'SCENE_WOLF_CORPSE') typeNum = 8;
                 else if (upperType === 'SCENE_BEAR_CORPSE') typeNum = 9;
+                else if (upperType === 'SCENE_CRYSTAL_MINE' || upperType === 'SCENE_CRYSTAL_ORE') typeNum = 10;
+                else if (upperType === 'SCENE_COPPER_MINE' || upperType === 'SCENE_COPPER_ORE') typeNum = 11;
+                else if (upperType === 'SCENE_SILVER_MINE' || upperType === 'SCENE_SILVER_ORE') typeNum = 12;
+                else if (upperType === 'SCENE_MITHRIL_MINE' || upperType === 'SCENE_MITHRIL_ORE') typeNum = 13;
 
                 for (let i = 0; i < pool.length && count < cfg.density; i++) {
                     const { gx, gy } = pool[i];
@@ -1285,12 +1289,16 @@ export class GameEngine {
                     if (uType === 'SCENE_WOOD') varCfg = resCfg.Tree.visualVariation;
                     else if (uType === 'SCENE_STONE') varCfg = resCfg.Rock.visualVariation;
                     else if (uType === 'SCENE_FRUIT') varCfg = resCfg.BerryBush.visualVariation;
-                    else if (uType === 'SCENE_GOLD_ORE' || uType === 'SCENE_GOLD') varCfg = resCfg.GoldOreMine.visualVariation;
-                    else if (uType === 'SCENE_IRON_ORE') varCfg = resCfg.IronMine.visualVariation;
-                    else if (uType === 'SCENE_COAL') varCfg = resCfg.CoalMine.visualVariation;
+                    else if (uType === 'SCENE_GOLD_MINE' || uType === 'SCENE_GOLD_ORE') varCfg = resCfg.GoldMine.visualVariation;
+                    else if (uType === 'SCENE_IRON_MINE' || uType === 'SCENE_IRON_ORE') varCfg = resCfg.IronMine.visualVariation;
+                    else if (uType === 'SCENE_COAL_MINE' || uType === 'SCENE_COAL_ORE' || uType === 'SCENE_COAL') varCfg = resCfg.CoalMine.visualVariation;
                     else if (uType === 'SCENE_MAGIC_HERB') varCfg = resCfg.RareHerb.visualVariation;
                     else if (uType === 'SCENE_WOLF_CORPSE') varCfg = resCfg.WolfCorpse.visualVariation;
                     else if (uType === 'SCENE_BEAR_CORPSE') varCfg = resCfg.BearCorpse.visualVariation;
+                    else if (uType === 'SCENE_CRYSTAL_MINE' || uType === 'SCENE_CRYSTAL_ORE') varCfg = resCfg.CrystalMine.visualVariation;
+                    else if (uType === 'SCENE_COPPER_MINE' || uType === 'SCENE_COPPER_ORE') varCfg = resCfg.CopperMine.visualVariation;
+                    else if (uType === 'SCENE_SILVER_MINE' || uType === 'SCENE_SILVER_ORE') varCfg = resCfg.SilverMine.visualVariation;
+                    else if (uType === 'SCENE_MITHRIL_MINE' || uType === 'SCENE_MITHRIL_ORE') varCfg = resCfg.MithrilMine.visualVariation;
 
                     if (varCfg) {
                         const brightness = 1.0 - (Math.random() * varCfg.tintRange);
@@ -1441,12 +1449,16 @@ export class GameEngine {
                 1: 'SCENE_WOOD', 
                 2: 'SCENE_STONE', 
                 3: 'SCENE_FRUIT', 
-                4: 'SCENE_GOLD_ORE',
-                5: 'SCENE_IRON_ORE',
-                6: 'SCENE_COAL',
+                4: 'SCENE_GOLD_MINE',
+                5: 'SCENE_IRON_MINE',
+                6: 'SCENE_COAL_MINE',
                 7: 'SCENE_MAGIC_HERB',
                 8: 'SCENE_WOLF_CORPSE',
-                9: 'SCENE_BEAR_CORPSE'
+                9: 'SCENE_BEAR_CORPSE',
+                10: 'SCENE_CRYSTAL_MINE',
+                11: 'SCENE_COPPER_MINE',
+                12: 'SCENE_SILVER_MINE',
+                13: 'SCENE_MITHRIL_MINE'
             };
             for (let i = 0; i < this.state.mapData.totalTiles; i++) {
                 const typeNum = this.state.mapData.typeGrid[i];

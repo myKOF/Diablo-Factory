@@ -50,7 +50,7 @@ export const UI_CONFIG = {
             stone: "🪨 石頭：",
             fruit: "🍓 水果：",
             iron_ore: "⛓️ 鐵礦：",
-            coal: "💎 煤炭：",
+            coal_ore: "💎 煤炭：",
             magic_herb: "🌿 草藥：",
             wolf_hide: "🐺 狼皮：",
             bear_pelt: "🐻 熊皮：",
@@ -209,88 +209,88 @@ export const UI_CONFIG = {
     // -- 自然資源與實體幾何渲染配置（ResourceRenderer）--------------------
     // 控制渲染器在生成材質時的多邊形顏色、粗細與隨機變異範圍
     ResourceRenderer: {
-        Tree: {
+        Tree: { // 樹木 (產出木材)
             trunkColor: "#795548",
             leafColors: ["#2e7d32", "#388e3c", "#43a047"],
             outlineColor: "#1b2d00",
             outlineWidth: 2,
             visualVariation: { tintRange: 0.2, minScale: 0.8, maxScale: 1.3 }
         },
-        Rock: {
-            colors: ["#757575", "#9e9e9e", "#bdbdbd"],
+        Rock: { // 岩石 (產出石頭)
+            colors: ["#979797ff", "#9e9e9e", "#bdbdbd"],
             outlineColor: "#212121",
             outlineWidth: 2,
             visualVariation: { tintRange: 0.15, minScale: 0.7, maxScale: 1.2 }
         },
-        BerryBush: {
-            leafColor: "#2e7d32",
+        BerryBush: { // 漿果叢 (產出水果/食物)
+            leafColor: "#00d10aff",
             berryColor: "#ff5252",
             outlineColor: "#1b2d00",
             outlineWidth: 2,
             visualVariation: { tintRange: 0.1, minScale: 0.9, maxScale: 1.1 }
         },
-        GoldOreMine: {
+        GoldMine: { // 金礦脈 (產出金礦)
             colors: ["#ffd740", "#ffc400", "#ffb300"],
             outlineColor: "#3e2723",
             outlineWidth: 2,
             visualVariation: { tintRange: 0.15, minScale: 0.8, maxScale: 1.25 }
         },
-        IronMine: {
-            colors: ["#78909c", "#90a4ae", "#b0bec5"],
+        IronMine: { // 鐵礦脈 (產出鐵礦)
+            colors: ["#1c2b6eff", "#003550ff", "#424242ff"],
             outlineColor: "#263238",
             outlineWidth: 2,
             visualVariation: { tintRange: 0.15, minScale: 0.8, maxScale: 1.2 }
         },
-        CoalMine: {
-            colors: ["#212121", "#373737", "#424242"],
+        CoalMine: { // 煤礦脈 (產出煤炭)
+            colors: ["#000000ff", "#080707ff", "#050202ff"],
             outlineColor: "#000000",
             outlineWidth: 2,
             visualVariation: { tintRange: 0.1, minScale: 0.8, maxScale: 1.15 }
         },
-        RareHerb: {
+        RareHerb: { // 稀有草藥 (產出草藥/藥水材料)
             leafColor: "#43a047",
             flowerColor: "#e91e63",
             outlineColor: "#1b5e20",
             outlineWidth: 1.5,
             visualVariation: { tintRange: 0.2, minScale: 0.7, maxScale: 1.1 }
         },
-        CrystalOreMine: {
-            colors: ["#b3e5fc", "#81d4fa", "#4fc3f7"],
-            outlineColor: "#01579b",
+        CrystalMine: { // 水晶礦脈 (產出稀有水晶資源)
+            colors: ["#ffffffff", "#edf4f7ff", "#c4e2f0ff"],
+            outlineColor: "#c1edffff",
             outlineWidth: 2,
             visualVariation: { tintRange: 0.2, minScale: 0.8, maxScale: 1.3 }
         },
-        CopperOreMine: {
-            colors: ["#a1887f", "#8d6e63", "#795548"],
+        CopperMine: { // 銅礦脈 (產出銅礦)
+            colors: ["#ad370cff", "#8d6e63", "#795548"],
             outlineColor: "#3e2723",
             outlineWidth: 2,
             visualVariation: { tintRange: 0.15, minScale: 0.8, maxScale: 1.2 }
         },
-        SilverOreMine: {
+        SilverMine: { // 銀礦脈 (產出銀礦)
             colors: ["#e0e0e0", "#bdbdbd", "#9e9e9e"],
             outlineColor: "#424242",
             outlineWidth: 2,
             visualVariation: { tintRange: 0.1, minScale: 0.8, maxScale: 1.2 }
         },
-        MithrilOreMine: {
-            colors: ["#e0f7fa", "#b2ebf2", "#80deea"],
+        MithrilMine: { // 秘銀礦脈 (產出高級秘銀金屬)
+            colors: ["#ddf35eff", "#42d5e9ff", "#20f19aff"],
             outlineColor: "#006064",
             outlineWidth: 2,
             visualVariation: { tintRange: 0.3, minScale: 0.9, maxScale: 1.4 }
         },
-        WolfCorpse: {
+        WolfCorpse: { // 狼的屍體 (可採集狼皮)
             furColor: "#757575",
             outlineColor: "#212121",
             outlineWidth: 1.5,
             visualVariation: { tintRange: 0.1, minScale: 1.0, maxScale: 1.0 }
         },
-        BearCorpse: {
+        BearCorpse: { // 熊的屍體 (可採集熊皮)
             furColor: "#5d4037",
             outlineColor: "#212121",
             outlineWidth: 2,
             visualVariation: { tintRange: 0.1, minScale: 1.0, maxScale: 1.0 }
         },
-        Campfire: {
+        Campfire: { // 營火 (環境/功能實體)
             groundColor: "#8f4c00d8",
             woodColor: "#795548",
             woodOutline: "#6d352bff",
@@ -343,7 +343,7 @@ export const UI_CONFIG = {
         FRUIT: "#fd8763ff",
         GOLD_ORE: "#e4b20dea",
         IRON_ORE: "#b0bec5",
-        COAL: "#424242",
+        COAL_ORE: "#424242",
         MAGIC_HERB: "#81c784",
         WOLF_HIDE: "#a1887f",
         BEAR_PELT: "#5d4037",
@@ -361,7 +361,7 @@ export const UI_CONFIG = {
         FRUIT: "#ff5816ff",
         GOLD_ORE: "#ffe047ff",
         IRON_ORE: "#90a4aeff",
-        COAL: "#212121ff",
+        COAL_ORE: "#212121ff",
         MAGIC_HERB: "#b9f6ca",
         WOLF_HIDE: "#d7ccc8",
         BEAR_PELT: "#8d6e63",
