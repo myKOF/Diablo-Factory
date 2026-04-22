@@ -3,6 +3,7 @@ import { EffectSystem } from "./EffectSystem.js";
 import { PathfindingSystem } from "./PathfindingSystem.js?v=3";
 import { BattleSystem } from "./BattleSystem.js";
 import { MapDataSystem } from "./MapDataSystem.js";
+import { ResourceSystem } from "./ResourceSystem.js";
 
 
 
@@ -59,20 +60,8 @@ export class GameEngine {
     };
 
 
-    static RESOURCE_NAMES = {
-        gold_ore: "金礦",
-        iron_ore: "鐵礦",
-        coal: "煤炭",
-        magic_herb: "高級草藥",
-        wolf_hide: "狼皮",
-        bear_pelt: "熊皮",
-        wood: "木材",
-        stone: "石頭",
-        food: "食物",
-        healthpotion: "生命藥水",
-        soul: "靈魂碎片",
-        mana: "法力"
-    };
+    // 資源名稱對照表已遷移至 ResourceSystem.RESOURCE_NAMES
+    static get RESOURCE_NAMES() { return ResourceSystem.RESOURCE_NAMES; }
 
     static lastTickTime = 0;
     static isStarted = false;
@@ -525,10 +514,7 @@ export class GameEngine {
         } catch (e) { }
     }
 
-    static RESOURCE_NAMES = {
-        gold_ore: "金礦", gold_ingots: "金錠", wood: "木材", stone: "石頭", fruit: "水果", food: "食物",
-        healthpotion: "生命藥水", soul: "靈魂碎片", mana: "法力"
-    };
+    // 資源名稱對照表已統一於 ResourceSystem.RESOURCE_NAMES
 
     static async loadStringsConfig() {
         try {
@@ -1740,6 +1726,9 @@ export class GameEngine {
                 }
 
                 if (target) {
+                    // [核心修復] 將目標資源加入碰撞忽略列表，確保多工人可同時接近同一資源
+                    if (!ignoreEnts.includes(target)) ignoreEnts.push(target);
+
                     if (!v.gatherPoint || v._lastTargetId !== (target.id || `${target.gx}_${target.gy}`)) {
                         v._lastTargetId = (target.id || `${target.gx}_${target.gy}`);
                         GameEngine.addLog(`[尋路更新] ${v.configName || '工人'} 定位目標資源...`, 'PATH');
@@ -1795,12 +1784,8 @@ export class GameEngine {
                 } else { v.state = 'IDLE'; v.pathTarget = null; v.gatherPoint = null; v.workOffset = null; v.vTint = 0xffffff; }
                 break;
             case 'GATHERING':
-                // 採集時根據資源類型變色
-                const gatherCol = (v.cargoType === 'fruit' || v.type === 'FOOD') ? 0xff80ab : 
-                                 (v.cargoType === 'wood' || v.type === 'WOOD') ? 0x8d6e63 :
-                                 (v.cargoType === 'stone' || v.type === 'STONE') ? 0x9e9e9e :
-                                 (v.cargoType === 'gold_ore' || v.type === 'GOLD') ? 0xffd54f : 0xffffff;
-                v.vTint = gatherCol;
+                // 採集狀態的服裝顏色由渲染器 (character_renderer.js) 根據 data.type 統一判定
+                // 不再硬編碼 vTint，避免與 VillagerColors 配置衝突
                 v.gatherTimer += dt;
                 const harvestTime = v.config.collection_speed || 2; // 採集時間 (秒)
 
@@ -2356,44 +2341,9 @@ export class GameEngine {
         return false;
     }
 
+    // 存放點查詢已遷移至 ResourceSystem.findNearestDepositPoint
     static findNearestDepositPoint(x, y, resourceType = 'WOOD') {
-        const grid = this.state.spatialGrid;
-        const startGx = Math.floor(x / grid.cellSize);
-        const startGy = Math.floor(y / grid.cellSize);
-
-        const depositTypes = ['village', 'town_center', 'barn', 'timber_factory', 'stone_factory', 'gold_mining_factory'];
-
-        let nearest = null;
-        let minDist = Infinity;
-
-        // 從中心向外搜尋 5 圈 (約 1200 像素半徑)
-        for (let r = 0; r <= 5; r++) {
-            for (let dx = -r; dx <= r; dx++) {
-                for (let dy = -r; dy <= r; dy++) {
-                    if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-                    const key = `${startGx + dx},${startGy + dy}`;
-                    const cell = grid.cells.get(key);
-                    if (cell) {
-                        cell.forEach(e => {
-                            if (e.isUnderConstruction) return;
-                            if (depositTypes.includes(e.type)) {
-                                const d = Math.hypot(e.x - x, e.y - y);
-                                if (d < minDist) { minDist = d; nearest = e; }
-                            }
-                        });
-                    }
-                }
-            }
-            if (nearest) return nearest;
-        }
-
-        // 如果附近沒找到，回退到全量搜尋防止 Bug
-        this.state.mapEntities.forEach(e => {
-            if (e.isUnderConstruction || !depositTypes.includes(e.type)) return;
-            const d = Math.hypot(e.x - x, e.y - y);
-            if (d < minDist) { minDist = d; nearest = e; }
-        });
-        return nearest;
+        return ResourceSystem.findNearestDepositPoint(this.state, x, y, resourceType);
     }
 
     /**
@@ -2758,68 +2708,9 @@ export class GameEngine {
         return true;
     }
 
+    // 資源搜尋已遷移至 ResourceSystem.findNearestResource
     static findNearestResource(x, y, typeOrName, villagerId) {
-        if (!this.state.mapData || !typeOrName) return null;
-
-        // 轉換類型名稱為數字 (1: WOOD, 2: STONE, 3: FOOD, 4: GOLD)
-        let targetType = 0;
-        const upper = typeOrName.toUpperCase();
-        if (upper === 'WOOD' || upper === 'SCENE_WOOD') targetType = 1;
-        else if (upper === 'STONE' || upper === 'SCENE_STONE') targetType = 2;
-        else if (upper === 'FOOD' || upper === 'FRUIT' || upper === 'SCENE_FRUIT') targetType = 3;
-        else if (upper === 'GOLD' || upper === 'GOLD_ORE' || upper === 'SCENE_GOLD_ORE') targetType = 4;
-        else if (upper === 'IRON' || upper === 'IRON_ORE' || upper === 'SCENE_IRON_ORE') targetType = 5;
-        else if (upper === 'COAL' || upper === 'SCENE_COAL') targetType = 6;
-        else if (upper === 'MAGIC_HERB' || upper === 'SCENE_MAGIC_HERB') targetType = 7;
-        else if (upper === 'WOLF' || upper === 'SCENE_WOLF_CORPSE') targetType = 8;
-        else if (upper === 'BEAR' || upper === 'SCENE_BEAR_CORPSE') targetType = 9;
-
-        if (targetType === 0) return null;
-
-        const TS = this.TILE_SIZE;
-
-        // --- 核心優化：優先搜尋建築實體資源 (農田/樹木田) ---
-        const entities = this.state.mapEntities.filter(e =>
-            !e.isUnderConstruction && e.amount > 0 &&
-            ((targetType === 3 && (e.type === 'farmland' || e.type === 'corpse')) || (targetType === 1 && e.type === 'tree_plantation'))
-        );
-        if (entities.length > 0) {
-            entities.sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y));
-            const nearestEnt = entities[0];
-            if (Math.hypot(nearestEnt.x - x, nearestEnt.y - y) < 800) {
-                return nearestEnt;
-            }
-        }
-
-        const gx = Math.floor(x / TS);
-        const gy = Math.floor(y / TS);
-
-        // 螺旋搜尋 (使用 MapDataSystem)
-        for (let r = 0; r <= 80; r++) { // 從 0 核心格點開始搜尋，避免漏掉足下資源
-            // 這裡為了效能，我們簡化搜尋，直接在 MapDataSystem 的格網中遍歷周邊
-            for (let dy = -r; dy <= r; dy++) {
-                const ny = gy + dy;
-                for (let dx = -r; dx <= r; dx++) {
-                    if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-                    const nx = gx + dx;
-                    const res = this.state.mapData.getResource(nx, ny);
-                    if (res && res.type === targetType && res.amount > 0) {
-                        // 回傳一個模擬物件，兼容舊邏輯中的 targetId / target
-                        return {
-                            id: `${nx}_${ny}`, // 修正 ID 格式以匹配 MainScene
-                            x: nx * TS + TS / 2,
-                            y: ny * TS + TS / 2,
-                            gx: nx,
-                            gy: ny,
-                            type: upper, // 這裡回傳 string 格式
-                            resourceType: upper,
-                            amount: res.amount
-                        };
-                    }
-                }
-            }
-        }
-        return null;
+        return ResourceSystem.findNearestResource(this.state, this.TILE_SIZE, x, y, typeOrName, villagerId);
     }
 
     /**
@@ -2942,20 +2833,9 @@ export class GameEngine {
         if (window.UIManager) window.UIManager.updateValues();
     }
 
+    // 資源存款已遷移至 ResourceSystem.depositResource
     static depositResource(type, amount) {
-        if (amount <= 0) return; // [防護] 防止 0 量存款導致的日誌洪流
-        if (typeof type !== 'string') type = 'food'; // [極端防護] 避免 null 或 undefined 造成的 toLowerCase 崩潰
-        const resKey = type.toLowerCase();
-        
-        if (this.state.resources.hasOwnProperty(resKey)) {
-            this.state.resources[resKey] += amount;
-        } else if (resKey === 'food') {
-            this.state.resources.food += amount;
-        } else {
-            // 自動納入新種類材料
-            this.state.resources[resKey] = (this.state.resources[resKey] || 0) + amount;
-        }
-        this.addLog(`[資源繳庫] 工人存入了 ${amount} 單位的 ${type.toUpperCase()}`, 'TASK');
+        ResourceSystem.depositResource(this.state, type, amount, this.addLog.bind(this));
     }
 
     static setCommand(event, commandType) {
