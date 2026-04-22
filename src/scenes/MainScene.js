@@ -1205,7 +1205,7 @@ export class MainScene extends Phaser.Scene {
             const rCfg = UI_CONFIG.ResourceSelection || {};
             const cScale = rCfg.corpseSelectionScale || 0.8;
             uw = cScale; uh = cScale;
-        } else if (cfg.size) {
+        } else if (cfg && cfg.size) {
             const cleanSize = cfg.size.toString().replace(/['"]/g, '');
             const match = cleanSize.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
             if (match) { uw = parseFloat(match[1]); uh = parseFloat(match[2]); }

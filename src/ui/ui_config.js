@@ -49,6 +49,7 @@ export const UI_CONFIG = {
             wood: "🪵 木材：",
             stone: "🪨 石頭：",
             fruit: "🍓 水果：",
+            food: "🍖 食物：",
             iron_ore: "⛓️ 鐵礦：",
             coal_ore: "💎 煤炭：",
             magic_herb: "🌿 草藥：",

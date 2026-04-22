@@ -611,10 +611,12 @@ export class UIManager {
             const currentCount = GameEngine.state.mapEntities.filter(e => e.type === cfg.model).length;
 
             const costStr = [];
-            if (cfg.costs.food > 0) costStr.push(`🍖${cfg.costs.food}`);
-            if (cfg.costs.wood > 0) costStr.push(`🪵${cfg.costs.wood}`);
-            if (cfg.costs.stone > 0) costStr.push(`🪨${cfg.costs.stone}`);
-            if (cfg.costs.gold > 0) costStr.push(`💰${cfg.costs.gold}`);
+            const iconMap = { food: '🍖', wood: '🪵', stone: '🪨', gold_ore: '🪙', gold: '💰' };
+            for (let r in cfg.costs) {
+                if (cfg.costs[r] > 0) {
+                    costStr.push(`${iconMap[r] || '📦'}${cfg.costs[r]}`);
+                }
+            }
 
             const item = {
                 id: cfg.model,
@@ -1123,12 +1125,20 @@ export class UIManager {
             `;
         } else if (!isConfirming && nextCfg && !entity.isUnderConstruction) {
             const unlock = GameEngine.isUpgradeUnlocked(entity, nextCfg);
-            const costs = cfg_current?.upgradeResources || {};
+            const costs = nextCfg?.costs || {};
             const costItems = [];
-            if (costs.food) costItems.push({ key: 'food', icon: '🍖', val: costs.food });
-            if (costs.wood) costItems.push({ key: 'wood', icon: '🪵', val: costs.wood });
-            if (costs.stone) costItems.push({ key: 'stone', icon: '🪨', val: costs.stone });
-            if (costs.gold) costItems.push({ key: 'gold', icon: '💰', val: costs.gold });
+            
+            // 定義資源圖標映射 (可優化為從 Config 讀取)
+            const iconMap = {
+                food: '🍖', wood: '🪵', stone: '🪨', 
+                gold_ore: '🪙', gold: '💰', 
+                iron_ore: '⛓️', coal_ore: '💎',
+                crystal_ore: '🔮'
+            };
+
+            for (let r in costs) {
+                costItems.push({ key: r, icon: iconMap[r] || '📦', val: costs[r] });
+            }
 
             const btnSize = hCfg.upgradeBtnSize || 54;
             let btnStyle = `width: ${btnSize}px; height: ${btnSize}px; background: ${hCfg.upgradeBtnBg}; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; box-shadow: ${hCfg.upgradeBtnShadow}; border: 1.5px solid rgba(255,255,255,0.2); flex-shrink: 0;`;
@@ -1620,20 +1630,45 @@ export class UIManager {
 
         // 更新資源
         const rb = document.getElementById("resource_bar");
-        if (rb) {
+        if (rb && state) {
             const labels = UI_CONFIG.ResourceBar.labels;
-            const popCount = GameEngine.getCurrentPopulation();
-            const maxPop = GameEngine.getMaxPopulation();
+            const popCount = GameEngine.getCurrentPopulation ? GameEngine.getCurrentPopulation() : 0;
+            const maxPop = GameEngine.getMaxPopulation ? GameEngine.getMaxPopulation() : 0;
+            
+            // 優先使用設定檔讀取的鍵值，若無或為空則回退至預設
+            const initialKeys = (state.initialResourceKeys && state.initialResourceKeys.length > 0) 
+                ? state.initialResourceKeys 
+                : []; // 若無配置則不顯示，避免顯示死代碼 fallback
 
-            const stateStr = `${res.gold_ore || 0}|${res.wood || 0}|${res.stone || 0}|${res.fruit || 0}|${popCount}|${maxPop}`;
-            if (this.lastUIState.resources !== stateStr) {
-                rb.innerHTML = `
-                    <span>${labels.gold_ore} ${res.gold_ore || 0}</span>
-                    <span>${labels.wood} ${res.wood || 0}</span>
-                    <span>${labels.stone} ${res.stone || 0}</span>
-                    <span>${labels.fruit} ${res.fruit || 0}</span>
-                    <span title="人口上限" style="${popCount >= maxPop ? 'color: #ff5252' : ''}">👥 ${popCount} / ${maxPop}</span>
-                `;
+            // 構建比對字串，包含所有動態資源數值與人口
+            const resValues = initialKeys.map(k => (res && res[k]) || 0);
+            const stateStr = `${resValues.join('|')}|${popCount}|${maxPop}`;
+
+            if (this.lastUIState.resources !== stateStr || forceUpdate) {
+                let html = "";
+                initialKeys.forEach(key => {
+                    let label = "";
+                    const iconMap = {
+                        wood: "🪵", stone: "🪨", gold_ore: "🟡", food: "🍖", fruit: "🍎",
+                        wolf_hide: "🐺", bear_pelt: "🐻", magic_herb: "🌿", iron_ore: "🔩", coal_ore: "💎"
+                    };
+                    
+                    const cfg = state.ingredientConfigs ? state.ingredientConfigs[key] : null;
+                    if (cfg) {
+                        const icon = iconMap[key] || "📦";
+                        label = `${icon} ${cfg.name}：`;
+                    } else {
+                        label = (labels && labels[key]) || `${key}：`;
+                    }
+                    
+                    const val = (res && res[key]) || 0;
+                    html += `<span>${label} ${val}</span>`;
+                });
+                
+                // 最後加入人口顯示
+                html += `<span title="人口上限" style="${popCount >= maxPop ? 'color: #ff5252' : ''}">👥 ${popCount} / ${maxPop}</span>`;
+                
+                rb.innerHTML = html;
                 this.lastUIState.resources = stateStr;
             }
         }

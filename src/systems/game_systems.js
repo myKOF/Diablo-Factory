@@ -53,7 +53,8 @@ export class GameEngine {
         lastSelectedUnitId: null, // 上一次選中的單位 ID (用於雙擊檢測)
         lastSelectedBuildingId: null, // 上一次選中的建築 ID (用於雙擊檢測)
         lastSelectionTime: 0, // 上一次選中的時間 (用於雙擊檢測)
-        mapData: null // 大地圖數據系統實例 (Uint16Array)
+        mapData: null, // 大地圖數據系統實例 (Uint16Array)
+        initialResourceKeys: [] // [新功能] 記錄初始資源鍵值，供 UI 動態顯示
     };
 
 
@@ -456,25 +457,42 @@ export class GameEngine {
     static async loadSystemConfig() {
         try {
             const text = await this.fetchCSVText('config/system_config.csv');
+            console.log("--- [DEBUG] system_config.csv RAW TEXT ---");
+            console.log(text.substring(0, 200) + "..."); 
             const data = this.parseCSV(text);
-            if (!data) return;
+            if (!data) {
+                console.warn("無法解析 system_config.csv");
+                return;
+            }
             const { rows, headerIdx, headers } = data;
             const hIdx = (key) => headers.findIndex(h => h.toLowerCase().trim() === key.toLowerCase());
             const idxType = hIdx('type'), idxValue = hIdx('value');
             for (let i = headerIdx + 1; i < rows.length; i++) {
                 const row = rows[i];
                 if (!row[idxType]) continue;
-                const type = row[idxType].trim();
+                const type = row[idxType].trim().toLowerCase();
                 const val = row[idxValue].trim();
 
                 if (type === 'default_resource') {
                     // 解析 "{food=100,wood=200,stone=100}"
                     const costs = this.parseResourceCosts(val);
-                    // 先歸零所有資源
-                    for (let r in this.state.resources) this.state.resources[r] = 0;
+                    console.log("--- [DEBUG] 已讀取初始資源配置:", costs);
+                    
+                    // 先歸零所有資源 (保持物件引用)
+                    if (this.state.resources) {
+                        for (let r in this.state.resources) this.state.resources[r] = 0;
+                    } else {
+                        this.state.resources = {};
+                    }
+                    
+                    // 記錄初始資源鍵值，供 UI 動態顯示
+                    const keys = Object.keys(costs);
+                    this.state.initialResourceKeys = keys.slice(0, 6);
+                    console.log("--- [DEBUG] UI 顯示鍵值:", this.state.initialResourceKeys);
+                    
                     // 套用初始資源
-                    Object.entries(costs).forEach(([rk, rv]) => {
-                        this.state.resources[rk] = rv;
+                    keys.forEach(rk => {
+                        this.state.resources[rk] = costs[rk];
                     });
                 } else if (val.includes('*')) {
                     const clean = val.replace(/[\{\}]/g, '');
@@ -667,7 +685,6 @@ export class GameEngine {
                 idxCol = hIdx('collision'),
                 idxSize = hIdx('size'),
                 idxPop = hIdx('population'),
-                idxNeed = hIdx('need_resource'),
                 idxName = headers.find(h => h === 'name' || h === '名稱'),
                 idxDesc = headers.find(h => h === 'desc' || h === '描述'),
                 idxMax = hIdx('max_count'),
@@ -676,7 +693,7 @@ export class GameEngine {
                 idxProdType = (hIdx('npc_production_type') !== -1) ? hIdx('npc_production_type') : headers.lastIndexOf('npc_production'),
                 idxResourceValue = hIdx('resource_value');
 
-            console.log(`[CSV載入] 建築配置欄位索引結果:`, { model: idxModel, type: idxType, need: idxNeed, prod: idxProd, prodType: idxProdType });
+            console.log(`[CSV載入] 建築配置欄位索引結果:`, { model: idxModel, type: idxType, prod: idxProd, prodType: idxProdType });
 
             // 轉換為 index (使用上方載入時定義的健壯版 hIdx)
             const nameIdx = headers.indexOf(idxName);
@@ -684,7 +701,7 @@ export class GameEngine {
 
             const idxLv = hIdx('lv'),
                 idxUnlock = hIdx('build_unlock'),
-                idxUpgradeResources = hIdx('upgrade_need_resources'),
+                idxUpgradeIngredients = hIdx('upgrade_need_ingredients'),
                 idxUpgradeTimes = hIdx('upgrade_times');
 
             this.state.buildingConfigs = {}; // 舊格式相容 (儲存各 modellv1 作為基礎)
@@ -715,15 +732,14 @@ export class GameEngine {
                     collision: row[idxCol] === '1',
                     size: row[idxSize] || "{1,1}",
                     population: parseInt(row[idxPop]) || 0,
-                    costs: this.parseResourceCosts(row[idxNeed]),
+                    costs: this.parseResourceCosts(row[idxUpgradeIngredients]),
                     maxCount: parseInt(row[idxMax]) || 999,
                     buildTime: parseFloat(row[idxTime]) || 5,
-                    resourceValue: resValCosts.food || resValCosts.wood || resValCosts.stone || resValCosts.gold || 0,
+                    resourceValue: resValCosts.food || resValCosts.wood || resValCosts.stone || resValCosts.gold_ore || 0,
                     npcProduction: prodList,
                     productionMode: (row[idxProdType] || 'normal').toLowerCase().trim(),
-                    // 升級相關
+                    // 升級與解鎖相關
                     buildUnlock: row[idxUnlock] || "{0}",
-                    upgradeResources: this.parseResourceCosts(row[idxUpgradeResources]),
                     upgradeTime: parseFloat(row[idxUpgradeTimes]) || 0
                 };
 
@@ -1074,9 +1090,10 @@ export class GameEngine {
             return;
         }
 
-        // 檢查資源
-        for (let r in currentCfg.upgradeResources) {
-            const cost = currentCfg.upgradeResources[r];
+        // 檢查資源 (使用下一等級的 cost)
+        const nextCosts = nextCfg.costs || {};
+        for (let r in nextCosts) {
+            const cost = nextCosts[r];
             if ((this.state.resources[r] || 0) < cost) {
                 this.triggerWarning("1", [r.toUpperCase()]);
                 return;
@@ -1084,13 +1101,13 @@ export class GameEngine {
         }
 
         // 扣除資源
-        for (let r in currentCfg.upgradeResources) {
-            this.state.resources[r] -= currentCfg.upgradeResources[r];
+        for (let r in nextCosts) {
+            this.state.resources[r] -= nextCosts[r];
         }
 
         entity.isUpgrading = true;
         entity.upgradeProgress = 0;
-        entity.upgradeTime = currentCfg.upgradeTime || 10;
+        entity.upgradeTime = nextCfg.upgradeTime || 10;
         this.addLog(`開始升級 ${currentCfg.name} 到 ${entity.lv + 1} 級，預計耗時 ${entity.upgradeTime} 秒。`);
         if (window.UIManager) {
             window.UIManager.updateValues(true);
@@ -1103,8 +1120,8 @@ export class GameEngine {
         if (!entity || !entity.isUpgrading) return;
 
         // 返還資源 (100% 返還)
-        const currentCfg = this.getBuildingConfig(entity.type, entity.lv);
-        const costs = currentCfg?.upgradeResources || {};
+        const nextCfg = this.getBuildingConfig(entity.type, entity.lv + 1);
+        const costs = nextCfg?.costs || {};
         for (let r in costs) {
             if (this.state.resources.hasOwnProperty(r)) {
                 this.state.resources[r] += costs[r];
