@@ -1,4 +1,5 @@
 import { UI_CONFIG } from "../ui/ui_config.js";
+import { EffectSystem } from "./EffectSystem.js";
 
 /**
  * 獨立戰鬥系統 Alpha 版 (BattleSystem.js)
@@ -37,8 +38,7 @@ export class BattleSystem {
                 this.processCombat(unit, dt, state, TILE_SIZE, shouldScan);
             });
 
-            // 2. 更新遠程子彈
-            this.updateProjectiles(state, dt, TILE_SIZE);
+            // 2. 遠程子彈更新已遷移至 EffectSystem.updateProjectiles (由 GameEngine.logicTick 呼叫)
 
             // 3. 清理死亡單位並產生屍體
             this.cleanupDeadUnits(state);
@@ -214,14 +214,24 @@ export class BattleSystem {
         }
     }
 
+    /**
+     * 執行傷害判定
+     * @param {Object} target 目標實體
+     * @param {number} dmg 傷害值
+     * @param {Object} state 
+     * @param {string} attackerId 
+     */
     static applyDamage(target, dmg, state, attackerId = null) {
-        // [核心防護] 確保不會對屍體或無效目標造成傷害與跳字
         if (!target || !(target.hp > 0) || target.isCorpse) return;
 
         target.hp -= dmg;
         target.hitTimer = 1.0;
 
-        if (window.BattleRenderer) {
+        // 視覺通知：由 EffectSystem 統一代理視覺回饋
+        if (typeof EffectSystem !== 'undefined') {
+            EffectSystem.onUnitHit(target, dmg);
+        } else if (window.BattleRenderer) {
+            // 回退方案
             window.BattleRenderer.addDamagePopup(target.x, target.y, dmg);
         }
 
@@ -231,34 +241,12 @@ export class BattleSystem {
             target.chaseFrame = 10;
         }
 
-        // [核心追蹤] 幫助排查死亡延遲問題
         if (target.hp <= 0 && typeof GameEngine !== 'undefined') {
             GameEngine.addLog(`[生命值歸零] ${target.configName || '目標'} HP 已耗盡`, 'BATTLE');
         }
     }
 
-    static updateProjectiles(state, dt, TILE_SIZE) {
-        if (!state.projectiles) return;
-
-        for (let i = state.projectiles.length - 1; i >= 0; i--) {
-            const p = state.projectiles[i];
-            p.progress += dt / Math.max(0.01, p.duration);
-
-            if (p.progress >= 1.0) {
-                const target = this.findEntityById(p.targetId, state);
-                if (target && target.hp > 0) {
-                    this.applyDamage(target, p.damage, state, p.attackerId);
-                }
-                state.projectiles.splice(i, 1);
-            } else {
-                const target = this.findEntityById(p.targetId, state);
-                const tx = (target && target.hp > 0) ? target.x : p.lastX;
-                const ty = (target && target.hp > 0) ? target.y : p.lastY;
-                p.x = p.startX + (tx - p.startX) * p.progress;
-                p.y = p.startY + (ty - p.startY) * p.progress;
-            }
-        }
-    }
+    // 遠程子彈更新邏輯已遷移至 EffectSystem.updateProjectiles
 
     static cleanupDeadUnits(state) {
         if (!state || !state.units) return;

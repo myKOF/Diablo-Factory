@@ -210,17 +210,14 @@ export class BattleRenderer {
                 const coreColor = this.parseColor(cfg.colorCore);
                 const trailColor = this.parseColor(cfg.colorTrail);
 
-                // 繪製拖尾 (手動粒子感)
-                if (!p.history) p.history = [];
-                p.history.push({ x: rx, y: ry, alpha: 1.0 });
-                if (p.history.length > 8) p.history.shift();
-
-                p.history.forEach((h, idx) => {
-                    h.alpha -= 0.1;
-                    const trailSize = size * (idx / p.history.length);
-                    g.fillStyle(trailColor, h.alpha * 0.5);
-                    g.fillCircle(h.x + (Math.random() - 0.5) * 3, h.y + (Math.random() - 0.5) * 3, trailSize);
-                });
+                // 繪製拖尾 (由 EffectSystem 更新數據，此處僅負責繪圖)
+                if (p.history) {
+                    p.history.forEach((h, idx) => {
+                        const trailSize = size * (idx / p.history.length);
+                        g.fillStyle(trailColor, h.alpha * 0.5);
+                        g.fillCircle(h.x + (Math.random() - 0.5) * 3, h.y + (Math.random() - 0.5) * 3, trailSize);
+                    });
+                }
 
                 // 核心火球
                 g.fillStyle(glowColor, 0.8);
@@ -239,56 +236,40 @@ export class BattleRenderer {
                 const offset = Math.sin(Math.PI * (p.progress || 0)) * arcH;
                 ry -= offset;
 
-                // 1. 繪製煙霧拖尾 (底層：焦黑煙塵)
-                if (!p.historySmoke) p.historySmoke = [];
-                // 頻率控制：每幀產生煙霧
-                p.historySmoke.push({ x: rx, y: ry, life: cfg.smoke.lifespan, seed: Math.random() });
-                
-                for (let i = p.historySmoke.length - 1; i >= 0; i--) {
-                    const s = p.historySmoke[i];
-                    s.life -= dt * 1000;
-                    if (s.life <= 0) {
-                        p.historySmoke.splice(i, 1);
-                        continue;
+                // 1. 繪製煙霧拖尾 (數據由 EffectSystem 維護)
+                if (p.historySmoke) {
+                    for (let i = 0; i < p.historySmoke.length; i++) {
+                        const s = p.historySmoke[i];
+                        const ratio = 1 - (s.life / cfg.smoke.lifespan);
+                        const alpha = cfg.smoke.alpha.start * (1 - ratio);
+                        const scale = cfg.smoke.scale.start + (cfg.smoke.scale.end - cfg.smoke.scale.start) * ratio;
+                        
+                        g.fillStyle(this.parseColor(cfg.smoke.tint), alpha);
+                        const driftX = Math.sin(ratio * 5 + s.seed) * 10;
+                        const driftY = ratio * cfg.smoke.gravityY * 0.5;
+                        g.fillCircle(s.x + driftX, s.y + driftY, 12 * scale);
                     }
-                    const ratio = 1 - (s.life / cfg.smoke.lifespan);
-                    const alpha = cfg.smoke.alpha.start * (1 - ratio);
-                    const scale = cfg.smoke.scale.start + (cfg.smoke.scale.end - cfg.smoke.scale.start) * ratio;
-                    
-                    g.fillStyle(this.parseColor(cfg.smoke.tint), alpha);
-                    // 煙霧隨機擴散與微弱上升 (gravityY)
-                    const driftX = Math.sin(ratio * 5 + s.seed) * 10;
-                    const driftY = ratio * cfg.smoke.gravityY * 0.5;
-                    g.fillCircle(s.x + driftX, s.y + driftY, 12 * scale);
                 }
 
-                // 2. 繪製火焰拖尾 (上層：高熱火焰)
-                if (!p.historyFire) p.historyFire = [];
-                p.historyFire.push({ x: rx, y: ry, life: cfg.fire.lifespan, seed: Math.random() });
+                // 2. 繪製火焰拖尾 (數據由 EffectSystem 維護)
+                if (p.historyFire) {
+                    for (let i = 0; i < p.historyFire.length; i++) {
+                        const f = p.historyFire[i];
+                        const ratio = 1 - (f.life / cfg.fire.lifespan);
+                        const alpha = cfg.fire.alpha.start * (1 - ratio);
+                        const scale = cfg.fire.scale.start + (cfg.fire.scale.end - cfg.fire.scale.start) * ratio;
+                        
+                        let color;
+                        if (ratio < 0.5) {
+                            color = this.lerpColor(cfg.fire.tint[0], cfg.fire.tint[1], ratio * 2);
+                        } else {
+                            color = this.lerpColor(cfg.fire.tint[1], cfg.fire.tint[2], (ratio - 0.5) * 2);
+                        }
 
-                for (let i = p.historyFire.length - 1; i >= 0; i--) {
-                    const f = p.historyFire[i];
-                    f.life -= dt * 1000;
-                    if (f.life <= 0) {
-                        p.historyFire.splice(i, 1);
-                        continue;
+                        g.fillStyle(color, alpha);
+                        const driftY = ratio * cfg.fire.gravityY * 0.4;
+                        g.fillCircle(f.x + (Math.random() - 0.5) * 5, f.y + driftY, 8 * scale);
                     }
-                    const ratio = 1 - (f.life / cfg.fire.lifespan);
-                    const alpha = cfg.fire.alpha.start * (1 - ratio);
-                    const scale = cfg.fire.scale.start + (cfg.fire.scale.end - cfg.fire.scale.start) * ratio;
-                    
-                    // 顏色插值：白 -> 黃 -> 紅
-                    let color;
-                    if (ratio < 0.5) {
-                        color = this.lerpColor(cfg.fire.tint[0], cfg.fire.tint[1], ratio * 2);
-                    } else {
-                        color = this.lerpColor(cfg.fire.tint[1], cfg.fire.tint[2], (ratio - 0.5) * 2);
-                    }
-
-                    g.fillStyle(color, alpha);
-                    // 火焰向上飄升 (gravityY: -100)
-                    const driftY = ratio * cfg.fire.gravityY * 0.4;
-                    g.fillCircle(f.x + (Math.random() - 0.5) * 5, f.y + driftY, 8 * scale);
                 }
 
                 // 3. 核心投出的巨石

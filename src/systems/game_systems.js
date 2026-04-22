@@ -1,4 +1,5 @@
 import { UI_CONFIG } from "../ui/ui_config.js";
+import { EffectSystem } from "./EffectSystem.js";
 import { PathfindingSystem } from "./PathfindingSystem.js?v=3";
 import { BattleSystem } from "./BattleSystem.js";
 import { MapDataSystem } from "./MapDataSystem.js";
@@ -15,7 +16,7 @@ export class GameEngine {
     static state = {
         resources: { fruit: 0, wood: 0, stone: 0, gold_ore: 0, iron_ore: 0, coal: 0, magic_herb: 0, wolf_hide: 0, bear_pelt: 0, gold_ingots: 0, healthpotion: 0, soul: 100, mana: 0 },
         buildings: { village: 1, farmhouse: 0 },
-        units: { villagers: [], priest: 0, mage: 0, archmage: 0, swordsman: 0, archer: 0 },
+        units: { villagers: [], npcs: [], priest: 0, mage: 0, archmage: 0, swordsman: 0, archer: 0 },
         mapEntities: [],
         log: ["暗黑煉金工廠：末日準備中..."],
         npcConfigs: {},
@@ -131,7 +132,13 @@ export class GameEngine {
 
             // 核心戰鬥系統更新
             if (typeof BattleSystem !== 'undefined') {
+                // 1. 戰鬥系統更新
                 BattleSystem.update(this.state, deltaTime, this.TILE_SIZE);
+
+                // 2. 特效與彈道系統更新 (由 EffectSystem 統一管理)
+                if (typeof EffectSystem !== 'undefined') {
+                    EffectSystem.update(this.state, deltaTime, this.TILE_SIZE, BattleSystem.applyDamage.bind(BattleSystem));
+                }
             }
 
             // 處理每間城鎮中心各自的獨立生產隊列
@@ -239,7 +246,10 @@ export class GameEngine {
                 return bS - aS; // 選中的在前
             });
 
-            sortedVillagers.forEach(v => {
+            // 合併 NPC 單位，確保敵方/中立單位也能移動、追擊、巡邏
+            const allMovableUnits = [...sortedVillagers, ...(this.state.units.npcs || [])];
+
+            allMovableUnits.forEach(v => {
                 // [新協定] 本循環不再自動呼叫工人去建築。所有建築任務必須由玩家點擊觸發。
                 // 這裡僅負責更新移動位置等物理行為。
                 this.updateVillagerMovement(v, deltaTime);
@@ -853,7 +863,13 @@ export class GameEngine {
             produce_resource: config.produce_resource || null
         };
 
-        this.state.units.villagers.push(v);
+        // 根據陣營將單位推入對應的列表中 (村民 vs NPC/敵人)
+        if (config.camp === 'enemy' || config.camp === 'neutral') {
+            if (!this.state.units.npcs) this.state.units.npcs = [];
+            this.state.units.npcs.push(v);
+        } else {
+            this.state.units.villagers.push(v);
+        }
 
         // [集結點邏輯] 核心協定：新生單位優先執行建築物預設的集結指令（鎖定狀態），若無指令才進入自動分派
         if (building && building.rallyPoint) {
@@ -1514,7 +1530,8 @@ export class GameEngine {
         this.state.pathfinding.setGrid(matrix);
 
         // 核心要求：網格更新後，所有正在移動中的單位必須重新計算路徑，以避開剛生成的建築
-        this.state.units.villagers.forEach(v => {
+        const allUnitsForPath = [...this.state.units.villagers, ...(this.state.units.npcs || [])];
+        allUnitsForPath.forEach(v => {
             v.fullPath = null;
             v.pathIndex = 0;
             v.isFindingPath = false; // [修復] 同步重置尋路狀態，防止單位因 isFindingPath 鎖死而維持直線行走
@@ -2083,7 +2100,8 @@ export class GameEngine {
                     GameEngine.updatePathfindingGrid();
 
                     // 自動脫困：使用已保存的 finishedBuilding 引用，確保正確推開所有被壓住的人
-                    this.state.units.villagers.forEach(vi => {
+                    const allUnitsForUnstuck = [...this.state.units.villagers, ...(this.state.units.npcs || [])];
+                    allUnitsForUnstuck.forEach(vi => {
                         const ignore = [vi.targetId, vi.targetBase].filter(Boolean);
                         if (GameEngine.isColliding(vi.x, vi.y, ignore) === finishedBuilding) {
                             // 觸發防卡死機制

@@ -202,10 +202,11 @@ export class InputSystem {
         let targetType = 'GROUND';
 
         // 1. 檢查是否點擊到單位 (敵友皆可，優先級最高)
-        GameEngine.state.units.villagers.forEach(v => {
+        const allUnits = [...(GameEngine.state.units.villagers || []), ...(GameEngine.state.units.npcs || [])];
+        allUnits.forEach(v => {
             if (v.hp > 0) {
                 const d = Math.hypot(v.x - pos.x, v.y - pos.y);
-                if (d < 40) { // 稍微放寬 NPC 集結點點擊範圍
+                if (d < 40) { 
                     clickedTarget = v;
                     targetType = 'UNIT';
                 }
@@ -289,8 +290,9 @@ export class InputSystem {
         let clickedEntity = null;
         let bestDist = 40;
 
-        // --- 尋找目標的邏輯 (Agent原本寫的，保持不動) ---
-        GameEngine.state.units.villagers.forEach(v => {
+        // --- 尋找目標的邏輯 (納入 npcs 掃描) ---
+        const allUnits = [...(GameEngine.state.units.villagers || []), ...(GameEngine.state.units.npcs || [])];
+        allUnits.forEach(v => {
             const camp = (v.config && v.config.camp) || v.camp || 'player';
             if (camp === 'enemy' || camp === 'neutral') {
                 const d = Math.hypot(v.x - pointer.worldX, v.y - pointer.worldY);

@@ -581,10 +581,11 @@ export class MainScene extends Phaser.Scene {
         // 2. 判斷是否可以跳過重度的實體渲染計算
         // 如果相機沒動、加載完畢、實體數量沒變，且且渲染版本未更新，跳過繁重計算
         if (!camMoved && !this.pendingVisibleEntities && !entitiesCountChanged && !renderVersionChanged && !state.placingType) {
-            this.updateUnits(state.units.villagers);
+            const allUnits = [...(state.units.villagers || []), ...(state.units.npcs || [])];
+            this.updateUnits(allUnits);
             this.updateDynamicHUD(this.lastVisibleEntities);
-            // 渲染戰鬥視覺 (HP Bars & Projectiles - 即使沒動也需更新動畫與剩餘時間)
-            BattleRenderer.renderHPBars(this.hudGraphics, state.units.villagers, deltaTime);
+            // 渲染戰鬥視覺 (HP Bars & Projectiles)
+            BattleRenderer.renderHPBars(this.hudGraphics, allUnits, deltaTime);
             BattleRenderer.renderProjectiles(this.hudGraphics, state, deltaTime);
             return;
         }
@@ -600,11 +601,12 @@ export class MainScene extends Phaser.Scene {
             this.updateResources(state.mapData, cam.scrollX, cam.scrollY, cam.width, cam.height);
         }
 
-        this.updateUnits(state.units.villagers);
+        const allUnits = [...(state.units.villagers || []), ...(state.units.npcs || [])];
+        this.updateUnits(allUnits);
         this.updateDynamicHUD(visibleEntities);
 
         // 渲染戰鬥視覺 (HP Bars) - 同時包含單位與具備血量的建築實體
-        const allCombatants = [...state.units.villagers, ...state.mapEntities.filter(e => e.hp !== undefined)];
+        const allCombatants = [...allUnits, ...state.mapEntities.filter(e => e.hp !== undefined)];
         BattleRenderer.renderHPBars(this.hudGraphics, allCombatants, deltaTime);
         BattleRenderer.renderProjectiles(this.hudGraphics, state, deltaTime);
     }
