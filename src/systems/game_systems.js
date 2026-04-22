@@ -688,7 +688,6 @@ export class GameEngine {
                 idxName = headers.find(h => h === 'name' || h === '名稱'),
                 idxDesc = headers.find(h => h === 'desc' || h === '描述'),
                 idxMax = hIdx('max_count'),
-                idxTime = hIdx('building_times'),
                 idxProd = hIdx('npc_production'), // ID 列表
                 idxProdType = (hIdx('npc_production_type') !== -1) ? hIdx('npc_production_type') : headers.lastIndexOf('npc_production'),
                 idxResourceValue = hIdx('resource_value');
@@ -734,7 +733,7 @@ export class GameEngine {
                     population: parseInt(row[idxPop]) || 0,
                     costs: this.parseResourceCosts(row[idxUpgradeIngredients]),
                     maxCount: parseInt(row[idxMax]) || 999,
-                    buildTime: parseFloat(row[idxTime]) || 5,
+                    buildTime: parseFloat(row[idxUpgradeTimes]) || 5,
                     resourceValue: resValCosts.food || resValCosts.wood || resValCosts.stone || resValCosts.gold_ore || 0,
                     npcProduction: prodList,
                     productionMode: (row[idxProdType] || 'normal').toLowerCase().trim(),
