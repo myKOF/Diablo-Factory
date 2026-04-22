@@ -42,6 +42,7 @@
 - **代碼洗滌**：任務結束前，刪除未引用變數與除錯 Log。
 - **自動自測**：存檔後必須自動啟動 Playwright 進行功能驗證。
 - **進程與視窗自毀**：測試成功或結束後，腳本必須強制執行 `await browser.close();` 關閉所有開啟的測試網頁與瀏覽器實體，並以 `finally { process.exit(); }` 徹底了結，嚴禁殘留任何背景進程或需手動關閉的分頁。
+- **強制系統通知 (Windows Alert)**：任務與自測完全結束後，必須透過執行指令 `npx -y node-notifier-cli -t "Antigravity 系統" -m "作業與自測已完成，請回歸！"` 來強制彈出通知。若此方法失效，則必須透過 Node.js 調用 PowerShell 播放系統提示音：`powershell -c (New-Object Media.SoundPlayer 'C:\Windows\Media\notify.wav').PlaySync()`。
 
 ## [無痕測試與自動清理協議]
 1. **領地限制 (Sandbox)**：所有測試截圖、Log 檔案與臨時數據必須統一存放於 `/tmp/` 資料夾。嚴禁將產出物置於 `src/` 或根目錄。
