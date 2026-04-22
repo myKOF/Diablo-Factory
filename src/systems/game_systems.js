@@ -1375,6 +1375,12 @@ export class GameEngine {
                     // 1. 基本佔用檢查 (建築/資源)
                     if (checkOccupiedG(gx, gy, 1, 1)) continue;
 
+                    // 1b. 資源網格檢查：確認該格沒有資源節點 (樹木、石頭等)
+                    if (this.state.mapData) {
+                        const resData = this.state.mapData.getResource(gx, gy);
+                        if (resData && resData.type !== 0) continue;
+                    }
+
                     // 2. 同 ID 敵人間距檢查 (查閱 proximityGrid)
                     const pIdx = getIdx(gx, gy);
                     if (pIdx === -1 || proximityGrid[pIdx] === 1) continue;
@@ -1389,6 +1395,20 @@ export class GameEngine {
                         (Math.hypot(x - villagePos.x, y - villagePos.y) < npcSafe);
 
                     if (distCheck) continue;
+
+                    // 4. 額外檢查：確保周圍至少有一格可行走（不會被完全包圍而無法閒逛）
+                    let hasWalkableNeighbor = false;
+                    for (let dx = -1; dx <= 1 && !hasWalkableNeighbor; dx++) {
+                        for (let dy = -1; dy <= 1 && !hasWalkableNeighbor; dy++) {
+                            if (dx === 0 && dy === 0) continue;
+                            const nx = gx + dx, ny = gy + dy;
+                            if (!checkOccupiedG(nx, ny, 1, 1)) {
+                                const nRes = this.state.mapData ? this.state.mapData.getResource(nx, ny) : null;
+                                if (!nRes || nRes.type === 0) hasWalkableNeighbor = true;
+                            }
+                        }
+                    }
+                    if (!hasWalkableNeighbor) continue;
 
                     // 正式產出
                     this.spawnNPC(npcID, null, { x, y });
@@ -1589,10 +1609,25 @@ export class GameEngine {
                     const pr = v.config.patrol_range * this.TILE_SIZE;
                     const angle = Math.random() * Math.PI * 2;
                     const dist = Math.random() * pr;
-                    v.idleTarget = {
-                        x: (v.spawnX || v.x) + Math.cos(angle) * dist,
-                        y: (v.spawnY || v.y) + Math.sin(angle) * dist
-                    };
+                    const tx = (v.spawnX || v.x) + Math.cos(angle) * dist;
+                    const ty = (v.spawnY || v.y) + Math.sin(angle) * dist;
+
+                    // 驗證巡邏目標是否可行走 (避免走進資源/建築)
+                    let targetWalkable = true;
+                    if (this.state.pathfinding && this.state.pathfinding.isGridSet) {
+                        const tgx = Math.floor(tx / this.TILE_SIZE);
+                        const tgy = Math.floor(ty / this.TILE_SIZE);
+                        if (!this.state.pathfinding.isValidAndWalkable(tgx, tgy, true)) {
+                            targetWalkable = false;
+                        }
+                    }
+
+                    if (targetWalkable) {
+                        v.idleTarget = { x: tx, y: ty };
+                    } else {
+                        // 目標不可行走，等待下次嘗試
+                        v.waitTimer = 1 + Math.random() * 2;
+                    }
                 }
             } else if (v.state === 'MOVING') {
                 v.state = 'IDLE';
