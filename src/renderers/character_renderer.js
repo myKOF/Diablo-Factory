@@ -278,7 +278,7 @@ export class CharacterRenderer {
             const resType = (data.type || "").toUpperCase();
             if (data.vTint !== undefined && data.vTint !== 0xffffff) {
                 clothColor = data.vTint;
-            } else if (state === 'IDLE') {
+            } else if (state === 'IDLE' || state === 'MOVING_TO_FACTORY') {
                 clothColor = parseColor(colors.IDLE);
             } else if (state === 'CONSTRUCTING' || state === 'MOVING_TO_CONSTRUCTION') {
                 clothColor = parseColor(colors.CONSTRUCTING);

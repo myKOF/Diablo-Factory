@@ -1,0 +1,14 @@
+﻿編號,名稱,類型,屬性圖示,中文注釋說明，參考用
+id,name,type,icon,!annotation
+1,攻擊,Attack,,攻擊
+2,護甲,Armor,,護甲
+3,防禦,Defense,,防禦
+4,雷屬性傷害,Lightning Damage,,雷屬性傷害
+5,風屬性傷害,Wind Damage,,風屬性傷害
+6,火屬性傷害,Fire Damage,,火屬性傷害
+7,水屬性傷害,Water Damage,,水屬性傷害
+8,地屬性傷害,Earth Damage,,地屬性傷害
+9,生命回復,Health Regeneration,,生命回復
+10,攻速,Attack Speed,,攻速
+11,移動速度,Movement Speed,,移動速度
+12,傷害減免,Damage Reduction,,傷害減免

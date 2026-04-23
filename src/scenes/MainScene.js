@@ -794,6 +794,9 @@ export class MainScene extends Phaser.Scene {
             if (ent.rallyPoint && isSelected) {
                 this.drawRallyPoint(g, ent);
             }
+
+            // [核心修正] 繪製工人派駐燈號：移至 HUD 圖層 (Depth 250萬)，防止被建築貼圖蓋住
+            this.drawWorkerLights(g, ent, ent.x, ent.y, uw, uh, TS, 1.0);
         });
     }
 
@@ -1944,6 +1947,65 @@ export class MainScene extends Phaser.Scene {
         }
     }
 
+    /**
+     * 繪製建築上方的工人派駐燈號
+     */
+    drawWorkerLights(g, ent, offX, offY, uw, uh, TS, alpha) {
+        // 只有已完成的加工廠才顯示
+        if (ent.isUnderConstruction) return;
+        
+        const cfg = UI_CONFIG.WorkerOccupancy || {
+            lightWidth: 10, lightHeight: 5, spacing: 3, offsetY: -12,
+            bgColor: "#212121", bgAlpha: 0.8, activeColor: "#76ff03", inactiveColor: "#424242"
+        };
+        
+        // 使用引擎標準方法獲獲取建築配置
+        const bCfg = GameEngine.getBuildingConfig(ent.type1, ent.lv || 1);
+        if (!bCfg || !bCfg.need_villagers || bCfg.need_villagers <= 0) return;
+        
+        const max = bCfg.need_villagers;
+        const current = (ent.assignedWorkers ? ent.assignedWorkers.length : 0);
+        
+        const lw = cfg.lightWidth;
+        const lh = cfg.lightHeight;
+        const sp = cfg.spacing;
+        const totalW = (lw + sp) * max - sp;
+        
+        const startX = offX - totalW / 2;
+        const startY = offY - (uh * TS) / 2 + cfg.offsetY;
+
+        // 背景深色底座
+        const bg = this.hexOrRgba(cfg.bgColor);
+        const padding = cfg.basePadding || 2;
+        g.fillStyle(bg.color, alpha * (cfg.bgAlpha || 0.8));
+        g.fillRect(startX - padding, startY - padding, totalW + padding * 2, lh + padding * 2);
+
+        for (let i = 0; i < max; i++) {
+            const lx = startX + i * (lw + sp);
+            const isOn = i < current;
+            
+            // 底座/空格 (黑色)
+            g.fillStyle(this.hexOrRgba(cfg.inactiveColor).color, alpha);
+            g.fillRect(lx, startY, lw, lh);
+            
+            if (isOn) {
+                // 亮燈 (亮綠色)
+                const active = this.hexOrRgba(cfg.activeColor);
+                g.fillStyle(active.color, alpha);
+                g.fillRect(lx, startY, lw, lh);
+                
+                // 增加發光質感
+                g.fillStyle(0xffffff, alpha * 0.5);
+                g.fillRect(lx, startY, lw, 1.5);
+                
+                // 外發光
+                const glow = this.hexOrRgba(cfg.glowColor || "#b2ff59");
+                g.lineStyle(1, glow.color, alpha * (cfg.glowAlpha || 0.6));
+                g.strokeRect(lx - 0.5, startY - 0.5, lw + 1, lh + 1);
+            }
+        }
+    }
+
     drawBuildProgressBar(g, ent, uw, uh, TS) {
         const cfg = UI_CONFIG.BuildingProgressBar;
         const progress = ent.buildProgress / (ent.buildTime || 1);
@@ -2327,6 +2389,7 @@ export class MainScene extends Phaser.Scene {
 
             // [核心優化] 優先判定玩家單位，且採用混合 hitbox 檢測 (圓形 + 矩形)
             GameEngine.state.units.villagers.forEach(v => {
+                if (v.visible === false) return; // [新增] 忽略不可見(在工廠內)的單位
                 const isPlayer = (v.config?.camp === 'player' || v.camp === 'player' || !v.camp);
                 const d = Math.hypot(v.x - endX, v.y - endY);
 
@@ -2351,7 +2414,8 @@ export class MainScene extends Phaser.Scene {
                 const isDoubleClick = (GameEngine.state.lastSelectedUnitId === clickedUnit.id && (now - GameEngine.state.lastSelectionTime < 300));
                 if (isDoubleClick) {
                     const unitType = clickedUnit.config.type;
-                    const newlySelected = GameEngine.state.units.villagers.filter(v => v.config && v.config.type === unitType &&
+                    const newlySelected = GameEngine.state.units.villagers.filter(v => 
+                        v.config && v.config.type === unitType && v.visible !== false &&
                         v.x >= cam.scrollX && v.x <= cam.scrollX + cam.width &&
                         v.y >= cam.scrollY && v.y <= cam.scrollY + cam.height);
                     if (isShift) {
@@ -2381,6 +2445,7 @@ export class MainScene extends Phaser.Scene {
             const minY = Math.min(this.selectionStartPos.y, endY), maxY = Math.max(this.selectionStartPos.y, endY);
             const boxUnits = GameEngine.state.units.villagers.filter(v =>
                 (v.config?.camp === 'player' || v.camp === 'player' || !v.camp) &&
+                v.visible !== false &&
                 v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY
             );
             if (isShift) { boxUnits.forEach(u => { if (!GameEngine.state.selectedUnitIds.includes(u.id)) GameEngine.state.selectedUnitIds.push(u.id); }); }

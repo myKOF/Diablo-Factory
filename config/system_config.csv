@@ -1,4 +1,4 @@
-編號,類型,參數,中文注釋說明，參考用
+﻿編號,類型,參數,中文注釋說明，參考用
 id,type,value,annotation
 1,village_standby_range,200,村民在村莊周圍待機時的移動範圍，待機移動不可超出此範圍
 2,village_standby_speed,5,村民在村莊周圍待機時的移動速度

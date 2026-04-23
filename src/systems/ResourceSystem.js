@@ -78,7 +78,26 @@ export class ResourceSystem {
         const startGx = Math.floor(x / grid.cellSize);
         const startGy = Math.floor(y / grid.cellSize);
 
-        const depositTypes = ['village', 'town_center', 'barn', 'timber_factory', 'stone_factory', 'gold_mining_factory'];
+        const resType = resourceType.toUpperCase();
+        
+        // 定義各類建築支援的資源類型
+        const supportMap = {
+            'village': 'ALL',
+            'town_center': 'ALL',
+            'timber_factory': ['WOOD', 'TREE'],
+            'stone_factory': ['STONE', 'ROCK'],
+            'gold_mining_factory': ['GOLD', 'GOLD_ORE'],
+            'barn': ['FOOD', 'FRUIT', 'BERRY']
+        };
+
+        const canAccept = (type1, rType) => {
+            const supported = supportMap[type1];
+            if (!supported) return false;
+            if (supported === 'ALL') return true;
+            return supported.some(s => rType.includes(s));
+        };
+
+        const depositTypes = Object.keys(supportMap);
 
         let nearest = null;
         let minDist = Infinity;
@@ -93,7 +112,7 @@ export class ResourceSystem {
                     if (cell) {
                         cell.forEach(e => {
                             if (e.isUnderConstruction) return;
-                            if (depositTypes.includes(e.type1)) {
+                            if (depositTypes.includes(e.type1) && canAccept(e.type1, resType)) {
                                 const d = Math.hypot(e.x - x, e.y - y);
                                 if (d < minDist) { minDist = d; nearest = e; }
                             }
@@ -106,7 +125,7 @@ export class ResourceSystem {
 
         // 如果附近沒找到，回退到全量搜尋防止 Bug
         state.mapEntities.forEach(e => {
-            if (e.isUnderConstruction || !depositTypes.includes(e.type1)) return;
+            if (e.isUnderConstruction || !depositTypes.includes(e.type1) || !canAccept(e.type1, resType)) return;
             const d = Math.hypot(e.x - x, e.y - y);
             if (d < minDist) { minDist = d; nearest = e; }
         });

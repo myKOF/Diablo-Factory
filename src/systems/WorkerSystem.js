@@ -56,6 +56,7 @@ export class WorkerSystem {
                 this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
                 if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                     v.idleTarget = null;
+                    v.commandCenter = null;
                     if (v.state === 'MOVING') v.state = 'IDLE';
 
                     let minWait = 3, maxWait = 6;
@@ -99,6 +100,7 @@ export class WorkerSystem {
                 }
             } else if (v.state === 'MOVING') {
                 v.state = 'IDLE';
+                v.commandCenter = null;
             }
             const colliding = this.isColliding(v.x, v.y);
             if (colliding) {
@@ -167,15 +169,31 @@ export class WorkerSystem {
                     const isProcessingPlant = bCfg && bCfg.type2 === 'processing_plant';
                     
                     if (isProcessingPlant && currentCount >= need_villagers) {
-                        // 如果滿員了，停止在門口，不進入
+                        // 如果滿員了，在門口散開待命
                         v.state = 'IDLE';
                         v.pathTarget = null;
-                        this.engine.addLog(`[派駐中斷] ${v.factoryTarget.name || v.factoryTarget.type1} 已滿員 (${currentCount}/${need_villagers})，${v.configName || '工人'} 在外待命。`, 'TASK');
+                        v.commandCenter = null;
+                        
+                        // [新增] 隨機散開位移，避免堆疊
+                        const scatterAngle = Math.random() * Math.PI * 2;
+                        const scatterDist = 30 + Math.random() * 50;
+                        v.idleTarget = {
+                            x: v.x + Math.cos(scatterAngle) * scatterDist,
+                            y: v.y + Math.sin(scatterAngle) * scatterDist
+                        };
+                        
+                        this.engine.addLog(`[派駐中斷] ${v.factoryTarget.name || v.factoryTarget.type1} 已滿員 (${currentCount}/${need_villagers})，${v.configName || '工人'} 已在附近散開待命。`, 'TASK');
                     } else {
                         // 到達工廠，執行打卡邏輯
                         v.state = 'WORKING_IN_FACTORY';
                         v.pathTarget = null;
+                        v.commandCenter = null;
                         v.visible = false; // 工人進入工廠隱藏
+                        
+                        // [新增] 取消選取，防止進入工廠後仍帶有選取框
+                        if (this.state.selectedUnitIds) {
+                            this.state.selectedUnitIds = this.state.selectedUnitIds.filter(id => id !== v.id);
+                        }
                         
                         if (!v.factoryTarget.assignedWorkers) v.factoryTarget.assignedWorkers = [];
                         if (!v.factoryTarget.assignedWorkers.includes(v.id)) {
@@ -198,6 +216,7 @@ export class WorkerSystem {
                     this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt, ignoreEnts);
                     if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 10) {
                         v.idleTarget = null;
+                        v.commandCenter = null;
                         v.isPlayerLocked = false;
                         v._isRallyMovement = false;
                         v.waitTimer = 1 + Math.random() * 2;
@@ -279,6 +298,7 @@ export class WorkerSystem {
                         } else {
                             this.engine.addLog(`[任務啟動] ${v.configName || '工人'} 已抵達資源點並開始採集 ${target.name || target.type1}`, 'TASK');
                             v.state = 'GATHERING'; v.targetId = target; v.gatherTimer = 0; v.pathTarget = null;
+                            v.commandCenter = null;
                             v.gatherPoint = null; 
                         }
                     } else {
@@ -470,6 +490,7 @@ export class WorkerSystem {
                     ResourceSystem.depositResource(this.state, v.cargoType || v.type, v.cargo, this.engine.addLog.bind(this.engine));
                     v.cargo = 0; v.cargoType = null; v.pathTarget = null;
                     v.depositPoint = null; v._lastBaseId = null;
+                    v.commandCenter = null;
                     v.vTint = 0xffffff;
                     if (v.nextStateAfterDeposit) {
                         v.state = v.nextStateAfterDeposit;
@@ -534,6 +555,7 @@ export class WorkerSystem {
                 if (distC < 35 || buildingDist < (Math.max(halfWC, halfHC) + 15)) {
                     v.state = 'CONSTRUCTING';
                     v.pathTarget = null;
+                    v.commandCenter = null;
                     v._stableConstructionTarget = null;
                 } else {
                     this.moveDetailed(v, txC_pos, tyC_pos, moveSpeed, dt, ignoreEnts);
@@ -634,36 +656,11 @@ export class WorkerSystem {
 
         if (v.state === 'IDLE' && collidingEnt) {
             v.idleTarget = null;
+            v.commandCenter = null;
             v.isPlayerLocked = false;
         }
 
-        if (v.state === 'MOVING_TO_BASE' && v.targetBase) {
-            const bCfg = this.engine.getBuildingConfig(v.targetBase.type1, v.targetBase.lv || 1);
-            let depositDist_base = 60;
-            if (bCfg && bCfg.size) {
-                const m = bCfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
-                if (m) {
-                    const uw_b = parseInt(m[1]), uh_b = parseInt(m[2]);
-                    depositDist_base = (Math.max(uw_b, uh_b) * 20 / 2) + 20;
-                }
-            }
-            if (Math.hypot(v.x - v.targetBase.x, v.y - v.targetBase.y) < depositDist_base) {
-                ResourceSystem.depositResource(this.state, v.type, v.cargo, this.engine.addLog.bind(this.engine));
-                v.cargo = 0;
-                v.pathTarget = null;
-                if (v.nextStateAfterDeposit) {
-                    v.state = v.nextStateAfterDeposit;
-                    v.nextStateAfterDeposit = null;
-                } else if (v.isRecalled) {
-                    v.state = 'IDLE'; v.isRecalled = false; this.assignNextTask(v);
-                } else {
-                    v.state = 'MOVING_TO_RESOURCE';
-                    if (v.isPlayerLocked && v.targetId) { v.pathTarget = null; return; }
-                    v.isPlayerLocked = false;
-                    this.assignNextTask(v);
-                }
-            }
-        }
+        // 已移除冗餘的 MOVING_TO_BASE 邏輯，相關功能已整合至 switch 狀態機中。
     }
 
     restoreVillagerTask(v) {
@@ -1118,12 +1115,14 @@ export class WorkerSystem {
             }
 
             const need_villagers = bCfg ? (bCfg.need_villagers || 0) : 0;
-            if (!clickedTarget.assignedWorkers) clickedTarget.assignedWorkers = [];
+            const currentInside = (clickedTarget.assignedWorkers || []).length;
+            const pendingArrival = this.state.units.villagers.filter(worker => 
+                worker.state === 'MOVING_TO_FACTORY' && worker.factoryTarget === clickedTarget && worker.id !== v.id
+            ).length;
+            const totalAssigned = currentInside + pendingArrival;
 
-            // [需求調整] 超過數量後派出工人則只會停在建築旁邊，無法進駐。
-            // 因此這裡不再 return true 攔截指令，而是發出警告後繼續讓其移動。
-            if (clickedTarget.assignedWorkers.length >= need_villagers) {
-                this.engine.triggerWarning(`工廠派駐人數已滿 (${need_villagers})，工人抵達後將在外待命。`);
+            if (totalAssigned >= need_villagers) {
+                this.engine.triggerWarning(`工廠派駐預約已滿 (${totalAssigned}/${need_villagers})，工人抵達後將在外待命。`);
             }
 
             // 3. 設定派駐任務
