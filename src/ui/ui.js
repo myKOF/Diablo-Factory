@@ -1407,11 +1407,23 @@ export class UIManager {
         const cfg = UI_CONFIG.SettingsPanel;
         const settings = GameEngine.state.settings;
 
-        let html = `<div class="title" style="text-align:center; font-size: 20px; border-bottom: 2px solid #8b6e4b; margin-bottom: 20px; padding-bottom: 10px;">${cfg.title}</div>`;
+        // 右上角關閉按鈕
+        let html = `
+            <div onclick="event.stopPropagation(); window.UIManager.toggleSettingsPanel()" 
+                 style="position: absolute; top: 15px; right: 20px; width: 30px; height: 30px; 
+                        display: flex; align-items: center; justify-content: center; 
+                        cursor: pointer; color: #fbc02d; font-size: 28px; transition: all 0.2s; z-index: 10;"
+                 onmouseover="this.style.transform='scale(1.2)'; this.style.color='#fff'" 
+                 onmouseout="this.style.transform='scale(1)'; this.style.color='#fbc02d'">
+                ×
+            </div>
+        `;
+
+        html += `<div class="title" style="text-align:center; font-size: 20px; border-bottom: 2px solid #8b6e4b; margin-bottom: 20px; padding-bottom: 10px;">${cfg.title}</div>`;
 
         html += `<div style="display:flex; flex-direction:column; gap:16px; padding: 10px;">`;
 
-        // 1. 顯示資源資訊 (名稱、等級、數量)
+        // 1. 地圖資源標籤顯示
         html += `
             <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="window.UIManager.updateSetting(event, 'showResourceInfo', !window.GAME_STATE.settings.showResourceInfo)">
                 <span style="font-size: 16px; color: #e0e0e0; font-weight: 600;">地圖資源標籤顯示</span>
@@ -1431,18 +1443,16 @@ export class UIManager {
                     </span>
                 </div>
             </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="window.UIManager.updateSetting(event, 'rightClickDrag', !window.GAME_STATE.settings.rightClickDrag)">
+                <span style="font-size: 16px; color: #e0e0e0; font-weight: 600;">右鍵拖動畫面的開關</span>
+                <div class="setting-toggle ${settings.rightClickDrag ? 'active' : ''}" style="width: 54px; height: 26px; background: ${settings.rightClickDrag ? 'var(--aoe-gold)' : '#444'}; border-radius: 13px; position: relative; transition: all 0.3s; box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);">
+                    <div style="width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 3px; ${settings.rightClickDrag ? 'right: 3px' : 'left: 3px'}; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
+                </div>
+            </div>
         `;
 
         html += `</div>`;
-
-        // 關閉按鈕
-        html += `
-            <div style="margin-top: 30px; border-top: 1px solid rgba(139, 110, 75, 0.3); padding-top: 15px;">
-                <button class="action-btn" onclick="event.stopPropagation(); window.UIManager.toggleSettingsPanel()" style="width: 100%; height: 44px; flex-direction: row; gap: 10px;">
-                    <span class="icon" style="font-size:18px; margin:0;">🔙</span><span class="label" style="font-size:14px;">返回遊戲</span>
-                </button>
-            </div>
-        `;
 
         panel.innerHTML = html;
     }

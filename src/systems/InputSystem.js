@@ -84,6 +84,11 @@ export class InputSystem {
             if (dist > this.DRAG_THRESHOLD) {
                 this.didMove = true; // 2. 標記為動過
 
+                // [新功能] 檢查設置：若關閉右鍵拖拽，則跳過相機滾動邏輯
+                if (GameEngine.state.settings.rightClickDrag === false) {
+                    return;
+                }
+
                 const dx = pointer.x - this.lastX;
                 const dy = pointer.y - this.lastY;
                 const cam = this.scene.cameras.main;

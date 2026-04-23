@@ -649,12 +649,12 @@ export const UI_CONFIG = {
         lightWidth: 10,
         lightHeight: 5,
         spacing: 3,
-        offsetY: -15,              // 距離建築頂部的垂直偏移 (調高防止遮擋)
+        offsetY: 65,              // 距離建築頂部的垂直偏移 (調高防止遮擋)
         basePadding: 2,            // 背景底座內邊距
-        bgColor: "#000000",        // 底座背景顏色 (黑色)
+        bgColor: "#000000ff",        // 底座背景顏色 (黑色)
         bgAlpha: 0.9,
         activeColor: "#76ff03",    // 亮燈顏色 (亮綠)
-        inactiveColor: "#1a1a1a",  // 滅燈顏色 (極深灰)
+        inactiveColor: "#adadadff",  // 滅燈顏色 (極深灰)
         glowColor: "#b2ff59",      // 發光描邊顏色
         glowAlpha: 0.6
     },

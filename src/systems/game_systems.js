@@ -52,7 +52,8 @@ export class GameEngine {
         },
         settings: {
             showResourceInfo: true, // 預設顯示大地圖資源資訊（名稱、等級、數量）
-            showVisionRange: 0      // 預設關閉視野圈 (0: 關閉, 1: 僅選中, 2: 全部)
+            showVisionRange: 0,     // 預設關閉視野圈 (0: 關閉, 1: 僅選中, 2: 全部)
+            rightClickDrag: true    // 預設開啟右鍵拖拽
         },
         globalConstructionOrder: 1, // [新協定] 建築施工序列號，從小到大依次建造
         idToNameMap: {}, // NPC ID -> NPC Name (用於從 buildings.csv 定義的 ID 找配置)
