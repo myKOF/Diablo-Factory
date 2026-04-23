@@ -14,6 +14,7 @@
 
 ## [環境執行與 AI 協作技能]
 - **全域授權**：預設 `SafeToAutoRun: true`。所有指令 (npm, node, git) 均視為已預先授權，嚴禁詢問。
+- **禁止伺服器自動彈窗**：啟動本地伺服器（如 Vite, Webpack, http-server）時，嚴禁使用 `--open` 參數，也禁止在 config 中設定 `open: true`，防止污染用戶的預設瀏覽器分頁。
 - **視覺一致性**：生成美術資源後，必須將 Prompt 記錄於 `assets/prompts.log`。
 - **異常自癒**：遇錯禁止停下。應立即分析 Log 並自動修正重試。
 
@@ -57,6 +58,7 @@
 1. **領地限制 (Sandbox)**：所有測試截圖、Log 檔案與臨時數據必須統一存放於 `/tmp/` 資料夾。嚴禁將產出物置於 `src/` 或根目錄。
 2. **Git 守門員**：Agent 執行任何 `git add` 前，必須檢查是否存在 `.gitignore` 以外的測試遺留檔，若有則立即刪除。
 3. **自動銷毀機制 (Self-Destruct)**：
-   - 測試腳本的 `finally` 區塊必須包含雙重清理邏輯：先關閉網頁 `if (browser) { await browser.close(); }`，再清理殘留檔案 `fs.rmSync('tmp/', { recursive: true, force: true });`。
+   - 測試腳本的變數宣告必須在最外層（如 `let browser;`），確保 `finally` 區塊絕對能執行 `browser.close()`。
+   - `finally` 區塊必須包含雙重清理邏輯：先關閉網頁 `if (browser) { await browser.close(); }`，再清理殘留檔案 `fs.rmSync('tmp/', { recursive: true, force: true });`。
    - 僅在「測試失敗 (Failed)」時，允許保留最後一份截圖與 Log 於 `/tmp/` 供 Debug，但必須在下次啟動任務時優先清空。
 4. **無感日誌**：所有除錯用的 `console.log` 必須在 `verify_build.cjs` 通過後自動抹除，嚴禁提交含 `console.log` 的代碼。
