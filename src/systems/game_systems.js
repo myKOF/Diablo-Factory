@@ -366,7 +366,7 @@ export class GameEngine {
                             x: gx * this.TILE_SIZE + this.TILE_SIZE / 2,
                             y: gy * this.TILE_SIZE + this.TILE_SIZE / 2,
                             type1: 'RESOURCE',
-                            resourceType: ['NONE', 'WOOD', 'STONE', 'FOOD', 'GOLD'][res.type]
+                            resourceType: ['NONE', 'WOOD', 'STONE', 'FOOD', 'GOLD', 'IRON', 'COAL', 'MAGIC_HERB', 'WOLF', 'BEAR'][res.type]
                         };
                     }
                 } else {

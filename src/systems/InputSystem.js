@@ -201,57 +201,73 @@ export class InputSystem {
     handleRallyPoint(pointer, ent, bCfg) {
         const pos = { x: pointer.worldX, y: pointer.worldY };
         const TS = GameEngine.TILE_SIZE;
+        const state = GameEngine.state;
 
         // [核心邏輯] 偵測點擊位置的物件類型以決定集結模式
         let clickedTarget = null;
         let targetType = 'GROUND';
 
-        // 1. 檢查是否點擊到單位 (敵友皆可，優先級最高)
-        const allUnits = [...(GameEngine.state.units.villagers || []), ...(GameEngine.state.units.npcs || [])];
-        allUnits.forEach(v => {
-            if (v.hp > 0) {
-                const d = Math.hypot(v.x - pos.x, v.y - pos.y);
-                if (d < 40) { 
-                    clickedTarget = v;
-                    targetType = 'UNIT';
+        // 1. [優先權最高] 使用全域懸停目標 (MainScene 已計算過精確碰撞與深度優先級)
+        if (state.hoveredId) {
+            const hid = state.hoveredId;
+            // A. 檢查是否點擊到單位
+            const allUnits = [...(state.units.villagers || []), ...(state.units.npcs || [])];
+            let found = allUnits.find(u => u.id === hid && u.hp > 0);
+            if (found) {
+                clickedTarget = found;
+                targetType = 'UNIT';
+            } 
+            
+            // B. 檢查是否點擊到建築物或屍體
+            if (!clickedTarget) {
+                found = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === hid);
+                if (found) {
+                    clickedTarget = found;
+                    targetType = (found.type1 === 'corpse') ? 'RESOURCE' : 'BUILDING';
                 }
             }
-        });
 
-        // 2. 檢查是否點擊到資源 (地圖格網型)
-        if (!clickedTarget && GameEngine.state.mapData) {
-            const gx = Math.floor(pos.x / TS);
-            const gy = Math.floor(pos.y / TS);
-            const res = GameEngine.state.mapData.getResource(gx, gy);
-            if (res && res.type !== 0) {
-                clickedTarget = { 
-                    id: `res_${gx}_${gy}`, 
-                    gx, gy, 
-                    x: gx * TS + TS / 2, 
-                    y: gy * TS + TS / 2, 
-                    type: 'RESOURCE_NODE',
-                    resourceType: ['NONE', 'SCENE_WOOD', 'SCENE_STONE', 'SCENE_FRUIT', 'SCENE_GOLD_ORE', 'SCENE_IRON_ORE', 'SCENE_COAL', 'SCENE_MAGIC_HERB', 'SCENE_WOLF_CORPSE', 'SCENE_BEAR_CORPSE'][res.type]
-                };
-                targetType = 'RESOURCE';
+            // C. 檢查是否點擊到網格資源 (gx_gy)
+            if (!clickedTarget && hid.includes('_')) {
+                const parts = hid.split('_');
+                if (parts.length === 2) {
+                    const gx = parseInt(parts[0]), gy = parseInt(parts[1]);
+                    if (!isNaN(gx) && !isNaN(gy)) {
+                        const res = state.mapData.getResource(gx, gy);
+                        if (res && res.type !== 0) {
+                            clickedTarget = { 
+                                id: `res_${gx}_${gy}`, 
+                                gx, gy, 
+                                x: gx * TS + TS / 2, 
+                                y: gy * TS + TS / 2, 
+                                type: 'RESOURCE_NODE',
+                                resourceType: ['NONE', 'WOOD', 'STONE', 'FOOD', 'GOLD', 'IRON', 'COAL', 'MAGIC_HERB', 'WOLF', 'BEAR'][res.type]
+                            };
+                            targetType = 'RESOURCE';
+                        }
+                    }
+                }
             }
         }
 
-        // 3. 檢查是否點擊到建築物 (地圖實體型，包含我方工地或採集場)
+        // 2. [備選方案] 若懸停目標失效，則執行區域掃描 (相容原本邏輯)
         if (!clickedTarget) {
-            GameEngine.state.mapEntities.forEach(e => {
-                const fp = GameEngine.getFootprint(e.type1);
-                // [需求修正] 屍體點擊範圍動態讀取 UI_CONFIG.corpseSelectionScale 並擴大
-                let w = (fp.uw * TS);
-                let h = (fp.uh * TS);
-                let padding = 10;
-
-                if (e.type1 === 'corpse') {
-                    const cScale = (UI_CONFIG.ResourceSelection && UI_CONFIG.ResourceSelection.corpseSelectionScale) || 0.8;
-                    w = cScale * TS;
-                    h = cScale * TS;
-                    padding = 5; // 已經根據比例擴大了，墊片可以小一點
+            // ... (原本的 Units 掃描可保留作為二次檢查)
+            const allUnits = [...(state.units.villagers || []), ...(state.units.npcs || [])];
+            allUnits.forEach(v => {
+                if (v.hp > 0 && Math.hypot(v.x - pos.x, v.y - pos.y) < 40) {
+                    clickedTarget = v;
+                    targetType = 'UNIT';
                 }
+            });
+        }
 
+        if (!clickedTarget) {
+            // 原本的建築掃描
+            state.mapEntities.forEach(e => {
+                const fp = GameEngine.getFootprint(e.type1);
+                let w = (fp.uw * TS), h = (fp.uh * TS);
+                let padding = 10;
                 if (pos.x >= e.x - w / 2 - padding && pos.x <= e.x + w / 2 + padding &&
                     pos.y >= e.y - h / 2 - padding && pos.y <= e.y + h / 2 + padding) {
                     clickedTarget = e;
