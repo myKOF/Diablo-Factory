@@ -145,8 +145,20 @@ export class WorkerSystem {
         switch (v.state) {
             case 'MOVING_TO_FACTORY':
                 if (!v.factoryTarget) { v.state = 'IDLE'; break; }
-                const distF = Math.hypot(v.factoryTarget.x - v.x, v.factoryTarget.y - v.y);
-                if (distF < 30) {
+                
+                // [核心優化] 派駐位置放寬：判定是否碰到建築模型範圍
+                const fp = this.engine.getFootprint(v.factoryTarget.type);
+                const halfW = (fp.uw * 20) / 2;
+                const halfH = (fp.uh * 20) / 2;
+                
+                // 計算建築物的 AABB 範圍 (中心點 x, y)
+                const isTouching = 
+                    v.x >= v.factoryTarget.x - halfW - 10 && 
+                    v.x <= v.factoryTarget.x + halfW + 10 &&
+                    v.y >= v.factoryTarget.y - halfH - 10 &&
+                    v.y <= v.factoryTarget.y + halfH + 10;
+
+                if (isTouching) {
                     // 到達工廠，執行打卡邏輯
                     v.state = 'WORKING_IN_FACTORY';
                     v.pathTarget = null;
@@ -1083,6 +1095,11 @@ export class WorkerSystem {
 
         // 2. 派駐檢查：當目標是加工廠時
         if (clickedTarget && this.FACTORY_TYPES.includes(clickedTarget.type)) {
+            // [核心需求] 若建築還在施工中，不執行派駐邏輯，回傳 false 讓 MainScene 處理為建造指令
+            if (clickedTarget.isUnderConstruction) {
+                return false;
+            }
+
             const cfg = this.engine.getBuildingConfig(clickedTarget.type, clickedTarget.lv || 1);
             const need_villagers = cfg ? (cfg.need_villagers || 0) : 0;
 

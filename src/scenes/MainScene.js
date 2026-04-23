@@ -121,7 +121,7 @@ export class MainScene extends Phaser.Scene {
 
         // 選取高亮層
         this.selectionGraphics = this.add.graphics();
-        this.selectionGraphics.setDepth(1800000); // 提昇至遊戲實體之上
+        this.selectionGraphics.setDepth(15); // 置於地表（單位與建築之下）以避免遮擋前景單位
 
         // 框選 marquee 層
         this.marqueeGraphics = this.add.graphics();
@@ -192,20 +192,14 @@ export class MainScene extends Phaser.Scene {
         const buildingTypes = [
             'village', 'town_center', 'farmhouse', 'timber_factory',
             'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation',
-            'mage_place', 'swordsman_place', 'archer_place', 'campfire'
+            'mage_place', 'swordsman_place', 'archer_place', 'campfire',
+            // [核心對齊] 新合成工廠統一進入貼圖生成序列
+            'timber_processing_plant', 'smelting_plant', 'stone_processing_plant', 'tank_workshop'
         ];
 
         buildingTypes.forEach(type => {
-            const cfg = GameEngine.state.buildingConfigs[type];
-            let uw = 1, uh = 1;
-            if (cfg && cfg.size) {
-                const cleanSize = cfg.size.toString().replace(/['"]/g, '');
-                const match = cleanSize.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
-                if (match) {
-                    uw = parseFloat(match[1]);
-                    uh = parseFloat(match[2]);
-                }
-            }
+            const cfg = GameEngine.getEntityConfig(type);
+            const { uw, uh } = this.getFootprint(cfg);
             createTex(`tex_${type}`, uw * TS + 20, uh * TS + 40, wrapDraw(type));
         });
 
@@ -1231,9 +1225,10 @@ export class MainScene extends Phaser.Scene {
             g.lineStyle(2, 0xffffff, 0.4);
             g.strokeCircle(ent.x, ent.y, radius - 4);
         } else {
+            // [層級優化] 增加外框邊距，確保選取框在地表層級時仍能從建築邊緣露出
+            g.strokeRect(ent.x - w / 2 - 4, ent.y - h / 2 - 4, w + 8, h + 8);
+            g.lineStyle(2, 0xffffff, 0.8);
             g.strokeRect(ent.x - w / 2 - 2, ent.y - h / 2 - 2, w + 4, h + 4);
-            g.lineStyle(1.5, 0xffffff, 1);
-            g.strokeRect(ent.x - w / 2 - 0, ent.y - h / 2 - 0, w, h);
         }
     }
 
@@ -1633,8 +1628,11 @@ export class MainScene extends Phaser.Scene {
         const visualX = Math.round(ent.x);
         const visualY = Math.round(ent.y);
 
+        // 解析建築物尺寸以計算標籤偏移
+        const { uw, uh } = this.getFootprint(config);
+
         // 1. 名稱標籤 (Name)
-        const nameStr = ent.isUnderConstruction ? "施工中" : (ent.name || ent.type);
+        const nameStr = ent.isUnderConstruction ? "施工中" : (ent.name || (config ? config.name : ent.type));
         let nameTxt = this.nameLabels.get(id);
         if (!nameTxt && cfg.name) {
             nameTxt = this.add.text(visualX, visualY, nameStr, {
@@ -1651,7 +1649,10 @@ export class MainScene extends Phaser.Scene {
             nameTxt.setVisible(true);
             const ox = cfg.name.offsetX || 0;
             const oy = cfg.name.offsetY || 0;
+            
+            // [還原] 尊重用戶在 ui_config.js 的原始偏移設置
             nameTxt.setPosition(visualX + ox, visualY + oy);
+
             if (cache.name !== nameStr) {
                 nameTxt.setText(nameStr);
                 cache.name = nameStr;
@@ -1680,7 +1681,10 @@ export class MainScene extends Phaser.Scene {
             lvTxt.setVisible(true);
             const lox = cfg.level.offsetX || 0;
             const loy = cfg.level.offsetY || 0;
+            
+            // [還原] 尊重用戶在 ui_config.js 的原始偏移設置
             lvTxt.setPosition(visualX + lox, visualY + loy);
+
             if (cache.level !== lvStr) {
                 lvTxt.setText(lvStr);
                 cache.level = lvStr;
@@ -1749,7 +1753,11 @@ export class MainScene extends Phaser.Scene {
             'mage_place': 'tex_mage_place',
             'swordsman_place': 'tex_swordsman_place',
             'archer_place': 'tex_archer_place',
-            'campfire': 'tex_campfire'
+            'campfire': 'tex_campfire',
+            'timber_processing_plant': 'tex_timber_processing_plant',
+            'smelting_plant': 'tex_smelting_plant',
+            'stone_processing_plant': 'tex_stone_processing_plant',
+            'tank_workshop': 'tex_tank_workshop'
         };
 
         if (mapping[type]) return mapping[type];
@@ -1775,15 +1783,7 @@ export class MainScene extends Phaser.Scene {
     drawEntity(g, ent, alpha, offX = 0, offY = 0) {
         const TS = GameEngine.TILE_SIZE;
         const cfg = GameEngine.getEntityConfig(ent.type);
-        let uw = 1, uh = 1;
-        if (cfg && cfg.size) {
-            const cleanSize = cfg.size.toString().replace(/['"]/g, '');
-            const match = cleanSize.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
-            if (match) {
-                uw = parseFloat(match[1]);
-                uh = parseFloat(match[2]);
-            }
-        }
+        const { uw, uh } = this.getFootprint(cfg);
 
         const isUnderConstruction = ent.isUnderConstruction === true || ent.isUnderConstruction === 1;
         const finalAlpha = isUnderConstruction ? (alpha * 0.5) : Math.max(alpha, 0.6);
@@ -1898,6 +1898,51 @@ export class MainScene extends Phaser.Scene {
             g.strokeRect(offX - 8, offY - 8, 16, 16);
 
             g.restore();
+        } else if (ent.type === 'timber_processing_plant') {
+            // 工廠主體
+            g.fillStyle(0x2e7d32, finalAlpha);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            g.lineStyle(2, 0x1b5e20, finalAlpha);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            // 鋸齒屋頂 (Factory Style)
+            g.fillStyle(0x1b5e20, finalAlpha);
+            for (let i = 0; i < 3; i++) {
+                g.beginPath();
+                const sx = offX - (uw * TS) / 2 + (i * (uw * TS) / 3);
+                g.moveTo(sx, offY - (uh * TS) / 2);
+                g.lineTo(sx + (uw * TS) / 3, offY - (uh * TS) / 2);
+                g.lineTo(sx, offY - (uh * TS) / 2 - 15);
+                g.fillPath();
+            }
+        } else if (ent.type === 'smelting_plant') {
+            g.fillStyle(0x37474f, finalAlpha);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            g.lineStyle(2, 0x212121, finalAlpha);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            // 煙囪細節
+            g.fillStyle(0x212121, finalAlpha);
+            g.fillRect(offX + (uw * TS) / 4, offY - (uh * TS) / 2 - 20, 10, 25);
+            g.fillStyle(0xff7043, finalAlpha);
+            g.fillCircle(offX - 5, offY, 10);
+        } else if (ent.type === 'stone_processing_plant') {
+            g.fillStyle(0x607d8b, finalAlpha);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            g.lineStyle(2, 0x455a64, finalAlpha);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            // 石磚裝飾
+            g.lineStyle(1, 0xffffff, finalAlpha * 0.3);
+            g.strokeRect(offX - 10, offY - 10, 20, 20);
+        } else if (ent.type === 'tank_workshop') {
+            g.fillStyle(0x455a64, finalAlpha);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            g.lineStyle(2, 0x263238, finalAlpha);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            // 重型屋頂
+            g.fillStyle(0x263238, finalAlpha);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2 - 10, uw * TS, 10);
+            // 標誌
+            g.lineStyle(2, 0xfbc02d, finalAlpha);
+            g.strokeCircle(offX, offY, 12);
         } else if (ent.type.startsWith('tree') || ent.type.startsWith('wood')) {
             g.fillStyle(0x2e7d32, finalAlpha);
             g.fillCircle(offX, offY, 20);
@@ -1952,6 +1997,19 @@ export class MainScene extends Phaser.Scene {
         const outlineColor = this.hexOrRgba(cfg.outlineColor);
         g.lineStyle(1, outlineColor.color, outlineColor.alpha);
         g.strokeRect(bx, by, bw, bh);
+    }
+
+    getFootprint(cfg) {
+        let uw = 1, uh = 1;
+        if (cfg && cfg.size) {
+            const clean = cfg.size.toString().replace(/['"]/g, '');
+            const m = clean.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
+            if (m) {
+                uw = parseFloat(m[1]);
+                uh = parseFloat(m[2]);
+            }
+        }
+        return { uw, uh };
     }
 
     hexOrRgba(str) {
