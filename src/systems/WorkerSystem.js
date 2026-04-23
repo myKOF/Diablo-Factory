@@ -9,7 +9,10 @@ import { ResourceSystem } from "./ResourceSystem.js";
 export class WorkerSystem {
     constructor(state, engineContext) {
         this.state = state;
-        this.engine = engineContext; // 包含 GameEngine 的回呼，如 addLog, updatePathfindingGrid 等
+        this.engine = engineContext; 
+        
+        // 工廠類型定義
+        this.FACTORY_TYPES = ['timber_processing_plant', 'smelting_plant', 'tank_workshop', 'stone_processing_plant'];
     }
 
     /**
@@ -140,6 +143,29 @@ export class WorkerSystem {
         }
 
         switch (v.state) {
+            case 'MOVING_TO_FACTORY':
+                if (!v.factoryTarget) { v.state = 'IDLE'; break; }
+                const distF = Math.hypot(v.factoryTarget.x - v.x, v.factoryTarget.y - v.y);
+                if (distF < 30) {
+                    // 到達工廠，執行打卡邏輯
+                    v.state = 'WORKING_IN_FACTORY';
+                    v.pathTarget = null;
+                    v.visible = false; // 工人進入工廠隱藏
+                    
+                    if (!v.factoryTarget.assignedWorkers) v.factoryTarget.assignedWorkers = [];
+                    if (!v.factoryTarget.assignedWorkers.includes(v.id)) {
+                        v.factoryTarget.assignedWorkers.push(v.id);
+                    }
+                    this.engine.addLog(`[派駐完成] ${v.configName || '工人'} 已進入 ${v.factoryTarget.name || v.factoryTarget.type} 開始加工。`, 'TASK');
+                } else {
+                    this.moveDetailed(v, v.factoryTarget.x, v.factoryTarget.y, moveSpeed, dt, ignoreEnts);
+                }
+                break;
+            case 'WORKING_IN_FACTORY':
+                // 在工廠內工作，不執行移動邏輯，僅確保狀態鎖定
+                v.pathTarget = null;
+                v.fullPath = null;
+                break;
             case 'IDLE':
                 if (v.vTint !== 0xffffff) v.vTint = 0xffffff;
                 if (v.idleTarget) {
@@ -1038,6 +1064,47 @@ export class WorkerSystem {
             if (dist < minDist) { minDist = dist; nearest = v; }
         });
         return nearest;
+    }
+
+    /**
+     * 處理工人的右鍵點擊指令 (派駐工廠專用邏輯)
+     * @returns {boolean} 是否已處理該指令
+     */
+    handleWorkerCommand(v, clickedTarget) {
+        // 1. 離職與除名 (中斷防護)：如果工人目前在工廠中，接收任何新指令都要先「離職」
+        if (v.state === 'WORKING_IN_FACTORY' || v.state === 'MOVING_TO_FACTORY') {
+            if (v.factoryTarget && v.factoryTarget.assignedWorkers) {
+                v.factoryTarget.assignedWorkers = v.factoryTarget.assignedWorkers.filter(id => id !== v.id);
+            }
+            v.visible = true; // 恢復顯示
+            v.factoryTarget = null;
+            this.engine.addLog(`[任務變更] ${v.configName || '工人'} 已離開加工廠。`, 'INPUT');
+        }
+
+        // 2. 派駐檢查：當目標是加工廠時
+        if (clickedTarget && this.FACTORY_TYPES.includes(clickedTarget.type)) {
+            const cfg = this.engine.getBuildingConfig(clickedTarget.type, clickedTarget.lv || 1);
+            const need_villagers = cfg ? (cfg.need_villagers || 0) : 0;
+
+            if (!clickedTarget.assignedWorkers) clickedTarget.assignedWorkers = [];
+
+            if (clickedTarget.assignedWorkers.length >= need_villagers) {
+                this.engine.triggerWarning("工廠派駐人數已滿！");
+                return true; // 已攔截並顯示警告，中止後續動作
+            }
+
+            // 3. 設定派駐任務
+            v.state = 'MOVING_TO_FACTORY';
+            v.factoryTarget = clickedTarget;
+            v.targetId = null; // 清除資源或戰鬥目標
+            v.isPlayerLocked = true;
+            v.pathTarget = null;
+            v.fullPath = null;
+            this.engine.addLog(`[派工] ${v.configName || '工人'} 正在前往 ${clickedTarget.name || clickedTarget.type} 報到。`, 'INPUT');
+            return true;
+        }
+
+        return false; // 非工廠指令，交由原有的 MainScene 邏輯處理
     }
 
     getFootprint(type) {

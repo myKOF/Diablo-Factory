@@ -484,6 +484,15 @@ export class GameEngine {
     }
 
     static getFootprint(type) {
+        // [核心優先級] 1. 優先從 UI_CONFIG 讀取手動調整的長寬
+        if (UI_CONFIG.BuildingPanel && UI_CONFIG.BuildingPanel.list) {
+            const uiCfg = UI_CONFIG.BuildingPanel.list.find(item => item.id === type);
+            if (uiCfg && uiCfg.width && uiCfg.height) {
+                return { uw: uiCfg.width, uh: uiCfg.height };
+            }
+        }
+
+        // 2. 回退至從 CSV 配置讀取
         const cfg = this.getEntityConfig(type);
         let uw = 1, uh = 1;
         if (cfg && cfg.size) {

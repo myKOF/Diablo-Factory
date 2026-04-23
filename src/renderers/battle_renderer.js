@@ -78,6 +78,8 @@ export class BattleRenderer {
         const selectedIds = window.GAME_STATE ? (window.GAME_STATE.selectedUnitIds || []) : [];
 
         units.forEach(unit => {
+            if (unit.visible === false) return; // [核心新增] 如果單位被標記為不可見（如派駐工廠中），則不渲染血條
+            
             // 使用渲染座標進行視覺計算 (rx, ry)，確保血條始終貼合視覺模型
             const rx = unit.renderX !== undefined ? unit.renderX : unit.x;
             const ry = unit.renderY !== undefined ? unit.renderY : unit.y;

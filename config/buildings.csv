@@ -1,4 +1,3 @@
-編號,名稱,模型,建築類型,建造上限,尺寸,碰撞開關,建築等級,解鎖條件,升級所需材料,升級時間(秒),人口提供,維持村民數量,資源總量,生產npc單位,生產npc模式，rand=隨機生產，normal=單獨生產,注釋說明
 id,name,model,type,max_count,size,collision,lv,build_unlock,upgrade_need_Ingredients,upgrade_times,population,need_villagers,resource_value,npc_production,npc_production,annotation
 42,射箭場,archer_place,archer_place,10,"{6,6}",1,1,{0},"{food=100,wood=100,stone=150}",20,0,0,,"{5,9}",normal,弓箭手的訓練所
 43,射箭場,archer_place,archer_place,10,"{6,6}",1,2,{village.lv=2},"{food=100,wood=100}",10,0,0,,"{5,9}",normal,弓箭手的訓練所
@@ -44,3 +43,7 @@ id,name,model,type,max_count,size,collision,lv,build_unlock,upgrade_need_Ingredi
 2,城鎮中心,village,village,5,"{8,8}",1,2,{0},"{food=100,wood=100, stone=100}",10,10,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
 3,城鎮中心,village,village,5,"{8,8}",1,3,{0},"{food=200,wood=200, stone=300}",30,10,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
 4,城鎮中心,village,village,5,"{8,8}",1,4,{0},"{food=500,wood=500, stone=500,,gold_ore=500}",60,10,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
+47,木材精煉廠,timber_processing_plant,timber_processing_plant,99,"{3,3}",1,1,{0},"{wood=100,stone=50}",15,0,2,0,,,將原木加工為高級板材
+48,金屬熔煉工坊,smelting_plant,smelting_plant,99,"{4,4}",1,1,{0},"{wood=150,stone=100}",20,0,3,0,,,熔煉礦石以產出各類合金
+49,石材加工中心,stone_processing_plant,stone_processing_plant,99,"{3,3}",1,1,{0},"{wood=100,stone=100}",15,0,2,0,,,將石塊切割為精良石料
+50,重型戰車工廠,tank_workshop,tank_workshop,99,"{5,5}",1,1,{0},"{wood=300,stone=300,iron_ore=200}",40,0,5,0,,,製造威力強大的末日戰車

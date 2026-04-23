@@ -600,7 +600,8 @@ export class UIManager {
             town_center: "🏰", village: "🏘️", farmhouse: "🏡",
             timber_factory: "🪵", stone_factory: "⛏️", barn: "🌾",
             farmland: "🌱", alchemy_lab: "⚗️", cathedral: "⛪", academy: "🧙",
-            tree_plantation: "🌳", mage_place: "🧙", swordsman_place: "⚔️", archer_place: "🏹"
+            tree_plantation: "🌳", mage_place: "🧙", swordsman_place: "⚔️", archer_place: "🏹",
+            timber_processing_plant: "🪵", smelting_plant: "🔥", tank_workshop: "🚜", stone_processing_plant: "🪨"
         };
 
         // 改為從 bp.list 讀取，確保順序與顯示內容正確
@@ -636,8 +637,9 @@ export class UIManager {
         // 使用 Flexbox 佈局以適應不同高度
         btn.style.cssText = `
             position: relative; 
-            height: ${bp.itemHeight}px; 
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            width: ${bp.itemWidth || 240}px;
+            height: ${bp.itemHeight || 80}px; 
+            border: 1.5px solid rgba(255, 255, 255, 0.08);
             margin: 4px 0; 
             padding: 0 12px; 
             background: rgba(45, 45, 45, 0.6);
@@ -647,24 +649,28 @@ export class UIManager {
             display: flex;
             flex-direction: column;
             justify-content: center;
-            overflow: hidden;
+            overflow: visible;
             box-sizing: border-box;
             border-radius: 4px;
         `;
 
-        // 內部文字容器
+        // 內部文字容器 (採用絕對定位確保對齊)
         const content = document.createElement("div");
         content.style.cssText = `
+            position: absolute;
+            left: 12px;
+            top: 5px;
+            bottom: 5px;
+            right: 60px;
             display: flex;
             flex-direction: column;
-            gap: 2px;
+            justify-content: space-between;
             pointer-events: none;
-            width: calc(100% - 45px);
         `;
 
         content.innerHTML = `
-            <div style="color: ${bp.titleColor}; font-size: ${bp.fontSize}; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.name}</div>
-            <div style="color: ${this.hexToRgba(bp.descColor, bp.descAlpha)}; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${item.desc}</div>
+            <div style="color: ${bp.titleColor}; font-size: ${bp.fontSize}; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left;">${item.name}</div>
+            <div style="color: ${this.hexToRgba(bp.descColor, bp.descAlpha)}; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left;">${item.desc}</div>
         `;
 
         // 圖示容器

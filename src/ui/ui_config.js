@@ -66,7 +66,8 @@ export const UI_CONFIG = {
         offsetX: 30,                       // 距左側邊界的距離（像素）
         offsetY: 100,                      // 距頂部的距離（像素）
         width: 280, height: "calc(90% - 160px)",  // 寬高（高度動態計算）
-        itemHeight: 60,                    // 每個建築項目列的高度
+        itemWidth: 240,                    // [核心新增] 全局統一項目寬度
+        itemHeight: 60,                    // [核心修改] 全局統一項目高度 
         titleSize: "24px",
         fontSize: "14px",
         title: "🛡️ 末日設施建造",
@@ -85,7 +86,12 @@ export const UI_CONFIG = {
             { id: "tree_plantation" },
             { id: "mage_place" },
             { id: "swordsman_place" },
-            { id: "archer_place" }
+            { id: "archer_place" },
+            // -- 加工廠系列 [新加入，參數將從 buildings.csv 讀取] --
+            { id: "timber_processing_plant" },
+            { id: "smelting_plant" },
+            { id: "stone_processing_plant" },
+            { id: "tank_workshop" }
         ]
     },
 

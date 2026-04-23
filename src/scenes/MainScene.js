@@ -353,6 +353,12 @@ export class MainScene extends Phaser.Scene {
         const unitType = unit.config ? unit.config.type : '';
         const unitCamp = (unit.config && unit.config.camp) || unit.camp || 'player';
         if (unitType === 'wolf' || unitType === 'bear' || unitCamp === 'neutral') return; // 非玩家控制單位不處理
+        
+        // [核心新增] 加工廠派駐系統連動：先檢查是否為派駐指令，或是否需要解除當前派駐狀態
+        if (GameEngine.workerSystem && unit.config.type === 'villagers') {
+            const handled = GameEngine.workerSystem.handleWorkerCommand(unit, clickedTarget);
+            if (handled) return; // 如果是工廠派駐相關操作，則中止後續的移動/採集邏輯
+        }
 
         const wx = pointer.worldX, wy = pointer.worldY;
         const TS = GameEngine.TILE_SIZE;
@@ -2082,7 +2088,7 @@ export class MainScene extends Phaser.Scene {
             const isVisible = (v.x + 50 > cam.scrollX && v.x - 50 < cam.scrollX + cam.width &&
                 v.y + 50 > cam.scrollY && v.y - 50 < cam.scrollY + cam.height);
 
-            sprite.setVisible(isVisible);
+            sprite.setVisible(isVisible && v.visible !== false);
             if (isVisible) {
                 // 核心優化：渲染插值 (Lerp)
                 // 邏輯坐標 (v.x, v.y) 每 50ms 更新一次，但渲染每 16ms 執行一次
