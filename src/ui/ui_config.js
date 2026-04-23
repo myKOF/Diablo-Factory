@@ -65,7 +65,7 @@ export const UI_CONFIG = {
         anchor: "TOP_LEFT",               // 錨點：左上角
         offsetX: 30,                       // 距左側邊界的距離（像素）
         offsetY: 100,                      // 距頂部的距離（像素）
-        width: 280, height: "calc(90% - 160px)",  // 寬高（高度動態計算）
+        width: 300, height: "calc(90% - 160px)",  // 寬高（高度動態計算）
         itemWidth: 240,                    // [核心新增] 全局統一項目寬度
         itemHeight: 60,                    // [核心修改] 全局統一項目高度 
         titleSize: "24px",

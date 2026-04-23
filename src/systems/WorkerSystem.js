@@ -109,11 +109,11 @@ export class WorkerSystem {
         }
 
         if (v.assignedWarehouseId) {
-            const w = this.state.mapEntities.find(e => (e.id || `${e.type}_${e.x}_${e.y}`) === v.assignedWarehouseId);
+            const w = this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.assignedWarehouseId);
             if (w && !w.isUnderConstruction) { v.targetBase = w; }
-            else { v.assignedWarehouseId = null; v.targetBase = ResourceSystem.findNearestDepositPoint(this.state, v.x, v.y, v.type) || { x: 960, y: 560 }; }
+            else { v.assignedWarehouseId = null; v.targetBase = ResourceSystem.findNearestDepositPoint(this.state, v.x, v.y, v.cargoType || 'WOOD') || { x: 960, y: 560 }; }
         } else {
-            v.targetBase = ResourceSystem.findNearestDepositPoint(this.state, v.x, v.y, v.type) || { x: 960, y: 560 };
+            v.targetBase = ResourceSystem.findNearestDepositPoint(this.state, v.x, v.y, v.cargoType || 'WOOD') || { x: 960, y: 560 };
         }
         const oldX = v.x, oldY = v.y;
 
@@ -147,7 +147,7 @@ export class WorkerSystem {
                 if (!v.factoryTarget) { v.state = 'IDLE'; break; }
                 
                 // [核心優化] 派駐位置放寬：判定是否碰到建築模型範圍
-                const fp = this.engine.getFootprint(v.factoryTarget.type);
+                const fp = this.engine.getFootprint(v.factoryTarget.type1);
                 const halfW = (fp.uw * 20) / 2;
                 const halfH = (fp.uh * 20) / 2;
                 
@@ -159,16 +159,30 @@ export class WorkerSystem {
                     v.y <= v.factoryTarget.y + halfH + 10;
 
                 if (isTouching) {
-                    // 到達工廠，執行打卡邏輯
-                    v.state = 'WORKING_IN_FACTORY';
-                    v.pathTarget = null;
-                    v.visible = false; // 工人進入工廠隱藏
+                    // [需求變更] 抵達後檢查是否已滿員 (針對 processing_plant 類型)
+                    const bCfg = this.engine.getBuildingConfig(v.factoryTarget.type1, v.factoryTarget.lv || 1);
+                    const need_villagers = bCfg ? (bCfg.need_villagers || 0) : 0;
+                    const currentCount = (v.factoryTarget.assignedWorkers || []).length;
                     
-                    if (!v.factoryTarget.assignedWorkers) v.factoryTarget.assignedWorkers = [];
-                    if (!v.factoryTarget.assignedWorkers.includes(v.id)) {
-                        v.factoryTarget.assignedWorkers.push(v.id);
+                    const isProcessingPlant = bCfg && bCfg.type2 === 'processing_plant';
+                    
+                    if (isProcessingPlant && currentCount >= need_villagers) {
+                        // 如果滿員了，停止在門口，不進入
+                        v.state = 'IDLE';
+                        v.pathTarget = null;
+                        this.engine.addLog(`[派駐中斷] ${v.factoryTarget.name || v.factoryTarget.type1} 已滿員 (${currentCount}/${need_villagers})，${v.configName || '工人'} 在外待命。`, 'TASK');
+                    } else {
+                        // 到達工廠，執行打卡邏輯
+                        v.state = 'WORKING_IN_FACTORY';
+                        v.pathTarget = null;
+                        v.visible = false; // 工人進入工廠隱藏
+                        
+                        if (!v.factoryTarget.assignedWorkers) v.factoryTarget.assignedWorkers = [];
+                        if (!v.factoryTarget.assignedWorkers.includes(v.id)) {
+                            v.factoryTarget.assignedWorkers.push(v.id);
+                        }
+                        this.engine.addLog(`[派駐完成] ${v.configName || '工人'} 已進入 ${v.factoryTarget.name || v.factoryTarget.type1} 開始加工。`, 'TASK');
                     }
-                    this.engine.addLog(`[派駐完成] ${v.configName || '工人'} 已進入 ${v.factoryTarget.name || v.factoryTarget.type} 開始加工。`, 'TASK');
                 } else {
                     this.moveDetailed(v, v.factoryTarget.x, v.factoryTarget.y, moveSpeed, dt, ignoreEnts);
                 }
@@ -205,12 +219,12 @@ export class WorkerSystem {
             case 'MOVING_TO_RESOURCE':
                 let searchX = v.x, searchY = v.y;
                 if (v.assignedWarehouseId) {
-                    const w = this.state.mapEntities.find(e => (e.id || `${e.type}_${e.x}_${e.y}`) === v.assignedWarehouseId);
+                    const w = this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.assignedWarehouseId);
                     if (w) { searchX = w.x; searchY = w.y; }
                 }
 
                 let target = v.targetId;
-                const isEntityResource = target && (target.type === 'farmland' || target.type === 'tree_plantation');
+                const isEntityResource = target && (target.type1 === 'farmland' || target.type1 === 'tree_plantation');
 
                 if (!target || (target.gx === undefined && !isEntityResource)) {
                     if (typeof target === 'string') {
@@ -233,14 +247,14 @@ export class WorkerSystem {
                         v._lastTargetId = (target.id || `${target.gx}_${target.gy}`);
                         this.engine.addLog(`[尋路更新] ${v.configName || '工人'} 定位目標資源...`, 'PATH');
 
-                        if (target.type === 'farmland' || target.type === 'tree_plantation') {
+                        if (target.type1 === 'farmland' || target.type1 === 'tree_plantation') {
                             v.gatherPoint = {
                                 x: target.x + (Math.random() - 0.5) * 50,
                                 y: target.y + (Math.random() - 0.5) * 50
                             };
                         } else {
                             let rRadius = 25;
-                            const rCfg = this.state.resourceConfigs.find(c => c.type === (target.resourceType || target.type));
+                            const rCfg = this.state.resourceConfigs.find(c => c.type === (target.resourceType || target.type1));
                             if (rCfg && rCfg.pixel_size) {
                                 rRadius = (Math.max(rCfg.pixel_size.w, rCfg.pixel_size.h) / 2) + 15;
                             }
@@ -263,7 +277,7 @@ export class WorkerSystem {
                             v.pathTarget = null;
                             v.gatherPoint = null;
                         } else {
-                            this.engine.addLog(`[任務啟動] ${v.configName || '工人'} 已抵達資源點並開始採集 ${target.name || target.type}`, 'TASK');
+                            this.engine.addLog(`[任務啟動] ${v.configName || '工人'} 已抵達資源點並開始採集 ${target.name || target.type1}`, 'TASK');
                             v.state = 'GATHERING'; v.targetId = target; v.gatherTimer = 0; v.pathTarget = null;
                             v.gatherPoint = null; 
                         }
@@ -300,7 +314,7 @@ export class WorkerSystem {
                             this.state.mapEntities.find(e => e.id === v.targetId) : 
                             (this.state.mapEntities.includes(v.targetId) ? v.targetId : null);
                         if (targetEnt) {
-                            const cfg = this.engine.getEntityConfig(targetEnt.type, targetEnt.lv || 1);
+                            const cfg = this.engine.getEntityConfig(targetEnt.type1, targetEnt.lv || 1);
                             if (cfg && cfg.collection_resource) {
                                 harvestTotal = cfg.collection_resource;
                             }
@@ -346,7 +360,7 @@ export class WorkerSystem {
                             targetEnt.amount -= canTake;
                             this.state.renderVersion++;
                             
-                            if (targetEnt.type === 'corpse') {
+                            if (targetEnt.type1 === 'corpse') {
                                 this.engine.addLog(`[戰鬥資訊] 採集屍體資源：${v.configName || '工人'} 正在採集 ${targetEnt.name || '屍體'} (獲得 ${targetEnt.resType} x${canTake})`, 'GATHER');
                                 v.cargo += canTake;
                                 v.cargoType = targetEnt.resType || 'FOOD';
@@ -356,8 +370,8 @@ export class WorkerSystem {
                                     if (targetEnt.amount <= 0) v._lastTaskWasCorpse = true;
                                 }
                             } else {
-                                if (targetEnt.type === 'farmland') this.state.resources.food += canTake;
-                                else if (targetEnt.type === 'tree_plantation') this.state.resources.wood += canTake;
+                                if (targetEnt.type1 === 'farmland') this.state.resources.food += canTake;
+                                else if (targetEnt.type1 === 'tree_plantation') this.state.resources.wood += canTake;
                                 v.cargo = 0;
                                 v.cargoType = null;
                             }
@@ -365,21 +379,21 @@ export class WorkerSystem {
                             v.gatherTimer = 0;
                             if (targetEnt.amount <= 0) {
                                 this.engine.addLog(`${targetEnt.name || '資源點'} 已採集完畢。`, 'SYSTEM');
-                                if (targetEnt.type === 'corpse') {
-                                    this.state.mapEntities = this.state.mapEntities.filter(e => e !== targetEnt);
-                                    if (this.engine.updatePathfindingGrid) this.engine.updatePathfindingGrid();
-                                    this.state.renderVersion++;
-                                    v._lastTaskWasCorpse = true;
-                                } else {
-                                    targetEnt.isUnderConstruction = true;
-                                    targetEnt.buildProgress = 0;
-                                    targetEnt.name = "施工中 (" + (targetEnt.type === 'farmland' ? "農田" : "樹木田") + ")";
-                                    if (this.engine.updatePathfindingGrid) this.engine.updatePathfindingGrid();
-                                }
+                            if (targetEnt.type1 === 'corpse') {
+                                this.state.mapEntities = this.state.mapEntities.filter(e => e !== targetEnt);
+                                if (this.engine.updatePathfindingGrid) this.engine.updatePathfindingGrid();
+                                this.state.renderVersion++;
+                                v._lastTaskWasCorpse = true;
+                            } else {
+                                targetEnt.isUnderConstruction = true;
+                                targetEnt.buildProgress = 0;
+                                targetEnt.name = "施工中 (" + (targetEnt.type1 === 'farmland' ? "農田" : "樹木田") + ")";
+                                if (this.engine.updatePathfindingGrid) this.engine.updatePathfindingGrid();
+                            }
                                 v.targetId = null;
                                 v.gatherPoint = null;
                                 
-                                if (targetEnt.type !== 'corpse') {
+                                if (targetEnt.type1 !== 'corpse') {
                                     this.restoreVillagerTask(v);
                                 } else if (v.state !== 'MOVING_TO_BASE') {
                                     v.state = 'IDLE';
@@ -394,7 +408,7 @@ export class WorkerSystem {
                 break;
             case 'MOVING_TO_BASE':
                 if (!v.targetBase) {
-                    const nearestTC = this.state.mapEntities.find(e => e.type === 'town_center' || e.type === 'village');
+                    const nearestTC = this.state.mapEntities.find(e => e.type1 === 'town_center' || e.type1 === 'village');
                     if (nearestTC) {
                         v.targetBase = nearestTC;
                         v.pathTarget = null;
@@ -404,7 +418,7 @@ export class WorkerSystem {
                     break;
                 }
 
-                const cfgB = this.engine.getBuildingConfig(v.targetBase.type, v.targetBase.lv || 1);
+                const cfgB = this.engine.getBuildingConfig(v.targetBase.type1, v.targetBase.lv || 1);
                 let depositDist = 25;
                 let uw = 1, uh = 1;
                 if (cfgB && cfgB.size) {
@@ -415,7 +429,7 @@ export class WorkerSystem {
                     }
                 }
 
-                const baseId = v.targetBase.id || `${v.targetBase.type}_${v.targetBase.x}_${v.targetBase.y}`;
+                const baseId = v.targetBase.id || `${v.targetBase.type1}_${v.targetBase.x}_${v.targetBase.y}`;
                 if (!v.depositPoint || v._lastBaseId !== baseId) {
                     v._lastBaseId = baseId;
                     const pts = [];
@@ -489,7 +503,7 @@ export class WorkerSystem {
                 }
 
                 const idNumC = parseInt((v.id || "0").replace(/[^0-9]/g, '')) || 0;
-                const fpC = this.getFootprint(v.constructionTarget.type);
+                const fpC = this.getFootprint(v.constructionTarget.type1);
                 const halfWC = (fpC.uw * 20) / 2;
                 const halfHC = (fpC.uh * 20) / 2;
 
@@ -542,16 +556,16 @@ export class WorkerSystem {
                     const finishedBuilding = v.constructionTarget;
                     finishedBuilding.isUnderConstruction = false;
                     this.state.renderVersion++;
-                    const type = finishedBuilding.type;
-                    const bCfg = this.engine.getBuildingConfig(type, 1);
-                    finishedBuilding.name = bCfg ? bCfg.name : type;
+                    const type1 = finishedBuilding.type1;
+                    const bCfg = this.engine.getBuildingConfig(type1, 1);
+                    finishedBuilding.name = bCfg ? bCfg.name : type1;
 
-                    if (type === 'farmland' || type === 'tree_plantation') {
-                        finishedBuilding.resourceType = (type === 'farmland' ? 'FOOD' : 'WOOD');
+                    if (type1 === 'farmland' || type1 === 'tree_plantation') {
+                        finishedBuilding.resourceType = (type1 === 'farmland' ? 'FOOD' : 'WOOD');
                         finishedBuilding.amount = bCfg ? (bCfg.resourceValue || 500) : 500;
                     }
 
-                    if (type === 'farmhouse') this.state.buildings.farmhouse++;
+                    if (type1 === 'farmhouse') this.state.buildings.farmhouse++;
                     this.engine.addLog(`建造完成：${finishedBuilding.name}。`);
 
                     if (this.engine.updatePathfindingGrid) this.engine.updatePathfindingGrid();
@@ -564,18 +578,18 @@ export class WorkerSystem {
                         }
                     });
 
-                    if (['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(type)) {
-                        v.assignedWarehouseId = (finishedBuilding.id || `${finishedBuilding.type}_${finishedBuilding.x}_${finishedBuilding.y}`);
-                        v.type = (type === 'timber_factory' ? 'WOOD' : (type === 'stone_factory' ? 'STONE' : (type === 'barn' ? 'FOOD' : 'GOLD')));
+                    if (['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(type1)) {
+                        v.assignedWarehouseId = (finishedBuilding.id || `${finishedBuilding.type1}_${finishedBuilding.x}_${finishedBuilding.y}`);
+                        v.type = (type1 === 'timber_factory' ? 'WOOD' : (type1 === 'stone_factory' ? 'STONE' : (type1 === 'barn' ? 'FOOD' : 'GOLD')));
                         v.state = 'MOVING_TO_RESOURCE';
                         v.targetId = null; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
                         this.engine.addLog(`建造者已自動轉為 ${finishedBuilding.name} 的專職員工。`);
-                    } else if (type === 'farmland' || type === 'tree_plantation') {
-                        v.assignedWarehouseId = (finishedBuilding.id || `${finishedBuilding.type}_${finishedBuilding.x}_${finishedBuilding.y}`);
-                        v.type = (type === 'farmland' ? 'FOOD' : 'WOOD');
+                    } else if (type1 === 'farmland' || type1 === 'tree_plantation') {
+                        v.assignedWarehouseId = (finishedBuilding.id || `${finishedBuilding.type1}_${finishedBuilding.x}_${finishedBuilding.y}`);
+                        v.type = (type1 === 'farmland' ? 'FOOD' : 'WOOD');
                         v.state = 'MOVING_TO_RESOURCE'; v.targetId = finishedBuilding; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
                         v.workOffset = { x: (Math.random() - 0.5) * 50, y: (Math.random() - 0.5) * 50 };
-                        this.engine.addLog(`建造者前往${type === 'farmland' ? '農田' : '樹木田'}內部開始工作。`);
+                        this.engine.addLog(`建造者前往${type1 === 'farmland' ? '農田' : '樹木田'}內部開始工作。`);
                     } else {
                         if (!this.assignNextConstructionTask(v)) {
                             this.restoreVillagerTask(v);
@@ -624,7 +638,7 @@ export class WorkerSystem {
         }
 
         if (v.state === 'MOVING_TO_BASE' && v.targetBase) {
-            const bCfg = this.engine.getBuildingConfig(v.targetBase.type, v.targetBase.lv || 1);
+            const bCfg = this.engine.getBuildingConfig(v.targetBase.type1, v.targetBase.lv || 1);
             let depositDist_base = 60;
             if (bCfg && bCfg.size) {
                 const m = bCfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
@@ -678,11 +692,11 @@ export class WorkerSystem {
         }
 
         const warehouses = this.state.mapEntities.filter(e =>
-            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(e.type) && !e.isUnderConstruction
+            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(e.type1) && !e.isUnderConstruction
         );
 
         if (v.assignedWarehouseId) {
-            const myW = warehouses.find(e => (e.id || `${e.type}_${e.x}_${e.y}`) === v.assignedWarehouseId);
+            const myW = warehouses.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.assignedWarehouseId);
             if (myW && ResourceSystem.findNearestResource(this.state, 20, v.x, v.y, v.type, v.id)) {
                 const currentWorkers = this.state.units.villagers.filter(vi => vi !== v && vi.assignedWarehouseId === v.assignedWarehouseId).length;
                 if (currentWorkers < (myW.targetWorkerCount || 0)) {
@@ -695,12 +709,12 @@ export class WorkerSystem {
         }
 
         for (const w of warehouses) {
-            const winfo = (w.id || `${w.type}_${w.x}_${w.y}`);
+            const winfo = (w.id || `${w.type1}_${w.x}_${w.y}`);
             const count = this.state.units.villagers.filter(vi => vi.assignedWarehouseId === winfo).length;
             if (count < (w.targetWorkerCount || 0)) {
-                const resType = (w.type === 'timber_factory' || w.type === 'tree_plantation' ? 'WOOD' :
-                    (w.type === 'stone_factory' ? 'STONE' :
-                        (w.type === 'barn' || w.type === 'farmland' ? 'FOOD' : 'GOLD')));
+                const resType = (w.type1 === 'timber_factory' || w.type1 === 'tree_plantation' ? 'WOOD' :
+                    (w.type1 === 'stone_factory' ? 'STONE' :
+                        (w.type1 === 'barn' || w.type1 === 'farmland' ? 'FOOD' : 'GOLD')));
                 if (ResourceSystem.findNearestResource(this.state, 20, w.x, w.y, resType, v.id)) {
                     v.assignedWarehouseId = winfo;
                     v.type = resType;
@@ -921,7 +935,7 @@ export class WorkerSystem {
                     if (ent.isUnderConstruction) continue;
                     if (ignoreEnts.includes(ent)) continue;
 
-                    const cfg = this.engine.getEntityConfig(ent.type);
+                    const cfg = this.engine.getEntityConfig(ent.type1);
                     if (cfg && cfg.collision) {
                         if (!ent._collisionW) {
                             const match = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
@@ -982,11 +996,11 @@ export class WorkerSystem {
 
     updateWorkerAssignments() {
         const warehouses = this.state.mapEntities.filter(e =>
-            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(e.type) && !e.isUnderConstruction
+            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(e.type1) && !e.isUnderConstruction
         );
 
         const warehouseMap = new Map();
-        warehouses.forEach(w => warehouseMap.set(w.id || `${w.type}_${w.x}_${w.y}`, { entity: w, workers: [] }));
+        warehouses.forEach(w => warehouseMap.set(w.id || `${w.type1}_${w.x}_${w.y}`, { entity: w, workers: [] }));
 
         this.state.units.villagers.forEach(v => {
             if (!v.config || v.config.type !== 'villagers' || v.config.camp !== 'player') {
@@ -1034,11 +1048,11 @@ export class WorkerSystem {
                 if (workers.length < target && allIdle.length > 0) {
                     const v = allIdle.shift();
                     v.assignedWarehouseId = wid;
-                    v.type = (entity.type === 'timber_factory' || entity.type === 'tree_plantation' ? 'WOOD' :
-                        (entity.type === 'stone_factory' ? 'STONE' :
-                            (entity.type === 'barn' || entity.type === 'farmland' ? 'FOOD' : 'GOLD')));
+                    v.type = (entity.type1 === 'timber_factory' || entity.type1 === 'tree_plantation' ? 'WOOD' :
+                        (entity.type1 === 'stone_factory' ? 'STONE' :
+                            (entity.type1 === 'barn' || entity.type1 === 'farmland' ? 'FOOD' : 'GOLD')));
                     v.state = 'MOVING_TO_RESOURCE';
-                    if (entity.type === 'farmland' || entity.type === 'tree_plantation') {
+                    if (entity.type1 === 'farmland' || entity.type1 === 'tree_plantation') {
                         v.targetId = entity;
                     } else {
                         v.targetId = null;
@@ -1070,7 +1084,7 @@ export class WorkerSystem {
         if (nearest) return nearest;
         this.state.units.villagers.forEach(v => {
             if (v.state === 'MOVING_TO_CONSTRUCTION' || v.state === 'CONSTRUCTING') return;
-            if (v.targetId && v.targetId.type === 'farmland') return;
+            if (v.targetId && v.targetId.type1 === 'farmland') return;
             if (v.assignedWarehouseId) return;
             const dist = Math.hypot(v.x - x, v.y - y);
             if (dist < minDist) { minDist = dist; nearest = v; }
@@ -1094,20 +1108,22 @@ export class WorkerSystem {
         }
 
         // 2. 派駐檢查：當目標是加工廠時
-        if (clickedTarget && this.FACTORY_TYPES.includes(clickedTarget.type)) {
+        const bCfg = clickedTarget ? this.engine.getBuildingConfig(clickedTarget.type1, clickedTarget.lv || 1) : null;
+        const isProcessingPlant = bCfg && (bCfg.type2 === 'processing_plant' || this.FACTORY_TYPES.includes(clickedTarget.type1));
+
+        if (clickedTarget && isProcessingPlant) {
             // [核心需求] 若建築還在施工中，不執行派駐邏輯，回傳 false 讓 MainScene 處理為建造指令
             if (clickedTarget.isUnderConstruction) {
                 return false;
             }
 
-            const cfg = this.engine.getBuildingConfig(clickedTarget.type, clickedTarget.lv || 1);
-            const need_villagers = cfg ? (cfg.need_villagers || 0) : 0;
-
+            const need_villagers = bCfg ? (bCfg.need_villagers || 0) : 0;
             if (!clickedTarget.assignedWorkers) clickedTarget.assignedWorkers = [];
 
+            // [需求調整] 超過數量後派出工人則只會停在建築旁邊，無法進駐。
+            // 因此這裡不再 return true 攔截指令，而是發出警告後繼續讓其移動。
             if (clickedTarget.assignedWorkers.length >= need_villagers) {
-                this.engine.triggerWarning("工廠派駐人數已滿！");
-                return true; // 已攔截並顯示警告，中止後續動作
+                this.engine.triggerWarning(`工廠派駐人數已滿 (${need_villagers})，工人抵達後將在外待命。`);
             }
 
             // 3. 設定派駐任務
@@ -1117,15 +1133,15 @@ export class WorkerSystem {
             v.isPlayerLocked = true;
             v.pathTarget = null;
             v.fullPath = null;
-            this.engine.addLog(`[派工] ${v.configName || '工人'} 正在前往 ${clickedTarget.name || clickedTarget.type} 報到。`, 'INPUT');
+            this.engine.addLog(`[派工] ${v.configName || '工人'} 正在前往 ${clickedTarget.name || clickedTarget.type1} 報到。`, 'INPUT');
             return true;
         }
 
         return false; // 非工廠指令，交由原有的 MainScene 邏輯處理
     }
 
-    getFootprint(type) {
-        const cfg = this.engine.getBuildingConfig(type, 1);
+    getFootprint(type1) {
+        const cfg = this.engine.getBuildingConfig(type1, 1);
         if (cfg && cfg.size) {
             const m = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
             if (m) return { uw: parseInt(m[1]), uh: parseInt(m[2]) };

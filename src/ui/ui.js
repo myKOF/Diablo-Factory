@@ -609,7 +609,7 @@ export class UIManager {
             const cfg = configs[listItem.id];
             if (!cfg) return;
 
-            const currentCount = GameEngine.state.mapEntities.filter(e => e.type === cfg.model).length;
+            const currentCount = GameEngine.state.mapEntities.filter(e => e.type1 === cfg.model).length;
 
             const costStr = [];
             const iconMap = { food: '🍖', wood: '🪵', stone: '🪨', gold_ore: '🪙', gold: '💰' };
@@ -1022,7 +1022,7 @@ export class UIManager {
         const entities = GameEngine.state.mapEntities;
 
         const clicked = entities.find(ent => {
-            const cfg = GameEngine.getEntityConfig(ent.type);
+            const cfg = GameEngine.getEntityConfig(ent.type1);
             if (!cfg) return false;
             const em = cfg.size ? cfg.size.match(/\{(\d+),(\d+)\}/) : null;
             const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE;
@@ -1033,22 +1033,22 @@ export class UIManager {
 
         if (clicked) {
             const now = Date.now();
-            const buildingId = clicked.id || `${clicked.type}_${clicked.x}_${clicked.y}`;
+            const buildingId = clicked.id || `${clicked.type1}_${clicked.x}_${clicked.y}`;
             
             // 雙擊全選邏輯：移至 UIManager 以避開 UI 遮擋造成的 Phaser 事件丟失
             const isDoubleClick = (GameEngine.state.lastSelectedBuildingId === buildingId && (now - GameEngine.state.lastSelectionTime < 500));
             
             if (isDoubleClick) {
-                const type = clicked.type;
+                const type1 = clicked.type1;
                 const scene = window.PhaserScene;
                 if (scene) {
                     const view = scene.cameras.main.worldView;
                     const visibleBuildings = GameEngine.state.mapEntities.filter(e => 
-                        e.type === type &&
+                        e.type1 === type1 &&
                         e.x >= view.x && e.x <= view.x + view.width &&
                         e.y >= view.y && e.y <= view.y + view.height
                     );
-                    GameEngine.state.selectedBuildingIds = visibleBuildings.map(e => e.id || `${e.type}_${e.x}_${e.y}`);
+                    GameEngine.state.selectedBuildingIds = visibleBuildings.map(e => e.id || `${e.type1}_${e.x}_${e.y}`);
                     GameEngine.addLog(`[選取] 相同類型建築共 ${visibleBuildings.length} 個。`);
                 }
             } else {
@@ -1085,9 +1085,9 @@ export class UIManager {
         menu.style.boxSizing = "border-box";
         menu.style.overflow = "hidden";
 
-        let name = entity.isUnderConstruction ? (GameEngine.getBuildingConfig(entity.type, entity.lv)?.name || "施工中的建築") : (entity.name || entity.type);
-        const cfg_current = GameEngine.getBuildingConfig(entity.type, entity.lv || 1);
-        const nextCfg = GameEngine.getBuildingConfig(entity.type, (entity.lv || 1) + 1);
+        let name = entity.isUnderConstruction ? (GameEngine.getBuildingConfig(entity.type1, entity.lv)?.name || "施工中的建築") : (entity.name || entity.type1);
+        const cfg_current = GameEngine.getBuildingConfig(entity.type1, entity.lv || 1);
+        const nextCfg = GameEngine.getBuildingConfig(entity.type1, (entity.lv || 1) + 1);
         const hCfg = UI_CONFIG.ActionMenuHeader;
 
         // --- 1. 左側標頭：Lv 與 名稱 (垂直堆疊) ---
@@ -1190,7 +1190,7 @@ export class UIManager {
             rightHeader = `<div style="color: #fbc02d; font-weight: bold; font-size: 16px; border: 1px solid rgba(251, 192, 45, 0.3); display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgba(0,0,0,0.3); width: ${boxW}; height: ${boxH}; box-sizing: border-box; transform: translate(${rOffset.x}px, ${rOffset.y}px);">已達最高等級 ⭐</div>`;
         }
 
-        const eid = entity.id || `${entity.type}_${entity.x}_${entity.y}`;
+        const eid = entity.id || `${entity.type1}_${entity.x}_${entity.y}`;
         const btnOpacity = entity.isUpgrading ? "opacity: 0.4; filter: grayscale(1); pointer-events: none;" : "opacity: 1;";
 
         // --- 3. 指令按鈕生成 (格網) ---
@@ -1211,7 +1211,7 @@ export class UIManager {
             `;
         } else {
             // 普通指令模式
-            if (entity.type === 'town_center' || entity.type === 'village') {
+            if (entity.type1 === 'town_center' || entity.type1 === 'village') {
                 const cmds = [['WOOD', '🪓', '採集木材'], ['STONE', '⛏️', '採集石頭'], ['GOLD', '💰', '採集黃金'], ['FOOD', '🧺', '採集食物'], ['RETURN', '🏘️', '收工']];
                 cmds.forEach(c => {
                     gridHtml += `<button class="action-btn" id="cmd_${c[0]}" onclick="window.GameEngine.setCommand(event, '${c[0]}')" style="${btnOpacity}"><span class="icon">${c[1]}</span><span class="label">${c[2]}</span></button>`;
@@ -1219,7 +1219,7 @@ export class UIManager {
             }
 
             // 生產按鈕
-            const bCfg = GameEngine.getBuildingConfig(entity.type, entity.lv || 1);
+            const bCfg = GameEngine.getBuildingConfig(entity.type1, entity.lv || 1);
             if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0 && !entity.isUnderConstruction) {
                 const iconMap = { 'villagers': '👤', 'female villagers': '👩', 'mage': '🧙', 'swordsman': '⚔️', 'archer': '🏹' };
                 if (bCfg.productionMode === 'rand') {
@@ -1243,7 +1243,7 @@ export class UIManager {
         gridHtml += `</div>`; // 結束指令按鈕格網 (action_button_grid)
 
         // [修正] 人數控制項移出 action_button_grid，使其獨立置中且不被 actionGridOffset 偏移影響
-        if (!isConfirming && ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(entity.type) && !entity.isUnderConstruction) {
+        if (!isConfirming && ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(entity.type1) && !entity.isUnderConstruction) {
             const current = GameEngine.state.units.villagers.filter(v => v.config?.type === 'villagers' && v.assignedWarehouseId === eid).length;
             const wcOff = hCfg.workerControlOffset || { x: 0, y: 15 };
             gridHtml += `
@@ -1288,7 +1288,7 @@ export class UIManager {
                                 ${rightHeader}
                                 <div style="display: flex; flex-direction: column; align-items: flex-end; margin-top: 8px; gap: 4px;">
                                     ${requirementHtml}
-                                    ${(entity.type === 'farmland' || entity.type === 'tree_plantation') ? `
+                                    ${(entity.type1 === 'farmland' || entity.type1 === 'tree_plantation') ? `
                                     <div style="color: #fbc02d; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px black; white-space: nowrap;">
                                         剩餘量 ${Math.floor(entity.amount || 0)}/${Math.floor(entity.maxAmount || entity.amount || 0)}
                                     </div>` : ''}
@@ -1335,8 +1335,8 @@ export class UIManager {
 
         const destroyBtn = document.getElementById("destroy_btn");
         if (destroyBtn) {
-            const villageCount = GameEngine.state.mapEntities.filter(e => e.type === 'town_center' || e.type === 'village').length;
-            const isLastVillage = (entity.type === 'town_center' || entity.type === 'village') && villageCount <= 1;
+            const villageCount = GameEngine.state.mapEntities.filter(e => e.type1 === 'town_center' || e.type1 === 'village').length;
+            const isLastVillage = (entity.type1 === 'town_center' || entity.type1 === 'village') && villageCount <= 1;
             destroyBtn.style.display = (!isConfirming && !isLastVillage) ? "flex" : "none";
         }
 
@@ -1367,7 +1367,7 @@ export class UIManager {
 
         // 使用 ID 查找實體，確保引用最新
         const ent = GameEngine.state.mapEntities.find(e => {
-            const id = e.id || `${e.type}_${e.x}_${e.y}`;
+            const id = e.id || `${e.type1}_${e.x}_${e.y}`;
             return id === eid;
         });
 
@@ -1782,7 +1782,7 @@ export class UIManager {
             const ent = this.activeMenuEntity;
             const current = GameEngine.state.units.villagers.filter(v =>
                 v.config && v.config.type === 'villagers' && v.config.camp === 'player' &&
-                v.assignedWarehouseId === (ent.id || `${ent.type}_${ent.x}_${ent.y}`)
+                v.assignedWarehouseId === (ent.id || `${ent.type1}_${ent.x}_${ent.y}`)
             ).length;
             countDisplay.innerText = `${current} / ${ent.targetWorkerCount || 0}`;
             if (statusHint) statusHint.innerText = `派遣狀態`;
@@ -1860,7 +1860,7 @@ export class UIManager {
             // [同步圖 4 需求] 更新銷毀按鈕位置到建築物右上角
             const dBtn = document.getElementById("destroy_btn");
             if (dBtn && dBtn.style.display !== 'none') {
-                const bCfg = GameEngine.getEntityConfig(this.activeMenuEntity.type);
+                const bCfg = GameEngine.getEntityConfig(this.activeMenuEntity.type1);
                 let uw = 1, uh = 1;
                 if (bCfg && bCfg.size) {
                     const match = bCfg.size.match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
@@ -1880,7 +1880,7 @@ export class UIManager {
      */
     static panToTownCenter() {
         // 同時檢查 village 與 town_center
-        const tc = GameEngine.state.mapEntities.find(e => e.type === 'town_center' || e.type === 'village');
+        const tc = GameEngine.state.mapEntities.find(e => e.type1 === 'town_center' || e.type1 === 'village');
         if (!tc || !window.PhaserScene) return;
 
         const cam = window.PhaserScene.cameras.main;

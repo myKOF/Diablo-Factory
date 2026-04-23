@@ -159,9 +159,9 @@ export class GameEngine {
     static startUpgrade(event, entity) { BuildingSystem.startUpgrade(this.state, this, event, entity); }
     static cancelUpgrade(event, entity) { BuildingSystem.cancelUpgrade(this.state, this, event, entity); }
     static addToProductionQueue(event, configName, sourceBuilding = null) { BuildingSystem.addToProductionQueue(this.state, this, event, configName, sourceBuilding); }
-    static placeBuilding(type, x, y) { return BuildingSystem.placeBuilding(this.state, this, type, x, y); }
-    static placeBuildingLine(type, startX, startY, endX, endY) { BuildingSystem.placeBuildingLine(this.state, this, type, startX, startY, endX, endY); }
-    static getLinePositions(type, startX, startY, endX, endY) { return BuildingSystem.getLinePositions(this.state, this, type, startX, startY, endX, endY); }
+    static placeBuilding(type1, x, y) { return BuildingSystem.placeBuilding(this.state, this, type1, x, y); }
+    static placeBuildingLine(type1, startX, startY, endX, endY) { BuildingSystem.placeBuildingLine(this.state, this, type1, startX, startY, endX, endY); }
+    static getLinePositions(type1, startX, startY, endX, endY) { return BuildingSystem.getLinePositions(this.state, this, type1, startX, startY, endX, endY); }
     static destroyBuilding(ent) { BuildingSystem.destroyBuilding(this.state, this, ent); }
     static _executeSingleProduction(clickedConfigId, building) { BuildingSystem._executeSingleProduction(this.state, this, clickedConfigId, building); }
     static resolveAppropriateUnitId(clickedId, building) { return BuildingSystem.resolveAppropriateUnitId(this.state, this, clickedId, building); }
@@ -228,16 +228,16 @@ export class GameEngine {
 
 
 
-    static getEntityConfig(type, lv = 1) {
-        if (!type) return null;
-        if (this.state.buildingConfigsByType && this.state.buildingConfigsByType[type]) {
-            return this.state.buildingConfigsByType[type][lv] || this.state.buildingConfigsByType[type][1];
+    static getEntityConfig(type1, lv = 1) {
+        if (!type1) return null;
+        if (this.state.buildingConfigsByType && this.state.buildingConfigsByType[type1]) {
+            return this.state.buildingConfigsByType[type1][lv] || this.state.buildingConfigsByType[type1][1];
         }
-        if (this.state.buildingConfigs && this.state.buildingConfigs[type]) {
-            return this.state.buildingConfigs[type];
+        if (this.state.buildingConfigs && this.state.buildingConfigs[type1]) {
+            return this.state.buildingConfigs[type1];
         }
         if (this.state.resourceConfigs) {
-            const resCfg = this.state.resourceConfigs.find(r => r.model === type);
+            const resCfg = this.state.resourceConfigs.find(r => r.model === type1);
             if (resCfg) return resCfg;
         }
         return null;
@@ -252,7 +252,7 @@ export class GameEngine {
         if (this.state.idToNameMap[targetIdOrName]) {
             finalConfigName = this.state.idToNameMap[targetIdOrName];
         } else if (building) {
-            const bCfg = this.getBuildingConfig(building.type, building.lv || 1);
+            const bCfg = this.getBuildingConfig(building.type1, building.lv || 1);
             if (bCfg && bCfg.productionMode === 'rand' && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
                 const randId = bCfg.npcProduction[Math.floor(Math.random() * bCfg.npcProduction.length)];
                 finalConfigName = this.state.idToNameMap[randId] || finalConfigName;
@@ -277,7 +277,7 @@ export class GameEngine {
 
         if (building) {
             if (building.spawnIdx === undefined) building.spawnIdx = 0;
-            const fp = GameEngine.getFootprint(building.type);
+            const fp = GameEngine.getFootprint(building.type1);
             const perimeter = 2 * (fp.uw + fp.uh) + 4;
 
             // [核心修復] 動態起始點：若設有集結點，尋找距離集結點最近的周長點作為起始索引
@@ -364,14 +364,14 @@ export class GameEngine {
                             id: rp.targetId, gx, gy,
                             x: gx * this.TILE_SIZE + this.TILE_SIZE / 2,
                             y: gy * this.TILE_SIZE + this.TILE_SIZE / 2,
-                            type: 'RESOURCE',
+                            type1: 'RESOURCE',
                             resourceType: ['NONE', 'WOOD', 'STONE', 'FOOD', 'GOLD'][res.type]
                         };
                     }
                 } else {
                     // 從單位或地圖實體(包含屍體)中尋找
                     targetEnt = this.state.units.villagers.find(u => u.id === rp.targetId) ||
-                        this.state.mapEntities.find(e => (e.id || `${e.type}_${e.x}_${e.y}`) === rp.targetId);
+                        this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === rp.targetId);
                 }
             }
 
@@ -389,29 +389,29 @@ export class GameEngine {
                     v.constructionTarget = targetEnt;
                     v.isPlayerLocked = true;
                     GameEngine.addLog(`[集結] 已自動指派至建造任務。`);
-                } else if (targetEnt.type === 'RESOURCE' || targetEnt.type === 'corpse') {
+                } else if (targetEnt.type1 === 'RESOURCE' || targetEnt.type1 === 'corpse') {
                     // [核心修正] 支援屍體集結連動
                     v.state = 'MOVING_TO_RESOURCE';
                     v.targetId = targetEnt;
                     v.type = targetEnt.resourceType || targetEnt.resType; // 核心支援不同欄位名
                     v.isPlayerLocked = true;
                     GameEngine.addLog(`[集結] 已自動指派至採集 ${targetEnt.name || '資源'}。`);
-                } else if (['farmland', 'tree_plantation'].includes(targetEnt.type)) {
+                } else if (['farmland', 'tree_plantation'].includes(targetEnt.type1)) {
                     v.state = 'MOVING_TO_RESOURCE';
                     v.targetId = targetEnt;
-                    v.type = (targetEnt.type === 'farmland' ? 'FOOD' : 'WOOD');
+                    v.type = (targetEnt.type1 === 'farmland' ? 'FOOD' : 'WOOD');
                     v.isPlayerLocked = true;
                     GameEngine.addLog(`[集結] 已加入資源田作業。`);
-                } else if (['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(targetEnt.type)) {
+                } else if (['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(targetEnt.type1)) {
                     // [核心修復] 先設定歸屬，再增加需求，確保自動化邏輯不會搶先指派其它人。
-                    v.assignedWarehouseId = targetEnt.id || `${targetEnt.type}_${targetEnt.x}_${targetEnt.y}`;
+                    v.assignedWarehouseId = targetEnt.id || `${targetEnt.type1}_${targetEnt.x}_${targetEnt.y}`;
                     this.adjustWarehouseWorkers(targetEnt, 1);
-                    v.type = (targetEnt.type === 'timber_factory' ? 'WOOD' :
-                        (targetEnt.type === 'stone_factory' ? 'STONE' :
-                            (targetEnt.type === 'barn' ? 'FOOD' : 'GOLD')));
+                    v.type = (targetEnt.type1 === 'timber_factory' ? 'WOOD' :
+                        (targetEnt.type1 === 'stone_factory' ? 'STONE' :
+                            (targetEnt.type1 === 'barn' ? 'FOOD' : 'GOLD')));
                     v.state = 'MOVING_TO_RESOURCE';
                     v.isPlayerLocked = true; // [核心修復] 鎖定狀態防止出生瞬間被 assignNextTask 覆蓋
-                    GameEngine.addLog(`[集結] 已加入 ${targetEnt.name || targetEnt.type} 採集隊列。`);
+                    GameEngine.addLog(`[集結] 已加入 ${targetEnt.name || targetEnt.type1} 採集隊列。`);
                 } else if (targetEnt.hp !== undefined && (targetEnt.config.camp === 'enemy' || targetEnt.camp === 'enemy')) {
                     v.state = 'CHASE';
                     v.targetId = targetEnt.id;
@@ -483,17 +483,17 @@ export class GameEngine {
         return { x: rallyPoint.x, y: rallyPoint.y };
     }
 
-    static getFootprint(type) {
+    static getFootprint(lookupType1) {
         // [核心優先級] 1. 優先從 UI_CONFIG 讀取手動調整的長寬
         if (UI_CONFIG.BuildingPanel && UI_CONFIG.BuildingPanel.list) {
-            const uiCfg = UI_CONFIG.BuildingPanel.list.find(item => item.id === type);
+            const uiCfg = UI_CONFIG.BuildingPanel.list.find(item => item.id === lookupType1);
             if (uiCfg && uiCfg.width && uiCfg.height) {
                 return { uw: uiCfg.width, uh: uiCfg.height };
             }
         }
 
         // 2. 回退至從 CSV 配置讀取
-        const cfg = this.getEntityConfig(type);
+        const cfg = this.getEntityConfig(lookupType1);
         let uw = 1, uh = 1;
         if (cfg && cfg.size) {
             const em = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
@@ -509,7 +509,7 @@ export class GameEngine {
      * @param {number} R 擴展層數 (1 為緊貼建築邊緣外一圈)
      */
     static getBuildingPerimeterPos(building, currentIdx, R = 1) {
-        const fp = GameEngine.getFootprint(building.type);
+        const fp = GameEngine.getFootprint(building.type1);
         const uw = fp.uw, uh = fp.uh;
         const TS = this.TILE_SIZE;
         let tx, ty;
@@ -539,9 +539,9 @@ export class GameEngine {
         return { x: building.x + tx * TS, y: building.y - footY + ty * TS };
     }
 
-    static getBuildingConfig(type, lv) {
-        if (!this.state.buildingConfigsByType || !this.state.buildingConfigsByType[type]) return null;
-        return this.state.buildingConfigsByType[type][lv] || null;
+    static getBuildingConfig(type1, lv) {
+        if (!this.state.buildingConfigsByType || !this.state.buildingConfigsByType[type1]) return null;
+        return this.state.buildingConfigsByType[type1][lv] || null;
     }
 
     static isUpgradeUnlocked(entity, nextCfg) {
@@ -556,9 +556,9 @@ export class GameEngine {
             const targetLv = parseInt(match[2]);
             // 檢查我方是否已有該等級的建築
             const hasRequirement = this.state.mapEntities.some(ent => {
-                const entType = ent.type;
+                const entType1 = ent.type1;
                 // [修復] 只要目前等級夠，不論是否正在升級都算符合條件
-                return entType === targetType && ent.lv >= targetLv && !ent.isUnderConstruction;
+                return entType1 === targetType && ent.lv >= targetLv && !ent.isUnderConstruction;
             });
 
             const reqText = `需 ${this.state.buildingConfigs[targetType]?.name || targetType} ${targetLv} 級`;
@@ -578,7 +578,7 @@ export class GameEngine {
         this.state.mapEntities.forEach(ent => {
             if (ent.isUnderConstruction) return;
             // 升級中的建築依然提供人口上限？通常是。
-            const cfg = this.getBuildingConfig(ent.type, ent.lv);
+            const cfg = this.getBuildingConfig(ent.type1, ent.lv);
             if (cfg && cfg.population) total += cfg.population;
         });
         return total || 5;
@@ -693,8 +693,8 @@ export class GameEngine {
     }
 
 
-    static isAreaClear(x, y, type, tempEntities = []) {
-        const cfg = this.getEntityConfig(type);
+    static isAreaClear(x, y, type1, tempEntities = []) {
+        const cfg = this.getEntityConfig(type1);
         if (!cfg) return true;
         const match = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
         const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
@@ -703,7 +703,7 @@ export class GameEngine {
         // 1. 檢查建築與實體碰撞
         const allToCheck = [...this.state.mapEntities, ...tempEntities];
         const hitEntity = allToCheck.some(ent => {
-            const ecfg = this.getEntityConfig(ent.type, ent.lv || 1);
+            const ecfg = this.getEntityConfig(ent.type1, ent.lv || 1);
             let ew = this.TILE_SIZE, eh = this.TILE_SIZE;
             if (ecfg) {
                 const em = ecfg.size ? ecfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
@@ -787,8 +787,8 @@ export class GameEngine {
 
 
     // 資源存款已遷移至 ResourceSystem.depositResource
-    static depositResource(type, amount) {
-        ResourceSystem.depositResource(this.state, type, amount, this.addLog.bind(this));
+    static depositResource(type1, amount) {
+        ResourceSystem.depositResource(this.state, type1, amount, this.addLog.bind(this));
     }
 
     static setCommand(event, commandType) {
@@ -828,13 +828,13 @@ export class GameEngine {
 
             // 禁止中斷正在建造中或已分配到特殊田地（農田、樹木田）的工人
             if (v.state === 'CONSTRUCTING' || v.state === 'MOVING_TO_CONSTRUCTION') return;
-            if (v.targetId && (v.targetId.type === 'farmland' || v.targetId.type === 'tree_plantation')) return;
+            if (v.targetId && (v.targetId.type1 === 'farmland' || v.targetId.type1 === 'tree_plantation')) return;
 
             // 只有「通用工人」(沒有被分配到特定採集場) 才受全域指令控制
             if (v.assignedWarehouseId) return;
 
             const isIdle = v.state === 'IDLE';
-            const isVillageWorker = v.targetBase && v.targetBase.type === 'village';
+            const isVillageWorker = v.targetBase && v.targetBase.type1 === 'village';
 
             if (isIdle || isVillageWorker) {
                 v.type = commandType;

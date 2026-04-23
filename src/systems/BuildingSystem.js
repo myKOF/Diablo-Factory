@@ -33,7 +33,7 @@ export class BuildingSystem {
                     ent.isUpgrading = false;
                     ent.upgradeProgress = 0;
                     ent.lv = (ent.lv || 1) + 1;
-                    const newCfg = engine.getBuildingConfig(ent.type, ent.lv);
+                    const newCfg = engine.getBuildingConfig(ent.type1, ent.lv);
                     if (newCfg) {
                         ent.name = newCfg.name;
                         ent.model = newCfg.model;
@@ -95,8 +95,8 @@ export class BuildingSystem {
         if (event && event.stopPropagation) event.stopPropagation();
         if (entity.isUpgrading || entity.isUnderConstruction) return;
 
-        const currentCfg = engine.getBuildingConfig(entity.type, entity.lv);
-        const nextCfg = engine.getBuildingConfig(entity.type, entity.lv + 1);
+        const currentCfg = engine.getBuildingConfig(entity.type1, entity.lv);
+        const nextCfg = engine.getBuildingConfig(entity.type1, entity.lv + 1);
 
         if (!nextCfg) {
             engine.addLog("已達最高等級！");
@@ -139,7 +139,7 @@ export class BuildingSystem {
         if (!entity || !entity.isUpgrading) return;
 
         // 返還資源 (100% 返還)
-        const nextCfg = engine.getBuildingConfig(entity.type, entity.lv + 1);
+        const nextCfg = engine.getBuildingConfig(entity.type1, entity.lv + 1);
         const costs = nextCfg?.costs || {};
         for (let r in costs) {
             if (state.resources.hasOwnProperty(r)) {
@@ -150,8 +150,8 @@ export class BuildingSystem {
         entity.isUpgrading = false;
         entity.upgradeProgress = 0;
 
-        const currentCfg = engine.getBuildingConfig(entity.type, entity.lv);
-        engine.addLog(`${currentCfg.name || entity.type} 升級已取消，資源已退還。`);
+        const currentCfg = engine.getBuildingConfig(entity.type1, entity.lv);
+        engine.addLog(`${currentCfg.name || entity.type1} 升級已取消，資源已退還。`);
         if (window.UIManager) {
             window.UIManager.showWarning("升級已取消，資源已全額退還");
             window.UIManager.showContextMenu(entity);
@@ -174,8 +174,8 @@ export class BuildingSystem {
 
         if (isMultiSelect) {
             targets = state.mapEntities.filter(e =>
-                state.selectedBuildingIds.includes(e.id || `${e.type}_${e.x}_${e.y}`) &&
-                e.type === activeBuilding.type &&
+                state.selectedBuildingIds.includes(e.id || `${e.type1}_${e.x}_${e.y}`) &&
+                e.type1 === activeBuilding.type1 &&
                 !e.isUnderConstruction
             );
         }
@@ -204,7 +204,7 @@ export class BuildingSystem {
         const finalConfigId = engine.resolveAppropriateUnitId(clickedConfigId, building);
 
         // 檢查該建築是否真的被允許生產此單位 (或此種類型)
-        const bCfg = engine.getBuildingConfig(building.type, building.lv || 1);
+        const bCfg = engine.getBuildingConfig(building.type1, building.lv || 1);
         if (!bCfg || !bCfg.npcProduction) return;
 
         // 如果不是 RANDOM，則檢查 finalConfigId 是否在該等級建築的產出清單中
@@ -299,10 +299,10 @@ export class BuildingSystem {
         return bestId;
     }
 
-    static placeBuilding(state, engine, type, x, y) {
-        const cfg = state.buildingConfigs[type];
+    static placeBuilding(state, engine, type1, x, y) {
+        const cfg = state.buildingConfigs[type1];
         if (!cfg) return false;
-        const currentCount = state.mapEntities.filter(e => e.type === type).length;
+        const currentCount = state.mapEntities.filter(e => e.type1 === type1).length;
         if (cfg.maxCount !== undefined && currentCount >= cfg.maxCount) {
             engine.addLog(`建造失敗：${cfg.name} 數量已達上限！`);
             return false;
@@ -314,7 +314,7 @@ export class BuildingSystem {
                 return false;
             }
         }
-        if (!engine.isAreaClear(x, y, type)) { engine.addLog("位置受阻！"); return false; }
+        if (!engine.isAreaClear(x, y, type1)) { engine.addLog("位置受阻！"); return false; }
 
         // 扣額
         for (let r in cfg.costs) {
@@ -324,17 +324,17 @@ export class BuildingSystem {
         }
 
         const newBuilding = {
-            id: `build_${type}_${x}_${y}_${Date.now()}`,
+            id: `build_${type1}_${x}_${y}_${Date.now()}`,
             model: cfg.model,
-            type: cfg.type,
+            type1: cfg.type1,
             lv: cfg.lv || 1,
             x: x, y: y, name: "待施工",
             isUnderConstruction: true, buildProgress: 0,
             buildTime: Math.max(1, cfg.buildTime || 5), // 防止 0 或 NaN
             amount: cfg.resourceValue || 0,
             maxAmount: cfg.resourceValue || 0,
-            isResource: (type === 'farmland' || type === 'tree_plantation'),
-            targetWorkerCount: (type === 'farmland' || type === 'tree_plantation') ? 1 : (['timber_factory', 'stone_factory', 'barn', 'quarry', 'gold_mining_factory'].includes(type) ? 1 : 0),
+            isResource: (type1 === 'farmland' || type1 === 'tree_plantation'),
+            targetWorkerCount: (type1 === 'farmland' || type1 === 'tree_plantation') ? 1 : (['timber_factory', 'stone_factory', 'barn', 'quarry', 'gold_mining_factory'].includes(type1) ? 1 : 0),
             ...(cfg.npcProduction && cfg.npcProduction.length > 0 ? { queue: [], productionTimer: 0 } : {})
         };
         state.mapEntities.push(newBuilding);
@@ -405,9 +405,9 @@ export class BuildingSystem {
         return true;
     }
 
-    static placeBuildingLine(state, engine, type, startX, startY, endX, endY) {
-        const positions = engine.getLinePositions(type, startX, startY, endX, endY);
-        const cfg = state.buildingConfigs[type];
+    static placeBuildingLine(state, engine, type1, startX, startY, endX, endY) {
+        const positions = engine.getLinePositions(type1, startX, startY, endX, endY);
+        const cfg = state.buildingConfigs[type1];
         if (!cfg || positions.length === 0) return;
 
         // 預檢總成本與可用性
@@ -415,7 +415,7 @@ export class BuildingSystem {
         let totalCosts = { food: 0, wood: 0, stone: 0, gold: 0 };
 
         positions.forEach(pos => {
-            if (engine.isAreaClear(pos.x, pos.y, type, possibleBuildings)) {
+            if (engine.isAreaClear(pos.x, pos.y, type1, possibleBuildings)) {
                 possibleBuildings.push({ x: pos.x, y: pos.y });
                 for (let r in cfg.costs) totalCosts[r] += cfg.costs[r];
             }
@@ -434,7 +434,7 @@ export class BuildingSystem {
         // 批量執行
         let count = 0;
         possibleBuildings.forEach(pos => {
-            if (engine.placeBuilding(type, pos.x, pos.y)) count++;
+            if (engine.placeBuilding(type1, pos.x, pos.y)) count++;
         });
         if (count > 0) {
             engine.addLog(`批次建造：${cfg.name} x${count}。`);
@@ -457,9 +457,9 @@ export class BuildingSystem {
         }
     }
 
-    static getLinePositions(state, engine, type, startX, startY, endX, endY) {
+    static getLinePositions(state, engine, type1, startX, startY, endX, endY) {
         const TS = engine.TILE_SIZE;
-        const cfg = state.buildingConfigs[type];
+        const cfg = state.buildingConfigs[type1];
         if (!cfg) return [];
         const match = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
         const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
@@ -492,7 +492,7 @@ export class BuildingSystem {
 
     static destroyBuilding(state, engine, ent) {
         if (!ent) return;
-        const cfg = state.buildingConfigs[ent.type];
+        const cfg = state.buildingConfigs[ent.type1];
         if (!cfg) return;
 
         // 1. 返還資源 (50%)
@@ -507,12 +507,12 @@ export class BuildingSystem {
         }
 
         // 2. 更新狀態計計數
-        if (ent.type === 'farmhouse') state.buildings.farmhouse--;
+        if (ent.type1 === 'farmhouse') state.buildings.farmhouse--;
 
         // 3. 從地圖移除
-        const id = ent.id || `${ent.type}_${ent.x}_${ent.y}`;
+        const id = ent.id || `${ent.type1}_${ent.x}_${ent.y}`;
         state.mapEntities = state.mapEntities.filter(e => {
-            const eid = e.id || `${e.type}_${e.x}_${e.y}`;
+            const eid = e.id || `${e.type1}_${e.x}_${e.y}`;
             return eid !== id;
         });
 

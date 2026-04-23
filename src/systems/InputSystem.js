@@ -162,19 +162,19 @@ export class InputSystem {
                     }
                 } else if (window.UIManager && window.UIManager.activeMenuEntity) {
                     const activeEnt = window.UIManager.activeMenuEntity;
-                    const bCfg = GameEngine.state.buildingConfigs[activeEnt.type];
+                    const bCfg = GameEngine.state.buildingConfigs[activeEnt.type1];
                     
                     // 如果選中的建築可以集結 (有生產功能)
                     if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
                         const isMulti = GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.length > 1;
                         if (isMulti) {
                             // 多選模式：為所有同類型的選中建築設定集結點
-                            const type = activeEnt.type;
+                            const type1 = activeEnt.type1;
                             const targets = GameEngine.state.mapEntities.filter(e => 
-                                GameEngine.state.selectedBuildingIds.includes(e.id || `${e.type}_${e.x}_${e.y}`) &&
-                                e.type === type && !e.isUnderConstruction
+                                GameEngine.state.selectedBuildingIds.includes(e.id || `${e.type1}_${e.x}_${e.y}`) &&
+                                e.type1 === type1 && !e.isUnderConstruction
                             );
-                            targets.forEach(t => this.handleRallyPoint(pointer, t, GameEngine.state.buildingConfigs[t.type]));
+                            targets.forEach(t => this.handleRallyPoint(pointer, t, GameEngine.state.buildingConfigs[t.type1]));
                         } else {
                             this.handleRallyPoint(pointer, activeEnt, bCfg);
                         }
@@ -234,13 +234,13 @@ export class InputSystem {
         // 3. 檢查是否點擊到建築物 (地圖實體型，包含我方工地或採集場)
         if (!clickedTarget) {
             GameEngine.state.mapEntities.forEach(e => {
-                const fp = GameEngine.getFootprint(e.type);
+                const fp = GameEngine.getFootprint(e.type1);
                 // [需求修正] 屍體點擊範圍動態讀取 UI_CONFIG.corpseSelectionScale 並擴大
                 let w = (fp.uw * TS);
                 let h = (fp.uh * TS);
                 let padding = 10;
 
-                if (e.type === 'corpse') {
+                if (e.type1 === 'corpse') {
                     const cScale = (UI_CONFIG.ResourceSelection && UI_CONFIG.ResourceSelection.corpseSelectionScale) || 0.8;
                     w = cScale * TS;
                     h = cScale * TS;
@@ -250,7 +250,7 @@ export class InputSystem {
                 if (pos.x >= e.x - w / 2 - padding && pos.x <= e.x + w / 2 + padding &&
                     pos.y >= e.y - h / 2 - padding && pos.y <= e.y + h / 2 + padding) {
                     clickedTarget = e;
-                    targetType = (e.type === 'corpse') ? 'RESOURCE' : 'BUILDING';
+                    targetType = (e.type1 === 'corpse') ? 'RESOURCE' : 'BUILDING';
                 }
             });
         }
@@ -269,7 +269,7 @@ export class InputSystem {
                 targetId: clickedTarget.id || (clickedTarget.gx !== undefined ? `res_${clickedTarget.gx}_${clickedTarget.gy}` : null),
                 targetType: targetType,
                 // 保存基礎屬性快照
-                name: clickedTarget.name || clickedTarget.type || '目標'
+                name: clickedTarget.name || clickedTarget.type1 || '目標'
             };
             GameEngine.addLog(`${bCfg.name} 集結點已鎖定至：${ent.rallyPoint.name}`);
             if (window.UIManager) window.UIManager.updateValues(true);
@@ -304,11 +304,11 @@ export class InputSystem {
         if (!clickedEnemy) {
             const TS = GameEngine.TILE_SIZE;
             GameEngine.state.mapEntities.forEach(e => {
-                const fp = GameEngine.getFootprint(e.type);
+                const fp = GameEngine.getFootprint(e.type1);
                 let w = fp.uw * TS, h = fp.uh * TS;
                 let padding = 10;
 
-                if (e.type === 'corpse') {
+                if (e.type1 === 'corpse') {
                     const cScale = (UI_CONFIG.ResourceSelection && UI_CONFIG.ResourceSelection.corpseSelectionScale) || 0.8;
                     w = cScale * TS;
                     h = cScale * TS;

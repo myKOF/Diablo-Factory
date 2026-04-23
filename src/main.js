@@ -42,7 +42,7 @@ window.render_game_to_text = () => {
         // 僅回傳視口內的關鍵實體，節省 Token
         entities: (scene.entities || []).filter(e => e.active).map(e => ({
             id: e.id,
-            type: e.type,
+            type1: e.type1 || e.type,
             x: Math.round(e.x),
             y: Math.round(e.y)
         })),

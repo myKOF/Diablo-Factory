@@ -184,7 +184,7 @@ export class MainScene extends Phaser.Scene {
             g.translateCanvas && g.translateCanvas(w / 2, h / 2); // 部分 Phaser 版本支援
             // 如果不支援 translateCanvas，可以手動在 drawEntity 傳入偏移，但這裡我們統一用 mockEnt 傳達意圖 (雖然現在 drawEntity 忽略它)
             // 修正：手動偏移才是最穩定的
-            this.drawEntity(g, { type, isUnderConstruction: false }, 1.0);
+            this.drawEntity(g, { type1: type, isUnderConstruction: false }, 1.0);
             g.restore();
         };
 
@@ -218,25 +218,6 @@ export class MainScene extends Phaser.Scene {
         });
 
         graphics.destroy();
-    }
-
-    drawEntity(g, ent, alpha) {
-        const cfg = GameEngine.getEntityConfig(ent.type);
-        if (!cfg) return;
-        g.clear();
-        const TS = GameEngine.TILE_SIZE;
-        let uw = 1, uh = 1;
-        if (cfg.size) {
-            const match = cfg.size.toString().match(/\{[ ]*([\d.]+)[ ]*,[ ]*([\d.]+)[ ]*\}/);
-            if (match) { uw = parseFloat(match[1]); uh = parseFloat(match[2]); }
-        }
-        const color = typeof cfg.color === 'string' ? parseInt(cfg.color.replace('#', ''), 16) : (cfg.color || 0x888888);
-        const w = uw * TS;
-        const h = uh * TS;
-        g.fillStyle(color, alpha);
-        g.fillRect(-w / 2, -h / 2, w, h);
-        g.lineStyle(2, 0xffffff, alpha * 0.5);
-        g.strokeRect(-w / 2, -h / 2, w, h);
     }
 
     setupCamera() {
@@ -365,7 +346,7 @@ export class MainScene extends Phaser.Scene {
         if (clickedTarget) {
             const isResource = !!(clickedTarget.gx !== undefined && clickedTarget.gy !== undefined) ||
                 (clickedTarget.resourceType) ||
-                (clickedTarget.type === 'farmland' || clickedTarget.type === 'tree_plantation');
+                (clickedTarget.type1 === 'farmland' || clickedTarget.type1 === 'tree_plantation');
             const isEnemy = (clickedTarget.config && (clickedTarget.config.camp === 'enemy' || clickedTarget.config.camp === 'neutral')) ||
                 clickedTarget.camp === 'enemy' || clickedTarget.camp === 'neutral' || clickedTarget.isEnemy;
 
@@ -394,12 +375,12 @@ export class MainScene extends Phaser.Scene {
                 unit.pathTarget = null;
                 unit.isPlayerLocked = true;
 
-                GameEngine.addLog(`[命令] 工人 ${unit.id} 前往建設 ${clickedTarget.name || clickedTarget.type}。`, 'INPUT');
+                GameEngine.addLog(`[命令] 工人 ${unit.id} 前往建設 ${clickedTarget.name || clickedTarget.type1}。`, 'INPUT');
                 return;
             } else if (isResource && unit.config.type === 'villagers') {
                 // 我方工人右鍵點資源：採集該資源
                 unit.state = 'MOVING_TO_RESOURCE';
-                unit.type = clickedTarget.resourceType || clickedTarget.type;
+                unit.type = clickedTarget.resourceType || clickedTarget.type1 || clickedTarget.type;
                 unit.targetId = clickedTarget;
                 unit.pathTarget = null;
                 unit.isPlayerLocked = true;
@@ -712,14 +693,14 @@ export class MainScene extends Phaser.Scene {
         const el = document.getElementById("tc_locator");
         if (!el) return;
 
-        const tc = GameEngine.state.mapEntities.find(e => e.type === 'town_center' || e.type === 'village');
+        const tc = GameEngine.state.mapEntities.find(e => e.type1 === 'town_center' || e.type1 === 'village');
         if (!tc) {
             el.style.display = "none";
             return;
         }
 
         const TS = GameEngine.TILE_SIZE;
-        const cfg = GameEngine.getEntityConfig(tc.type);
+        const cfg = GameEngine.getEntityConfig(tc.type1);
         let uw = 3, uh = 3; // 預期 Town Center 是 3x3
         if (cfg && cfg.size) {
             const m = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
@@ -788,7 +769,7 @@ export class MainScene extends Phaser.Scene {
 
         const TS = GameEngine.TILE_SIZE;
         visibleEntities.forEach(ent => {
-            const cfg = GameEngine.getEntityConfig(ent.type);
+            const cfg = GameEngine.getEntityConfig(ent.type1);
             let uw = 1, uh = 1;
             if (cfg && cfg.size) {
                 const match = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
@@ -798,7 +779,7 @@ export class MainScene extends Phaser.Scene {
             if (ent.isUnderConstruction) {
                 this.drawBuildProgressBar(g, ent, uw, uh, TS);
                 // 施工中時，確保生產隊列標籤隱藏
-                const id = ent.id || `${ent.type}_${ent.x}_${ent.y}`;
+                const id = ent.id || `${ent.type1}_${ent.x}_${ent.y}`;
                 if (this.queueTexts.has(id)) this.queueTexts.get(id).setVisible(false);
             } else if (ent.isUpgrading) {
                 this.drawUpgradeProgressBar(g, ent, uw, uh, TS);
@@ -809,7 +790,7 @@ export class MainScene extends Phaser.Scene {
 
             // 繪製集結點 (僅在選中且有集結點時顯示)
             const isSelected = (window.UIManager && window.UIManager.activeMenuEntity === ent) ||
-                (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(ent.id || `${ent.type}_${ent.x}_${ent.y}`));
+                (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(ent.id || `${ent.type1}_${ent.x}_${ent.y}`));
             if (ent.rallyPoint && isSelected) {
                 this.drawRallyPoint(g, ent);
             }
@@ -887,7 +868,7 @@ export class MainScene extends Phaser.Scene {
         // 1. [手動選取] 建築選取框 (橘色，由玩家點擊觸發)
         if (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.length > 0) {
             GameEngine.state.selectedBuildingIds.forEach(id => {
-                const ent = GameEngine.state.mapEntities.find(e => (e.id === id || `${e.type}_${e.x}_${e.y}` === id));
+                const ent = GameEngine.state.mapEntities.find(e => (e.id === id || `${e.type1}_${e.x}_${e.y}` === id));
                 if (ent) {
                     this.drawSingleSelectionBox(g, ent, 0xff9800);
                 }
@@ -942,7 +923,7 @@ export class MainScene extends Phaser.Scene {
         if (!this._buildingMap || this._lastMapEntitiesCount !== state.mapEntities.length) {
             this._buildingMap = new Map();
             state.mapEntities.forEach(e => {
-                this._buildingMap.set(e.id || `${e.type}_${e.x}_${e.y}`, e);
+                this._buildingMap.set(e.id || `${e.type1}_${e.x}_${e.y}`, e);
             });
             this._lastMapEntitiesCount = state.mapEntities.length;
         }
@@ -952,7 +933,7 @@ export class MainScene extends Phaser.Scene {
         const selectedResId = state.selectedResourceId;
         if (selectedResId) {
             // [新增] 支援屍體 (mapEntities) 的選取高亮
-            if (selectedResId.startsWith('corpse_')) {
+            if (selectedResId && selectedResId.startsWith('corpse_')) {
                 const corpse = buildingMap.get(selectedResId);
                 if (corpse && worldView.contains(corpse.x, corpse.y)) {
                     // 使用 cfgRes 渲染通用的選取效果
@@ -993,7 +974,7 @@ export class MainScene extends Phaser.Scene {
                     // [Requirement 2] 支援屍體實體之採集目標描邊
                     const tEntId = (typeof u.targetId === 'string') ? u.targetId : u.targetId.id;
                     const tEnt = buildingMap.get(tEntId);
-                    if (tEnt && tEnt.type === 'corpse' && worldView.contains(tEnt.x, tEnt.y)) {
+                    if (tEnt && tEnt.type1 === 'corpse' && worldView.contains(tEnt.x, tEnt.y)) {
                         activeTargets.set(tEntId + "_target", { entity: tEnt, fxType: 'target', config: cfgRes });
                         // 同時畫出橘色基礎方框增強視覺反饋 (Requirement 2)
                         this.drawSingleSelectionBox(this.selectionGraphics, tEnt, 0xff9800);
@@ -1008,7 +989,7 @@ export class MainScene extends Phaser.Scene {
                 // 安全邊界設為 100，避免建築邊角突然消失
                 if (worldView.left - 100 < b.x && worldView.right + 100 > b.x &&
                     worldView.top - 100 < b.y && worldView.bottom + 100 > b.y) {
-                    const bId = b.id || `${b.type}_${b.x}_${b.y}`;
+                    const bId = b.id || `${b.type1}_${b.x}_${b.y}`;
                     activeTargets.set(bId + "_const", { entity: b, fxType: 'const', config: cfgBld });
                 }
             }
@@ -1024,7 +1005,7 @@ export class MainScene extends Phaser.Scene {
                 let isRes = false;
 
                 if (rp.targetType === 'RESOURCE') {
-                    if (rp.targetId.startsWith('res_')) {
+                    if (rp.targetId && rp.targetId.startsWith('res_')) {
                         const parts = rp.targetId.split('_'); // 'res_gx_gy'
                         if (parts.length >= 3) {
                             const gx = parseInt(parts[1]), gy = parseInt(parts[2]);
@@ -1037,7 +1018,7 @@ export class MainScene extends Phaser.Scene {
                                 }
                             }
                         }
-                    } else if (rp.targetId.startsWith('corpse_')) {
+                    } else if (rp.targetId && rp.targetId.startsWith('corpse_')) {
                         const corpse = buildingMap.get(rp.targetId);
                         if (corpse && worldView.contains(corpse.x, corpse.y)) {
                             target = corpse;
@@ -1071,7 +1052,7 @@ export class MainScene extends Phaser.Scene {
         const hoveredId = state.hoveredId;
         if (hoveredId && !activeTargets.has(hoveredId + "_sel") && !activeTargets.has(hoveredId + "_const")) {
             const cfgHover = { ...cfgRes, glowAlpha: 0.2, glowOuterStrength: 5 };
-            if (hoveredId.includes('_') && !hoveredId.startsWith('corpse_') && !hoveredId.startsWith('unit_')) {
+            if (hoveredId && hoveredId.includes('_') && !hoveredId.startsWith('corpse_') && !hoveredId.startsWith('unit_')) {
                 const parts = hoveredId.split('_');
                 const gx = parseInt(parts[0]), gy = parseInt(parts[1]);
                 const res = GameEngine.state.mapData.getResource(gx, gy);
@@ -1099,7 +1080,7 @@ export class MainScene extends Phaser.Scene {
                 if (entity.gx !== undefined && typeof entity.type === 'number') {
                     textureKey = this.getTextureKeyFromType(entity.type);
                 } else {
-                    textureKey = this.getTextureKey(entity.type);
+                    textureKey = this.getTextureKey(entity.type1);
                 }
 
                 if (!textureKey || !this.textures.exists(textureKey)) return;
@@ -1157,7 +1138,7 @@ export class MainScene extends Phaser.Scene {
             } else {
                 fxSprite.x = entity.x;
                 fxSprite.y = entity.y;
-                const cfg = GameEngine.getEntityConfig(entity.type);
+                const cfg = GameEngine.getEntityConfig(entity.type1);
                 if (cfg && cfg.model_size) {
                     let sx = 0.6, sy = 0.6;
                     if (typeof cfg.model_size === 'string') {
@@ -1199,11 +1180,11 @@ export class MainScene extends Phaser.Scene {
 
     drawSingleSelectionBox(g, ent, color) {
         const TS = GameEngine.TILE_SIZE;
-        const cfg = GameEngine.getEntityConfig(ent.type);
-        if (!cfg && ent.type !== 'corpse') return; // [修正] 支援屍體等無配置實體
+        const cfg = GameEngine.getEntityConfig(ent.type1);
+        if (!cfg && ent.type1 !== 'corpse') return; // [修正] 支援屍體等無配置實體
 
         let uw = 1, uh = 1;
-        if (ent.type === 'corpse') {
+        if (ent.type1 === 'corpse') {
             const rCfg = UI_CONFIG.ResourceSelection || {};
             const cScale = rCfg.corpseSelectionScale || 0.8;
             uw = cScale; uh = cScale;
@@ -1217,7 +1198,7 @@ export class MainScene extends Phaser.Scene {
         const h = uh * TS;
 
         g.lineStyle(4, color, 1);
-        if (ent.type === 'corpse') {
+        if (ent.type1 === 'corpse') {
             // [需求修正] 屍體改用圓形選取框，與 NPC 保持一致
             const radius = Math.max(w, h) / 2 + 2;
             g.strokeCircle(ent.x, ent.y, radius);
@@ -1375,6 +1356,7 @@ export class MainScene extends Phaser.Scene {
         for (let i = 0; i < visibleEntities.length; i++) {
             const ent = visibleEntities[i];
             const id = ent.id;
+            const type1 = ent.type1 || ent.type; // [核心相容] 支援新舊屬性命名
             visibleIds.add(id);
 
             let displayObj = this.entities.get(id);
@@ -1385,13 +1367,13 @@ export class MainScene extends Phaser.Scene {
                     continue;
                 }
 
-                const textureKey = this.getTextureKey(ent.type);
+                const textureKey = this.getTextureKey(type1);
                 if (textureKey && this.textures.exists(textureKey)) {
                     displayObj = this.add.image(ent.x, ent.y, textureKey);
                     this.entities.set(id, displayObj);
                     this.entityGroup.add(displayObj);
                     displayObj.setDepth(500000 + ent.y); // Requirement 3: Y-axis sorting + Huge Offset
-                } else if (!textureKey && !['campfire'].includes(ent.type)) {
+                } else if (!textureKey && !['campfire'].includes(type1)) {
                     displayObj = this.add.graphics();
                     this.drawEntity(displayObj, ent, 1.0);
                     this.entities.set(id, displayObj);
@@ -1409,7 +1391,7 @@ export class MainScene extends Phaser.Scene {
                     const targetAlpha = ent.isUnderConstruction ? 0.6 : 1.0;
                     if (displayObj.alpha !== targetAlpha) displayObj.setAlpha(targetAlpha);
 
-                    const cfg = GameEngine.getEntityConfig(ent.type);
+                    const cfg = GameEngine.getEntityConfig(type1);
                     if (cfg && cfg.model_size) {
                         let sx = 0.6, sy = 0.6;
                         if (typeof cfg.model_size === 'string') {
@@ -1426,7 +1408,7 @@ export class MainScene extends Phaser.Scene {
             }
 
             this.updateEntityLabel(id, ent);
-            if (ent.type === 'campfire' && !ent.isUnderConstruction) {
+            if (type1 === 'campfire' && !ent.isUnderConstruction) {
                 this.handleCampfireParticles(id, ent, true);
             }
         }
@@ -1610,7 +1592,7 @@ export class MainScene extends Phaser.Scene {
     updateEntityLabel(id, ent) {
         const resCfg = UI_CONFIG.MapResourceLabels;
         const bldCfg = UI_CONFIG.MapBuildingLabels; // 使用專屬建築標籤配置
-        const config = GameEngine.state.buildingConfigs[ent.type];
+        const config = GameEngine.state.buildingConfigs[ent.type1];
         const isBuilding = !!config;
 
         // 建築標籤恆顯示，資源標籤依據設定開關
@@ -1738,7 +1720,8 @@ export class MainScene extends Phaser.Scene {
         });
     }
 
-    getTextureKey(type) {
+    getTextureKey(type1) {
+        if (!type1) return null;
         // 精確匹配建築類型（必須在前綴匹配之前，避免 stone_factory 被誤判為石頭資源）
         const mapping = {
             'village': 'tex_village',
@@ -1760,29 +1743,31 @@ export class MainScene extends Phaser.Scene {
             'tank_workshop': 'tex_tank_workshop'
         };
 
-        if (mapping[type]) return mapping[type];
+        if (!type1) return null;
+        if (mapping[type1]) return mapping[type1];
 
         // 前綴匹配資源類型（僅對非建築的自然資源）
-        if (type.startsWith('tree') || type.startsWith('wood')) return 'tex_tree';
-        if (type.startsWith('stone')) return 'tex_stone';
-        if (type.startsWith('food')) return 'tex_food';
-        if (type.includes('gold')) return 'tex_gold_mine';
-        if (type.includes('iron')) return 'tex_iron_mine';
-        if (type.includes('coal')) return 'tex_coal_mine';
-        if (type.includes('herb')) return 'tex_magic_herb';
-        if (type.includes('crystal')) return 'tex_crystal_mine';
-        if (type.includes('copper')) return 'tex_copper_mine';
-        if (type.includes('silver')) return 'tex_silver_mine';
-        if (type.includes('mithril')) return 'tex_mithril_mine';
-        if (type.includes('wolf')) return 'tex_wolf_corpse';
-        if (type.includes('bear')) return 'tex_bear_corpse';
+        if (type1.startsWith('tree') || type1.startsWith('wood')) return 'tex_tree';
+        if (type1.startsWith('stone')) return 'tex_stone';
+        if (type1.startsWith('food')) return 'tex_food';
+        if (type1.includes('gold')) return 'tex_gold_mine';
+        if (type1.includes('iron')) return 'tex_iron_mine';
+        if (type1.includes('coal')) return 'tex_coal_mine';
+        if (type1.includes('herb')) return 'tex_magic_herb';
+        if (type1.includes('crystal')) return 'tex_crystal_mine';
+        if (type1.includes('copper')) return 'tex_copper_mine';
+        if (type1.includes('silver')) return 'tex_silver_mine';
+        if (type1.includes('mithril')) return 'tex_mithril_mine';
+        if (type1.includes('wolf')) return 'tex_wolf_corpse';
+        if (type1.includes('bear')) return 'tex_bear_corpse';
 
         return null;
     }
 
     drawEntity(g, ent, alpha, offX = 0, offY = 0) {
         const TS = GameEngine.TILE_SIZE;
-        const cfg = GameEngine.getEntityConfig(ent.type);
+        const type1 = ent.type1 || ent.type;
+        const cfg = GameEngine.getEntityConfig(type1);
         const { uw, uh } = this.getFootprint(cfg);
 
         const isUnderConstruction = ent.isUnderConstruction === true || ent.isUnderConstruction === 1;
@@ -1796,12 +1781,12 @@ export class MainScene extends Phaser.Scene {
         }
 
 
-        if (ent.type === 'village' || ent.type === 'town_center') {
+        if (type1 === 'village' || type1 === 'town_center') {
             g.fillStyle(0x8d6e63, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(1, 0x5d4037, finalAlpha);
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
-        } else if (ent.type === 'farmhouse') {
+        } else if (type1 === 'farmhouse') {
             g.fillStyle(0xbcaaa4, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(1, 0x8d6e63, finalAlpha);
@@ -1813,22 +1798,22 @@ export class MainScene extends Phaser.Scene {
             g.lineTo(offX, offY - (uh * TS) / 2 - 20);
             g.lineTo(offX + (uw * TS) / 2 + 5, offY - (uh * TS) / 2);
             g.fillPath();
-        } else if (ent.type === 'timber_factory') {
+        } else if (type1 === 'timber_factory') {
             g.fillStyle(0x388e3c, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x1b5e20, finalAlpha);
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
-        } else if (ent.type === 'stone_factory' || ent.type === 'quarry') {
+        } else if (type1 === 'stone_factory' || type1 === 'quarry') {
             g.fillStyle(0x455a64, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x263238, finalAlpha);
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
-        } else if (ent.type === 'barn') {
+        } else if (type1 === 'barn') {
             g.fillStyle(0xa1887f, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x5d4037, finalAlpha);
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
-        } else if (ent.type === 'gold_mining_factory') {
+        } else if (type1 === 'gold_mining_factory') {
             g.fillStyle(0xfbc02d, finalAlpha); // 鮮亮的黃色
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0xf57f17, finalAlpha); // 橘黃色輪廓
@@ -1836,7 +1821,7 @@ export class MainScene extends Phaser.Scene {
             // 加點晶體裝飾感
             g.fillStyle(0xfff176, finalAlpha);
             g.fillCircle(offX, offY, 15);
-        } else if (ent.type === 'farmland') {
+        } else if (type1 === 'farmland') {
             g.fillStyle(0xdce775, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(1, 0xafb42b, finalAlpha);
@@ -1844,7 +1829,7 @@ export class MainScene extends Phaser.Scene {
                 g.lineBetween(offX + i * TS, offY - (uh * TS) / 2 + 5, offX + i * TS, offY + (uh * TS) / 2 - 5);
             }
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
-        } else if (ent.type === 'tree_plantation') {
+        } else if (type1 === 'tree_plantation') {
             g.fillStyle(0x1b5e20, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x0a3d0d, finalAlpha);
@@ -1856,21 +1841,21 @@ export class MainScene extends Phaser.Scene {
                 }
             }
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
-        } else if (ent.type === 'mage_place') {
+        } else if (type1 === 'mage_place') {
             g.fillStyle(0x4a148c, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0xe1f5fe, finalAlpha);
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.fillStyle(0xffd600, finalAlpha);
             g.fillCircle(offX, offY, 20);
-        } else if (ent.type === 'swordsman_place') {
+        } else if (type1 === 'swordsman_place') {
             g.fillStyle(0x455a64, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0xf44336, finalAlpha);
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.fillStyle(0xffccbc, finalAlpha);
             g.fillRect(offX - 10, offY - 10, 20, 20);
-        } else if (ent.type === 'archer_place') {
+        } else if (type1 === 'archer_place') {
             g.fillStyle(0x795548, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0xffeb3b, finalAlpha);
@@ -1878,10 +1863,10 @@ export class MainScene extends Phaser.Scene {
             g.lineStyle(2, 0xf44336, finalAlpha);
             g.strokeCircle(offX, offY, 15);
             g.strokeCircle(offX, offY, 5);
-        } else if (ent.type === 'corpse') {
+        } else if (type1 === 'corpse') {
             // [核心修正] 呼叫專屬角色渲染器繪製屍體，達成自訂外觀效果
             CharacterRenderer.renderCorpse(g, offX, offY, ent);
-        } else if (ent.type === 'campfire') {
+        } else if (type1 === 'campfire') {
             const cfg = UI_CONFIG.ResourceRenderer.Campfire;
             g.fillStyle(cfg.groundColor, finalAlpha);
             g.fillCircle(offX, offY, 20);
@@ -1898,7 +1883,7 @@ export class MainScene extends Phaser.Scene {
             g.strokeRect(offX - 8, offY - 8, 16, 16);
 
             g.restore();
-        } else if (ent.type === 'timber_processing_plant') {
+        } else if (type1 === 'timber_processing_plant') {
             // 工廠主體
             g.fillStyle(0x2e7d32, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
@@ -1914,7 +1899,7 @@ export class MainScene extends Phaser.Scene {
                 g.lineTo(sx, offY - (uh * TS) / 2 - 15);
                 g.fillPath();
             }
-        } else if (ent.type === 'smelting_plant') {
+        } else if (type1 === 'smelting_plant') {
             g.fillStyle(0x37474f, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x212121, finalAlpha);
@@ -1924,7 +1909,7 @@ export class MainScene extends Phaser.Scene {
             g.fillRect(offX + (uw * TS) / 4, offY - (uh * TS) / 2 - 20, 10, 25);
             g.fillStyle(0xff7043, finalAlpha);
             g.fillCircle(offX - 5, offY, 10);
-        } else if (ent.type === 'stone_processing_plant') {
+        } else if (type1 === 'stone_processing_plant') {
             g.fillStyle(0x607d8b, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x455a64, finalAlpha);
@@ -1932,7 +1917,7 @@ export class MainScene extends Phaser.Scene {
             // 石磚裝飾
             g.lineStyle(1, 0xffffff, finalAlpha * 0.3);
             g.strokeRect(offX - 10, offY - 10, 20, 20);
-        } else if (ent.type === 'tank_workshop') {
+        } else if (type1 === 'tank_workshop') {
             g.fillStyle(0x455a64, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x263238, finalAlpha);
@@ -1943,17 +1928,17 @@ export class MainScene extends Phaser.Scene {
             // 標誌
             g.lineStyle(2, 0xfbc02d, finalAlpha);
             g.strokeCircle(offX, offY, 12);
-        } else if (ent.type.startsWith('tree') || ent.type.startsWith('wood')) {
+        } else if (type1 && (type1.startsWith('tree') || type1.startsWith('wood'))) {
             g.fillStyle(0x2e7d32, finalAlpha);
             g.fillCircle(offX, offY, 20);
-        } else if (ent.type.startsWith('stone')) {
+        } else if (type1 && type1.startsWith('stone')) {
             g.fillStyle(0x757575, finalAlpha);
             g.beginPath();
             g.moveTo(offX - 20, offY + 10);
             g.lineTo(offX, offY - 15);
             g.lineTo(offX + 25, offY + 15);
             g.fillPath();
-        } else if (ent.type.startsWith('food')) {
+        } else if (type1 && type1.startsWith('food')) {
             g.fillStyle(0xc2185b, finalAlpha);
             g.fillCircle(offX, offY, 18);
         }
@@ -1963,7 +1948,7 @@ export class MainScene extends Phaser.Scene {
         const cfg = UI_CONFIG.BuildingProgressBar;
         const progress = ent.buildProgress / (ent.buildTime || 1);
 
-        const overrides = cfg.overrides && cfg.overrides[ent.type] ? cfg.overrides[ent.type] : {};
+        const overrides = cfg.overrides && cfg.overrides[ent.type1] ? cfg.overrides[ent.type1] : {};
         const widthScale = overrides.widthScale !== undefined ? overrides.widthScale : (cfg.widthScale || 1.1);
         const bh = overrides.height !== undefined ? overrides.height : (cfg.height || 10);
         const bw = (uw * TS) * widthScale;
@@ -2238,7 +2223,7 @@ export class MainScene extends Phaser.Scene {
         if (state.previewPos && (state.buildingMode === 'DRAG' || state.buildingMode === 'STAMP' || state.buildingMode === 'NONE')) {
             const isClear = GameEngine.isAreaClear(state.previewPos.x, state.previewPos.y, state.placingType);
             this.drawEntity(g, {
-                type: state.placingType,
+                type1: state.placingType,
                 previewColor: isClear ? 0x2196f3 : 0xf44336
             }, isClear ? 0.5 : 0.7, state.previewPos.x, state.previewPos.y);
         }
@@ -2249,11 +2234,11 @@ export class MainScene extends Phaser.Scene {
             state.linePreviewEntities.forEach(pos => {
                 const isClear = GameEngine.isAreaClear(pos.x, pos.y, state.placingType, tempPlaced);
                 this.drawEntity(g, {
-                    type: state.placingType,
+                    type1: state.placingType,
                     previewColor: isClear ? 0x2196f3 : 0xf44336
                 }, isClear ? 0.3 : 0.6, pos.x, pos.y);
 
-                if (isClear) tempPlaced.push({ type: state.placingType, x: pos.x, y: pos.y });
+                if (isClear) tempPlaced.push({ type1: state.placingType, x: pos.x, y: pos.y });
             });
         }
     }
@@ -2456,9 +2441,9 @@ export class MainScene extends Phaser.Scene {
             );
 
             for (const e of sortedBuildings) {
-                const cfg = GameEngine.getEntityConfig(e.type);
+                const cfg = GameEngine.getEntityConfig(e.type1);
                 let uw = 1, uh = 1;
-                if (e.type === 'corpse') {
+                if (e.type1 === 'corpse') {
                     // [核心修復] 屍體左鍵點擊範圍應與 UI_CONFIG 及右鍵判定同步
                     const cScale = (UI_CONFIG.ResourceSelection && UI_CONFIG.ResourceSelection.corpseSelectionScale) || 0.8;
                     uw = cScale; uh = cScale;
@@ -2474,7 +2459,7 @@ export class MainScene extends Phaser.Scene {
             }
 
             if (clickedB && !isShift) {
-                if (clickedB.type === 'corpse') {
+                if (clickedB.type1 === 'corpse') {
                     // [核心修正] 屍體選取連動至資源高亮系統
                     GameEngine.state.selectedResourceId = clickedB.id;
                     GameEngine.state.selectedUnitIds = [];
@@ -2483,7 +2468,7 @@ export class MainScene extends Phaser.Scene {
                 } else if (window.UIManager) {
                     window.UIManager.showContextMenu(clickedB);
                 }
-                GameEngine.addLog(`[選取] ${clickedB.type === 'corpse' ? '資源' : '建築'}：${clickedB.name || clickedB.type}`);
+                GameEngine.addLog(`[選取] ${clickedB.type1 === 'corpse' ? '資源' : '建築'}：${clickedB.name || clickedB.type1}`);
             } else if (!isShift) {
                 GameEngine.state.selectedUnitIds = [];
                 GameEngine.state.selectedResourceId = null;
@@ -2531,9 +2516,9 @@ export class MainScene extends Phaser.Scene {
         if (state.mapEntities) {
             state.mapEntities.forEach(ent => {
                 if (!ent) return;
-                const cfg = GameEngine.getEntityConfig(ent.type);
+                const cfg = GameEngine.getEntityConfig(ent.type1);
                 let uw = 1, uh = 1;
-                if (ent.type === 'corpse') {
+                if (ent.type1 === 'corpse') {
                     const cScale = (UI_CONFIG.ResourceSelection && UI_CONFIG.ResourceSelection.corpseSelectionScale) || 0.8;
                     uw = cScale; uh = cScale;
                 } else if (cfg && cfg.size) {
@@ -2547,7 +2532,7 @@ export class MainScene extends Phaser.Scene {
                     pointer.worldY >= ent.y - h / 2 - padding && pointer.worldY <= ent.y + h / 2 + padding) {
                     if (ent.y > bestY) {
                         bestY = ent.y;
-                        bestId = ent.id || `${ent.type}_${ent.x}_${ent.y}`;
+                        bestId = ent.id || `${ent.type1}_${ent.x}_${ent.y}`;
                     }
                 }
             });

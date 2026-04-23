@@ -1,49 +1,49 @@
-id,name,model,type,max_count,size,collision,lv,build_unlock,upgrade_need_Ingredients,upgrade_times,population,need_villagers,resource_value,npc_production,npc_production,annotation
-42,射箭場,archer_place,archer_place,10,"{6,6}",1,1,{0},"{food=100,wood=100,stone=150}",20,0,0,,"{5,9}",normal,弓箭手的訓練所
-43,射箭場,archer_place,archer_place,10,"{6,6}",1,2,{village.lv=2},"{food=100,wood=100}",10,0,0,,"{5,9}",normal,弓箭手的訓練所
-44,射箭場,archer_place,archer_place,10,"{6,6}",1,3,{village.lv=2},"{food=200,wood=200,stone=200}",20,0,0,,"{5,9}",normal,弓箭手的訓練所
-45,射箭場,archer_place,archer_place,10,"{6,6}",1,4,{village.lv=2},"{food=300,wood=300,stone=300,gold_ore=300}",40,0,0,,"{5,9}",normal,弓箭手的訓練所
-18,穀倉,barn,barn,99,"{3,3}",1,1,{0},{wood=50},7.5,0,0,,,,可放置食物的建築
-19,穀倉,barn,barn,99,"{3,3}",1,2,{village.lv=2},{wood=50},5,0,0,,,,可放置食物的建築
-20,穀倉,barn,barn,99,"{3,3}",1,3,{village.lv=2},"{wood=100, stone=50}",10,0,0,,,,可放置食物的建築
-21,穀倉,barn,barn,99,"{3,3}",1,4,{village.lv=2},"{wood=200, stone=100}",15,0,0,,,,可放置食物的建築
-5,民居,farmhouse,farmhouse,99,"{3,3}",1,1,{0},"{food=20,wood=20}",5.5,4,0,,,,農舍：增加 3 人口上限
-6,民居,farmhouse,farmhouse,99,"{3,3}",1,2,{village.lv=2},{wood=50},5,4,0,,,,農舍：增加 3 人口上限
-7,民居,farmhouse,farmhouse,99,"{3,3}",1,3,{village.lv=2},"{wood=100, stone=50}",10,4,0,,,,農舍：增加 3 人口上限
-8,民居,farmhouse,farmhouse,99,"{3,3}",1,4,{village.lv=2},"{wood=200, stone=100}",15,4,0,,,,農舍：增加 3 人口上限
-26,農田,farmland,farmland,99,"{6,6}",0,1,{0},"{food=100,wood=100}",10,0,1,{food=300},,,可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造
-27,農田,farmland,farmland,99,"{6,6}",0,2,{village.lv=2},{wood=50},5,0,1,{food=600},,,可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造
-28,農田,farmland,farmland,99,"{6,6}",0,3,{village.lv=2},"{wood=100, stone=50}",10,0,1,{food=1000},,,可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造
-29,農田,farmland,farmland,99,"{6,6}",0,4,{village.lv=2},"{wood=200, stone=100}",15,0,1,{food=1500},,,可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造
-22,金礦場,gold_mining_factory,gold_mining_factory,99,"{3,3}",1,1,{0},{wood=50},7.5,0,0,,,,可放置黃金的建築
-23,金礦場,gold_mining_factory,gold_mining_factory,99,"{3,3}",1,2,{village.lv=2},{wood=50},5,0,0,,,,可放置黃金的建築
-24,金礦場,gold_mining_factory,gold_mining_factory,99,"{3,3}",1,3,{village.lv=2},"{wood=100, stone=50}",10,0,0,,,,可放置黃金的建築
-25,金礦場,gold_mining_factory,gold_mining_factory,99,"{3,3}",1,4,{village.lv=2},"{wood=200, stone=100}",15,0,0,,,,可放置黃金的建築
-38,魔法學院,mage_place,mage_place,10,"{6,6}",1,1,{0},"{food=100,wood=100,stone=150}",20,0,0,,{4},normal,法師的訓練所
-39,魔法學院,mage_place,mage_place,10,"{6,6}",1,2,{village.lv=2},"{food=100,wood=100}",10,0,0,,{4},normal,法師的訓練所
-40,魔法學院,mage_place,mage_place,10,"{6,6}",1,3,{village.lv=2},"{food=200,wood=200,stone=200}",20,0,0,,{4},normal,法師的訓練所
-41,魔法學院,mage_place,mage_place,10,"{6,6}",1,4,{village.lv=2},"{food=300,wood=300,stone=300,gold_ore=300}",40,0,0,,{4},normal,法師的訓練所
-14,採石場,stone_factory,stone_factory,99,"{3,3}",1,1,{0},{wood=50},7.5,0,0,,,,可放置石頭的建築
-15,採石場,stone_factory,stone_factory,99,"{3,3}",1,2,{village.lv=2},{wood=50},5,0,0,,,,可放置石頭的建築
-16,採石場,stone_factory,stone_factory,99,"{3,3}",1,3,{village.lv=2},"{wood=100, stone=50}",10,0,0,,,,可放置石頭的建築
-17,採石場,stone_factory,stone_factory,99,"{3,3}",1,4,{village.lv=2},"{wood=200, stone=100}",15,0,0,,,,可放置石頭的建築
-34,劍士訓練所,swordsman_place,swordsman_place,10,"{6,6}",1,1,{0},"{food=100,wood=100,stone=150}",20,0,0,,{3},normal,劍士的訓練所
-35,劍士訓練所,swordsman_place,swordsman_place,10,"{6,6}",1,2,{village.lv=2},"{food=100,wood=100}",10,0,0,,"{3,4}",normal,劍士的訓練所
-36,劍士訓練所,swordsman_place,swordsman_place,10,"{6,6}",1,3,{village.lv=2},"{food=200,wood=200,stone=200}",20,0,0,,"{3,4,5}",normal,劍士的訓練所
-37,劍士訓練所,swordsman_place,swordsman_place,10,"{6,6}",1,4,{village.lv=2},"{food=300,wood=300,stone=300,gold_ore=300}",40,0,0,,"{2,3,4,5}",normal,劍士的訓練所
-9,木材場,timber_factory,timber_factory,99,"{3,3}",1,1,{0},{wood=50},7.5,0,0,,,,可放置木材的建築
-10,木材場,timber_factory,timber_factory,99,"{3,3}",1,2,{village.lv=2},{wood=50},5,0,0,,,,可放置木材的建築
-11,木材場,timber_factory,timber_factory,99,"{3,3}",1,3,{village.lv=2},"{wood=100, stone=50}",10,0,0,,,,可放置木材的建築
-12,木材場,timber_factory,timber_factory,99,"{3,3}",1,4,{village.lv=2},"{wood=200, stone=100}",15,0,0,,,,可放置木材的建築
-30,樹木田,tree_plantation,tree_plantation,99,"{6,6}",0,1,{0},"{food=100,wood=100}",10,0,1,{wood=300},,,可自動生產木材的建築，需要村民來維持生產，資源量耗盡時需重新建造
-31,樹木田,tree_plantation,tree_plantation,99,"{6,6}",0,2,{village.lv=2},{wood=50},5,0,1,{wood=600},,,可自動生產木材的建築，需要村民來維持生產，資源量耗盡時需重新建造
-32,樹木田,tree_plantation,tree_plantation,99,"{6,6}",0,3,{village.lv=2},"{wood=100, stone=50}",10,0,1,{wood=1000},,,可自動生產木材的建築，需要村民來維持生產，資源量耗盡時需重新建造
-33,樹木田,tree_plantation,tree_plantation,99,"{6,6}",0,4,{village.lv=2},"{wood=200, stone=100}",15,0,1,{wood=1500},,,可自動生產木材的建築，需要村民來維持生產，資源量耗盡時需重新建造
-1,城鎮中心,village,village,5,"{8,8}",1,1,{0},{food=100},20,10,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
-2,城鎮中心,village,village,5,"{8,8}",1,2,{0},"{food=100,wood=100, stone=100}",10,10,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
-3,城鎮中心,village,village,5,"{8,8}",1,3,{0},"{food=200,wood=200, stone=300}",30,10,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
-4,城鎮中心,village,village,5,"{8,8}",1,4,{0},"{food=500,wood=500, stone=500,,gold_ore=500}",60,10,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
-47,木材加工廠,timber_processing_plant,timber_processing_plant,99,"{4,4}",1,1,{0},"{wood=100,stone=50}",15,0,2,0,,,將原木加工為高級板材
-48,冶煉廠,smelting_plant,smelting_plant,99,"{4,4}",1,1,{0},"{wood=150,stone=100}",20,0,3,0,,,熔煉礦石以產出各類合金
-49,石材廠,stone_processing_plant,stone_processing_plant,99,"{4,4}",1,1,{0},"{wood=100,stone=100}",15,0,2,0,,,將石塊切割為精良石料
-50,製皮所,tank_workshop,tank_workshop,99,"{4,4}",1,1,{0},"{wood=300,stone=300,iron_ore=200}",40,0,5,0,,,製造威力強大的末日戰車
+id,name,model,type1,type2,max_count,size,collision,lv,build_unlock,upgrade_need_Ingredients,upgrade_times,population,need_villagers,resource_value,npc_production,npc_production,annotation
+42,射箭場,archer_place,archer_place,Military,10,"{6,6}",1,1,{0},"{food=100,wood=100,stone=150}",20,0,0,,"{5,9}",normal,弓箭手的訓練所
+43,射箭場,archer_place,archer_place,Military,10,"{6,6}",1,2,{village.lv=2},"{food=100,wood=100}",10,0,0,,"{5,9}",normal,弓箭手的訓練所
+44,射箭場,archer_place,archer_place,Military,10,"{6,6}",1,3,{village.lv=2},"{food=200,wood=200,stone=200}",20,0,0,,"{5,9}",normal,弓箭手的訓練所
+45,射箭場,archer_place,archer_place,Military,10,"{6,6}",1,4,{village.lv=2},"{food=300,wood=300,stone=300,gold_ore=300}",40,0,0,,"{5,9}",normal,弓箭手的訓練所
+18,穀倉,barn,barn,Storage,99,"{3,3}",1,1,{0},{wood=50},7.5,0,0,,,,可放置食物的建築
+19,穀倉,barn,barn,Storage,99,"{3,3}",1,2,{village.lv=2},{wood=50},5,0,0,,,,可放置食物的建築
+20,穀倉,barn,barn,Storage,99,"{3,3}",1,3,{village.lv=2},"{wood=100, stone=50}",10,0,0,,,,可放置食物的建築
+21,穀倉,barn,barn,Storage,99,"{3,3}",1,4,{village.lv=2},"{wood=200, stone=100}",15,0,0,,,,可放置食物的建築
+5,民居,farmhouse,farmhouse,Residential,99,"{3,3}",1,1,{0},"{food=20,wood=20}",5.5,4,0,,,,農舍：增加 3 人口上限
+6,民居,farmhouse,farmhouse,Residential,99,"{3,3}",1,2,{village.lv=2},{wood=50},5,4,0,,,,農舍：增加 3 人口上限
+7,民居,farmhouse,farmhouse,Residential,99,"{3,3}",1,3,{village.lv=2},"{wood=100, stone=50}",10,4,0,,,,農舍：增加 3 人口上限
+8,民居,farmhouse,farmhouse,Residential,99,"{3,3}",1,4,{village.lv=2},"{wood=200, stone=100}",15,4,0,,,,農舍：增加 3 人口上限
+26,農田,farmland,farmland,Producer,99,"{6,6}",0,1,{0},"{food=100,wood=100}",10,0,1,{food=300},,,可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造
+27,農田,farmland,farmland,Producer,99,"{6,6}",0,2,{village.lv=2},{wood=50},5,0,1,{food=600},,,可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造
+28,農田,farmland,farmland,Producer,99,"{6,6}",0,3,{village.lv=2},"{wood=100, stone=50}",10,0,1,{food=1000},,,可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造
+29,農田,farmland,farmland,Producer,99,"{6,6}",0,4,{village.lv=2},"{wood=200, stone=100}",15,0,1,{food=1500},,,可自動生產食物的建築，需要村民來維持生產，資源量耗盡時需重新建造
+22,金礦場,gold_mining_factory,gold_mining_factory,Storage,99,"{3,3}",1,1,{0},{wood=50},7.5,0,0,,,,可放置黃金的建築
+23,金礦場,gold_mining_factory,gold_mining_factory,Storage,99,"{3,3}",1,2,{village.lv=2},{wood=50},5,0,0,,,,可放置黃金的建築
+24,金礦場,gold_mining_factory,gold_mining_factory,Storage,99,"{3,3}",1,3,{village.lv=2},"{wood=100, stone=50}",10,0,0,,,,可放置黃金的建築
+25,金礦場,gold_mining_factory,gold_mining_factory,Storage,99,"{3,3}",1,4,{village.lv=2},"{wood=200, stone=100}",15,0,0,,,,可放置黃金的建築
+38,魔法學院,mage_place,mage_place,Military,10,"{6,6}",1,1,{0},"{food=100,wood=100,stone=150}",20,0,0,,{4},normal,法師的訓練所
+39,魔法學院,mage_place,mage_place,Military,10,"{6,6}",1,2,{village.lv=2},"{food=100,wood=100}",10,0,0,,{4},normal,法師的訓練所
+40,魔法學院,mage_place,mage_place,Military,10,"{6,6}",1,3,{village.lv=2},"{food=200,wood=200,stone=200}",20,0,0,,{4},normal,法師的訓練所
+41,魔法學院,mage_place,mage_place,Military,10,"{6,6}",1,4,{village.lv=2},"{food=300,wood=300,stone=300,gold_ore=300}",40,0,0,,{4},normal,法師的訓練所
+14,採石場,stone_factory,stone_factory,Storage,99,"{3,3}",1,1,{0},{wood=50},7.5,0,0,,,,可放置石頭的建築
+15,採石場,stone_factory,stone_factory,Storage,99,"{3,3}",1,2,{village.lv=2},{wood=50},5,0,0,,,,可放置石頭的建築
+16,採石場,stone_factory,stone_factory,Storage,99,"{3,3}",1,3,{village.lv=2},"{wood=100, stone=50}",10,0,0,,,,可放置石頭的建築
+17,採石場,stone_factory,stone_factory,Storage,99,"{3,3}",1,4,{village.lv=2},"{wood=200, stone=100}",15,0,0,,,,可放置石頭的建築
+34,劍士訓練所,swordsman_place,swordsman_place,Military,10,"{6,6}",1,1,{0},"{food=100,wood=100,stone=150}",20,0,0,,{3},normal,劍士的訓練所
+35,劍士訓練所,swordsman_place,swordsman_place,Military,10,"{6,6}",1,2,{village.lv=2},"{food=100,wood=100}",10,0,0,,"{3,4}",normal,劍士的訓練所
+36,劍士訓練所,swordsman_place,swordsman_place,Military,10,"{6,6}",1,3,{village.lv=2},"{food=200,wood=200,stone=200}",20,0,0,,"{3,4,5}",normal,劍士的訓練所
+37,劍士訓練所,swordsman_place,swordsman_place,Military,10,"{6,6}",1,4,{village.lv=2},"{food=300,wood=300,stone=300,gold_ore=300}",40,0,0,,"{2,3,4,5}",normal,劍士的訓練所
+9,木材場,timber_factory,timber_factory,Storage,99,"{3,3}",1,1,{0},{wood=50},7.5,0,0,,,,可放置木材的建築
+10,木材場,timber_factory,timber_factory,Storage,99,"{3,3}",1,2,{village.lv=2},{wood=50},5,0,0,,,,可放置木材的建築
+11,木材場,timber_factory,timber_factory,Storage,99,"{3,3}",1,3,{village.lv=2},"{wood=100, stone=50}",10,0,0,,,,可放置木材的建築
+12,木材場,timber_factory,timber_factory,Storage,99,"{3,3}",1,4,{village.lv=2},"{wood=200, stone=100}",15,0,0,,,,可放置木材的建築
+30,樹木田,tree_plantation,tree_plantation,Producer,99,"{6,6}",0,1,{0},"{food=100,wood=100}",10,0,1,{wood=300},,,可自動生產木材的建築，需要村民來維持生產，資源量耗盡時需重新建造
+31,樹木田,tree_plantation,tree_plantation,Producer,99,"{6,6}",0,2,{village.lv=2},{wood=50},5,0,1,{wood=600},,,可自動生產木材的建築，需要村民來維持生產，資源量耗盡時需重新建造
+32,樹木田,tree_plantation,tree_plantation,Producer,99,"{6,6}",0,3,{village.lv=2},"{wood=100, stone=50}",10,0,1,{wood=1000},,,可自動生產木材的建築，需要村民來維持生產，資源量耗盡時需重新建造
+33,樹木田,tree_plantation,tree_plantation,Producer,99,"{6,6}",0,4,{village.lv=2},"{wood=200, stone=100}",15,0,1,{wood=1500},,,可自動生產木材的建築，需要村民來維持生產，資源量耗盡時需重新建造
+1,城鎮中心,village,village,Base,5,"{8,8}",1,1,{0},{food=100},20,10,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
+2,城鎮中心,village,village,Base,5,"{8,8}",1,2,{0},"{food=100,wood=100, stone=100}",10,10,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
+3,城鎮中心,village,village,Base,5,"{8,8}",1,3,{0},"{food=200,wood=200, stone=300}",30,10,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
+4,城鎮中心,village,village,Base,5,"{8,8}",1,4,{0},"{food=500,wood=500, stone=500,,gold_ore=500}",60,10,0,,"{1,2}",rand,城鎮中心：提供基礎人口上限與訓練工人
+47,木材加工廠,timber_processing_plant,timber_processing_plant,processing_plant,99,"{4,4}",1,1,{0},"{wood=100,stone=50}",15,0,2,0,,,將原木加工為高級板材
+48,冶煉廠,smelting_plant,smelting_plant,processing_plant,99,"{4,4}",1,1,{0},"{wood=150,stone=100}",20,0,3,0,,,熔煉礦石以產出各類合金
+49,石材廠,stone_processing_plant,stone_processing_plant,processing_plant,99,"{4,4}",1,1,{0},"{wood=100,stone=100}",15,0,2,0,,,將石塊切割為精良石料
+50,製皮所,tank_workshop,tank_workshop,processing_plant,99,"{4,4}",1,1,{0},"{wood=300,stone=300,iron_ore=200}",40,0,5,0,,,製造威力強大的末日戰車

@@ -32,3 +32,14 @@ Ensure all resources defined in `config/resources_data.csv` have high-quality, p
 - [x] Refine recipe parser and extend ConfigManager for production data.
 - [x] Integrate with `GameEngine` logic tick.
 - [ ] Verify resource production and UI state synchronization.
+
+### Phase 6: Building Classification (Type2 Support)
+- [ ] Update `config/buildings.csv` with `type2` column and initial categories.
+- [ ] Modify `src/systems/ConfigManager.js` to parse and store `type2`.
+- [ ] Verify that building configurations correctly include `type2`.
+
+### Phase 7: Processing Plant Population Control (加工廠人數限制)
+- [ ] 調整 `WorkerSystem.js` 以支援 `type2=processing_plant` 的派駐限制。
+- [ ] 修改 `handleWorkerCommand` 允許工人即便在工廠滿員時也能出發前往（不中斷指令）。
+- [ ] 修改 `updateVillagerMovement` 的 `MOVING_TO_FACTORY` 邏輯，在抵達時檢查是否滿員，若滿則停止於外圍。
+

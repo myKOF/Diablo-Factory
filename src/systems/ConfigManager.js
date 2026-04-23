@@ -341,7 +341,7 @@ export class ConfigManager {
             const hIdx = (key) => headers.findIndex(h => h.toLowerCase().trim() === key.toLowerCase());
 
             const idxModel = hIdx('model'),
-                idxType = hIdx('type'),
+                idxType1 = hIdx('type1'),
                 idxCol = hIdx('collision'),
                 idxSize = hIdx('size'),
                 idxPop = hIdx('population'),
@@ -352,9 +352,10 @@ export class ConfigManager {
                 idxProdType = (hIdx('npc_production_type') !== -1) ? hIdx('npc_production_type') : headers.lastIndexOf('npc_production'),
                 idxResourceValue = hIdx('resource_value'),
                 idxNeedVillagers = hIdx('need_villagers'),
+                idxType2 = hIdx('type2'),
                 idxIngredientsProd = hIdx('ingredients_production');
 
-            console.log(`[CSV載入] 建築配置欄位索引結果:`, { model: idxModel, type: idxType, prod: idxProd, prodType: idxProdType });
+            console.log(`[CSV載入] 建築配置欄位索引結果:`, { model: idxModel, type1: idxType1, prod: idxProd, prodType: idxProdType });
 
             // 轉換為 index (使用上方載入時定義的健壯版 hIdx)
             const nameIdx = headers.indexOf(idxName);
@@ -373,7 +374,7 @@ export class ConfigManager {
                 if (!row[idxModel]) continue;
 
                 const model = row[idxModel].trim();
-                const type = row[idxType] ? row[idxType].trim() : model;
+                const type1 = row[idxType1] ? row[idxType1].trim() : model;
                 const lv = parseInt(row[idxLv]) || 1;
 
                 // 解析生產清單
@@ -388,7 +389,8 @@ export class ConfigManager {
                     name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : model,
                     desc: (descIdx !== -1 && row[descIdx]) ? row[descIdx].trim() : "",
                     model: model,
-                    type: type,
+                    type1: type1,
+                    type2: row[idxType2] ? row[idxType2].trim() : "Other",
                     lv: lv,
                     collision: row[idxCol] === '1',
                     size: row[idxSize] || "{1,1}",
@@ -407,8 +409,8 @@ export class ConfigManager {
                 };
 
                 // 按類型等級儲存
-                if (!state.buildingConfigsByType[type]) state.buildingConfigsByType[type] = {};
-                state.buildingConfigsByType[type][lv] = cfg;
+                if (!state.buildingConfigsByType[type1]) state.buildingConfigsByType[type1] = {};
+                state.buildingConfigsByType[type1][lv] = cfg;
 
                 // 為了相容舊邏輯，buildingConfigs 以 model 為 key，但只存 LV1 (用於新蓋建築)
                 if (lv === 1 || !state.buildingConfigs[model]) {

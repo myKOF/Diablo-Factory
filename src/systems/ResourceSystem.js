@@ -93,7 +93,7 @@ export class ResourceSystem {
                     if (cell) {
                         cell.forEach(e => {
                             if (e.isUnderConstruction) return;
-                            if (depositTypes.includes(e.type)) {
+                            if (depositTypes.includes(e.type1)) {
                                 const d = Math.hypot(e.x - x, e.y - y);
                                 if (d < minDist) { minDist = d; nearest = e; }
                             }
@@ -106,7 +106,7 @@ export class ResourceSystem {
 
         // 如果附近沒找到，回退到全量搜尋防止 Bug
         state.mapEntities.forEach(e => {
-            if (e.isUnderConstruction || !depositTypes.includes(e.type)) return;
+            if (e.isUnderConstruction || !depositTypes.includes(e.type1)) return;
             const d = Math.hypot(e.x - x, e.y - y);
             if (d < minDist) { minDist = d; nearest = e; }
         });
@@ -146,7 +146,7 @@ export class ResourceSystem {
         // --- 核心優化：優先搜尋建築實體資源 (農田/樹木田) ---
         const entities = state.mapEntities.filter(e =>
             !e.isUnderConstruction && e.amount > 0 &&
-            ((targetType === 3 && (e.type === 'farmland' || e.type === 'corpse')) || (targetType === 1 && e.type === 'tree_plantation'))
+            ((targetType === 3 && (e.type1 === 'farmland' || e.type1 === 'corpse')) || (targetType === 1 && e.type1 === 'tree_plantation'))
         );
         if (entities.length > 0) {
             entities.sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y));

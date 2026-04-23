@@ -41,7 +41,7 @@ export class SynthesisSystem {
      */
     static getBuildingRecipes(state, engine, building) {
         // 1. 從 Config 取得該建築類型設定的 ingredients_production_raw
-        const cfg = engine.getEntityConfig(building.type, building.lv);
+        const cfg = engine.getEntityConfig(building.type1, building.lv);
         if (!cfg || !cfg.ingredients_production_raw) return [];
 
         // 2. 解析配方
@@ -61,7 +61,7 @@ export class SynthesisSystem {
         if (!recipe.isUnlocked) return false;
         building.currentRecipe = recipe;
         building.craftingProgress = 0;
-        engine.addLog(`[加工廠] ${building.name || building.type} 開始生產 ${recipe.type}`);
+        engine.addLog(`[加工廠] ${building.name || building.type1} 開始生產 ${recipe.type}`);
         return true;
     }
 
@@ -76,7 +76,7 @@ export class SynthesisSystem {
             // 排除無配方或施工中的建築
             if (!ent.currentRecipe || ent.isUnderConstruction) return;
             
-            const cfg = engine.getEntityConfig(ent.type, ent.lv);
+            const cfg = engine.getEntityConfig(ent.type1, ent.lv);
             if (!cfg) return;
 
             // 計算生產效率 (當前派駐人數 / 需要人數)

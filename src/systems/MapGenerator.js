@@ -70,11 +70,11 @@ export class MapGenerator {
         // 1. 放置核心建築
         const villagePos = { x: 960, y: 560 };
         const villageFP = getFootprint('village');
-        const villageCfg = state.buildingConfigs['village'] || {};
+        const villageCfg = (state.buildingConfigsByType['village'] && state.buildingConfigsByType['village'][1]) || {};
         state.mapEntities.push({
             id: 'core_village',
             model: 'village',
-            type: 'village',
+            type1: 'village',
             lv: 1,
             x: villagePos.x, y: villagePos.y, name: villageCfg.name || "城鎮中心", queue: [], productionTimer: 0
         });
@@ -86,7 +86,7 @@ export class MapGenerator {
         const campfireFP = getFootprint('campfire');
         state.mapEntities.push({
             id: 'core_campfire',
-            type: 'campfire', x: campfirePos.x, y: campfirePos.y, name: "小火堆"
+            type1: 'campfire', x: campfirePos.x, y: campfirePos.y, name: "小火堆"
         });
         const cgx = Math.round((campfirePos.x - (campfireFP.uw * TS) / 2) / TS);
         const cgy = Math.round((campfirePos.y - (campfireFP.uh * TS) / 2) / TS);
@@ -290,7 +290,7 @@ export class MapGenerator {
         // 1. 注入建築物碰撞 (mapEntities)
         state.mapEntities.forEach(ent => {
             if (ent.isUnderConstruction) return;
-            const cfg = engine.getEntityConfig(ent.type);
+            const cfg = engine.getEntityConfig(ent.type1);
             if (cfg && cfg.collision) {
                 const em = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
                 const uw = em ? parseInt(em[1]) : 1, uh = em ? parseInt(em[2]) : 1;

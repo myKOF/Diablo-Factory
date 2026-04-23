@@ -137,7 +137,7 @@ export class BattleSystem {
                 if (typeof GameEngine !== 'undefined' && !unit._lastLogAttack) {
                     const target = this.findEntityById(unit.targetId, state);
                     if (target) {
-                        GameEngine.addLog(`[戰鬥資訊] 攻擊目標：${unit.configName || '單位'} 正在攻擊 ${target.name || target.type} (目標座標: ${Math.round(target.x)}, ${Math.round(target.y)})`, 'BATTLE');
+                        GameEngine.addLog(`[戰鬥資訊] 攻擊目標：${unit.configName || '單位'} 正在攻擊 ${target.name || target.type1} (目標座標: ${Math.round(target.x)}, ${Math.round(target.y)})`, 'BATTLE');
                         unit._lastLogAttack = unit.targetId;
                     }
                 }
@@ -334,7 +334,7 @@ export class BattleSystem {
             id: corpseId,
             x: unit.x || 0,
             y: unit.y || 0,
-            type: 'corpse',
+            type1: 'corpse',
             resType: rType.toUpperCase(),
             amount: rAmount,
             maxAmount: rAmount,
