@@ -26,4 +26,9 @@ Ensure all resources defined in `config/resources_data.csv` have high-quality, p
 ## 📝 Design Principles
 - **Aesthetic**: Premium, dark-fantasy style with vibrant resource highlights.
 - **SSOT**: All visual parameters must be in `ui_config.js`.
-- **Performance**: Use `RenderTexture` to minimize draw calls.
+### Phase 5: Synthesis Pipeline System (加工廠系統)
+- [x] Implement `src/systems/SynthesisSystem.js` with recipe parsing and production loop.
+- [x] Expand `src/ui/ui_config.js` with `SynthesisUI` parameters.
+- [x] Refine recipe parser and extend ConfigManager for production data.
+- [x] Integrate with `GameEngine` logic tick.
+- [ ] Verify resource production and UI state synchronization.

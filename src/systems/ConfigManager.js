@@ -350,7 +350,9 @@ export class ConfigManager {
                 idxMax = hIdx('max_count'),
                 idxProd = hIdx('npc_production'), // ID 列表
                 idxProdType = (hIdx('npc_production_type') !== -1) ? hIdx('npc_production_type') : headers.lastIndexOf('npc_production'),
-                idxResourceValue = hIdx('resource_value');
+                idxResourceValue = hIdx('resource_value'),
+                idxNeedVillagers = hIdx('need_villagers'),
+                idxIngredientsProd = hIdx('ingredients_production');
 
             console.log(`[CSV載入] 建築配置欄位索引結果:`, { model: idxModel, type: idxType, prod: idxProd, prodType: idxProdType });
 
@@ -399,7 +401,9 @@ export class ConfigManager {
                     productionMode: (row[idxProdType] || 'normal').toLowerCase().trim(),
                     // 升級與解鎖相關
                     buildUnlock: row[idxUnlock] || "{0}",
-                    upgradeTime: parseFloat(row[idxUpgradeTimes]) || 0
+                    upgradeTime: parseFloat(row[idxUpgradeTimes]) || 0,
+                    need_villagers: (idxNeedVillagers !== -1 && row[idxNeedVillagers]) ? parseInt(row[idxNeedVillagers]) : 0,
+                    ingredients_production_raw: (idxIngredientsProd !== -1 && row[idxIngredientsProd]) ? row[idxIngredientsProd].trim() : ""
                 };
 
                 // 按類型等級儲存

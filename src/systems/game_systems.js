@@ -11,6 +11,7 @@ import { WorkerSystem } from "./WorkerSystem.js";
 import { MapGenerator } from "./MapGenerator.js";
 import { ConfigManager } from "./ConfigManager.js";
 import { BuildingSystem } from "./BuildingSystem.js";
+import { SynthesisSystem } from "./SynthesisSystem.js";
 
 
 
@@ -141,6 +142,7 @@ export class GameEngine {
 
             // 3. 處理建築生產與升級邏輯 (Manager 職責)
             this.updateBuildingsLogic(deltaTime);
+            if (typeof SynthesisSystem !== 'undefined') { SynthesisSystem.update(this.state, this, deltaTime); }
 
             // 4. 工人系統更新 (尋路、移動、任務分配)
             if (this.workerSystem) {

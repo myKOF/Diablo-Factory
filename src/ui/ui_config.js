@@ -637,5 +637,13 @@ export const UI_CONFIG = {
                 frequency: 30                       // 噴發頻率比火低，節省效能
             }
         }
+    },
+    // -- 流水線加工廠 UI (SynthesisUI) --------------------------
+    SynthesisUI: {
+        panelWidth: 320,                // 加工選單面板寬度 (像素)
+        lockedItemAlpha: 0.5,           // 未解鎖項目的透明度 (0.0 ~ 1.0)
+        lockedItemTint: 0x555555,        // 未解鎖項目的色調 (置灰效果)
+        progressBarColor: "#4caf50",    // 生產進度條填充顏色 (綠色)
+        workerEfficiencyText: "生產效率: {0}%" // 效率顯示文字格式，{0} 會被替換為百分比數字
     }
 };
