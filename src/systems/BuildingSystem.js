@@ -522,12 +522,28 @@ export class BuildingSystem {
         const actionName = ent.isUnderConstruction ? "取消施工" : "銷毀";
         engine.addLog(`${actionName}了 ${cfg.name}。返還：${refundLog.join(', ') || '無'}`);
 
-        // 5. 如果有村民正要去這建設/採集，需重置
+        // 5. 如果有村民正要去這建設/採集，或已經進駐 (包含倉庫與工廠)，需重置並釋放
         state.units.villagers.forEach(v => {
-            if (v.constructionTarget === ent || v.targetId === ent || v.assignedWarehouseId === id) {
+            const isAssignedToThis = (v.constructionTarget === ent || v.targetId === ent || v.assignedWarehouseId === id || v.factoryTarget === ent);
+            
+            if (isAssignedToThis) {
+                // 如果工人已進駐建築內（處於隱藏狀態），將其釋放回地圖
+                if (v.visible === false || v.state === 'WORKING_IN_FACTORY') {
+                    v.visible = true;
+                    // 讓工人散開，避免疊在一個點上
+                    const scatterAngle = Math.random() * Math.PI * 2;
+                    const scatterDist = 20 + Math.random() * 40;
+                    v.x = ent.x + Math.cos(scatterAngle) * scatterDist;
+                    v.y = ent.y + Math.sin(scatterAngle) * scatterDist;
+                }
+                
                 v.constructionTarget = null;
                 v.targetId = null;
                 v.assignedWarehouseId = null;
+                v.factoryTarget = null;
+                
+                // 強制恢復為閒置狀態，避免卡在特殊狀態
+                v.state = 'IDLE';
                 engine.restoreVillagerTask(v);
             }
         });
@@ -537,5 +553,6 @@ export class BuildingSystem {
             window.UIManager.updateValues();
         }
         engine.updateSpatialGrid();
+        if (engine.updatePathfindingGrid) engine.updatePathfindingGrid();
     }
 }

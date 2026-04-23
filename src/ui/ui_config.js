@@ -568,6 +568,20 @@ export const UI_CONFIG = {
         requirementOffset: { x: -10, y: -15 }, // 升級條件文字偏移
         actionGridOffset: { x: 0, y: 5 },  // 指令按鈕區偏移
         workerControlOffset: { x: 0, y: 8 }, // 採集人數面板偏移 (當錨點為 CENTER 時)
+        // -- 工人解散按鈕 (Dismiss Button) --
+        dismissBtnBg: "#c62828",         // 解散按鈕背景色
+        dismissBtnBorder: "#ff8a80",     // 解散按鈕邊框色
+        dismissBtnColor: "white",        // 解散按鈕文字顏色
+        dismissBtnFontSize: "12px",      // 解散按鈕字體大小
+        dismissBtnHeight: "24px",        // 解散按鈕高度
+        dismissBtnOffsetX: 15,           // 解散按鈕與 Lv 文字的水平距離
+        dismissBtnOffsetY: -3,           // 解散按鈕與 Lv 文字的垂直微調
+        // -- 工人加減控制按鈕 --
+        workerAdjustBtnBg: "#4e342e",
+        workerAdjustBtnBorder: "#8b6e4b",
+        workerAdjustBtnColor: "white",
+        workerAdjustBtnSize: 28,
+        workerCountFontSize: "18px",
         // -- 其他設定 --
         upgradeBtnBg: "#4caf50",         // 升級按鈕背景色
         upgradeBtnHoverBg: "#66bb6a",    // 懸停色

@@ -55,13 +55,24 @@ export class SynthesisSystem {
     }
 
     /**
-     * 3. 設定加工目標
+     * 3. 設定加工目標 (加入隊列)
      */
     static setCraftingTarget(state, engine, building, recipe) {
         if (!recipe.isUnlocked) return false;
-        building.currentRecipe = recipe;
-        building.craftingProgress = 0;
-        engine.addLog(`[加工廠] ${building.name || building.type1} 開始生產 ${recipe.type}`);
+        
+        // 初始化隊列
+        if (!building.recipeQueue) building.recipeQueue = [];
+        
+        // 加入隊列 (深拷貝配方物件)
+        building.recipeQueue.push({ ...recipe });
+        
+        // 若當前沒有正在生產，則立即開始
+        if (!building.currentRecipe) {
+            building.currentRecipe = building.recipeQueue.shift();
+            building.craftingProgress = 0;
+        }
+        
+        engine.addLog(`[加工廠] ${building.name || building.type1} 已加入隊列：${recipe.type} (當前隊列：${building.recipeQueue.length})`);
         return true;
     }
 
@@ -71,42 +82,39 @@ export class SynthesisSystem {
     static update(state, engine, deltaTime) {
         if (!state.mapEntities) return;
 
-        // 遍歷所有 mapEntities
         state.mapEntities.forEach(ent => {
-            // 排除無配方或施工中的建築
             if (!ent.currentRecipe || ent.isUnderConstruction) return;
             
             const cfg = engine.getEntityConfig(ent.type1, ent.lv);
             if (!cfg) return;
 
-            // 計算生產效率 (當前派駐人數 / 需要人數)
             const needVillagers = cfg.need_villagers || 1;
             const currentWorkers = ent.assignedWorkers ? ent.assignedWorkers.length : 0;
             const efficiency = Math.min(1.0, currentWorkers / needVillagers);
 
-            // 若無人派駐，則停止生產
             if (efficiency <= 0) return;
 
-            // 取得配方的生產所需時間 (從 ingredientConfigs 查詢)
             const ingCfg = state.ingredientConfigs ? state.ingredientConfigs[ent.currentRecipe.type] : null;
-            const baseTime = ingCfg ? (ingCfg.craftTime || 5) : 5; // 預設 5 秒
+            const baseTime = ingCfg ? (ingCfg.craftTime || 5) : 5;
 
-            // 增加進度
             if (ent.craftingProgress === undefined) ent.craftingProgress = 0;
             ent.craftingProgress += (deltaTime / baseTime) * efficiency;
 
-            // 產出結算
             if (ent.craftingProgress >= 1.0) {
                 ent.craftingProgress = 0;
-                // 增加產出物
                 if (state.resources[ent.currentRecipe.type] !== undefined) {
                     state.resources[ent.currentRecipe.type] += ent.currentRecipe.amount;
                 } else {
-                    // 若資源不存在則初始化 (相容性處理)
                     state.resources[ent.currentRecipe.type] = ent.currentRecipe.amount;
                 }
-                
-                // 擴展預留：若有消耗原料的需求，需在此處扣除
+
+                // 處理隊列：從隊列中提取下一個任務
+                if (ent.recipeQueue && ent.recipeQueue.length > 0) {
+                    ent.currentRecipe = ent.recipeQueue.shift();
+                } else {
+                    // 若無隊列，則清空當前生產，停止工作
+                    ent.currentRecipe = null;
+                }
             }
         });
     }
