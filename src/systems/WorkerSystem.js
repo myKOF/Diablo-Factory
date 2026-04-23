@@ -1122,7 +1122,7 @@ export class WorkerSystem {
             const totalAssigned = currentInside + pendingArrival;
 
             if (totalAssigned >= need_villagers) {
-                this.engine.triggerWarning(`工廠派駐預約已滿 (${totalAssigned}/${need_villagers})，工人抵達後將在外待命。`);
+                // 不再提示警告訊息
             }
 
             // 3. 設定派駐任務
