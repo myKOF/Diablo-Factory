@@ -1,13 +1,6 @@
 export class ConfigManager {
-    static setFallbackConfig(state) {
-        state.npcConfigs['villagers'] = { speed: 5.5, collection_speed: 10 };
-        state.npcConfigs['female villagers'] = { speed: 5.5, collection_speed: 10 };
-    }
-
     /**
      * 泛用陣列解析器：將 "{1, 2, 3}" 或 "{wood, stone}" 轉換為真正的陣列
-     * @param {string} str - 原始字串
-     * @returns {Array} - 解析後的陣列 (會自動轉換數字)
      */
     static parseBracketArray(str) {
         if (!str || typeof str !== 'string') return [];
@@ -16,8 +9,13 @@ export class ConfigManager {
         return cleanStr.split(',').map(s => {
             const val = s.trim();
             const num = parseFloat(val);
-            return isNaN(num) ? val : num; // 如果是純數字就轉數字，否則保留字串
+            return isNaN(num) ? val : num; // 數字轉型，非數字保留字串
         });
+    }
+
+    static setFallbackConfig(state) {
+        state.npcConfigs['villagers'] = { speed: 5.5, collection_speed: 10 };
+        state.npcConfigs['female villagers'] = { speed: 5.5, collection_speed: 10 };
     }
 
     static parseCSV(text) {
@@ -386,7 +384,6 @@ export class ConfigManager {
                 const type1 = row[idxType1] ? row[idxType1].trim() : model;
                 const lv = parseInt(row[idxLv]) || 1;
 
-                // 解析物流權限 (canInput, canOutput)
                 let logistics = { canInput: false, canOutput: false };
                 if (idxProductionPlace !== -1 && row[idxProductionPlace]) {
                     const arr = this.parseBracketArray(row[idxProductionPlace]);

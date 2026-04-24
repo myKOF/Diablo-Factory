@@ -397,7 +397,7 @@ export const UI_CONFIG = {
         textureScale: 0.2, // 尺寸密度 
         textureTint: "#ffffff" //貼圖混色
     },
-    // -- 倉庫選單 (WarehousePanel) ----------------------------------
+    // -- 倉庫選單按鈕 (WarehouseButton) ----------------------------------
     WarehouseButton: {
         anchor: "BOTTOM_LEFT",
         offsetX: 80, offsetY: 80,
@@ -408,9 +408,11 @@ export const UI_CONFIG = {
         borderColor: "#fbc02d",
         icon: "📦"
     },
+    // -- 資源倉庫面板 (WarehousePanel) ----------------------------------
     WarehousePanel: {
-        anchor: "CENTER",
-        width: 600, height: "auto",
+        anchor: "RIGHT_CENTER",
+        offsetX: 20,
+        width: 420, height: 500,
         title: "📦 資源倉庫",
         glass: true
     },

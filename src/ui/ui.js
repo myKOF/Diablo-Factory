@@ -575,6 +575,18 @@ export class UIManager {
                 el.style.transform = `translate(-50%, -50%)`;
                 if (offX || offY) el.style.transform += ` translate(${offX}px, ${offY}px)`;
                 break;
+            case "LEFT_CENTER":
+                el.style.left = `${offX}px`;
+                el.style.top = "50%";
+                el.style.transform = `translateY(-50%)`;
+                if (offY) el.style.marginTop = `${offY}px`;
+                break;
+            case "RIGHT_CENTER":
+                el.style.right = `${offX}px`;
+                el.style.top = "50%";
+                el.style.transform = `translateY(-50%)`;
+                if (offY) el.style.marginTop = `${offY}px`;
+                break;
         }
 
         // 尺寸設定 (支援寬高及最小/最大值)
@@ -872,10 +884,9 @@ export class UIManager {
         const worldY = local.y - cam.y;
         
         const clickedBuilding = GameEngine.state.mapEntities.find(ent => {
-            const validTypes = ['timber_processing_plant', 'smelting_plant', 'tank_workshop', 'stone_processing_plant', 'barn', 'warehouse'];
-            if (!validTypes.includes(ent.type1) || ent.isUnderConstruction) return false;
+            if (ent.isUnderConstruction) return false;
             const cfg = GameEngine.getEntityConfig(ent.type1);
-            if (!cfg) return false;
+            if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false; // 必須允許輸出才能當起點
             const em = cfg.size ? cfg.size.match(/\{\s*(\d+)\s*,\s*(\d+)\s*\}/) : null;
             const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE;
             const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
@@ -960,9 +971,8 @@ export class UIManager {
 
             const targetBuilding = GameEngine.state.mapEntities.find(ent => {
                 if (ent === this.logisticsSourceEntity || ent.isUnderConstruction) return false;
-                const validTypes = ['timber_processing_plant', 'smelting_plant', 'tank_workshop', 'stone_processing_plant', 'barn', 'warehouse', 'village', 'town_center'];
-                if (!validTypes.includes(ent.type1)) return false;
                 const cfg = GameEngine.getEntityConfig(ent.type1);
+                if (!cfg || !cfg.logistics || !cfg.logistics.canInput) return false; // 必須允許輸入才能當終點
                 const em = cfg && cfg.size ? cfg.size.match(/\{\s*(\d+)\s*,\s*(\d+)\s*\}/) : null;
                 const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE;
                 const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
@@ -1662,7 +1672,14 @@ export class UIManager {
 
     static renderWarehousePanel() {
         const panel = document.getElementById("warehouse_panel");
+        if (!panel) return;
         const cfg = UI_CONFIG.WarehousePanel;
+
+        // 強制設置容器為 flex 佈局以支援內部高度自動填滿
+        panel.style.display = "flex";
+        panel.style.flexDirection = "column";
+        panel.style.padding = "20px";
+        panel.style.boxSizing = "border-box";
 
         // 右上角關閉按鈕
         let html = `
@@ -1678,35 +1695,16 @@ export class UIManager {
 
         html += `<div class="title" style="text-align:center; font-size: 20px; border-bottom: 2px solid #8b6e4b; margin-bottom: 10px; padding-bottom: 10px; color: ${cfg.titleColor || '#fbc02d'};">${cfg.title}</div>`;
 
-        // 頁籤過濾區
-        const isLv1 = this.warehouseFilterValue === 1;
-        const colorLv1 = isLv1 ? '#fff' : '#aaa';
-        const bgLv1 = isLv1 ? '#3a2b16' : '#221a10';
-
-        const isLv2 = this.warehouseFilterValue === 2;
-        const colorLv2 = isLv2 ? '#fff' : '#aaa';
-        const bgLv2 = isLv2 ? '#3a2b16' : '#221a10';
-
         html += `
-            <div style="display:flex; justify-content:space-between; margin-bottom: 15px; gap: 10px;">
-                <div style="display:flex; gap: 10px;">
-                    <button onclick="window.UIManager.setWarehouseFilter(1); event.stopPropagation();" 
-                            style="padding: 5px 15px; border: 1px solid #8b6e4b; border-radius: 4px; background: ${bgLv1}; color: ${colorLv1}; cursor: pointer; transition: 0.2s; box-shadow: ${isLv1 ? 'inset 0 0 5px rgba(251,192,45,0.5)' : 'none'};">
-                        資源
-                    </button>
-                    <button onclick="window.UIManager.setWarehouseFilter(2); event.stopPropagation();" 
-                            style="padding: 5px 15px; border: 1px solid #8b6e4b; border-radius: 4px; background: ${bgLv2}; color: ${colorLv2}; cursor: pointer; transition: 0.2s; box-shadow: ${isLv2 ? 'inset 0 0 5px rgba(251,192,45,0.5)' : 'none'};">
-                        材料
-                    </button>
-                </div>
+            <div style="display:flex; justify-content:flex-end; margin-bottom: 10px;">
                 <button onclick="window.UIManager.sortWarehouse(); event.stopPropagation();" 
-                        style="padding: 5px 10px; border: 1px solid #6b5232; border-radius: 4px; background: ${this.warehouseSortById ? '#3a2b16' : '#221a10'}; color: #ddd; cursor: pointer; transition: 0.2s;" title="ID排序">
-                    ${this.warehouseSortById ? '↑' : '↓'}
+                        style="padding: 5px 12px; border: 1px solid #6b5232; border-radius: 4px; background: ${this.warehouseSortById ? '#3a2b16' : '#221a10'}; color: #ddd; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 5px;" title="依 ID 排序">
+                    <span style="font-size: 12px;">排序</span> ${this.warehouseSortById ? '↑' : '↓'}
                 </button>
             </div>
         `;
 
-        html += `<div style="display:flex; flex-wrap: wrap; gap:8px; padding: 15px; color: #e0e0e0; min-height: 200px; align-content: flex-start; justify-content: flex-start; background: rgba(0,0,0,0.3); border-radius: 8px; overflow-y: auto; max-height: 45vh;">`;
+        html += `<div style="display:flex; flex-wrap: wrap; gap:10px; padding: 15px; color: #e0e0e0; flex: 1; align-content: flex-start; justify-content: flex-start; background: rgba(0,0,0,0.3); border-radius: 8px; overflow-y: auto; margin-bottom: 5px;">`;
 
         const ingredientIcons = {
             wood: "🪵", stone: "🪨", gold: "💰", gold_ore: "🟡", food: "🍖", fruit: "🍎",
@@ -1729,11 +1727,8 @@ export class UIManager {
         let itemsForTab = Object.values(configs).filter(c => {
             if (!c || !c.type) return false;
             const amount = GameEngine.state.resources[c.type] || 0;
-            // 僅顯示有庫存的項目
-            if (amount <= 0) return false;
-
-            // 資源(Resources)為 Lv1，材料(Ingredients)為 Lv2+
-            return this.warehouseFilterValue === 2 ? c.lv >= 2 : c.lv === 1;
+            // 顯示所有有庫存的項目，不再區分等級 (頁籤)
+            return amount > 0;
         });
 
         if (this.warehouseSortById) {
@@ -1749,10 +1744,13 @@ export class UIManager {
                 const amtColor = isFull ? '#ff5252' : '#fff';
                 const displayIcon = ingredientIcons[item.type] || ingredientIcons[item.icon] || "📦";
 
-                // 緊湊的卡片：10宮格
+                // 適應 420px 寬度的 5 欄佈局
                 html += `
-                    <div style="position: relative; width: calc(10% - 8px); aspect-ratio: 1; min-width: 44px; background: rgba(255,255,255,0.05); border: 1px solid rgba(139,110,75,0.5); border-radius: 4px; display:flex; justify-content:center; align-items:center; overflow: hidden; cursor: help;" title="${item.name} (ID:${item.id})\n數量: ${amount} / ${item.stack}">
-                        <div style="font-size: 24px; pointer-events: none;">${displayIcon}</div>
+                    <div style="position: relative; width: calc(20% - 8px); aspect-ratio: 1; min-width: 50px; background: rgba(255,255,255,0.05); border: 1px solid rgba(139,110,75,0.5); border-radius: 6px; display:flex; justify-content:center; align-items:center; overflow: hidden; cursor: help; transition: all 0.2s;" 
+                         onmouseover="this.style.background='rgba(255,255,255,0.1)'; this.style.borderColor='#fbc02d'"
+                         onmouseout="this.style.background='rgba(255,255,255,0.05)'; this.style.borderColor='rgba(139,110,75,0.5)'"
+                         title="${item.name} (ID:${item.id})\n數量: ${amount} / ${item.stack}">
+                        <div style="font-size: 28px; pointer-events: none;">${displayIcon}</div>
                         <div style="position: absolute; bottom: 1px; right: 2px; font-size: 10px; font-family: monospace; color: ${amtColor}; font-weight: bold; text-shadow: 1px 1px 1px #000; pointer-events: none;">
                             ${amount >= 1000 ? (amount / 1000).toFixed(1) + 'k' : amount}
                         </div>
