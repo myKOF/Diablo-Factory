@@ -14,7 +14,7 @@ export class UIManager {
     static activeBuilding = null;
     static logHeight = 200; // 預設日誌高度
     static isResizingLog = false;
-    static logFilters = { COMMON: false, PATH: false, INPUT: false, BATTLE: false, SYSTEM: false, TASK: false, GATHER: false }; // 日誌篩選器
+    static logFilters = { COMMON: false, PATH: false, INPUT: false, BATTLE: false, SYSTEM: false, TASK: false, GATHER: false, LOGISTICS: true }; // 日誌篩選器
     static startY = 0;
     static startHeight = 200;
     static leftMouseDownPos = null; // 記錄左鍵按下位置，用於過濾框選後的誤觸
@@ -312,7 +312,7 @@ export class UIManager {
             z-index: 400; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
         `;
 
-        const categories = { COMMON: "一般訊息", PATH: "尋路訊息", INPUT: "右鍵行為訊息", BATTLE: "戰鬥訊息", SYSTEM: "系統訊息", TASK: "任務訊息", GATHER: "採集訊息" };
+        const categories = { COMMON: "一般訊息", PATH: "尋路訊息", INPUT: "右鍵行為訊息", BATTLE: "戰鬥訊息", SYSTEM: "系統訊息", TASK: "任務訊息", GATHER: "採集訊息", LOGISTICS: "物流訊息" };
 
         // --- [新增] 全選/取消全選功能 ---
         const masterItem = document.createElement("label");
@@ -981,7 +981,7 @@ export class UIManager {
                 const tId = targetBuilding.id || `${targetBuilding.type1}_${targetBuilding.x}_${targetBuilding.y}`;
                 if (!this.logisticsSourceEntity.outputTargets.find(t => t.id === tId)) {
                     this.logisticsSourceEntity.outputTargets.push({ id: tId, filter: null });
-                    GameEngine.addLog(`[物流] 連線建立：${this.logisticsSourceEntity.name} ➡️ ${targetBuilding.name}`);
+                    GameEngine.addLog(`[物流] 連線建立：${this.logisticsSourceEntity.name} ➡️ ${targetBuilding.name}`, 'LOGISTICS');
                 }
                 this.showLogisticsMenu(this.logisticsSourceEntity, tId, e.clientX, e.clientY);
             }
@@ -1211,6 +1211,7 @@ export class UIManager {
 
         let name = entity.isUnderConstruction ? (GameEngine.getBuildingConfig(entity.type1, entity.lv)?.name || "施工中的建築") : (entity.name || entity.type1);
         const cfg_current = GameEngine.getBuildingConfig(entity.type1, entity.lv || 1);
+        const canAssignWorkers = cfg_current && (cfg_current.need_villagers > 0 || (cfg_current.logistics && (cfg_current.logistics.canInput || cfg_current.logistics.canOutput)));
         const nextCfg = GameEngine.getBuildingConfig(entity.type1, (entity.lv || 1) + 1);
         const hCfg = UI_CONFIG.ActionMenuHeader;
 
@@ -1225,9 +1226,7 @@ export class UIManager {
                 </div>
             `;
         } else {
-            const warehouseTypes = ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'];
-            const factoryTypes = ['timber_processing_plant', 'smelting_plant', 'tank_workshop', 'stone_processing_plant'];
-            const showDismiss = [...factoryTypes, ...warehouseTypes].includes(entity.type1) && !entity.isUnderConstruction;
+            const showDismiss = !isConfirming && canAssignWorkers && !entity.isUnderConstruction;
             
             let dismissHtml = "";
             if (showDismiss) {
@@ -1377,10 +1376,37 @@ export class UIManager {
                     });
                 }
             }
+
+            // --- [新增] 派駐人數加減按鈕 ---
+            if (!isConfirming && canAssignWorkers && !entity.isUnderConstruction) {
+                const current = GameEngine.state.units.villagers.filter(v => 
+                    v.config && v.config.type === 'villagers' && v.assignedWarehouseId === eid
+                ).length;
+                const wcOff = hCfg.workerControlOffset || { x: 0, y: 15 };
+                const maxWorkers = entity.targetWorkerCount || cfg_current.need_villagers || 5; 
+                
+                gridHtml += `
+                    <div class="warehouse-controls" style="display: flex; align-items: center; justify-content: center; gap: 20px; background: rgba(0,0,0,0.4); padding: 10px 25px; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); transform: translate(${wcOff.x}px, ${wcOff.y}px); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box;">
+                        <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)" 
+                                style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
+                                onmouseover="this.style.background='#6d4c41'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='${hCfg.workerAdjustBtnBg || '#4e342e'}'; this.style.transform='scale(1)';">－</button>
+                        
+                        <div style="display: flex; flex-direction: column; align-items: center; min-width: 90px;">
+                            <span style="font-size: 11px; color: rgba(255,255,255,0.35); font-weight: bold; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 1px;">Villagers</span>
+                            <div style="font-size: ${hCfg.workerCountFontSize || '22px'}; font-weight: 900; color: #fff; font-family: 'Arial Black', sans-serif; text-shadow: 0 2px 4px rgba(0,0,0,0.5); line-height: 1;">
+                                <span style="color: #76ff03;">${current}</span> <span style="color: rgba(255,255,255,0.2); margin: 0 4px;">/</span> <span style="color: #fbc02d;">${maxWorkers}</span>
+                            </div>
+                        </div>
+
+                        <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, 1)" 
+                                style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
+                                onmouseover="this.style.background='#6d4c41'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='${hCfg.workerAdjustBtnBg || '#4e342e'}'; this.style.transform='scale(1)';">＋</button>
+                    </div>`;
+            }
         }
         // --- [新增] 加工廠配方清單 ---
-        const factoryTypes = ['timber_processing_plant', 'smelting_plant', 'tank_workshop', 'stone_processing_plant'];
-        if (!isConfirming && factoryTypes.includes(entity.type1) && !entity.isUnderConstruction) {
+        const isProcessingPlant = cfg_current && cfg_current.type2 === 'processing_plant';
+        if (!isConfirming && isProcessingPlant && !entity.isUnderConstruction) {
             const recipes = SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, entity) || [];
             if (recipes.length > 0) {
                 // 圖示對照表 (Fallback)
@@ -1839,7 +1865,9 @@ export class UIManager {
         let html = `<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 5px; gap: 20px;"><span style="color: #4caf50; font-weight: bold; font-size: 15px;">設定此路線過濾器</span><button onclick="window.UIManager.deleteLogisticsLine(event)" style="background: #f44336; color: white; border: 1px solid #ff8a80; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-weight: bold; font-size: 12px;">刪除連線 ✖</button></div><div style="display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px;">`;
         html += `<button onclick="window.UIManager.setLogisticsFilter(event, null)" style="padding: 6px 12px; background: ${currentFilter === null ? '#4caf50' : '#333'}; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer;">無限制</button>`;
         availableItems.forEach(item => {
-            html += `<button onclick="window.UIManager.setLogisticsFilter(event, '${item}')" style="padding: 6px 12px; background: ${currentFilter === item ? '#4caf50' : '#333'}; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer;">${GameEngine.RESOURCE_NAMES[item] || item}</button>`;
+            const cfg = GameEngine.state.ingredientConfigs ? GameEngine.state.ingredientConfigs[item] : null;
+            const displayName = (cfg && cfg.name) ? cfg.name : (GameEngine.RESOURCE_NAMES[item] || item);
+            html += `<button onclick="window.UIManager.setLogisticsFilter(event, '${item}')" style="padding: 6px 12px; background: ${currentFilter === item ? '#4caf50' : '#333'}; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer;">${displayName}</button>`;
         });
         menu.innerHTML = html + `</div>`; menu.style.display = "flex";
         menu.style.left = `${Math.min(mouseX + 15, window.innerWidth - 300)}px`; menu.style.top = `${Math.min(mouseY - 20, window.innerHeight - 200)}px`;
@@ -1849,7 +1877,7 @@ export class UIManager {
         if (event) event.stopPropagation();
         if (this.activeLogisticsConnection) {
             const conn = this.activeLogisticsConnection.source.outputTargets.find(t => t.id === this.activeLogisticsConnection.targetId);
-            if (conn) { conn.filter = filterItem; GameEngine.addLog(`[物流] 路線過濾器已更新`); }
+            if (conn) { conn.filter = filterItem; GameEngine.addLog(`[物流] 路線過濾器已更新`, 'LOGISTICS'); }
             const menu = document.getElementById('logistics_menu');
             if (menu) this.showLogisticsMenu(this.activeLogisticsConnection.source, this.activeLogisticsConnection.targetId, parseInt(menu.style.left) - 15, parseInt(menu.style.top) + 20);
         }
@@ -1859,7 +1887,7 @@ export class UIManager {
         if (event) event.stopPropagation();
         if (this.activeLogisticsConnection) {
             this.activeLogisticsConnection.source.outputTargets = this.activeLogisticsConnection.source.outputTargets.filter(t => t.id !== this.activeLogisticsConnection.targetId);
-            GameEngine.addLog(`[物流] 路線已刪除`);
+            GameEngine.addLog(`[物流] 路線已刪除`, 'LOGISTICS');
         }
         const menu = document.getElementById("logistics_menu"); if (menu) menu.style.display = "none";
         this.activeLogisticsConnection = null;
@@ -1985,6 +2013,7 @@ export class UIManager {
                         case 'BATTLE': colorAttr = ' style="color: #ff5252;"'; break;
                         case 'TASK': colorAttr = ' style="color: #4caf50;"'; break;
                         case 'GATHER': colorAttr = ' style="color: #8bc34a;"'; break;
+                        case 'LOGISTICS': colorAttr = ' style="color: #81c784;"'; break;
                     }
                 }
 

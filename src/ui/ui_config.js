@@ -298,7 +298,7 @@ export const UI_CONFIG = {
             outlineWidth: 2,
             visualVariation: { tintRange: 0.1, minScale: 1.0, maxScale: 1.0 }
         },
-        Campfire: { // 營火 (環境/功能實體)
+        Campfire: { // 小火堆營火 (環境/功能實體)
             groundColor: "#8f4c00d8",
             woodColor: "#795548",
             woodOutline: "#6d352bff",

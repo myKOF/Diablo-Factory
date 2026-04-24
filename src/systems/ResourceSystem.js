@@ -210,6 +210,10 @@ export class ResourceSystem {
      * @returns {string} 中文名稱或原始鍵值
      */
     static getResourceName(key) {
+        const state = (window.GameEngine && window.GameEngine.state) ? window.GameEngine.state : null;
+        if (state && state.ingredientConfigs && state.ingredientConfigs[key]) {
+            return state.ingredientConfigs[key].name;
+        }
         return this.RESOURCE_NAMES[String(key).toLowerCase()] || key;
     }
 
