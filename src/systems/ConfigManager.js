@@ -4,6 +4,22 @@ export class ConfigManager {
         state.npcConfigs['female villagers'] = { speed: 5.5, collection_speed: 10 };
     }
 
+    /**
+     * 泛用陣列解析器：將 "{1, 2, 3}" 或 "{wood, stone}" 轉換為真正的陣列
+     * @param {string} str - 原始字串
+     * @returns {Array} - 解析後的陣列 (會自動轉換數字)
+     */
+    static parseBracketArray(str) {
+        if (!str || typeof str !== 'string') return [];
+        const cleanStr = str.replace(/[{}]/g, '').trim();
+        if (!cleanStr) return [];
+        return cleanStr.split(',').map(s => {
+            const val = s.trim();
+            const num = parseFloat(val);
+            return isNaN(num) ? val : num; // 如果是純數字就轉數字，否則保留字串
+        });
+    }
+
     static parseCSV(text) {
         const rows = text.split(/\r?\n/).map(row => {
             const arr = [];
@@ -136,16 +152,12 @@ export class ConfigManager {
 
                 // 解析物理尺寸 {寬,高} 或 {寬*高}
                 if (idxPixelSize !== -1 && row[idxPixelSize]) {
-                    const val = row[idxPixelSize].trim();
-                    const m1 = val.match(/\{[ ]*(\d+)[ ]*[\*,][ ]*(\d+)[ ]*\}/);
-                    if (m1) {
-                        state.npcConfigs[name].pixel_size = { w: parseInt(m1[1]), h: parseInt(m1[2]) };
-                    } else {
-                        const m2 = val.match(/\{[ ]*(\d+)[ ]*\}/);
-                        if (m2) {
-                            const n = parseInt(m2[1]);
-                            state.npcConfigs[name].pixel_size = { w: n, h: n };
-                        }
+                    const arr = this.parseBracketArray(row[idxPixelSize].replace(/\*/g, ','));
+                    if (arr.length >= 2) {
+                        state.npcConfigs[name].pixel_size = { w: parseInt(arr[0]), h: parseInt(arr[1]) };
+                    } else if (arr.length === 1) {
+                        const n = parseInt(arr[0]);
+                        state.npcConfigs[name].pixel_size = { w: n, h: n };
                     }
                 }
             }
@@ -193,18 +205,14 @@ export class ConfigManager {
                         state.resources[rk] = costs[rk];
                     });
                 } else if (val.includes('*')) {
-                    const clean = val.replace(/[\{\}]/g, '');
-                    const parts = clean.split('*').map(s => parseInt(s.trim()));
+                    const parts = this.parseBracketArray(val.replace(/\*/g, ','));
                     if (parts.length === 2) {
                         state.systemConfig[type] = { w: parts[0], h: parts[1] };
                     } else {
                         state.systemConfig[type] = parts[0] || 0;
                     }
                 } else if (val.startsWith('{') && val.includes(',')) {
-                    // 解析 "{6,500,30}" 為 [6, 500, 30]
-                    const clean = val.replace(/[\{\}]/g, '');
-                    const parts = clean.split(',').map(s => parseFloat(s.trim()));
-                    state.systemConfig[type] = parts;
+                    state.systemConfig[type] = this.parseBracketArray(val);
                 } else {
                     const num = parseFloat(val);
                     state.systemConfig[type] = isNaN(num) ? val : num;
@@ -353,7 +361,8 @@ export class ConfigManager {
                 idxResourceValue = hIdx('resource_value'),
                 idxNeedVillagers = hIdx('need_villagers'),
                 idxType2 = hIdx('type2'),
-                idxIngredientsProd = hIdx('ingredients_production');
+                idxIngredientsProd = hIdx('ingredients_production'),
+                idxProductionPlace = hIdx('production_place');
 
             console.log(`[CSV載入] 建築配置欄位索引結果:`, { model: idxModel, type1: idxType1, prod: idxProd, prodType: idxProdType });
 
@@ -377,12 +386,18 @@ export class ConfigManager {
                 const type1 = row[idxType1] ? row[idxType1].trim() : model;
                 const lv = parseInt(row[idxLv]) || 1;
 
-                // 解析生產清單
-                let prodList = [];
-                if (row[idxProd]) {
-                    const clean = row[idxProd].replace(/[\{\}]/g, '');
-                    if (clean) prodList = clean.split(',').map(s => s.trim());
+                // 解析物流權限 (canInput, canOutput)
+                let logistics = { canInput: false, canOutput: false };
+                if (idxProductionPlace !== -1 && row[idxProductionPlace]) {
+                    const arr = this.parseBracketArray(row[idxProductionPlace]);
+                    if (arr.length >= 2) {
+                        logistics.canInput = arr[0] === 1;
+                        logistics.canOutput = arr[1] === 1;
+                    }
                 }
+
+                // 解析生產清單
+                const prodList = this.parseBracketArray(row[idxProd]);
 
                 const resValCosts = ConfigManager.parseResourceCosts(row[idxResourceValue]);
                 const cfg = {
@@ -401,6 +416,7 @@ export class ConfigManager {
                     resourceValue: resValCosts.food || resValCosts.wood || resValCosts.stone || resValCosts.gold_ore || 0,
                     npcProduction: prodList,
                     productionMode: (row[idxProdType] || 'normal').toLowerCase().trim(),
+                    logistics: logistics,
                     // 升級與解鎖相關
                     buildUnlock: row[idxUnlock] || "{0}",
                     upgradeTime: parseFloat(row[idxUpgradeTimes]) || 0,
