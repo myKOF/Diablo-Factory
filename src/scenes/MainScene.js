@@ -103,11 +103,11 @@ export class MainScene extends Phaser.Scene {
         // 考量到資源物件有模型縮放 (model_size) 與視覺變形需求，改用 Image 對象池而非 Blitter。
         // Phaser 在幾千個 Image 下效能依然強勁。
         this.resourceBobs = new Map(); // 格網鍵值 (gx_gy) -> { type, bob, lv }
-        this.resourcePools = { 
-            'tree': [], 'stone': [], 'food': [], 'gold_ore': [], 
-            'iron_ore': [], 'coal': [], 'magic_herb': [], 
+        this.resourcePools = {
+            'tree': [], 'stone': [], 'food': [], 'gold_ore': [],
+            'iron_ore': [], 'coal': [], 'magic_herb': [],
             'crystal_ore': [], 'copper_ore': [], 'silver_ore': [], 'mithril_ore': [],
-            'wolf_corpse': [], 'bear_corpse': [] 
+            'wolf_corpse': [], 'bear_corpse': []
         };
         // 建立專用群組
         this.resourceGroup = this.add.group();
@@ -132,10 +132,10 @@ export class MainScene extends Phaser.Scene {
         this.targetGraphics = this.add.graphics();
         this.targetGraphics.setDepth(10); // 確保在所有實體之下 (depth 以 Y 為準)
 
-        if (!this.logisticsGraphics) { 
-            this.logisticsGraphics = this.add.graphics(); 
+        if (!this.logisticsGraphics) {
+            this.logisticsGraphics = this.add.graphics();
             const logCfg = UI_CONFIG.LogisticsSystem || { depth: 150 };
-            this.logisticsGraphics.setDepth(logCfg.depth); 
+            this.logisticsGraphics.setDepth(logCfg.depth);
         }
 
         // 相機控制
@@ -336,7 +336,7 @@ export class MainScene extends Phaser.Scene {
         const unitType = unit.config ? unit.config.type : '';
         const unitCamp = (unit.config && unit.config.camp) || unit.camp || 'player';
         if (unitType === 'wolf' || unitType === 'bear' || unitCamp === 'neutral') return; // 非玩家控制單位不處理
-        
+
         // [核心新增] 加工廠派駐系統連動：先檢查是否為派駐指令，或是否需要解除當前派駐狀態
         if (GameEngine.workerSystem && unit.config.type === 'villagers') {
             const handled = GameEngine.workerSystem.handleWorkerCommand(unit, clickedTarget);
@@ -526,43 +526,48 @@ export class MainScene extends Phaser.Scene {
             const parseColor = (c) => this.hexOrRgba(c).color;
             const currentTime = this.time.now / 1000;
 
-            // 輔助函數：獲取穩定且一致的實體 ID
-            const getEntId = (e) => e.id || `${e.type1}_${e.x}_${e.y}`;
+            const getCoordId = (e) => `${e.type1}_${e.x}_${e.y}`;
 
-            // 1. 建立連線地圖以檢測雙向連線
+            // 1. 建立冗餘連線地圖 (同時支援 ID 與座標查詢)
             const connMap = new Map();
             if (state.mapEntities) {
                 state.mapEntities.forEach(ent => {
                     if (ent.outputTargetId) {
-                        connMap.set(getEntId(ent), ent.outputTargetId);
+                        const cid = getCoordId(ent);
+                        connMap.set(cid, ent.outputTargetId);
+                        if (ent.id) connMap.set(ent.id, ent.outputTargetId);
                     }
                 });
 
                 state.mapEntities.forEach(ent => {
                     if (ent.outputTargetId) {
-                        const sid = getEntId(ent);
+                        const rid = ent.id;
+                        const cid = getCoordId(ent);
                         const targetId = ent.outputTargetId;
-                        
-                        // 增強型查找：同時匹配實體 ID 與座標 ID
-                        const target = state.mapEntities.find(e => getEntId(e) === targetId || e.id === targetId);
-                        
+
+                        // 全路徑查找目標
+                        const target = state.mapEntities.find(e => e.id === targetId || getCoordId(e) === targetId);
+
                         if (target) {
                             let sx = ent.x, sy = ent.y, ex = target.x, ey = target.y;
-                            const tsid = getEntId(target);
-                            
-                            // 2. 雙向連線錯開邏輯 (使用穩定 ID 比較)
-                            if (connMap.get(tsid) === sid || connMap.get(target.id) === sid) {
+                            const t_rid = target.id;
+                            const t_cid = getCoordId(target);
+
+                            // 2. 判定雙向連線 (檢查所有可能的 ID 組合)
+                            const targetSendsTo = connMap.get(targetId) || (t_rid && connMap.get(t_rid)) || connMap.get(t_cid);
+                            const isReciprocal = (targetSendsTo === rid || targetSendsTo === cid);
+
+                            if (isReciprocal) {
                                 const dx = ex - sx, dy = ey - sy;
                                 const dist = Math.hypot(dx, dy);
                                 if (dist > 0) {
-                                    const nx = -dy / dist;
-                                    const ny = dx / dist;
-                                    const offset = logCfg.lineOffset || 8;
-                                    const dir = sid < tsid ? 1 : -1;
-                                    sx += nx * offset * dir;
-                                    sy += ny * offset * dir;
-                                    ex += nx * offset * dir;
-                                    ey += ny * offset * dir;
+                                    const nx = -dy / dist, ny = dx / dist;
+                                    const offset = logCfg.lineOffset || 10;
+                                    // 兩條線分別向各自方向的「左側」法向量位移，自然會達成對稱錯開
+                                    sx += nx * offset;
+                                    sy += ny * offset;
+                                    ex += nx * offset;
+                                    ey += ny * offset;
                                 }
                             }
 
@@ -581,7 +586,7 @@ export class MainScene extends Phaser.Scene {
                                 const speed = logCfg.arrowSpeed || 60;
                                 const spacing = logCfg.arrowSpacing || 40;
                                 const arrowOffset = (currentTime * speed) % spacing;
-                                
+
                                 this.logisticsGraphics.fillStyle(parseColor(logCfg.arrowColor), 0.9);
                                 for (let d = arrowOffset; d < alen - 10; d += spacing) {
                                     const px = sx + ux * d;
@@ -901,7 +906,7 @@ export class MainScene extends Phaser.Scene {
                     this.occupancyHuds.set(id, occG);
                 }
                 occG.clear();
-                occG.setDepth(500000 + ent.y + 0.5); 
+                occG.setDepth(500000 + ent.y + 0.5);
                 occG.setVisible(true);
                 this.drawWorkerLights(occG, ent, ent.x, ent.y, uw, uh, TS, 1.0);
             } else if (this.occupancyHuds.has(id)) {
@@ -1010,7 +1015,7 @@ export class MainScene extends Phaser.Scene {
 
         const state = GameEngine.state;
         const cam = this.cameras.main;
-        const worldView = cam.worldView; 
+        const worldView = cam.worldView;
         const TS = GameEngine.TILE_SIZE;
 
         const cfgRes = UI_CONFIG.ResourceSelection || {
@@ -1226,10 +1231,10 @@ export class MainScene extends Phaser.Scene {
 
             // 更新位置與縮放
             if (entity.gx !== undefined && typeof entity.type === 'number') {
-                const typeMap = { 
-                    1: 'SCENE_WOOD', 
-                    2: 'SCENE_STONE', 
-                    3: 'SCENE_FRUIT', 
+                const typeMap = {
+                    1: 'SCENE_WOOD',
+                    2: 'SCENE_STONE',
+                    3: 'SCENE_FRUIT',
                     4: 'SCENE_GOLD_ORE',
                     5: 'SCENE_IRON_ORE',
                     6: 'SCENE_COAL',
@@ -1278,7 +1283,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     getTextureKeyFromType(typeNum) {
-        const typeMap = { 
+        const typeMap = {
             1: 'tex_tree', 2: 'tex_stone', 3: 'tex_food', 4: 'tex_gold_ore',
             5: 'tex_iron_ore', 6: 'tex_coal', 7: 'tex_magic_herb',
             8: 'tex_wolf_corpse', 9: 'tex_bear_corpse',
@@ -1559,16 +1564,16 @@ export class MainScene extends Phaser.Scene {
         const visibleKeys = new Set();
 
         // 核心映射
-        const typeMap = { 
-            1: 'tree', 2: 'stone', 3: 'food', 4: 'gold_mine', 
-            5: 'iron_mine', 6: 'coal_mine', 7: 'magic_herb', 
+        const typeMap = {
+            1: 'tree', 2: 'stone', 3: 'food', 4: 'gold_mine',
+            5: 'iron_mine', 6: 'coal_mine', 7: 'magic_herb',
             8: 'wolf_corpse', 9: 'bear_corpse',
             10: 'crystal_mine', 11: 'copper_mine', 12: 'silver_mine', 13: 'mithril_mine'
         };
-        const typeNameMap = { 
-            1: 'SCENE_WOOD', 
-            2: 'SCENE_STONE', 
-            3: 'SCENE_FRUIT', 
+        const typeNameMap = {
+            1: 'SCENE_WOOD',
+            2: 'SCENE_STONE',
+            3: 'SCENE_FRUIT',
             4: 'SCENE_GOLD_MINE',
             5: 'SCENE_IRON_MINE',
             6: 'SCENE_COAL_MINE',
@@ -1663,7 +1668,7 @@ export class MainScene extends Phaser.Scene {
         }
         // 若池中無對象，新創一個 Image (資源貼圖皆以 tex_ 為前綴)
         const img = this.add.image(0, 0, `tex_${type}`);
-        img.setDepth(500000); 
+        img.setDepth(500000);
         this.resourceGroup.add(img);
         return img;
     }
@@ -1701,7 +1706,7 @@ export class MainScene extends Phaser.Scene {
         // isCraftingActive 由 SynthesisSystem 根據材料與工人充足情況更新
         const isWorking = !!ent.currentRecipe && !!ent.isCraftingActive && !ent.isUnderConstruction;
         const type1 = ent.type1 || ent.type;
-        
+
         // 特效即時開關
         const showEffect = isVisible && isWorking;
 
@@ -1737,8 +1742,8 @@ export class MainScene extends Phaser.Scene {
 
             // 顏色處理：兼容 tint, tints 以及 color
             const rawTint = cfg.tint || cfg.tints || cfg.color || cfg.colors;
-            const tintVal = Array.isArray(rawTint) 
-                ? rawTint.map(t => this.hexOrRgba(t).color) 
+            const tintVal = Array.isArray(rawTint)
+                ? rawTint.map(t => this.hexOrRgba(t).color)
                 : this.hexOrRgba(rawTint || "#ffffff").color;
 
             const emitterConfig = {
@@ -1761,19 +1766,19 @@ export class MainScene extends Phaser.Scene {
             }
 
             emitter = this.add.particles(ent.x, ent.y, 'fire_particle', emitterConfig);
-            emitter.setDepth(500000 + ent.y + 10); 
+            emitter.setDepth(500000 + ent.y + 10);
             this.emitters.set(eid, emitter);
         }
-        
+
         if (emitter.x !== ent.x || emitter.y !== ent.y) emitter.setPosition(ent.x, ent.y);
-        
+
         // [核心修正] 即時開關邏輯
         if (emitter.visible !== isVisible) {
             emitter.setVisible(isVisible);
             if (isVisible) {
                 // 確保發射器處於運行狀態並立即噴發
                 if (!emitter.emitting) emitter.start();
-                emitter.emitParticle(8); 
+                emitter.emitParticle(8);
             } else {
                 // 隱藏時停止發射
                 if (emitter.emitting) emitter.stop();
@@ -1823,7 +1828,7 @@ export class MainScene extends Phaser.Scene {
             nameTxt.setVisible(true);
             const ox = cfg.name.offsetX || 0;
             const oy = cfg.name.offsetY || 0;
-            
+
             // [還原] 尊重用戶在 ui_config.js 的原始偏移設置
             nameTxt.setPosition(visualX + ox, visualY + oy);
 
@@ -1855,7 +1860,7 @@ export class MainScene extends Phaser.Scene {
             lvTxt.setVisible(true);
             const lox = cfg.level.offsetX || 0;
             const loy = cfg.level.offsetY || 0;
-            
+
             // [還原] 尊重用戶在 ui_config.js 的原始偏移設置
             lvTxt.setPosition(visualX + lox, visualY + loy);
 
@@ -2127,11 +2132,11 @@ export class MainScene extends Phaser.Scene {
             g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
             g.lineStyle(2, 0x263238, finalAlpha);
             g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
-            
+
             // 屋頂
             g.fillStyle(0x37474f, finalAlpha);
             g.fillRect(offX - (uw * TS) / 2 - 2, offY - (uh * TS) / 2 - 5, uw * TS + 4, 10);
-            
+
             // 箱子符號 (📦 簡化版)
             g.fillStyle(0xffa726, finalAlpha);
             g.fillRect(offX - 10, offY - 10, 20, 20);
@@ -2162,24 +2167,24 @@ export class MainScene extends Phaser.Scene {
     drawWorkerLights(g, ent, offX, offY, uw, uh, TS, alpha) {
         // 只有已完成的加工廠才顯示
         if (ent.isUnderConstruction) return;
-        
+
         const cfg = UI_CONFIG.WorkerOccupancy || {
             lightWidth: 10, lightHeight: 5, spacing: 3, offsetY: -12,
             bgColor: "#212121", bgAlpha: 0.8, activeColor: "#76ff03", inactiveColor: "#424242"
         };
-        
+
         // 使用引擎標準方法獲獲取建築配置
         const bCfg = GameEngine.getBuildingConfig(ent.type1, ent.lv || 1);
         if (!bCfg || !bCfg.need_villagers || bCfg.need_villagers <= 0) return;
-        
+
         const max = bCfg.need_villagers;
         const current = (ent.assignedWorkers ? ent.assignedWorkers.length : 0);
-        
+
         const lw = cfg.lightWidth;
         const lh = cfg.lightHeight;
         const sp = cfg.spacing;
         const totalW = (lw + sp) * max - sp;
-        
+
         const startX = offX - totalW / 2;
         const startY = offY - (uh * TS) / 2 + cfg.offsetY;
 
@@ -2192,21 +2197,21 @@ export class MainScene extends Phaser.Scene {
         for (let i = 0; i < max; i++) {
             const lx = startX + i * (lw + sp);
             const isOn = i < current;
-            
+
             // 底座/空格 (黑色)
             g.fillStyle(this.hexOrRgba(cfg.inactiveColor).color, alpha);
             g.fillRect(lx, startY, lw, lh);
-            
+
             if (isOn) {
                 // 亮燈 (亮綠色)
                 const active = this.hexOrRgba(cfg.activeColor);
                 g.fillStyle(active.color, alpha);
                 g.fillRect(lx, startY, lw, lh);
-                
+
                 // 增加發光質感
                 g.fillStyle(0xffffff, alpha * 0.5);
                 g.fillRect(lx, startY, lw, 1.5);
-                
+
                 // 外發光
                 const glow = this.hexOrRgba(cfg.glowColor || "#b2ff59");
                 g.lineStyle(1, glow.color, alpha * (cfg.glowAlpha || 0.6));
@@ -2537,7 +2542,7 @@ export class MainScene extends Phaser.Scene {
         // ux, uy 是單位方向向量
         const px = -uy * (size * 0.6); // 垂直方向偏移
         const py = ux * (size * 0.6);
-        
+
         g.beginPath();
         g.moveTo(x + ux * size, y + uy * size); // 頂點
         g.lineTo(x - ux * size * 0.5 + px, y - uy * size * 0.5 + py); // 底角 1
@@ -2550,9 +2555,9 @@ export class MainScene extends Phaser.Scene {
      * [核心修補] 全域框選移動處理：支援 UI 穿透並實施邊界限制 (Clamping)
      */
     handleSelectionMove(e) {
-        if (window.GAME_STATE && window.GAME_STATE.logisticsDragLine) { 
-            if (this.marqueeGraphics) this.marqueeGraphics.visible = false; 
-            return; 
+        if (window.GAME_STATE && window.GAME_STATE.logisticsDragLine) {
+            if (this.marqueeGraphics) this.marqueeGraphics.visible = false;
+            return;
         }
         if (!this.selectionStartPos) return;
         if (this.marqueeGraphics) this.marqueeGraphics.visible = true;
@@ -2653,7 +2658,7 @@ export class MainScene extends Phaser.Scene {
                 const isDoubleClick = (GameEngine.state.lastSelectedUnitId === clickedUnit.id && (now - GameEngine.state.lastSelectionTime < 300));
                 if (isDoubleClick) {
                     const unitType = clickedUnit.config.type;
-                    const newlySelected = GameEngine.state.units.villagers.filter(v => 
+                    const newlySelected = GameEngine.state.units.villagers.filter(v =>
                         v.config && v.config.type === unitType && v.visible !== false &&
                         v.x >= cam.scrollX && v.x <= cam.scrollX + cam.width &&
                         v.y >= cam.scrollY && v.y <= cam.scrollY + cam.height);
@@ -2713,7 +2718,7 @@ export class MainScene extends Phaser.Scene {
                     const gx = searchGx + dx, gy = searchGy + dy;
                     const res = GameEngine.state.mapData.getResource(gx, gy);
                     if (!res) continue;
-                    const typeMap = { 
+                    const typeMap = {
                         1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD_ORE',
                         5: 'IRON_ORE', 6: 'COAL', 7: 'MAGIC_HERB',
                         8: 'WOLF_HIDE', 9: 'BEAR_PELT'
@@ -2849,10 +2854,10 @@ export class MainScene extends Phaser.Scene {
             const ry = gy * TS + TS / 2;
 
             // 讀取資源模型大小進行近似碰撞
-            const typeNameMap = { 
-                'tree': 'SCENE_WOOD', 
-                'stone': 'SCENE_STONE', 
-                'food': 'SCENE_FRUIT', 
+            const typeNameMap = {
+                'tree': 'SCENE_WOOD',
+                'stone': 'SCENE_STONE',
+                'food': 'SCENE_FRUIT',
                 'gold_ore': 'SCENE_GOLD_ORE',
                 'iron_ore': 'SCENE_IRON_ORE',
                 'coal': 'SCENE_COAL',

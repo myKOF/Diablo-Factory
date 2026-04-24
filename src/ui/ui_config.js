@@ -718,7 +718,7 @@ export const UI_CONFIG = {
         depth: 150,                     // 渲染深度 (位於地面之上，單位之下)
 
         // --- 動畫與視覺優化 ---
-        arrowColor: "#ff8800ff",        // 箭頭顏色 (亮橘)
+        arrowColor: "#00ffeaff",        // 箭頭顏色 (亮橘)
         arrowSize: 8,                   // 箭頭大小
         arrowSpeed: 30,                 // 箭頭前進速度 (像素/秒)
         arrowSpacing: 20,               // 箭頭之間的間距
