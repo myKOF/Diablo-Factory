@@ -32,20 +32,42 @@ export class SynthesisSystem {
         return recipes;
     }
 
-    /**
-     * 2. 獲取建築的生產選單 (供 UI 呼叫)
-     * 找出該類型建築的所有配方，並標記是否解鎖 (isUnlocked)
-     */
     static getBuildingRecipes(state, engine, building) {
-        // 1. 從 Config 取得該建築類型設定的 ingredients_production_raw
-        const cfg = engine.getEntityConfig(building.type1, building.lv);
-        if (!cfg || !cfg.ingredients_production_raw) return [];
+        // 1. 取得當前建築配置，判斷是否為加工廠 (type2 === 'processing_plant')
+        const currentCfg = engine.getEntityConfig(building.type1, building.lv);
+        if (!currentCfg) return [];
 
-        // 2. 解析配方
-        const recipes = this.parseRecipes(cfg.ingredients_production_raw);
+        const isProcessingPlant = currentCfg.type2 === 'processing_plant';
+        let recipes = [];
 
-        // 3. 比對 building.lv 與 reqLv，加入 isUnlocked 標記
-        return recipes.map(r => ({
+        if (isProcessingPlant && state.buildingConfigsByType && state.buildingConfigsByType[building.type1]) {
+            // [核心修正] 加工廠顯示所有定義的唯一配方，不再按類型去重
+            const allLevels = state.buildingConfigsByType[building.type1];
+            const recipeMap = new Map(); // 用於去除完全重複的配方定義 (避免 CSV 配置重疊)
+
+            for (let lvKey in allLevels) {
+                const lvCfg = allLevels[lvKey];
+                if (lvCfg && lvCfg.ingredients_production_raw) {
+                    const parsed = this.parseRecipes(lvCfg.ingredients_production_raw);
+                    parsed.forEach(r => {
+                        // 建立唯一鍵 (類型+產量+需求等級)，確保相同配方不重複，但不同產量/等級的同型材料都會顯示
+                        const key = `${r.type}_${r.amount}_${r.reqLv}`;
+                        if (!recipeMap.has(key)) {
+                            recipeMap.set(key, r);
+                        }
+                    });
+                }
+            }
+            recipes = Array.from(recipeMap.values());
+        } else {
+            // 一般建築：僅顯示當前等級配置的配方
+            if (currentCfg.ingredients_production_raw) {
+                recipes = this.parseRecipes(currentCfg.ingredients_production_raw);
+            }
+        }
+
+        // 2. 最終處理：按解鎖等級排序，並注入 isUnlocked 狀態
+        return recipes.sort((a, b) => a.reqLv - b.reqLv).map(r => ({
             ...r,
             isUnlocked: building.lv >= r.reqLv
         }));
@@ -56,20 +78,14 @@ export class SynthesisSystem {
      */
     static setCraftingTarget(state, engine, building, recipe) {
         if (!recipe.isUnlocked) return false;
+        building.currentRecipe = recipe;
+        building.craftingProgress = 0;
         
-        // 初始化隊列
-        if (!building.recipeQueue) building.recipeQueue = [];
-        
-        // 加入隊列 (深拷貝配方物件)
-        building.recipeQueue.push({ ...recipe });
-        
-        // 若當前沒有正在生產，則立即開始
-        if (!building.currentRecipe) {
-            building.currentRecipe = building.recipeQueue.shift();
-            building.craftingProgress = 0;
-        }
-        
-        engine.addLog(`[加工廠] ${building.name || building.type1} 已加入隊列：${recipe.type} (當前隊列：${building.recipeQueue.length})`);
+        // 初始化物流緩衝區
+        if (!building.inputBuffer) building.inputBuffer = {};
+        if (!building.outputBuffer) building.outputBuffer = {};
+
+        engine.addLog(`[加工廠] ${building.name} 已設定生產線：${recipe.type} (材料充足即自動運轉)`);
         return true;
     }
 
@@ -77,44 +93,63 @@ export class SynthesisSystem {
      * 4. 核心生產循環 (在 GameEngine 的 logicTick 中呼叫)
      */
     static update(state, engine, deltaTime) {
-        if (!state.mapEntities) return;
-
         state.mapEntities.forEach(ent => {
             if (!ent.currentRecipe || ent.isUnderConstruction) return;
             
-            const cfg = engine.getEntityConfig(ent.type1, ent.lv);
+            const cfg = engine.getEntityConfig(ent.type1 || ent.type, ent.lv);
             if (!cfg) return;
 
             const needVillagers = cfg.need_villagers || 1;
             const currentWorkers = ent.assignedWorkers ? ent.assignedWorkers.length : 0;
             const efficiency = Math.min(1.0, currentWorkers / needVillagers);
 
-            if (efficiency <= 0) return;
+            if (efficiency <= 0) {
+                ent.isCraftingActive = false;
+                return;
+            }
+
+            if (!ent.inputBuffer) ent.inputBuffer = {};
+            if (!ent.outputBuffer) ent.outputBuffer = {};
 
             const ingCfg = state.ingredientConfigs ? state.ingredientConfigs[ent.currentRecipe.type] : null;
             const baseTime = ingCfg ? (ingCfg.craftTime || 5) : 5;
+            const needs = ingCfg ? ingCfg.need_ingredients : {};
 
+            // 1. 自動化檢測：檢查 inputBuffer 中的材料是否足夠
+            let hasEnoughIngredients = true;
+            if (needs) {
+                for (let r in needs) {
+                    if ((ent.inputBuffer[r] || 0) < needs[r]) {
+                        hasEnoughIngredients = false;
+                        break;
+                    }
+                }
+            }
+
+            // 材料不足時暫停進度條，但不取消配方 (等待物流送達)
+            if (!hasEnoughIngredients) {
+                ent.isCraftingActive = false;
+                return; 
+            }
+
+            // 2. 開始自動生產
+            ent.isCraftingActive = true;
             if (ent.craftingProgress === undefined) ent.craftingProgress = 0;
             ent.craftingProgress += (deltaTime / baseTime) * efficiency;
 
+            // 3. 生產結算 (無限循環)
             if (ent.craftingProgress >= 1.0) {
                 ent.craftingProgress = 0;
-                if (state.resources[ent.currentRecipe.type] !== undefined) {
-                    state.resources[ent.currentRecipe.type] += ent.currentRecipe.amount;
-                } else {
-                    state.resources[ent.currentRecipe.type] = ent.currentRecipe.amount;
+                
+                // 扣除輸入緩衝區的原料
+                if (needs) {
+                    for (let r in needs) {
+                        ent.inputBuffer[r] -= needs[r];
+                    }
                 }
-
-                // [新功能] 觸發產出視覺回饋 (小圖示 +1)
-                EffectSystem.onResourceProduced(ent.x, ent.y, ent.currentRecipe.type, ent.currentRecipe.amount);
-
-                // 處理隊列：從隊列中提取下一個任務
-                if (ent.recipeQueue && ent.recipeQueue.length > 0) {
-                    ent.currentRecipe = ent.recipeQueue.shift();
-                } else {
-                    // 若無隊列，則清空當前生產，停止工作
-                    ent.currentRecipe = null;
-                }
+                // 將成品放入輸出緩衝區 (不再直接全域加總)
+                const outType = ent.currentRecipe.type;
+                ent.outputBuffer[outType] = (ent.outputBuffer[outType] || 0) + ent.currentRecipe.amount;
             }
         });
     }

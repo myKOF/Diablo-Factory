@@ -668,7 +668,8 @@ export const UI_CONFIG = {
             alpha: { start: 0.5, end: 0 },
             tint: "#aaaaaa", // 淺灰煙
             frequency: 150,
-            spreadX: 15
+            spreadX: 15,
+            offsetY: -80    // [新增] 使煙霧從建築頂部冒出
         },
         sparks: {
             lifespan: 500,
@@ -704,5 +705,23 @@ export const UI_CONFIG = {
         lockedItemTint: 0x555555,        // 未解鎖項目的色調 (置灰效果)
         progressBarColor: "#4caf50",    // 生產進度條填充顏色 (綠色)
         workerEfficiencyText: "生產效率: {0}%" // 效率顯示文字格式，{0} 會被替換為百分比數字
+    },
+
+    // -- 物流連線系統 (LogisticsSystem) --------------------------
+    LogisticsSystem: {
+        lineThickness: 10,           // 拖拽中連線的寬度
+        lineColor: "#0077ffff",           // 已建立連線的顏色 (綠色)
+        lineAlpha: 0.6,
+        dragLineThickness: 10,           // 拖拽中連線的寬度
+        dragLineColor: "#ff8800ff",       // 拖拽中連線的顏色 (淡綠)
+        dragLineAlpha: 0.8,
+        depth: 150,                     // 渲染深度 (位於地面之上，單位之下)
+
+        // --- 動畫與視覺優化 ---
+        arrowColor: "#ff8800ff",        // 箭頭顏色 (亮橘)
+        arrowSize: 8,                   // 箭頭大小
+        arrowSpeed: 30,                 // 箭頭前進速度 (像素/秒)
+        arrowSpacing: 20,               // 箭頭之間的間距
+        lineOffset: 10                   // 雙向連線時的錯開距離 (像素)
     }
 };

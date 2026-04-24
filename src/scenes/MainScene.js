@@ -132,6 +132,12 @@ export class MainScene extends Phaser.Scene {
         this.targetGraphics = this.add.graphics();
         this.targetGraphics.setDepth(10); // 確保在所有實體之下 (depth 以 Y 為準)
 
+        if (!this.logisticsGraphics) { 
+            this.logisticsGraphics = this.add.graphics(); 
+            const logCfg = UI_CONFIG.LogisticsSystem || { depth: 150 };
+            this.logisticsGraphics.setDepth(logCfg.depth); 
+        }
+
         // 相機控制
         this.lastCamX = -9999;
         this.lastCamY = -9999;
@@ -508,6 +514,93 @@ export class MainScene extends Phaser.Scene {
         const deltaTime = delta / 1000;
         const state = window.GAME_STATE;
         if (!state) return;
+
+        if (this.logisticsGraphics && window.GAME_STATE) {
+            this.logisticsGraphics.clear();
+            const state = window.GAME_STATE;
+            const logCfg = UI_CONFIG.LogisticsSystem || {
+                lineThickness: 3, lineColor: "#4caf50", lineAlpha: 0.6,
+                dragLineColor: "#8bc34a", dragLineAlpha: 0.8,
+                arrowColor: "#ff8800ff", arrowSize: 8, arrowSpeed: 60, arrowSpacing: 40, lineOffset: 8
+            };
+            const parseColor = (c) => this.hexOrRgba(c).color;
+            const currentTime = this.time.now / 1000;
+
+            // 輔助函數：獲取穩定且一致的實體 ID
+            const getEntId = (e) => e.id || `${e.type1}_${e.x}_${e.y}`;
+
+            // 1. 建立連線地圖以檢測雙向連線
+            const connMap = new Map();
+            if (state.mapEntities) {
+                state.mapEntities.forEach(ent => {
+                    if (ent.outputTargetId) {
+                        connMap.set(getEntId(ent), ent.outputTargetId);
+                    }
+                });
+
+                state.mapEntities.forEach(ent => {
+                    if (ent.outputTargetId) {
+                        const sid = getEntId(ent);
+                        const targetId = ent.outputTargetId;
+                        
+                        // 增強型查找：同時匹配實體 ID 與座標 ID
+                        const target = state.mapEntities.find(e => getEntId(e) === targetId || e.id === targetId);
+                        
+                        if (target) {
+                            let sx = ent.x, sy = ent.y, ex = target.x, ey = target.y;
+                            const tsid = getEntId(target);
+                            
+                            // 2. 雙向連線錯開邏輯 (使用穩定 ID 比較)
+                            if (connMap.get(tsid) === sid || connMap.get(target.id) === sid) {
+                                const dx = ex - sx, dy = ey - sy;
+                                const dist = Math.hypot(dx, dy);
+                                if (dist > 0) {
+                                    const nx = -dy / dist;
+                                    const ny = dx / dist;
+                                    const offset = logCfg.lineOffset || 8;
+                                    const dir = sid < tsid ? 1 : -1;
+                                    sx += nx * offset * dir;
+                                    sy += ny * offset * dir;
+                                    ex += nx * offset * dir;
+                                    ey += ny * offset * dir;
+                                }
+                            }
+
+                            // 繪製線條
+                            this.logisticsGraphics.lineStyle(logCfg.lineThickness, parseColor(logCfg.lineColor), logCfg.lineAlpha);
+                            this.logisticsGraphics.beginPath();
+                            this.logisticsGraphics.moveTo(sx, sy);
+                            this.logisticsGraphics.lineTo(ex, ey);
+                            this.logisticsGraphics.strokePath();
+
+                            // 3. 繪製箭頭動畫
+                            const adx = ex - sx, ady = ey - sy;
+                            const alen = Math.hypot(adx, ady);
+                            if (alen > 20) {
+                                const ux = adx / alen, uy = ady / alen;
+                                const speed = logCfg.arrowSpeed || 60;
+                                const spacing = logCfg.arrowSpacing || 40;
+                                const arrowOffset = (currentTime * speed) % spacing;
+                                
+                                this.logisticsGraphics.fillStyle(parseColor(logCfg.arrowColor), 0.9);
+                                for (let d = arrowOffset; d < alen - 10; d += spacing) {
+                                    const px = sx + ux * d;
+                                    const py = sy + uy * d;
+                                    this.drawArrowhead(this.logisticsGraphics, px, py, ux, uy, logCfg.arrowSize || 8);
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            if (state.logisticsDragLine) {
+                this.logisticsGraphics.lineStyle(logCfg.dragLineThickness || logCfg.lineThickness, parseColor(logCfg.dragLineColor), logCfg.dragLineAlpha);
+                this.logisticsGraphics.beginPath();
+                this.logisticsGraphics.moveTo(state.logisticsDragLine.startX, state.logisticsDragLine.startY);
+                this.logisticsGraphics.lineTo(state.logisticsDragLine.endX, state.logisticsDragLine.endY);
+                this.logisticsGraphics.strokePath();
+            }
+        }
 
         // RTS 邊緣捲動實作
         this.updateEdgeScrolling(deltaTime);
@@ -1604,8 +1697,9 @@ export class MainScene extends Phaser.Scene {
      * [核心特效] 處理加工廠運作時的粒子效果 (煙霧、火花)
      */
     handleWorkingEffects(id, ent, isVisible) {
-        // [核心修復] 回歸以配方存在為準，移除可能導致不顯示的效率檢查
-        const isWorking = !!ent.currentRecipe && !ent.isUnderConstruction;
+        // [核心修復] 必須同時具備配方且處於「活動生產」狀態才顯示特效
+        // isCraftingActive 由 SynthesisSystem 根據材料與工人充足情況更新
+        const isWorking = !!ent.currentRecipe && !!ent.isCraftingActive && !ent.isUnderConstruction;
         const type1 = ent.type1 || ent.type;
         
         // 特效即時開關
@@ -2437,15 +2531,44 @@ export class MainScene extends Phaser.Scene {
     }
 
     /**
+     * 繪製指向性箭頭
+     */
+    drawArrowhead(g, x, y, ux, uy, size) {
+        // ux, uy 是單位方向向量
+        const px = -uy * (size * 0.6); // 垂直方向偏移
+        const py = ux * (size * 0.6);
+        
+        g.beginPath();
+        g.moveTo(x + ux * size, y + uy * size); // 頂點
+        g.lineTo(x - ux * size * 0.5 + px, y - uy * size * 0.5 + py); // 底角 1
+        g.lineTo(x - ux * size * 0.5 - px, y - uy * size * 0.5 - py); // 底角 2
+        g.closePath();
+        g.fillPath();
+    }
+
+    /**
      * [核心修補] 全域框選移動處理：支援 UI 穿透並實施邊界限制 (Clamping)
      */
     handleSelectionMove(e) {
+        if (window.GAME_STATE && window.GAME_STATE.logisticsDragLine) { 
+            if (this.marqueeGraphics) this.marqueeGraphics.visible = false; 
+            return; 
+        }
         if (!this.selectionStartPos) return;
+        if (this.marqueeGraphics) this.marqueeGraphics.visible = true;
+
         const cam = this.cameras.main;
 
-        // 如果傳入 e，解析最新位置；否則使用最後記錄的位置
+        // [核心修復] 相容 Phaser Pointer 與原生 DOM MouseEvent
+        // Phaser Pointer 沒有 clientX，但有 x (螢幕座標)
         if (e) {
-            this.lastLocalMouse = window.UIManager ? window.UIManager.getLocalMouse(e) : { x: e.clientX, y: e.clientY };
+            if (e.clientX !== undefined) {
+                // DOM MouseEvent
+                this.lastLocalMouse = window.UIManager ? window.UIManager.getLocalMouse(e) : { x: e.clientX, y: e.clientY };
+            } else {
+                // Phaser Pointer
+                this.lastLocalMouse = { x: e.x, y: e.y };
+            }
         }
 
         if (!this.lastLocalMouse) return;
@@ -2469,6 +2592,7 @@ export class MainScene extends Phaser.Scene {
      * [核心修補] 全域框選結束處理：解決鼠標移出視窗後鎖死的問題
      */
     handleSelectionEnd(e) {
+        if (window.GAME_STATE && window.GAME_STATE.logisticsDragLine) return;
         if (!this.selectionStartPos) return;
 
         const isPhaserPointer = !!e.worldX;

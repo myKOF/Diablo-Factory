@@ -10,6 +10,7 @@ import { SynthesisSystem } from "../systems/SynthesisSystem.js";
 export class UIManager {
     static uiLayer;
     static dragGhost = null;
+    static logisticsSourceEntity = null;
     static activeBuilding = null;
     static logHeight = 200; // 預設日誌高度
     static isResizingLog = false;
@@ -513,7 +514,7 @@ export class UIManager {
             position: absolute; display: none; width: 18px; height: 18px;
             background: rgba(244, 67, 54, 0.9); color: white; border: 1px solid #fff;
             border-radius: 3px; align-items: center; justify-content: center;
-            cursor: pointer; font-size: 14px; font-weight: bold; z-index: 1100;
+            cursor: pointer; font-size: 14px; font-weight: bold; z-index: 5;
             pointer-events: auto; box-shadow: 0 2px 5px rgba(0,0,0,0.5);
             transition: transform 0.1s;
         `;
@@ -863,7 +864,35 @@ export class UIManager {
         // 僅處理左鍵
         if (e.button !== 0) return;
 
+        // --- [新增] 物流連線起點 (先選中才能拉線) ---
+        const local = this.getLocalMouse(e);
+        const scene = window.PhaserScene;
+        const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
+        const worldX = local.x - cam.x;
+        const worldY = local.y - cam.y;
+        
+        const clickedBuilding = GameEngine.state.mapEntities.find(ent => {
+            const validTypes = ['timber_processing_plant', 'smelting_plant', 'tank_workshop', 'stone_processing_plant', 'barn', 'warehouse'];
+            if (!validTypes.includes(ent.type1) || ent.isUnderConstruction) return false;
+            const cfg = GameEngine.getEntityConfig(ent.type1);
+            if (!cfg) return false;
+            const em = cfg.size ? cfg.size.match(/\{\s*(\d+)\s*,\s*(\d+)\s*\}/) : null;
+            const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE;
+            const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
+            return worldX > ent.x - w / 2 && worldX < ent.x + w / 2 && worldY > ent.y - h / 2 && worldY < ent.y + h / 2;
+        });
+
         this.leftMouseDownPos = { x: e.clientX, y: e.clientY };
+
+        if (clickedBuilding && GameEngine.state.buildingMode === 'NONE') {
+            const bid = clickedBuilding.id || `${clickedBuilding.type1}_${clickedBuilding.x}_${clickedBuilding.y}`;
+            const isSelected = GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(bid);
+            if (isSelected) {
+                this.logisticsSourceEntity = clickedBuilding;
+                GameEngine.state.logisticsDragLine = { startX: clickedBuilding.x, startY: clickedBuilding.y, endX: worldX, endY: worldY };
+                return; // 攔截事件
+            }
+        }
 
         const state = GameEngine.state;
         if (state.buildingMode === 'STAMP') {
@@ -874,6 +903,16 @@ export class UIManager {
     }
 
     static handleWorldMouseMove(e) {
+        // --- [新增] 更新物流連線預覽 ---
+        if (this.logisticsSourceEntity && GameEngine.state.logisticsDragLine) {
+            const local = this.getLocalMouse(e);
+            const scene = window.PhaserScene;
+            const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
+            GameEngine.state.logisticsDragLine.endX = local.x - cam.x;
+            GameEngine.state.logisticsDragLine.endY = local.y - cam.y;
+            return;
+        }
+
         const state = GameEngine.state;
         if (!state.placingType) return;
 
@@ -910,6 +949,37 @@ export class UIManager {
 
         // [左鍵邏輯專區]
         if (e.button !== 0) return;
+
+        // --- [新增] 物流連線綁定 ---
+        if (this.logisticsSourceEntity) {
+            const local = this.getLocalMouse(e);
+            const scene = window.PhaserScene;
+            const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
+            const worldX = local.x - cam.x;
+            const worldY = local.y - cam.y;
+
+            const targetBuilding = GameEngine.state.mapEntities.find(ent => {
+                if (ent === this.logisticsSourceEntity || ent.isUnderConstruction) return false;
+                const validTypes = ['timber_processing_plant', 'smelting_plant', 'tank_workshop', 'stone_processing_plant', 'barn', 'warehouse', 'village', 'town_center'];
+                if (!validTypes.includes(ent.type1)) return false;
+                const cfg = GameEngine.getEntityConfig(ent.type1);
+                const em = cfg && cfg.size ? cfg.size.match(/\{\s*(\d+)\s*,\s*(\d+)\s*\}/) : null;
+                const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE;
+                const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
+                return worldX > ent.x - w / 2 && worldX < ent.x + w / 2 && worldY > ent.y - h / 2 && worldY < ent.y + h / 2;
+            });
+
+            if (targetBuilding) {
+                this.logisticsSourceEntity.outputTargetId = targetBuilding.id || `${targetBuilding.type1}_${targetBuilding.x}_${targetBuilding.y}`;
+                GameEngine.addLog(`[物流] 連線建立：${this.logisticsSourceEntity.name || this.logisticsSourceEntity.type1} ➡️ ${targetBuilding.name || targetBuilding.type1}`);
+            } else {
+                this.logisticsSourceEntity.outputTargetId = null;
+                GameEngine.addLog(`[物流] 取消輸出連線。`);
+            }
+            this.logisticsSourceEntity = null;
+            GameEngine.state.logisticsDragLine = null;
+            return;
+        }
 
         const state = GameEngine.state;
         if (state.buildingMode === 'DRAG') {
@@ -2015,7 +2085,7 @@ export class UIManager {
                 const halfW = (uw * GameEngine.TILE_SIZE) / 2;
                 const halfH = (uh * GameEngine.TILE_SIZE) / 2;
 
-                // sx, sy 是建築中心，將 18x18 的按鈕精確對齊至模型右上角的內部
+                // sx, sy 是建築中心，回歸至模型右上角對齊
                 dBtn.style.left = `${sx + halfW - 20}px`;
                 dBtn.style.top = `${sy - halfH}px`;
             }

@@ -42,7 +42,7 @@ export class WorkerSystem {
         }
     }
 
-    updateVillagerMovement(v, dt) {
+    updateVillagerMovement(v, deltaTime) {
         const TILE_SIZE = 20; // 基礎座標單位 (與 GameEngine.TILE_SIZE 保持一致)
 
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
@@ -53,7 +53,7 @@ export class WorkerSystem {
             const moveSpeed = moveBaseSpeed * 13;
             if (v.idleTarget) {
                 if (v.state !== 'CHASE' && v.state !== 'ATTACK' && v.state !== 'GATHERING') v.state = 'MOVING';
-                this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt);
+                this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, deltaTime);
                 if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
                     v.idleTarget = null;
                     v.commandCenter = null;
@@ -75,7 +75,7 @@ export class WorkerSystem {
                 }
             } else if (v.state === 'IDLE' && v.config.patrol_range > 0) {
                 if (v.waitTimer > 0) {
-                    v.waitTimer -= dt;
+                    v.waitTimer -= deltaTime;
                 } else {
                     const pr = v.config.patrol_range * TILE_SIZE;
                     const angle = Math.random() * Math.PI * 2;
@@ -202,18 +202,84 @@ export class WorkerSystem {
                         this.engine.addLog(`[派駐完成] ${v.configName || '工人'} 已進入 ${v.factoryTarget.name || v.factoryTarget.type1} 開始加工。`, 'TASK');
                     }
                 } else {
-                    this.moveDetailed(v, v.factoryTarget.x, v.factoryTarget.y, moveSpeed, dt, ignoreEnts);
+                    this.moveDetailed(v, v.factoryTarget.x, v.factoryTarget.y, moveSpeed, deltaTime, ignoreEnts);
                 }
                 break;
-            case 'WORKING_IN_FACTORY':
-                // 在工廠內工作，不執行移動邏輯，僅確保狀態鎖定
+            case 'WORKING_IN_FACTORY': {
+                // --- [新增] 流水線物流狀態 ---
+                // 1. 確保工人知道自己在哪間工廠 (相容 ID 綁定)
+                const factoryId = v.assignedWarehouseId || (v.targetId && v.targetId.id) || v.targetId;
+                const factory = typeof factoryId === 'string' ? this.engine.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === factoryId) : factoryId;
+                
+                if (factory && factory.outputTargetId && factory.outputBuffer) {
+                    // 2. 檢查是否有成品可以運送
+                    for (let resType in factory.outputBuffer) {
+                        if (factory.outputBuffer[resType] >= 1) {
+                            // 取出 1 個成品準備運送
+                            factory.outputBuffer[resType] -= 1;
+                            v.cargoType = resType;
+                            v.cargoAmount = 1;
+                            v.state = 'TRANSPORTING_LOGISTICS';
+                            v.logisticsTargetId = factory.outputTargetId;
+                            v.logisticsHomeId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
+                            v.visible = true; // 顯示搬運工
+                            this.engine.addLog(`[物流] 工人從 ${factory.name} 出發運送 ${this.engine.RESOURCE_NAMES[resType] || resType}`);
+                            break; 
+                        }
+                    }
+                }
                 v.pathTarget = null;
                 v.fullPath = null;
                 break;
+            }
+            case 'TRANSPORTING_LOGISTICS': {
+                const target = this.engine.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.logisticsTargetId);
+                if (!target) {
+                    v.state = 'RETURNING_TO_FACTORY'; // 目標消失，打道回府
+                    break;
+                }
+                
+                // 移動至目標
+                this.moveTowards(v, target.x, target.y, v.moveSpeed, deltaTime);
+                
+                // 抵達判定
+                if (Math.hypot(v.x - target.x, v.y - target.y) < 30) {
+                    if (!target.inputBuffer) target.inputBuffer = {};
+                    
+                    // 若目標是倉庫或城鎮中心，直接存入全域資源；否則存入目標工廠的輸入緩衝區
+                    if (['warehouse', 'barn', 'town_center', 'village'].includes(target.type1)) {
+                        if (this.engine.state.resources[v.cargoType] !== undefined) {
+                            this.engine.state.resources[v.cargoType] += v.cargoAmount;
+                        }
+                    } else {
+                        target.inputBuffer[v.cargoType] = (target.inputBuffer[v.cargoType] || 0) + v.cargoAmount;
+                    }
+                    
+                    v.cargoType = null;
+                    v.cargoAmount = 0;
+                    v.state = 'RETURNING_TO_FACTORY';
+                }
+                break;
+            }
+            case 'RETURNING_TO_FACTORY': {
+                const home = this.engine.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.logisticsHomeId);
+                if (!home) {
+                    this.restoreVillagerTask(v); // 家沒了，重新分配任務
+                    break;
+                }
+                
+                this.moveTowards(v, home.x, home.y, v.moveSpeed, deltaTime);
+                
+                if (Math.hypot(v.x - home.x, v.y - home.y) < 30) {
+                    v.state = 'WORKING_IN_FACTORY'; // 回到工廠繼續打卡
+                    // v.visible = false; // (可選)
+                }
+                break;
+            }
             case 'IDLE':
                 if (v.vTint !== 0xffffff) v.vTint = 0xffffff;
                 if (v.idleTarget) {
-                    this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt, ignoreEnts);
+                    this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, deltaTime, ignoreEnts);
                     if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 10) {
                         v.idleTarget = null;
                         v.commandCenter = null;
@@ -228,7 +294,7 @@ export class WorkerSystem {
                 break;
             case 'CHASE':
                 if (v.idleTarget) {
-                    this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, dt, ignoreEnts);
+                    this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, deltaTime, ignoreEnts);
                 }
                 break;
             case 'ATTACK':
@@ -306,12 +372,12 @@ export class WorkerSystem {
                             this.engine.addLog(`[尋路目標] ${v.configName || '工人'} 正在前往目標 (${Math.round(v.gatherPoint.x)}, ${Math.round(v.gatherPoint.y)})`, 'PATH');
                             v._lastLogPath = (target.id || 'target');
                         }
-                        this.moveDetailed(v, v.gatherPoint.x, v.gatherPoint.y, moveSpeed, dt, ignoreEnts);
+                        this.moveDetailed(v, v.gatherPoint.x, v.gatherPoint.y, moveSpeed, deltaTime, ignoreEnts);
                     }
                 } else { v.state = 'IDLE'; v.pathTarget = null; v.gatherPoint = null; v.workOffset = null; v.vTint = 0xffffff; }
                 break;
             case 'GATHERING':
-                v.gatherTimer += dt;
+                v.gatherTimer += deltaTime;
                 const harvestTime = v.config.collection_speed || 2;
                 if (!v.targetId) {
                     v.state = 'IDLE';
@@ -510,7 +576,7 @@ export class WorkerSystem {
                         this.engine.addLog(`[存入完成] ${v.configName || '工人'} 已清空背包，繼續採集`, 'TASK');
                     }
                 } else {
-                    this.moveDetailed(v, v.depositPoint.x, v.depositPoint.y, moveSpeed, dt, ignoreEnts);
+                    this.moveDetailed(v, v.depositPoint.x, v.depositPoint.y, moveSpeed, deltaTime, ignoreEnts);
                 }
                 break;
             case 'MOVING_TO_CONSTRUCTION':
@@ -558,7 +624,7 @@ export class WorkerSystem {
                     v.commandCenter = null;
                     v._stableConstructionTarget = null;
                 } else {
-                    this.moveDetailed(v, txC_pos, tyC_pos, moveSpeed, dt, ignoreEnts);
+                    this.moveDetailed(v, txC_pos, tyC_pos, moveSpeed, deltaTime, ignoreEnts);
                 }
                 break;
             case 'CONSTRUCTING':
@@ -571,7 +637,7 @@ export class WorkerSystem {
                 }
 
                 v.constructionTarget.name = "施工中";
-                v.constructionTarget.buildProgress += dt;
+                v.constructionTarget.buildProgress += deltaTime;
                 const targetBuildTime = Math.max(0.1, v.constructionTarget.buildTime || 5);
 
                 if (v.constructionTarget.buildProgress >= targetBuildTime) {
