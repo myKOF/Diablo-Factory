@@ -529,72 +529,40 @@ export class MainScene extends Phaser.Scene {
             const getCoordId = (e) => `${e.type1}_${e.x}_${e.y}`;
 
             // 1. 建立冗餘連線地圖 (同時支援 ID 與座標查詢)
-            const connMap = new Map();
             if (state.mapEntities) {
                 state.mapEntities.forEach(ent => {
-                    if (ent.outputTargetId) {
-                        const cid = getCoordId(ent);
-                        connMap.set(cid, ent.outputTargetId);
-                        if (ent.id) connMap.set(ent.id, ent.outputTargetId);
-                    }
-                });
-
-                state.mapEntities.forEach(ent => {
-                    if (ent.outputTargetId) {
-                        const rid = ent.id;
-                        const cid = getCoordId(ent);
-                        const targetId = ent.outputTargetId;
-
-                        // 全路徑查找目標
-                        const target = state.mapEntities.find(e => e.id === targetId || getCoordId(e) === targetId);
-
-                        if (target) {
-                            let sx = ent.x, sy = ent.y, ex = target.x, ey = target.y;
-                            const t_rid = target.id;
-                            const t_cid = getCoordId(target);
-
-                            // 2. 判定雙向連線 (檢查所有可能的 ID 組合)
-                            const targetSendsTo = connMap.get(targetId) || (t_rid && connMap.get(t_rid)) || connMap.get(t_cid);
-                            const isReciprocal = (targetSendsTo === rid || targetSendsTo === cid);
-
-                            if (isReciprocal) {
-                                const dx = ex - sx, dy = ey - sy;
-                                const dist = Math.hypot(dx, dy);
-                                if (dist > 0) {
-                                    const nx = -dy / dist, ny = dx / dist;
-                                    const offset = logCfg.lineOffset || 10;
-                                    // 兩條線分別向各自方向的「左側」法向量位移，自然會達成對稱錯開
-                                    sx += nx * offset;
-                                    sy += ny * offset;
-                                    ex += nx * offset;
-                                    ey += ny * offset;
+                    if (ent.outputTargets && ent.outputTargets.length > 0) {
+                        ent.outputTargets.forEach(conn => {
+                            const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
+                            if (target) {
+                                let sx = ent.x, sy = ent.y, ex = target.x, ey = target.y;
+                                const isReciprocal = target.outputTargets && target.outputTargets.find(t => (t.id === (ent.id || getCoordId(ent))));
+                                if (isReciprocal) {
+                                    const dx = ex - sx, dy = ey - sy; const dist = Math.hypot(dx, dy);
+                                    if (dist > 0) {
+                                        const nx = -dy / dist, ny = dx / dist; const offset = logCfg.lineOffset || 10;
+                                        sx += nx * offset; sy += ny * offset; ex += nx * offset; ey += ny * offset;
+                                    }
+                                }
+                                const isSelected = (window.UIManager.activeLogisticsConnection &&
+                                                  window.UIManager.activeLogisticsConnection.source === ent &&
+                                                  window.UIManager.activeLogisticsConnection.targetId === conn.id);
+                                const lColor = isSelected ? (logCfg.selectedLineColor || "#ffff00") : logCfg.lineColor;
+                                const lAlpha = isSelected ? (logCfg.selectedLineAlpha || 1.0) : logCfg.lineAlpha;
+                                this.logisticsGraphics.lineStyle(logCfg.lineThickness, parseColor(lColor), lAlpha);
+                                this.logisticsGraphics.beginPath(); this.logisticsGraphics.moveTo(sx, sy); this.logisticsGraphics.lineTo(ex, ey); this.logisticsGraphics.strokePath();
+                                const adx = ex - sx, ady = ey - sy; const alen = Math.hypot(adx, ady);
+                                if (alen > 20) {
+                                    const ux = adx / alen, uy = ady / alen;
+                                    const speed = logCfg.arrowSpeed || 60; const spacing = logCfg.arrowSpacing || 40;
+                                    const arrowOffset = (currentTime * speed) % spacing;
+                                    this.logisticsGraphics.fillStyle(parseColor(logCfg.arrowColor), 0.9);
+                                    for (let d = arrowOffset; d < alen - 10; d += spacing) {
+                                        this.drawArrowhead(this.logisticsGraphics, sx + ux * d, sy + uy * d, ux, uy, logCfg.arrowSize || 8);
+                                    }
                                 }
                             }
-
-                            // 繪製線條
-                            this.logisticsGraphics.lineStyle(logCfg.lineThickness, parseColor(logCfg.lineColor), logCfg.lineAlpha);
-                            this.logisticsGraphics.beginPath();
-                            this.logisticsGraphics.moveTo(sx, sy);
-                            this.logisticsGraphics.lineTo(ex, ey);
-                            this.logisticsGraphics.strokePath();
-
-                            // 3. 繪製箭頭動畫
-                            const adx = ex - sx, ady = ey - sy;
-                            const alen = Math.hypot(adx, ady);
-                            if (alen > 20) {
-                                const ux = adx / alen, uy = ady / alen;
-                                const speed = logCfg.arrowSpeed || 60;
-                                const spacing = logCfg.arrowSpacing || 40;
-                                const arrowOffset = (currentTime * speed) % spacing;
-
-                                this.logisticsGraphics.fillStyle(parseColor(logCfg.arrowColor), 0.9);
-                                for (let d = arrowOffset; d < alen - 10; d += spacing) {
-                                    const px = sx + ux * d;
-                                    const py = sy + uy * d;
-                                    this.drawArrowhead(this.logisticsGraphics, px, py, ux, uy, logCfg.arrowSize || 8);
-                                }
-                            }
-                        }
+                        });
                     }
                 });
             }

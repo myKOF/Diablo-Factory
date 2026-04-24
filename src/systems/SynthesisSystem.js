@@ -80,7 +80,7 @@ export class SynthesisSystem {
         if (!recipe.isUnlocked) return false;
         building.currentRecipe = recipe;
         building.craftingProgress = 0;
-        
+
         // 初始化物流緩衝區
         if (!building.inputBuffer) building.inputBuffer = {};
         if (!building.outputBuffer) building.outputBuffer = {};
@@ -95,7 +95,7 @@ export class SynthesisSystem {
     static update(state, engine, deltaTime) {
         state.mapEntities.forEach(ent => {
             if (!ent.currentRecipe || ent.isUnderConstruction) return;
-            
+
             const cfg = engine.getEntityConfig(ent.type1 || ent.type, ent.lv);
             if (!cfg) return;
 
@@ -129,7 +129,7 @@ export class SynthesisSystem {
             // 材料不足時暫停進度條，但不取消配方 (等待物流送達)
             if (!hasEnoughIngredients) {
                 ent.isCraftingActive = false;
-                return; 
+                return;
             }
 
             // 2. 開始自動生產
@@ -140,7 +140,7 @@ export class SynthesisSystem {
             // 3. 生產結算 (無限循環)
             if (ent.craftingProgress >= 1.0) {
                 ent.craftingProgress = 0;
-                
+
                 // 扣除輸入緩衝區的原料
                 if (needs) {
                     for (let r in needs) {

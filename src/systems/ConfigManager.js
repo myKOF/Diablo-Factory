@@ -7,9 +7,7 @@ export class ConfigManager {
         const cleanStr = str.replace(/[{}]/g, '').trim();
         if (!cleanStr) return [];
         return cleanStr.split(',').map(s => {
-            const val = s.trim();
-            const num = parseFloat(val);
-            return isNaN(num) ? val : num; // 數字轉型，非數字保留字串
+            const val = s.trim(); const num = parseFloat(val); return isNaN(num) ? val : num;
         });
     }
 
@@ -384,13 +382,11 @@ export class ConfigManager {
                 const type1 = row[idxType1] ? row[idxType1].trim() : model;
                 const lv = parseInt(row[idxLv]) || 1;
 
+                const idxProdPlace = hIdx('production_place');
                 let logistics = { canInput: false, canOutput: false };
-                if (idxProductionPlace !== -1 && row[idxProductionPlace]) {
-                    const arr = this.parseBracketArray(row[idxProductionPlace]);
-                    if (arr.length >= 2) {
-                        logistics.canInput = arr[0] === 1;
-                        logistics.canOutput = arr[1] === 1;
-                    }
+                if (idxProdPlace !== -1 && row[idxProdPlace]) {
+                    const arr = this.parseBracketArray(row[idxProdPlace]);
+                    if (arr.length >= 2) { logistics.canInput = arr[0] === 1; logistics.canOutput = arr[1] === 1; }
                 }
 
                 // 解析生產清單

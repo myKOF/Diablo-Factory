@@ -10,7 +10,7 @@ import { SynthesisSystem } from "../systems/SynthesisSystem.js";
 export class UIManager {
     static uiLayer;
     static dragGhost = null;
-    static logisticsSourceEntity = null;
+    static logisticsSourceEntity = null; static activeLogisticsConnection = null;
     static activeBuilding = null;
     static logHeight = 200; // 預設日誌高度
     static isResizingLog = false;
@@ -890,32 +890,24 @@ export class UIManager {
         // 僅處理左鍵
         if (e.button !== 0) return;
 
-        // --- [新增] 物流連線起點 (先選中才能拉線) ---
+        this.leftMouseDownPos = { x: e.clientX, y: e.clientY };
         const local = this.getLocalMouse(e);
-        const scene = window.PhaserScene;
-        const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
-        const worldX = local.x - cam.x;
-        const worldY = local.y - cam.y;
-        
+        const scene = window.PhaserScene; const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
+        const worldX = local.x - cam.x; const worldY = local.y - cam.y;
         const clickedBuilding = GameEngine.state.mapEntities.find(ent => {
             if (ent.isUnderConstruction) return false;
             const cfg = GameEngine.getEntityConfig(ent.type1);
-            if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false; // 必須允許輸出才能當起點
+            if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false;
             const em = cfg.size ? cfg.size.match(/\{\s*(\d+)\s*,\s*(\d+)\s*\}/) : null;
-            const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE;
-            const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
+            const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE; const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
             return worldX > ent.x - w / 2 && worldX < ent.x + w / 2 && worldY > ent.y - h / 2 && worldY < ent.y + h / 2;
         });
-
-        this.leftMouseDownPos = { x: e.clientX, y: e.clientY };
-
         if (clickedBuilding && GameEngine.state.buildingMode === 'NONE') {
             const bid = clickedBuilding.id || `${clickedBuilding.type1}_${clickedBuilding.x}_${clickedBuilding.y}`;
-            const isSelected = GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(bid);
-            if (isSelected) {
+            if (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(bid)) {
                 this.logisticsSourceEntity = clickedBuilding;
                 GameEngine.state.logisticsDragLine = { startX: clickedBuilding.x, startY: clickedBuilding.y, endX: worldX, endY: worldY };
-                return; // 攔截事件
+                return;
             }
         }
 
@@ -928,40 +920,10 @@ export class UIManager {
     }
 
     static handleWorldMouseMove(e) {
-        // --- [新增] 更新物流連線預覽 ---
         if (this.logisticsSourceEntity && GameEngine.state.logisticsDragLine) {
             const local = this.getLocalMouse(e);
-            const scene = window.PhaserScene;
-            const cam = scene ? scene.cameras.main : null;
-            const scrollX = cam ? cam.scrollX : 0;
-            const scrollY = cam ? cam.scrollY : 0;
-            
-            GameEngine.state.logisticsDragLine.endX = local.x + scrollX;
-            GameEngine.state.logisticsDragLine.endY = local.y + scrollY;
-
-            // 更新取消框位置 (位於起點建築正上方)
-            const cancelZone = document.getElementById("logistics_cancel_zone");
-            if (cancelZone) {
-                const screenX = this.logisticsSourceEntity.x - scrollX;
-                const screenY = this.logisticsSourceEntity.y - scrollY;
-                const cfg = GameEngine.getEntityConfig(this.logisticsSourceEntity.type1);
-                const em = cfg && cfg.size ? cfg.size.match(/\{\s*(\d+)\s*,\s*(\d+)\s*\}/) : null;
-                const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
-
-                cancelZone.style.display = "flex";
-                cancelZone.style.left = `${screenX - 12}px`;
-                cancelZone.style.top = `${screenY - h / 2 - 35}px`;
-
-                // 檢查滑鼠是否在取消框內，提供視覺反饋
-                const rect = cancelZone.getBoundingClientRect();
-                if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-                    cancelZone.style.transform = "scale(1.3)";
-                    cancelZone.style.background = "#ff1744";
-                } else {
-                    cancelZone.style.transform = "scale(1)";
-                    cancelZone.style.background = "rgba(244, 67, 54, 0.9)";
-                }
-            }
+            const scene = window.PhaserScene; const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
+            GameEngine.state.logisticsDragLine.endX = local.x - cam.x; GameEngine.state.logisticsDragLine.endY = local.y - cam.y;
             return;
         }
 
@@ -1002,53 +964,28 @@ export class UIManager {
         // [左鍵邏輯專區]
         if (e.button !== 0) return;
 
-        // --- [新增] 物流連線綁定 ---
         if (this.logisticsSourceEntity) {
             const local = this.getLocalMouse(e);
-            const scene = window.PhaserScene;
-            const cam = scene ? scene.cameras.main : null;
-            const scrollX = cam ? cam.scrollX : 0;
-            const scrollY = cam ? cam.scrollY : 0;
-            const worldX = local.x + scrollX;
-            const worldY = local.y + scrollY;
-
-            // 1. 優先檢查是否在取消框內
-            const cancelZone = document.getElementById("logistics_cancel_zone");
-            let isCancelled = false;
-            if (cancelZone) {
-                const rect = cancelZone.getBoundingClientRect();
-                if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-                    isCancelled = true;
+            const scene = window.PhaserScene; const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
+            const worldX = local.x - cam.x; const worldY = local.y - cam.y;
+            const targetBuilding = GameEngine.state.mapEntities.find(ent => {
+                if (ent === this.logisticsSourceEntity || ent.isUnderConstruction) return false;
+                const cfg = GameEngine.getEntityConfig(ent.type1);
+                if (!cfg || !cfg.logistics || !cfg.logistics.canInput) return false;
+                const em = cfg.size ? cfg.size.match(/\{\s*(\d+)\s*,\s*(\d+)\s*\}/) : null;
+                const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE; const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
+                return worldX > ent.x - w / 2 && worldX < ent.x + w / 2 && worldY > ent.y - h / 2 && worldY < ent.y + h / 2;
+            });
+            if (targetBuilding) {
+                if (!this.logisticsSourceEntity.outputTargets) this.logisticsSourceEntity.outputTargets = [];
+                const tId = targetBuilding.id || `${targetBuilding.type1}_${targetBuilding.x}_${targetBuilding.y}`;
+                if (!this.logisticsSourceEntity.outputTargets.find(t => t.id === tId)) {
+                    this.logisticsSourceEntity.outputTargets.push({ id: tId, filter: null });
+                    GameEngine.addLog(`[物流] 連線建立：${this.logisticsSourceEntity.name} ➡️ ${targetBuilding.name}`);
                 }
-                cancelZone.style.display = "none";
+                this.showLogisticsMenu(this.logisticsSourceEntity, tId, e.clientX, e.clientY);
             }
-
-            if (isCancelled) {
-                this.logisticsSourceEntity.outputTargetId = null;
-                GameEngine.addLog(`[物流] 已取消輸出連線。`);
-            } else {
-                // 2. 檢查是否在有效的目標建築上
-                const targetBuilding = GameEngine.state.mapEntities.find(ent => {
-                    if (ent === this.logisticsSourceEntity || ent.isUnderConstruction) return false;
-                    const cfg = GameEngine.getEntityConfig(ent.type1);
-                    if (!cfg || !cfg.logistics || !cfg.logistics.canInput) return false;
-                    const em = cfg && cfg.size ? cfg.size.match(/\{\s*(\d+)\s*,\s*(\d+)\s*\}/) : null;
-                    const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE;
-                    const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
-                    return worldX > ent.x - w / 2 && worldX < ent.x + w / 2 && worldY > ent.y - h / 2 && worldY < ent.y + h / 2;
-                });
-
-                if (targetBuilding) {
-                    this.logisticsSourceEntity.outputTargetId = targetBuilding.id || `${targetBuilding.type1}_${targetBuilding.x}_${targetBuilding.y}`;
-                    GameEngine.addLog(`[物流] 連線建立：${this.logisticsSourceEntity.name || this.logisticsSourceEntity.type1} ➡️ ${targetBuilding.name || targetBuilding.type1}`);
-                } else {
-                    // 若既非取消也非建立新連線，則保留原連線 (不執行任何操作)
-                    GameEngine.addLog(`[物流] 未更改連線。`);
-                }
-            }
-
-            this.logisticsSourceEntity = null;
-            GameEngine.state.logisticsDragLine = null;
+            this.logisticsSourceEntity = null; GameEngine.state.logisticsDragLine = null;
             return;
         }
 
@@ -1163,6 +1100,7 @@ export class UIManager {
         const nearbyUnit = GameEngine.state.units.villagers.find(u => u.visible !== false && Math.hypot(u.x - worldX, u.y - worldY) < 50);
         if (nearbyUnit) return;
 
+
         const entities = GameEngine.state.mapEntities;
 
         const clicked = entities.find(ent => {
@@ -1212,11 +1150,47 @@ export class UIManager {
             } else {
                 this.showContextMenu(clicked);
             }
-        } else {
-            // 點擊地面
-            GameEngine.state.selectedBuildingIds = [];
-            GameEngine.state.selectedBuildingId = null;
+            return;
         }
+
+        // [核心修復] 物流線點擊優先級降至建築之下，並縮小判定範圍以防止誤觸
+        const distToSegmentSquared = (p, v, w) => {
+            let l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2);
+            if (l2 === 0) return Math.pow(p.x - v.x, 2) + Math.pow(p.y - v.y, 2);
+            let t = Math.max(0, Math.min(1, ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2));
+            return Math.pow(p.x - (v.x + t * (w.x - v.x)), 2) + Math.pow(p.y - (v.y + t * (w.y - v.y)), 2);
+        };
+        let clickedConn = null;
+        for (let ent of GameEngine.state.mapEntities) {
+            if (ent.outputTargets && ent.outputTargets.length > 0) {
+                for (let conn of ent.outputTargets) {
+                    let target = GameEngine.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
+                    if (target) {
+                        let sx = ent.x, sy = ent.y, ex = target.x, ey = target.y;
+                        const isReciprocal = target.outputTargets && target.outputTargets.find(t => (t.id === (ent.id || `${ent.type1}_${ent.x}_${ent.y}`)));
+                        if (isReciprocal) {
+                            const dx = ex - sx, dy = ey - sy; const d = Math.hypot(dx, dy);
+                            if (d > 0) {
+                                const nx = -dy / d, ny = dx / d;
+                                const offset = (UI_CONFIG.LogisticsSystem && UI_CONFIG.LogisticsSystem.lineOffset) || 10;
+                                sx += nx * offset; sy += ny * offset; ex += nx * offset; ey += ny * offset;
+                            }
+                        }
+                        // 縮小閾值至 144 (12px)，確保在線條錯開 15px 的情況下點擊「中間」不會誤觸
+                        if (distToSegmentSquared({x: worldX, y: worldY}, {x: sx, y: sy}, {x: ex, y: ey}) < 144) {
+                            clickedConn = { source: ent, targetId: conn.id }; break;
+                        }
+                    }
+                }
+            }
+            if (clickedConn) break;
+        }
+        if (clickedConn) { this.showLogisticsMenu(clickedConn.source, clickedConn.targetId, e.clientX, e.clientY); return; }
+
+        // 點擊地面
+        GameEngine.state.selectedBuildingIds = [];
+        GameEngine.state.selectedBuildingId = null;
+        this.activeLogisticsConnection = null;
     }
 
     static showContextMenu(entity, isConfirming = false) {
@@ -1838,9 +1812,57 @@ export class UIManager {
         if (destroyBtn) destroyBtn.style.display = "none";
 
         this.hideWarehousePanel(); // 關閉右鍵選單時順便把倉庫也關閉
-
+        const lm = document.getElementById("logistics_menu"); if (lm) lm.style.display = "none";
 
         // 注意：這裡不再自動隱藏 settings_panel，避免 toggle 時發生衝突
+    }
+
+    static showLogisticsMenu(sourceEnt, targetId, mouseX, mouseY) {
+        this.hideContextMenu(); this.activeLogisticsConnection = { source: sourceEnt, targetId: targetId };
+        let menu = document.getElementById("logistics_menu");
+        if (!menu) {
+            menu = document.createElement("div"); menu.id = "logistics_menu"; menu.className = "panel glass-panel";
+            menu.style.cssText = `position: absolute; z-index: 2000; padding: 15px; display: flex; flex-direction: column; gap: 10px; background: rgba(20,20,20,0.95); border: 2px solid #4caf50; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); pointer-events: auto;`;
+            this.uiLayer.appendChild(menu);
+        }
+        let availableItems = [];
+        if (typeof SynthesisSystem !== 'undefined') {
+            const recipes = SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, sourceEnt) || [];
+            if (recipes.length > 0) availableItems = recipes.filter(r => r.isUnlocked).map(r => r.type);
+        }
+        if (availableItems.length === 0) {
+            availableItems = Object.keys(GameEngine.state.resources).filter(k => GameEngine.state.resources[k] > 0);
+            if (sourceEnt.outputBuffer) availableItems = [...new Set([...availableItems, ...Object.keys(sourceEnt.outputBuffer)])];
+        }
+        const conn = sourceEnt.outputTargets.find(t => t.id === targetId);
+        const currentFilter = conn ? conn.filter : null;
+        let html = `<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 5px; gap: 20px;"><span style="color: #4caf50; font-weight: bold; font-size: 15px;">設定此路線過濾器</span><button onclick="window.UIManager.deleteLogisticsLine(event)" style="background: #f44336; color: white; border: 1px solid #ff8a80; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-weight: bold; font-size: 12px;">刪除連線 ✖</button></div><div style="display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px;">`;
+        html += `<button onclick="window.UIManager.setLogisticsFilter(event, null)" style="padding: 6px 12px; background: ${currentFilter === null ? '#4caf50' : '#333'}; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer;">無限制</button>`;
+        availableItems.forEach(item => {
+            html += `<button onclick="window.UIManager.setLogisticsFilter(event, '${item}')" style="padding: 6px 12px; background: ${currentFilter === item ? '#4caf50' : '#333'}; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer;">${GameEngine.RESOURCE_NAMES[item] || item}</button>`;
+        });
+        menu.innerHTML = html + `</div>`; menu.style.display = "flex";
+        menu.style.left = `${Math.min(mouseX + 15, window.innerWidth - 300)}px`; menu.style.top = `${Math.min(mouseY - 20, window.innerHeight - 200)}px`;
+    }
+
+    static setLogisticsFilter(event, filterItem) {
+        if (event) event.stopPropagation();
+        if (this.activeLogisticsConnection) {
+            const conn = this.activeLogisticsConnection.source.outputTargets.find(t => t.id === this.activeLogisticsConnection.targetId);
+            if (conn) { conn.filter = filterItem; GameEngine.addLog(`[物流] 路線過濾器已更新`); }
+            const menu = document.getElementById('logistics_menu');
+            if (menu) this.showLogisticsMenu(this.activeLogisticsConnection.source, this.activeLogisticsConnection.targetId, parseInt(menu.style.left) - 15, parseInt(menu.style.top) + 20);
+        }
+    }
+
+    static deleteLogisticsLine(event) {
+        if (event) event.stopPropagation();
+        if (this.activeLogisticsConnection) {
+            this.activeLogisticsConnection.source.outputTargets = this.activeLogisticsConnection.source.outputTargets.filter(t => t.id !== this.activeLogisticsConnection.targetId);
+            GameEngine.addLog(`[物流] 路線已刪除`);
+        }
+        const menu = document.getElementById("logistics_menu"); if (menu) menu.style.display = "none";
+        this.activeLogisticsConnection = null;
     }
 
     static updateValues(forceUpdate = false) {

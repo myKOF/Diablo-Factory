@@ -206,31 +206,22 @@ export class WorkerSystem {
                 }
                 break;
             case 'WORKING_IN_FACTORY': {
-                // --- [新增] 流水線物流狀態 ---
-                // 1. 確保工人知道自己在哪間工廠 (相容 ID 綁定)
                 const factoryId = v.assignedWarehouseId || (v.targetId && v.targetId.id) || v.targetId;
                 const factory = typeof factoryId === 'string' ? this.engine.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === factoryId) : factoryId;
-                
-                if (factory && factory.outputTargetId && factory.outputBuffer) {
-                    // 2. 檢查是否有成品可以運送
+                if (factory && factory.outputTargets && factory.outputTargets.length > 0 && factory.outputBuffer) {
                     for (let resType in factory.outputBuffer) {
                         if (factory.outputBuffer[resType] >= 1) {
-                            // 取出 1 個成品準備運送
-                            factory.outputBuffer[resType] -= 1;
-                            v.cargoType = resType;
-                            v.cargoAmount = 1;
-                            v.state = 'TRANSPORTING_LOGISTICS';
-                            v.logisticsTargetId = factory.outputTargetId;
-                            v.logisticsHomeId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
-                            v.visible = true; // 顯示搬運工
-                            this.engine.addLog(`[物流] 工人從 ${factory.name} 出發運送 ${this.engine.RESOURCE_NAMES[resType] || resType}`);
-                            break; 
+                            const validConn = factory.outputTargets.find(t => !t.filter || t.filter === resType);
+                            if (validConn) {
+                                factory.outputBuffer[resType] -= 1; v.cargoType = resType; v.cargoAmount = 1;
+                                v.state = 'TRANSPORTING_LOGISTICS'; v.logisticsTargetId = validConn.id;
+                                v.logisticsHomeId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
+                                v.visible = true; break;
+                            }
                         }
                     }
                 }
-                v.pathTarget = null;
-                v.fullPath = null;
-                break;
+                v.pathTarget = null; v.fullPath = null; break;
             }
             case 'TRANSPORTING_LOGISTICS': {
                 const target = this.engine.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.logisticsTargetId);

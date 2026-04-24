@@ -711,10 +711,12 @@ export const UI_CONFIG = {
 
     // -- 物流連線系統 (LogisticsSystem) --------------------------
     LogisticsSystem: {
-        lineThickness: 10,           // 拖拽中連線的寬度
+        lineThickness: 14,           // 拖拽中連線的寬度
         lineColor: "#0077ffff",           // 已建立連線的顏色 (綠色)
         lineAlpha: 0.6,
-        dragLineThickness: 10,           // 拖拽中連線的寬度
+        selectedLineColor: "#3bb7ffff",   // 被選取連線的顏色 (黃色)
+        selectedLineAlpha: 1.0,
+        dragLineThickness: 14,           // 拖拽中連線的寬度
         dragLineColor: "#ff8800ff",       // 拖拽中連線的顏色 (淡綠)
         dragLineAlpha: 0.8,
         depth: 150,                     // 渲染深度 (位於地面之上，單位之下)
