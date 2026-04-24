@@ -11,6 +11,7 @@ export class UIManager {
     static uiLayer;
     static dragGhost = null;
     static logisticsSourceEntity = null; static activeLogisticsConnection = null;
+    static activeWarehouseEntity = null;
     static activeBuilding = null;
     static logHeight = 200; // 預設日誌高度
     static isResizingLog = false;
@@ -419,7 +420,7 @@ export class UIManager {
             warehouseBtn.innerHTML = warehouseBtnCfg.icon || "📦";
             warehouseBtn.onclick = (e) => {
                 e.stopPropagation();
-                this.toggleWarehousePanel();
+                this.toggleWarehousePanel(this.activeWarehouseEntity);
             };
             this.uiLayer.appendChild(warehouseBtn);
         }
@@ -1145,7 +1146,7 @@ export class UIManager {
             if (!clicked.isUnderConstruction && (clicked.type1 === 'storehouse' || clicked.type2 === 'storehouse')) {
                 const panel = document.getElementById("warehouse_panel");
                 if (panel && panel.style.display === "none") {
-                    this.toggleWarehousePanel();
+                    this.toggleWarehousePanel(clicked);
                 }
             } else {
                 this.showContextMenu(clicked);
@@ -1212,6 +1213,7 @@ export class UIManager {
         let name = entity.isUnderConstruction ? (GameEngine.getBuildingConfig(entity.type1, entity.lv)?.name || "施工中的建築") : (entity.name || entity.type1);
         const cfg_current = GameEngine.getBuildingConfig(entity.type1, entity.lv || 1);
         const canAssignWorkers = cfg_current && (cfg_current.need_villagers > 0 || (cfg_current.logistics && (cfg_current.logistics.canInput || cfg_current.logistics.canOutput)));
+        const isProcessingPlant = cfg_current && cfg_current.type2 === 'processing_plant';
         const nextCfg = GameEngine.getBuildingConfig(entity.type1, (entity.lv || 1) + 1);
         const hCfg = UI_CONFIG.ActionMenuHeader;
 
@@ -1335,7 +1337,7 @@ export class UIManager {
         // [修正] 改為 nowrap 並使用 space-evenly，確保縮減寬度時，間距會同比調整，且永不換行
         const gridJustify = isConfirming ? "center" : "space-evenly";
         const gridGap = isConfirming ? "20px" : "4px";
-        let gridHtml = `<div id="action_button_grid" style="display:flex; flex-direction:row; flex-wrap:nowrap; gap:${gridGap}; justify-content:${gridJustify}; align-items:center; transition: all 0.3s; width: 100%; transform: translate(${gOffset.x}px, ${gOffset.y}px);">`;
+        let gridHtml = `<div id="action_button_grid" style="display:flex; flex-direction:${isProcessingPlant ? 'column' : 'row'}; flex-wrap:nowrap; gap:${isProcessingPlant ? '12px' : gridGap}; justify-content:${isProcessingPlant ? 'flex-start' : gridJustify}; align-items:${isProcessingPlant ? 'stretch' : 'center'}; transition: all 0.3s; width: 100%; transform: translate(${gOffset.x}px, ${gOffset.y}px);">`;
 
         if (isConfirming) {
             gridHtml += `
@@ -1386,7 +1388,7 @@ export class UIManager {
                 const maxWorkers = entity.targetWorkerCount || cfg_current.need_villagers || 5; 
                 
                 gridHtml += `
-                    <div class="warehouse-controls" style="display: flex; align-items: center; justify-content: center; gap: 20px; background: rgba(0,0,0,0.4); padding: 10px 25px; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); transform: translate(${wcOff.x}px, ${wcOff.y}px); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box;">
+                    <div class="warehouse-controls" style="display: flex; align-items: center; justify-content: center; gap: 20px; background: rgba(0,0,0,0.4); padding: 10px 25px; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); transform: translate(${wcOff.x}px, ${wcOff.y}px); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box; ${isProcessingPlant ? 'width: 100%; justify-content: space-between; padding: 14px 18px;' : ''}">
                         <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)" 
                                 style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
                                 onmouseover="this.style.background='#6d4c41'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='${hCfg.workerAdjustBtnBg || '#4e342e'}'; this.style.transform='scale(1)';">－</button>
@@ -1405,16 +1407,46 @@ export class UIManager {
             }
         }
         // --- [新增] 加工廠配方清單 ---
-        const isProcessingPlant = cfg_current && cfg_current.type2 === 'processing_plant';
         if (!isConfirming && isProcessingPlant && !entity.isUnderConstruction) {
             const recipes = SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, entity) || [];
+            const bufferEntries = Object.entries(entity.inputBuffer || {}).filter(([, amount]) => (amount || 0) > 0);
             if (recipes.length > 0) {
+                const currentRecipeName = entity.currentRecipe
+                    ? (GameEngine.RESOURCE_NAMES[entity.currentRecipe.type] || entity.currentRecipe.type)
+                    : '未設定';
                 // 圖示對照表 (Fallback)
                 const rIconMap = {
                     wooden_planks: "🪵", steel: "🧱", copper_plates: "🛡️", iron_plates: "⛓️",
                     glass: "🥛", silver_ingots: "🥈", gold_ingots: "🥇", mithril_ingots: "🎖️"
                 };
-                gridHtml += `<div style="width: 100%; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.15);">`;
+                gridHtml += `<div style="width: 100%; display: flex; flex-direction: column; gap: 12px; justify-content: center; padding-top: 2px;">`;
+                gridHtml += `<div style="width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 0.9fr); gap: 10px; align-items: stretch;">`;
+                gridHtml += `<div style="display: flex; flex-direction: column; gap: 6px; background: linear-gradient(180deg, rgba(22,33,18,0.92), rgba(14,18,12,0.88)); border: 1px solid rgba(156,204,101,0.28); border-radius: 14px; padding: 12px 14px; box-sizing: border-box; min-height: 92px;">`;
+                gridHtml += `<div style="font-size: 11px; color: rgba(220,237,200,0.58); text-transform: uppercase; letter-spacing: 1.4px;">當前生產線</div>`;
+                gridHtml += `<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">`;
+                gridHtml += `<div style="font-size: 18px; font-weight: 800; color: ${entity.currentRecipe ? '#fff59d' : '#ffab91'}; text-shadow: 0 2px 8px rgba(0,0,0,0.35);">${currentRecipeName}</div>`;
+                gridHtml += `<div style="min-width: 64px; text-align: center; padding: 8px 10px; border-radius: 12px; background: rgba(139,195,74,0.16); border: 1px solid rgba(220,237,200,0.16); color: #dcedc8; font-size: 12px; font-weight: bold;">${entity.isCraftingActive ? '運作中' : '待機中'}</div>`;
+                gridHtml += `</div>`;
+                gridHtml += `<div style="height: 8px; width: 100%; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden;">`;
+                gridHtml += `<div style="height: 100%; width: ${entity.currentRecipe ? Math.min(100, (entity.craftingProgress || 0) * 100) : 0}%; background: linear-gradient(90deg, #9ccc65, #ffee58); box-shadow: 0 0 12px rgba(255,238,88,0.3);"></div>`;
+                gridHtml += `</div>`;
+                gridHtml += `</div>`;
+                gridHtml += `<div style="display: flex; flex-direction: column; gap: 8px; background: linear-gradient(180deg, rgba(18,20,18,0.92), rgba(10,12,10,0.88)); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 12px 14px; box-sizing: border-box; min-height: 92px;">`;
+                gridHtml += `<div style="font-size: 11px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 1.2px;">當前屯積材料</div>`;
+                if (bufferEntries.length > 0) {
+                    gridHtml += `<div style="display: flex; flex-wrap: wrap; gap: 8px;">`;
+                    bufferEntries.forEach(([type, amount]) => {
+                        const displayName = GameEngine.RESOURCE_NAMES[type] || type;
+                        gridHtml += `<div style="display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; padding: 5px 10px; font-size: 12px; color: #fff;"><span style="color: #c5e1a5;">${displayName}</span><span style="color: #ffecb3; font-weight: bold;">x${amount}</span></div>`;
+                    });
+                } else {
+                    gridHtml += `<div style="display: flex; align-items: center; justify-content: center; flex: 1; min-height: 40px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.45);">目前尚未屯積任何材料</div>`;
+                }
+                gridHtml += `</div>`;
+                gridHtml += `</div>`;
+                gridHtml += `<div style="width: 100%; display: flex; flex-direction: column; gap: 8px; background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 12px 14px; box-sizing: border-box;">`;
+                gridHtml += `<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;"><div style="font-size: 11px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 1.2px;">產品設定</div><div style="font-size: 12px; color: rgba(255,255,255,0.45);">選擇工廠輸出產品</div></div>`;
+                gridHtml += `<div style="width: 100%; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start;">`;
                 recipes.forEach(rec => {
                     const isUnlocked = rec.isUnlocked;
                     const isCrafting = entity.currentRecipe && entity.currentRecipe.type === rec.type;
@@ -1427,7 +1459,7 @@ export class UIManager {
 
                     gridHtml += `
                             <button class="action-btn recipe-btn" data-type="${rec.type}" onclick="window.UIManager.selectRecipe(event, '${rec.type}')" 
-                                    style="position: relative; overflow: visible; opacity: ${opacity}; filter: ${filter}; ${activeStyle} flex-direction: row; padding: 4px 10px; width: auto; height: 38px; gap: 6px;" 
+                                    style="position: relative; overflow: visible; opacity: ${opacity}; filter: ${filter}; ${activeStyle} flex-direction: row; padding: 6px 12px; min-width: 140px; height: 42px; gap: 8px; justify-content: flex-start;" 
                                     ${isUnlocked ? '' : 'disabled'} title="${isUnlocked ? '點擊加入生產隊列' : '建築等級不足，尚未解鎖'}">
                                 <span style="font-size: 16px; margin: 0; z-index: 2;">${icon}</span>
                                 <span style="font-size: 13px; font-weight: bold; z-index: 2;">${name}</span>
@@ -1438,7 +1470,7 @@ export class UIManager {
                             </button>
                         `;
                 });
-                gridHtml += `</div>`;
+                gridHtml += `</div></div>`;
             }
         }
         gridHtml += `</div>`; // 結束指令按鈕格網 (action_button_grid)
@@ -1452,12 +1484,24 @@ export class UIManager {
         // --- 5. 最終組合 ---
         // 動態調整高度：沒有指令時高度自適應，有指令時使用配置的高度
         if (hasActions) {
-            if (cfg.height) menu.style.height = typeof cfg.height === 'number' ? `${cfg.height}px` : cfg.height;
+            if (isProcessingPlant) {
+                menu.style.height = "auto";
+                menu.style.width = "560px";
+                menu.style.minWidth = "560px";
+                menu.style.maxWidth = "560px";
+                menu.style.overflow = "visible";
+            } else if (cfg.height) {
+                menu.style.height = typeof cfg.height === 'number' ? `${cfg.height}px` : cfg.height;
+                menu.style.overflow = "hidden";
+            }
             // [修正] 確保寬度也重新套用，避免被其它邏輯誤改
-            if (cfg.width) menu.style.width = typeof cfg.width === 'number' ? `${cfg.width}px` : cfg.width;
-            if (cfg.minWidth) menu.style.minWidth = typeof cfg.minWidth === 'number' ? `${cfg.minWidth}px` : cfg.minWidth;
+            if (!isProcessingPlant) {
+                if (cfg.width) menu.style.width = typeof cfg.width === 'number' ? `${cfg.width}px` : cfg.width;
+                if (cfg.minWidth) menu.style.minWidth = typeof cfg.minWidth === 'number' ? `${cfg.minWidth}px` : cfg.minWidth;
+            }
         } else {
             menu.style.height = "auto";
+            menu.style.overflow = "visible";
             // 當內容少時，允許寬度彈性但仍維持最小寬度
             if (cfg.minWidth) menu.style.width = "auto";
         }
@@ -1466,7 +1510,23 @@ export class UIManager {
         const gridOff = hCfg.actionGridOffset || { x: 0, y: 0 };
 
         // 組合內容
-        if (hasActions) {
+        if (hasActions && isProcessingPlant && !isConfirming) {
+            menu.innerHTML = `
+                <div style="width: 100%; display: flex; flex-direction: column; gap: 14px; overflow: visible;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
+                        <div style="flex: 1; min-width: 0;">${leftHeader}</div>
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0;">
+                            ${rightHeader}
+                            ${requirementHtml}
+                        </div>
+                    </div>
+                    <div style="width: 100%; height: 1px; background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.16), rgba(255,255,255,0.04));"></div>
+                    <div style="width: 100%; display: flex; flex-direction: column; gap: 12px;">
+                        ${gridHtml}
+                    </div>
+                </div>
+            `;
+        } else if (hasActions) {
             menu.innerHTML = `
                 <div style="height: 100%; width: 100%; display: flex; flex-direction: column; position: relative; overflow: visible;">
                     <!-- 上部：標頭區 (佔 50%) -->
@@ -1572,11 +1632,17 @@ export class UIManager {
     static selectRecipe(event, recipeType) {
         if (event) event.stopPropagation();
         if (!this.activeMenuEntity) return;
-        const recipes = SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, this.activeMenuEntity) || [];
+        const activeId = this.activeMenuEntity.id || `${this.activeMenuEntity.type1}_${this.activeMenuEntity.x}_${this.activeMenuEntity.y}`;
+        const targetEntity = GameEngine.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === activeId) || this.activeMenuEntity;
+        const recipes = SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, targetEntity) || [];
         const rec = recipes.find(r => r.type === recipeType);
         if (rec && rec.isUnlocked) {
-            SynthesisSystem.setCraftingTarget(GameEngine.state, GameEngine, this.activeMenuEntity, rec);
-            this.showContextMenu(this.activeMenuEntity); // 點擊後刷新選單顯示高亮狀態
+            const applied = SynthesisSystem.setCraftingTarget(GameEngine.state, GameEngine, targetEntity, rec);
+            GameEngine.addLog(`[加工廠] 點擊配方按鈕：building=${activeId}, selectedRecipeType=${recipeType}, applied=${applied ? 'yes' : 'no'}`, 'LOGISTICS');
+            this.activeMenuEntity = targetEntity;
+            this.showContextMenu(targetEntity); // 點擊後刷新選單顯示高亮狀態
+        } else {
+            GameEngine.addLog(`[加工廠] 點擊配方按鈕失敗：building=${activeId}, selectedRecipeType=${recipeType}, foundRecipe=${rec ? 'yes' : 'no'}, unlocked=${rec ? (rec.isUnlocked ? 'yes' : 'no') : 'no'}`, 'LOGISTICS');
         }
     }
 
@@ -1611,6 +1677,18 @@ export class UIManager {
 
         GameEngine.addLog(`[解散] 已將 ${ent.name || ent.type1} 的所有工人解散至週圍。`, 'SYSTEM');
         this.showContextMenu(ent); // 立即刷新 UI
+    }
+
+    static dismissWarehouseWorkers(event) {
+        if (event) event.stopPropagation();
+        const ent = this.activeWarehouseEntity;
+        if (!ent) return;
+
+        const previousMenuEntity = this.activeMenuEntity;
+        this.activeMenuEntity = ent;
+        this.dismissWorkers(null);
+        this.activeMenuEntity = previousMenuEntity;
+        this.renderWarehousePanel();
     }
 
     static adjustWorkers(event, delta) {
@@ -1702,9 +1780,13 @@ export class UIManager {
         if (settings) settings.style.display = "none";
     }
 
-    static toggleWarehousePanel() {
+    static toggleWarehousePanel(entity = null) {
         const panel = document.getElementById("warehouse_panel");
         if (!panel) return;
+
+        if (entity) {
+            this.activeWarehouseEntity = entity;
+        }
 
         if (panel.style.display === "none") {
             this.hideContextMenu(); // 先關閉其它選單
@@ -1735,6 +1817,7 @@ export class UIManager {
         const panel = document.getElementById("warehouse_panel");
         if (!panel) return;
         const cfg = UI_CONFIG.WarehousePanel;
+        const ent = this.activeWarehouseEntity;
 
         // 強制設置容器為 flex 佈局以支援內部高度自動填滿
         panel.style.display = "flex";
@@ -1757,7 +1840,11 @@ export class UIManager {
         html += `<div class="title" style="text-align:center; font-size: 20px; border-bottom: 2px solid #8b6e4b; margin-bottom: 10px; padding-bottom: 10px; color: ${cfg.titleColor || '#fbc02d'};">${cfg.title}</div>`;
 
         html += `
-            <div style="display:flex; justify-content:flex-end; margin-bottom: 10px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px; gap: 10px;">
+                <div>
+                    ${ent ? `<button onclick="window.UIManager.dismissWarehouseWorkers(event)" 
+                        style="padding: 5px 12px; border: 1px solid #b86b6b; border-radius: 4px; background: #5a1f1f; color: #fff1f1; cursor: pointer; transition: 0.2s; font-weight: bold;" title="解散這間倉庫的派駐工人">解散</button>` : ``}
+                </div>
                 <button onclick="window.UIManager.sortWarehouse(); event.stopPropagation();" 
                         style="padding: 5px 12px; border: 1px solid #6b5232; border-radius: 4px; background: ${this.warehouseSortById ? '#3a2b16' : '#221a10'}; color: #ddd; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 5px;" title="依 ID 排序">
                     <span style="font-size: 12px;">排序</span> ${this.warehouseSortById ? '↑' : '↓'}
@@ -1852,18 +1939,35 @@ export class UIManager {
             this.uiLayer.appendChild(menu);
         }
         let availableItems = [];
-        if (typeof SynthesisSystem !== 'undefined') {
+        const sourceCfg = GameEngine.getBuildingConfig(sourceEnt.type1, sourceEnt.lv || 1);
+        const isProcessingPlantSource = sourceCfg && sourceCfg.type2 === 'processing_plant';
+        if (isProcessingPlantSource) {
+            const recipes = typeof SynthesisSystem !== 'undefined'
+                ? (SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, sourceEnt) || [])
+                : [];
+            availableItems = recipes.filter(r => r.isUnlocked).map(r => r.type);
+            if (!sourceEnt.currentRecipe && !sourceEnt._missingRecipeFilterHintLogged) {
+                GameEngine.addLog(`[物流] ${sourceEnt.name || sourceEnt.type1} 尚未設定加工廠生產線；物流線視窗只是在設定搬運品項，不是配方設定入口。`, 'LOGISTICS');
+                sourceEnt._missingRecipeFilterHintLogged = true;
+            }
+        } else if (typeof SynthesisSystem !== 'undefined') {
             const recipes = SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, sourceEnt) || [];
             if (recipes.length > 0) availableItems = recipes.filter(r => r.isUnlocked).map(r => r.type);
         }
-        if (availableItems.length === 0) {
+        if (!isProcessingPlantSource && availableItems.length === 0) {
             availableItems = Object.keys(GameEngine.state.resources).filter(k => GameEngine.state.resources[k] > 0);
             if (sourceEnt.outputBuffer) availableItems = [...new Set([...availableItems, ...Object.keys(sourceEnt.outputBuffer)])];
         }
+        availableItems = [...new Set(availableItems)];
         const conn = sourceEnt.outputTargets.find(t => t.id === targetId);
         const currentFilter = conn ? conn.filter : null;
-        let html = `<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 5px; gap: 20px;"><span style="color: #4caf50; font-weight: bold; font-size: 15px;">設定此路線過濾器</span><button onclick="window.UIManager.deleteLogisticsLine(event)" style="background: #f44336; color: white; border: 1px solid #ff8a80; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-weight: bold; font-size: 12px;">刪除連線 ✖</button></div><div style="display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px;">`;
-        html += `<button onclick="window.UIManager.setLogisticsFilter(event, null)" style="padding: 6px 12px; background: ${currentFilter === null ? '#4caf50' : '#333'}; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer;">無限制</button>`;
+        const helperText = isProcessingPlantSource
+            ? (sourceEnt.currentRecipe
+                ? `這裡只控制這條物流線要搬什麼。目前加工廠生產線為：${GameEngine.RESOURCE_NAMES[sourceEnt.currentRecipe.type] || sourceEnt.currentRecipe.type}。`
+                : `這裡只控制這條物流線要搬什麼。此加工廠尚未設定生產線，因此不應在這裡看到可量產成品。`)
+            : '這裡只控制這條物流線要搬什麼，不會自動設定加工廠的生產線。';
+        let html = `<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 5px; gap: 20px;"><span style="color: #4caf50; font-weight: bold; font-size: 15px;">設定此物流線搬運品項</span><button onclick="window.UIManager.deleteLogisticsLine(event)" style="background: #f44336; color: white; border: 1px solid #ff8a80; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-weight: bold; font-size: 12px;">刪除連線 ✖</button></div><div style="font-size: 12px; color: #c8e6c9; margin-bottom: 8px; line-height: 1.45;">${helperText}</div><div style="display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px;">`;
+        html += `<button onclick="window.UIManager.setLogisticsFilter(event, null)" style="padding: 6px 12px; background: ${currentFilter === null ? '#4caf50' : '#333'}; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer;">不限品項</button>`;
         availableItems.forEach(item => {
             const cfg = GameEngine.state.ingredientConfigs ? GameEngine.state.ingredientConfigs[item] : null;
             const displayName = (cfg && cfg.name) ? cfg.name : (GameEngine.RESOURCE_NAMES[item] || item);
@@ -1877,7 +1981,11 @@ export class UIManager {
         if (event) event.stopPropagation();
         if (this.activeLogisticsConnection) {
             const conn = this.activeLogisticsConnection.source.outputTargets.find(t => t.id === this.activeLogisticsConnection.targetId);
-            if (conn) { conn.filter = filterItem; GameEngine.addLog(`[物流] 路線過濾器已更新`, 'LOGISTICS'); }
+            if (conn) {
+                conn.filter = filterItem;
+                const filterName = filterItem ? (GameEngine.RESOURCE_NAMES[filterItem] || filterItem) : '不限品項';
+                GameEngine.addLog(`[物流] 路線搬運品項已更新：${filterName}。這只影響搬運，不會改變加工廠生產線。`, 'LOGISTICS');
+            }
             const menu = document.getElementById('logistics_menu');
             if (menu) this.showLogisticsMenu(this.activeLogisticsConnection.source, this.activeLogisticsConnection.targetId, parseInt(menu.style.left) - 15, parseInt(menu.style.top) + 20);
         }

@@ -1,6 +1,32 @@
 import { EffectSystem } from "./EffectSystem.js";
 
 export class SynthesisSystem {
+    static resolveBuilding(state, building) {
+        if (!building || !state || !Array.isArray(state.mapEntities)) return building || null;
+        const buildingId = building.id || `${building.type1}_${building.x}_${building.y}`;
+        return state.mapEntities.find(ent => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === buildingId) || building;
+    }
+
+    static ensureDefaultRecipe(state, engine, building) {
+        if (!building || building.currentRecipe || building.isUnderConstruction) return false;
+        const recipes = this.getBuildingRecipes(state, engine, building) || [];
+        const unlockedRecipes = recipes.filter(r => r.isUnlocked);
+        if (unlockedRecipes.length !== 1) return false;
+
+        const defaultRecipe = unlockedRecipes[0];
+        building.currentRecipe = defaultRecipe;
+        if (building.craftingProgress === undefined) building.craftingProgress = 0;
+        if (!building.inputBuffer) building.inputBuffer = {};
+        if (!building.outputBuffer) building.outputBuffer = {};
+        building._missingRecipeFilterHintLogged = false;
+
+        if (!building._autoRecipeLogKey || building._autoRecipeLogKey !== defaultRecipe.type) {
+            building._autoRecipeLogKey = defaultRecipe.type;
+            engine.addLog(`[加工廠] ${building.name || building.type1} 只有單一產品，已自動套用生產線：${defaultRecipe.type}`, 'LOGISTICS');
+        }
+        return true;
+    }
+
     /**
      * 1. 解析生產配方字串
      * 格式範例: "{wooden_planks,1,timber_processing_plant.lv=1}|{...}"
@@ -78,14 +104,18 @@ export class SynthesisSystem {
      */
     static setCraftingTarget(state, engine, building, recipe) {
         if (!recipe.isUnlocked) return false;
-        building.currentRecipe = recipe;
-        building.craftingProgress = 0;
+        const targetBuilding = this.resolveBuilding(state, building);
+        if (!targetBuilding) return false;
+
+        targetBuilding.currentRecipe = recipe;
+        targetBuilding.craftingProgress = 0;
+        targetBuilding._missingRecipeFilterHintLogged = false;
 
         // 初始化物流緩衝區
-        if (!building.inputBuffer) building.inputBuffer = {};
-        if (!building.outputBuffer) building.outputBuffer = {};
+        if (!targetBuilding.inputBuffer) targetBuilding.inputBuffer = {};
+        if (!targetBuilding.outputBuffer) targetBuilding.outputBuffer = {};
 
-        engine.addLog(`[加工廠] ${building.name} 已設定生產線：${recipe.type} (材料充足即自動運轉)`);
+        engine.addLog(`[加工廠] ${targetBuilding.name} 已設定生產線：${recipe.type} (材料充足即自動運轉)`);
         return true;
     }
 
@@ -94,13 +124,20 @@ export class SynthesisSystem {
      */
     static update(state, engine, deltaTime) {
         state.mapEntities.forEach(ent => {
-            if (!ent.currentRecipe || ent.isUnderConstruction) return;
+            if (ent.isUnderConstruction) return;
+            this.ensureDefaultRecipe(state, engine, ent);
+            if (!ent.currentRecipe) return;
 
             const cfg = engine.getEntityConfig(ent.type1 || ent.type, ent.lv);
             if (!cfg) return;
 
             const needVillagers = cfg.need_villagers || 1;
-            const currentWorkers = ent.assignedWorkers ? ent.assignedWorkers.length : 0;
+            const isProcessingPlant = cfg.type2 === 'processing_plant';
+            const stationedWorkers = ent.assignedWorkers ? ent.assignedWorkers.length : 0;
+            const configuredWorkers = ent.targetWorkerCount || 0;
+            const currentWorkers = isProcessingPlant
+                ? Math.max(stationedWorkers, configuredWorkers)
+                : stationedWorkers;
             const efficiency = Math.min(1.0, currentWorkers / needVillagers);
 
             if (efficiency <= 0) {
@@ -117,10 +154,12 @@ export class SynthesisSystem {
 
             // 1. 自動化檢測：檢查 inputBuffer 中的材料是否足夠
             let hasEnoughIngredients = true;
+            let missingIds = [];
             if (needs) {
                 for (let r in needs) {
                     if ((ent.inputBuffer[r] || 0) < needs[r]) {
                         hasEnoughIngredients = false;
+                        missingIds.push(`${r}:${ent.inputBuffer[r] || 0}/${needs[r]}`);
                         break;
                     }
                 }
@@ -129,8 +168,20 @@ export class SynthesisSystem {
             // 材料不足時暫停進度條，但不取消配方 (等待物流送達)
             if (!hasEnoughIngredients) {
                 ent.isCraftingActive = false;
+                const needIds = Object.keys(needs || {});
+                const bufferIds = Object.keys(ent.inputBuffer || {}).map(id => `${id}:${ent.inputBuffer[id]}`);
+                const debugKey = `${ent.currentRecipe.type}|${missingIds.join(',')}|${bufferIds.join(',')}`;
+                if (ent._lastMissingIngredientsLog !== debugKey) {
+                    ent._lastMissingIngredientsLog = debugKey;
+                    engine.addLog(
+                        `[加工廠] ${ent.name || ent.type1} 材料不足：currentRecipeType=${ent.currentRecipe.type}, needIngredientTypes=[${needIds.join(', ') || 'none'}], missing=[${missingIds.join(', ') || 'none'}], inputBufferTypes=[${bufferIds.join(', ') || 'empty'}]`,
+                        'LOGISTICS'
+                    );
+                }
                 return;
             }
+
+            ent._lastMissingIngredientsLog = null;
 
             // 2. 開始自動生產
             ent.isCraftingActive = true;

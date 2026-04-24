@@ -2148,9 +2148,16 @@ export class MainScene extends Phaser.Scene {
         const max = bCfg.need_villagers;
         const current = (ent.assignedWorkers ? ent.assignedWorkers.length : 0);
 
-        const lw = cfg.lightWidth;
+        let lw = cfg.lightWidth;
         const lh = cfg.lightHeight;
-        const sp = cfg.spacing;
+        let sp = cfg.spacing;
+        const baseTotalW = (lw + sp) * max - sp;
+        const maxAllowedW = Math.max(18, uw * TS * 0.86);
+        if (baseTotalW > maxAllowedW) {
+            const scale = maxAllowedW / baseTotalW;
+            lw = Math.max(4, Math.floor(lw * scale));
+            sp = Math.max(1, Math.floor(sp * scale));
+        }
         const totalW = (lw + sp) * max - sp;
 
         const startX = offX - totalW / 2;

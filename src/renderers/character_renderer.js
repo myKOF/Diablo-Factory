@@ -5,6 +5,20 @@ import { UI_CONFIG } from "../ui/ui_config.js";
  * 不依賴任何外部圖片資產，支援標準 Canvas 2D 與 Phaser Graphics
  */
 export class CharacterRenderer {
+    static isMovementState(state) {
+        return [
+            'MOVING',
+            'MOVE',
+            'CHASE',
+            'MOVING_TO_FACTORY',
+            'MOVING_TO_RESOURCE',
+            'MOVING_TO_BASE',
+            'MOVING_TO_CONSTRUCTION',
+            'TRANSPORTING_LOGISTICS',
+            'RETURNING_TO_FACTORY'
+        ].includes(state);
+    }
+
     /**
      * 繪製角色主入口
      * @param {CanvasRenderingContext2D|Phaser.GameObjects.Graphics} ctx 
@@ -57,7 +71,7 @@ export class CharacterRenderer {
         const isCombatMove = state === 'MOVE' || state === 'CHASE';
         // [核心修正] 僅針對「跟隨/追擊」且「無目標座標」的情況停止動畫，避免影響一般任務工人
         const isChaseReached = isCombatMove && !unitData.idleTarget && !unitData.pathTarget && !unitData.fullPath;
-        const isMoving = (state.includes('MOVING') || isCombatMove) && !isChaseReached; 
+        const isMoving = this.isMovementState(state) && !isChaseReached; 
         const isWandering = !!unitData.idleTarget && !isCombatMove; // 判斷是否正在閒晃 (排除戰鬥衝刺)
 
         // 計算動畫頻率與振幅
@@ -353,7 +367,7 @@ export class CharacterRenderer {
         const name = (data.configName || "").toLowerCase();
         this.setCtxStyle(ctx, 0xffcc8c, 1);
 
-        const isMoving = state.includes('MOVING');
+        const isMoving = CharacterRenderer.isMovementState(state);
         const isWandering = !!data.idleTarget;
 
         // 分類判定：如果是工作或攻擊狀態，不計入移動動畫

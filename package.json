@@ -4,6 +4,7 @@
   },
   "scripts": {
     "start": "node serve.js",
+    "dev": "node dev-server.js",
     "finalize": "node scripts/finalize.js"
   }
 }

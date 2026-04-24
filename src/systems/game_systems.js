@@ -351,6 +351,7 @@ export class GameEngine {
         if (building && building.rallyPoint) {
             const rp = building.rallyPoint;
             const isVillager = v.config.type === 'villagers';
+            v.rallySourceBuildingId = building.id || `${building.type1}_${building.x}_${building.y}`;
 
             // 1. 尋找集結點鎖定的目標旗標實體
             let targetEnt = null;
@@ -421,6 +422,7 @@ export class GameEngine {
                 } else {
                     v.idleTarget = this.findAvailableRallySpot(rp);
                     v._isRallyMovement = true;
+                    v.isPlayerLocked = true;
                 }
             } else if (targetEnt && !isVillager) {
                 const targetCamp = (targetEnt.config && targetEnt.config.camp) || targetEnt.camp || 'neutral';
@@ -431,11 +433,13 @@ export class GameEngine {
                 } else {
                     v.idleTarget = this.findAvailableRallySpot(rp);
                     v._isRallyMovement = true;
+                    v.isPlayerLocked = true;
                 }
             } else {
                 const spot = this.findAvailableRallySpot(rp);
                 v.idleTarget = spot;
                 v._isRallyMovement = true;
+                v.isPlayerLocked = true;
             }
         }
 
