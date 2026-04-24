@@ -1285,7 +1285,7 @@ export class UIManager {
                                 <!-- 隊列數量徽章 -->
                                 <div class="recipe-badge" style="position: absolute; top: -8px; right: -8px; background: #f44336; color: white; border-radius: 10px; min-width: 18px; height: 18px; display: none; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid white; z-index: 3; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">0</div>
                                 <!-- 即時進度條 -->
-                                <div class="recipe-progress" style="position: absolute; bottom: 0; left: 0; height: 100%; background: rgba(255,235,59,0.25); width: ${isCrafting ? prog : 0}%; z-index: 1; transition: width 0.2s linear; display: ${isCrafting ? 'block' : 'none'};"></div>
+                                <div class="recipe-progress" style="position: absolute; bottom: 0; left: 0; height: 100%; background: rgba(255,235,59,0.25); width: ${isCrafting ? prog : 0}%; z-index: 1; display: ${isCrafting ? 'block' : 'none'};"></div>
                             </button>
                         `;
                 });

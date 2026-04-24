@@ -16,6 +16,7 @@ export class MainScene extends Phaser.Scene {
         this.resourceLabels = new Map();
         this.unitIconTexts = new Map();
         this.emitters = new Map(); // ID -> ParticleEmitter
+        this.occupancyHuds = new Map(); // ID -> Graphics
         this.gridGraphics = null;
         this.marqueeGraphics = null; // 框選圖形界面
         this.targetGraphics = null;  // 尋路目標提示層
@@ -795,8 +796,23 @@ export class MainScene extends Phaser.Scene {
                 this.drawRallyPoint(g, ent);
             }
 
-            // [核心修正] 繪製工人派駐燈號：移至 HUD 圖層 (Depth 250萬)，防止被建築貼圖蓋住
-            this.drawWorkerLights(g, ent, ent.x, ent.y, uw, uh, TS, 1.0);
+            // [核心修正] 繪製工人派駐燈號：改用實體獨立 Graphics 物件，並根據 Y 軸設定深度 (500,000 + ent.y + 0.5)
+            // 這樣進度條會顯示在建築上方，但當工人站在建築前方 (y 較大) 時會遮住進度條。
+            const id = ent.id || `${ent.type1}_${ent.x}_${ent.y}`;
+            const bCfg = GameEngine.getBuildingConfig(ent.type1, ent.lv || 1);
+            if (bCfg && bCfg.need_villagers > 0 && !ent.isUnderConstruction) {
+                let occG = this.occupancyHuds.get(id);
+                if (!occG) {
+                    occG = this.add.graphics();
+                    this.occupancyHuds.set(id, occG);
+                }
+                occG.clear();
+                occG.setDepth(500000 + ent.y + 0.5); 
+                occG.setVisible(true);
+                this.drawWorkerLights(occG, ent, ent.x, ent.y, uw, uh, TS, 1.0);
+            } else if (this.occupancyHuds.has(id)) {
+                this.occupancyHuds.get(id).setVisible(false);
+            }
         });
     }
 
@@ -1583,7 +1599,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     cleanupEntityLabels(id) {
-        const labels = [this.queueTexts, this.nameLabels, this.levelLabels, this.resourceLabels, this.unitIconTexts, this.emitters];
+        const labels = [this.queueTexts, this.nameLabels, this.levelLabels, this.resourceLabels, this.unitIconTexts, this.emitters, this.occupancyHuds];
         labels.forEach(map => {
             if (map.has(id)) {
                 map.get(id).destroy();
@@ -1714,7 +1730,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     hideEntityLabel(id) {
-        const labels = [this.nameLabels, this.levelLabels, this.resourceLabels, this.queueTexts];
+        const labels = [this.nameLabels, this.levelLabels, this.resourceLabels, this.queueTexts, this.occupancyHuds];
         labels.forEach(map => {
             if (map.has(id)) {
                 const obj = map.get(id);

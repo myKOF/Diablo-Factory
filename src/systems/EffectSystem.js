@@ -92,6 +92,15 @@ export class EffectSystem {
     }
 
     /**
+     * 當資源產出時觸發 (視覺回饋)
+     */
+    static onResourceProduced(x, y, type, amount) {
+        if (window.BattleRenderer) {
+            window.BattleRenderer.addResourcePopup(x, y, type, amount);
+        }
+    }
+
+    /**
      * 輔助方法：根據 ID 尋找實體
      */
     static findEntityById(id, state) {

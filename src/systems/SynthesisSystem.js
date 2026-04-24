@@ -1,8 +1,5 @@
-/**
- * SynthesisSystem — 流水線加工廠系統
- * 負責處理建築物的配方解析、生產進度更新與產出物結算。
- * 遵循 [架構解耦與防污染搬移協議]，不修改既有 WorkerSystem 或 ResourceSystem。
- */
+import { EffectSystem } from "./EffectSystem.js";
+
 export class SynthesisSystem {
     /**
      * 1. 解析生產配方字串
@@ -107,6 +104,9 @@ export class SynthesisSystem {
                 } else {
                     state.resources[ent.currentRecipe.type] = ent.currentRecipe.amount;
                 }
+
+                // [新功能] 觸發產出視覺回饋 (小圖示 +1)
+                EffectSystem.onResourceProduced(ent.x, ent.y, ent.currentRecipe.type, ent.currentRecipe.amount);
 
                 // 處理隊列：從隊列中提取下一個任務
                 if (ent.recipeQueue && ent.recipeQueue.length > 0) {

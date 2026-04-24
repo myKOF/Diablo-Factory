@@ -8,6 +8,7 @@ import { BattleSystem } from "../systems/BattleSystem.js";
 export class BattleRenderer {
     static damagePopups = []; // 活躍的傷害跳字
     static popupPool = [];     // 物件池 (用於重複使用傷害跳字標籤)
+    static resourcePopupPool = []; // 資源提示物件池
     static hpBarTimer = 1.5;   // 受擊後顯示血條的時間 (秒)
 
     static init(scene) {
@@ -58,6 +59,62 @@ export class BattleRenderer {
             onComplete: () => {
                 popup.setActive(false).setVisible(false);
                 this.popupPool.push(popup);
+            }
+        });
+    }
+
+    /**
+     * 新增資源產出提示 (小圖示 +1)
+     * @param {number} x X 座標
+     * @param {number} y Y 座標
+     * @param {string} type 資源類型 (如 wooden_planks)
+     * @param {number} amount 數量
+     */
+    static addResourcePopup(x, y, type, amount) {
+        if (!this.scene) return;
+
+        const iconMap = {
+            wood: "🪵", stone: "🪨", gold: "💰", gold_ore: "🟡", food: "🍖", fruit: "🍎",
+            wolf_meat: "🥩", bear_meat: "🍗", wheat: "🌾", rice: "🍚",
+            crystal_ore: "💎", copper_ore: "🟫", iron_ore: "🔩", silver_ore: "⚪",
+            mithril_ore: "💠", wooden_planks: "🪵", slate_slabs: "🧱", glass: "🥛",
+            crystal_ball: "🔮", copper_ingots: "🟧", copper_plates: "🛡️", iron_ingots: "⬛",
+            iron_plates: "⛓️", steel: "🧱", silver_ingots: "🥈", gold_ingots: "🥇", mithril_ingots: "🎖️",
+            leather: "👞", healthpotion: "🧪"
+        };
+
+        const icon = iconMap[type] || "📦";
+        const text = `${icon} +${amount}`;
+
+        let popup;
+        if (this.resourcePopupPool.length > 0) {
+            popup = this.resourcePopupPool.pop();
+            popup.setActive(true).setVisible(true);
+            popup.setPosition(x, y - 40);
+        } else {
+            popup = this.scene.add.text(x, y - 40, '', {
+                font: 'bold 22px Arial',
+                fill: '#76ff03', // 亮綠色
+                stroke: '#000000',
+                strokeThickness: 3
+            }).setOrigin(0.5, 0.5).setDepth(5000000);
+        }
+
+        popup.setText(text);
+        popup.setAlpha(1);
+        popup.setScale(0.5); // 從小變大
+
+        // 動畫：向上漂浮並稍微放大後消失
+        this.scene.tweens.add({
+            targets: popup,
+            y: y - 100,
+            scale: 1.2,
+            alpha: { from: 1, to: 0 },
+            duration: 1200,
+            ease: 'Back.easeOut',
+            onComplete: () => {
+                popup.setActive(false).setVisible(false);
+                this.resourcePopupPool.push(popup);
             }
         });
     }
