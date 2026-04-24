@@ -603,7 +603,8 @@ export class UIManager {
             timber_factory: "🪵", stone_factory: "⛏️", barn: "🌾",
             farmland: "🌱", alchemy_lab: "⚗️", cathedral: "⛪", academy: "🧙",
             tree_plantation: "🌳", mage_place: "🧙", swordsman_place: "⚔️", archer_place: "🏹",
-            timber_processing_plant: "🪵", smelting_plant: "🔥", tank_workshop: "🚜", stone_processing_plant: "🪨"
+            timber_processing_plant: "🪵", smelting_plant: "🔥", tank_workshop: "🚜", stone_processing_plant: "🪨",
+            storehouse: "📦"
         };
 
         // 改為從 bp.list 讀取，確保順序與顯示內容正確
@@ -1062,7 +1063,14 @@ export class UIManager {
             GameEngine.state.selectedUnitIds = [];
             GameEngine.state.selectedResourceId = null;
 
-            this.showContextMenu(clicked);
+            if (!clicked.isUnderConstruction && (clicked.type1 === 'storehouse' || clicked.type2 === 'storehouse')) {
+                const panel = document.getElementById("warehouse_panel");
+                if (panel && panel.style.display === "none") {
+                    this.toggleWarehousePanel();
+                }
+            } else {
+                this.showContextMenu(clicked);
+            }
         } else {
             // 點擊地面
             GameEngine.state.selectedBuildingIds = [];

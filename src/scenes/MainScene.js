@@ -195,7 +195,8 @@ export class MainScene extends Phaser.Scene {
             'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation',
             'mage_place', 'swordsman_place', 'archer_place', 'campfire',
             // [核心對齊] 新合成工廠統一進入貼圖生成序列
-            'timber_processing_plant', 'smelting_plant', 'stone_processing_plant', 'tank_workshop'
+            'timber_processing_plant', 'smelting_plant', 'stone_processing_plant', 'tank_workshop',
+            'storehouse'
         ];
 
         buildingTypes.forEach(type => {
@@ -1392,7 +1393,7 @@ export class MainScene extends Phaser.Scene {
                     this.entities.set(id, displayObj);
                     this.entityGroup.add(displayObj);
                     displayObj.setDepth(500000 + ent.y); // Requirement 3: Y-axis sorting + Huge Offset
-                } else if (!textureKey && !['campfire'].includes(type1)) {
+                } else {
                     displayObj = this.add.graphics();
                     this.drawEntity(displayObj, ent, 1.0);
                     this.entities.set(id, displayObj);
@@ -1427,6 +1428,7 @@ export class MainScene extends Phaser.Scene {
             }
 
             this.updateEntityLabel(id, ent);
+            this.handleWorkingEffects(id, ent, true);
             if (type1 === 'campfire' && !ent.isUnderConstruction) {
                 this.handleCampfireParticles(id, ent, true);
             }
@@ -1440,7 +1442,10 @@ export class MainScene extends Phaser.Scene {
                 if (displayObj.visible) {
                     displayObj.setVisible(false);
                     this.hideEntityLabel(id);
-                    if (this.emitters.has(id)) this.emitters.get(id).setVisible(false);
+                    // 隱藏所有相關的 Emitter
+                    for (const [eid, emitter] of this.emitters.entries()) {
+                        if (eid.startsWith(id)) emitter.setVisible(false);
+                    }
                 }
                 // 超出生命週期則銷毀 (如動態產生的特效)
                 if (!allEntities.some(e => e.id === id) && id.startsWith('effect_')) {
@@ -1577,35 +1582,109 @@ export class MainScene extends Phaser.Scene {
         }
     }
 
-    handleCampfireParticles(id, ent, isVisible) {
-        let emitter = this.emitters.get(id);
-        if (!emitter) {
-            const cfg = UI_CONFIG.ResourceRenderer.Campfire.particle;
-            emitter = this.add.particles(ent.x, ent.y, 'fire_particle', {
-                lifespan: cfg.lifespan,
-                speedY: cfg.speedY,
-                scale: cfg.scale,
-                alpha: cfg.alpha,
-                tint: cfg.tints.map(t => this.hexOrRgba(t).color),
-                blendMode: cfg.blendMode,
-                frequency: cfg.frequency,
-                x: { min: -cfg.spreadX, max: cfg.spreadX },
-            });
-            emitter.setDepth(500000 + ent.y + 20); 
-            this.emitters.set(id, emitter);
-        }
-        if (emitter.x !== ent.x || emitter.y !== ent.y) emitter.setPosition(ent.x, ent.y);
-        if (emitter.visible !== isVisible) emitter.setVisible(isVisible);
-    }
-
     cleanupEntityLabels(id) {
-        const labels = [this.queueTexts, this.nameLabels, this.levelLabels, this.resourceLabels, this.unitIconTexts, this.emitters, this.occupancyHuds];
+        // [修正] 為了支援多個 Emitter (如 smoke, sparks)，改為遍歷 Map 並匹配 ID 前綴
+        for (const [eid, emitter] of this.emitters.entries()) {
+            if (eid.startsWith(id)) {
+                emitter.destroy();
+                this.emitters.delete(eid);
+            }
+        }
+
+        const labels = [this.queueTexts, this.nameLabels, this.levelLabels, this.resourceLabels, this.unitIconTexts, this.occupancyHuds];
         labels.forEach(map => {
             if (map.has(id)) {
                 map.get(id).destroy();
                 map.delete(id);
             }
         });
+    }
+
+    /**
+     * [核心特效] 處理加工廠運作時的粒子效果 (煙霧、火花)
+     */
+    handleWorkingEffects(id, ent, isVisible) {
+        // [核心修復] 回歸以配方存在為準，移除可能導致不顯示的效率檢查
+        const isWorking = !!ent.currentRecipe && !ent.isUnderConstruction;
+        const type1 = ent.type1 || ent.type;
+        
+        // 特效即時開關
+        const showEffect = isVisible && isWorking;
+
+        if (showEffect || this.emitters.has(`${id}_smoke`)) {
+            this.handleEmitter(`${id}_smoke`, ent, showEffect, 'smoke');
+        }
+
+        if (type1 === 'smelting_plant') {
+            this.handleEmitter(`${id}_sparks`, ent, showEffect, 'sparks');
+        }
+    }
+
+    /**
+     * 營火粒子效果處理 (複用通用 Emitter 邏輯)
+     */
+    handleCampfireParticles(id, ent, isVisible) {
+        this.handleEmitter(`${id}_fire`, ent, isVisible, 'campfire');
+    }
+
+    /**
+     * 通用粒子發射器管理器 (EventEmitter Pool)
+     */
+    handleEmitter(eid, ent, isVisible, presetType) {
+        let emitter = this.emitters.get(eid);
+        if (!emitter) {
+            let cfg;
+            if (presetType === 'campfire') {
+                cfg = UI_CONFIG.ResourceRenderer.Campfire.particle;
+            } else {
+                cfg = UI_CONFIG.WorkingEffects[presetType];
+            }
+            if (!cfg) return;
+
+            // 顏色處理：兼容 tint, tints 以及 color
+            const rawTint = cfg.tint || cfg.tints || cfg.color || cfg.colors;
+            const tintVal = Array.isArray(rawTint) 
+                ? rawTint.map(t => this.hexOrRgba(t).color) 
+                : this.hexOrRgba(rawTint || "#ffffff").color;
+
+            const emitterConfig = {
+                lifespan: cfg.lifespan,
+                speedY: cfg.speedY || 0,
+                speed: cfg.speed || 0,
+                scale: cfg.scale,
+                alpha: cfg.alpha,
+                tint: tintVal,
+                blendMode: cfg.blendMode || 'NORMAL',
+                frequency: cfg.frequency,
+                gravityY: cfg.gravityY || 0,
+                x: { min: -cfg.spreadX, max: cfg.spreadX },
+                y: { min: (cfg.offsetY || 0) - 5, max: (cfg.offsetY || 0) + 5 }
+            };
+
+            // 如果是 sparks 類型，額外調整噴發角度 (固定屬性)
+            if (presetType === 'sparks') {
+                emitterConfig.angle = { min: -120, max: -60 }; // 向上噴濺
+            }
+
+            emitter = this.add.particles(ent.x, ent.y, 'fire_particle', emitterConfig);
+            emitter.setDepth(500000 + ent.y + 10); 
+            this.emitters.set(eid, emitter);
+        }
+        
+        if (emitter.x !== ent.x || emitter.y !== ent.y) emitter.setPosition(ent.x, ent.y);
+        
+        // [核心修正] 即時開關邏輯
+        if (emitter.visible !== isVisible) {
+            emitter.setVisible(isVisible);
+            if (isVisible) {
+                // 確保發射器處於運行狀態並立即噴發
+                if (!emitter.emitting) emitter.start();
+                emitter.emitParticle(8); 
+            } else {
+                // 隱藏時停止發射
+                if (emitter.emitting) emitter.stop();
+            }
+        }
     }
 
     updateEntityLabel(id, ent) {
@@ -1759,7 +1838,8 @@ export class MainScene extends Phaser.Scene {
             'timber_processing_plant': 'tex_timber_processing_plant',
             'smelting_plant': 'tex_smelting_plant',
             'stone_processing_plant': 'tex_stone_processing_plant',
-            'tank_workshop': 'tex_tank_workshop'
+            'tank_workshop': 'tex_tank_workshop',
+            'storehouse': 'tex_storehouse'
         };
 
         if (!type1) return null;
@@ -1947,6 +2027,25 @@ export class MainScene extends Phaser.Scene {
             // 標誌
             g.lineStyle(2, 0xfbc02d, finalAlpha);
             g.strokeCircle(offX, offY, 12);
+        } else if (type1 === 'storehouse') {
+            // 倉庫外觀：深灰色基座，帶有箱子裝飾
+            g.fillStyle(0x546e7a, finalAlpha);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            g.lineStyle(2, 0x263238, finalAlpha);
+            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            
+            // 屋頂
+            g.fillStyle(0x37474f, finalAlpha);
+            g.fillRect(offX - (uw * TS) / 2 - 2, offY - (uh * TS) / 2 - 5, uw * TS + 4, 10);
+            
+            // 箱子符號 (📦 簡化版)
+            g.fillStyle(0xffa726, finalAlpha);
+            g.fillRect(offX - 10, offY - 10, 20, 20);
+            g.lineStyle(1, 0xe65100, finalAlpha);
+            g.strokeRect(offX - 10, offY - 10, 20, 20);
+            // 箱子蓋線
+            g.lineBetween(offX - 10, offY, offX + 10, offY);
+            g.lineBetween(offX, offY - 10, offX, offY);
         } else if (type1 && (type1.startsWith('tree') || type1.startsWith('wood'))) {
             g.fillStyle(0x2e7d32, finalAlpha);
             g.fillCircle(offX, offY, 20);

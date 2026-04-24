@@ -82,6 +82,7 @@ export const UI_CONFIG = {
             { id: "stone_factory" },
             { id: "barn" },
             { id: "gold_mining_factory" },
+            { id: "storehouse" },
             { id: "farmland" },
             { id: "tree_plantation" },
             { id: "mage_place" },
@@ -656,6 +657,29 @@ export const UI_CONFIG = {
                 tint: 0x222222,                     // 接近黑色的深灰
                 frequency: 30                       // 噴發頻率比火低，節省效能
             }
+        }
+    },
+    // -- 建築運作效果 (WorkingEffects) --------------------------
+    WorkingEffects: {
+        smoke: {
+            lifespan: 1500,
+            speedY: { min: -40, max: -70 },
+            scale: { start: 0.3, end: 1.2 },
+            alpha: { start: 0.5, end: 0 },
+            tint: "#aaaaaa", // 淺灰煙
+            frequency: 150,
+            spreadX: 15
+        },
+        sparks: {
+            lifespan: 500,
+            speed: { min: 80, max: 150 },
+            scale: { start: 0.2, end: 0 },
+            alpha: { start: 1, end: 0.2 },
+            tint: ["#ff9800", "#ffeb3b", "#ffffff"], // 橘、黃、白
+            frequency: 80,
+            gravityY: 500,
+            spreadX: 10,
+            blendMode: 'ADD'
         }
     },
     // -- 加工廠工人派駐顯示 (WorkerOccupancy) --------------------------
