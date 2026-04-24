@@ -1871,6 +1871,17 @@ export class UIManager {
                 configs[resType] = { id: baseId, name: GameEngine.RESOURCE_NAMES[resType] || resType, icon: resType, type: resType, stack: 5000, lv: 1 };
             }
         });
+        Object.keys(GameEngine.state.resources || {}).forEach((resType, index) => {
+            if ((GameEngine.state.resources[resType] || 0) <= 0 || configs[resType]) return;
+            configs[resType] = {
+                id: 9000 + index,
+                name: GameEngine.RESOURCE_NAMES[resType] || resType,
+                icon: resType,
+                type: resType,
+                stack: 5000,
+                lv: 1
+            };
+        });
 
         let itemsForTab = Object.values(configs).filter(c => {
             if (!c || !c.type) return false;
@@ -1890,7 +1901,7 @@ export class UIManager {
                 const amount = GameEngine.state.resources[item.type] || 0;
                 const isFull = amount >= item.stack;
                 const amtColor = isFull ? '#ff5252' : '#fff';
-                const displayIcon = ingredientIcons[item.type] || ingredientIcons[item.icon] || "📦";
+                const displayIcon = ingredientIcons[item.type] || ingredientIcons[item.icon] || item.icon || "📦";
 
                 // 適應 420px 寬度的 5 欄佈局
                 html += `
@@ -2070,10 +2081,22 @@ export class UIManager {
         }
 
         // 更新日誌
-        this.updateLogPanel();
+        this.updateLogPanel(forceUpdate);
+
+        const warehousePanel = document.getElementById("warehouse_panel");
+        if (warehousePanel && warehousePanel.style.display !== "none") {
+            const warehouseState = Object.keys(res || {})
+                .sort()
+                .map(key => `${key}:${res[key] || 0}`)
+                .join("|");
+            if (this.lastUIState.warehouse !== warehouseState || forceUpdate) {
+                this.lastUIState.warehouse = warehouseState;
+                this.renderWarehousePanel();
+            }
+        }
     }
 
-    static updateLogPanel() {
+    static updateLogPanel(forceUpdate = false) {
         // [TEST] 更新選中單位即時座標與狀態 (若選取多個，僅顯示第一個)
         const debugInfo = document.getElementById("unit_debug_info");
         const selIds = GameEngine.state.selectedUnitIds || [];
@@ -2169,6 +2192,26 @@ export class UIManager {
         // 更新加工廠配方即時狀態 (進度條 & 隊列數量)
         const factoryEnt = this.activeMenuEntity;
         if (factoryEnt && !factoryEnt.isUnderConstruction) {
+            const menu = document.getElementById("context_menu");
+            const cfg = GameEngine.getBuildingConfig(factoryEnt.type1, factoryEnt.lv || 1);
+            if (menu && menu.style.display !== "none" && cfg && cfg.type2 === "processing_plant") {
+                const factoryPanelState = [
+                    factoryEnt.id || `${factoryEnt.type1}_${factoryEnt.x}_${factoryEnt.y}`,
+                    factoryEnt.currentRecipe ? factoryEnt.currentRecipe.type : "none",
+                    factoryEnt.isCraftingActive ? "active" : "idle",
+                    Object.keys(factoryEnt.inputBuffer || {})
+                        .sort()
+                        .map(key => `${key}:${factoryEnt.inputBuffer[key] || 0}`)
+                        .join("|")
+                ].join("::");
+
+                if (this.lastUIState.factoryPanel !== factoryPanelState || forceUpdate) {
+                    this.lastUIState.factoryPanel = factoryPanelState;
+                    this.showContextMenu(factoryEnt, false);
+                    return;
+                }
+            }
+
             const recipeBtns = document.querySelectorAll(".recipe-btn");
             recipeBtns.forEach(btn => {
                 const type = btn.getAttribute("data-type");

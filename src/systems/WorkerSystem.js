@@ -216,7 +216,8 @@ export class WorkerSystem {
                         this.engine.addLog(`[物流] ${v.configName || '工人'} 已進入 ${v.factoryTarget.name || v.factoryTarget.type1} 待命。`, 'LOGISTICS');
                     }
                 } else {
-                    this.moveDetailed(v, v.factoryTarget.x, v.factoryTarget.y, moveSpeed, deltaTime, factoryIgnoreEnts);
+                    const approach = this.getBuildingApproachPoint(v, v.factoryTarget, 30);
+                    this.moveDetailed(v, approach.x, approach.y, moveSpeed, deltaTime, factoryIgnoreEnts);
                 }
                 break;
             case 'WORKING_IN_FACTORY': {
@@ -235,9 +236,10 @@ export class WorkerSystem {
                         if (factory) v.assignedWarehouseId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
                     }
 
+                    const fType = factory ? String(factory.type1 || factory.type).toLowerCase() : '';
+                    const isWarehouse = this.isLogisticsStorageType(fType);
+
                     if (factory && factory.outputTargets && factory.outputTargets.length > 0) {
-                        const fType = String(factory.type1 || factory.type).toLowerCase();
-                        const isWarehouse = this.isLogisticsStorageType(fType);
 
                         // 每 100 幀隨機抽樣印出日誌，讓我們知道工人在想什麼
                         if (Math.random() < 0.01) {
@@ -245,33 +247,37 @@ export class WorkerSystem {
                         }
 
                         if (isWarehouse) {
-                            for (let conn of factory.outputTargets) {
+                            const conn = this.pickLogisticsConnectionForWorker(v, factory, factory.outputTargets, (candidate) => {
+                                return candidate.filter && (state.resources[candidate.filter] || 0) >= 1;
+                            });
+                            if (conn) {
                                 const resCount = state.resources[conn.filter] || 0;
                                 if (Math.random() < 0.01) console.log(`[除錯] 檢查連線 -> 過濾器: ${conn.filter}, 全域庫存: ${resCount}`);
 
-                                if (conn.filter && resCount >= 1) {
-                                    state.resources[conn.filter] -= 1;
-                                    v.cargoType = conn.filter;
-                                    v.cargoAmount = 1;
-                                    v.state = 'TRANSPORTING_LOGISTICS';
-                                    v.logisticsTargetId = conn.id;
-                                    v.logisticsSourceId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
-                                    v.logisticsHomeId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
+                                state.resources[conn.filter] -= 1;
+                                v.cargoType = conn.filter;
+                                v.cargoAmount = 1;
+                                v.state = 'TRANSPORTING_LOGISTICS';
+                                v.logisticsTargetId = conn.id;
+                                v.logisticsSourceId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
+                                v.logisticsHomeId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
+                                this.markWorkerOutsideBuilding(v, factory);
 
-                                    // [修復 2] 雙重保證顯示工人 (邏輯與 Phaser 渲染層)
-                                    v.visible = true;
-                                    if (v.sprite && typeof v.sprite.setVisible === 'function') v.sprite.setVisible(true);
-                                    if (v.gameObject && typeof v.gameObject.setVisible === 'function') v.gameObject.setVisible(true);
+                                // [修復 2] 雙重保證顯示工人 (邏輯與 Phaser 渲染層)
+                                v.visible = true;
+                                if (v.sprite && typeof v.sprite.setVisible === 'function') v.sprite.setVisible(true);
+                                if (v.gameObject && typeof v.gameObject.setVisible === 'function') v.gameObject.setVisible(true);
 
-                                    if (this.engine) this.engine.addLog(`[物流] ${factory.name || factory.type1} 派出 ${v.configName || '工人'}，送出 ${conn.filter}。`, 'LOGISTICS');
-                                    console.log(`[成功] 工人 ${v.id} 帶著 ${conn.filter} 出門了！`);
-                                    break;
-                                }
+                                const routeNumber = (conn._balancedIndex ?? 0) + 1;
+                                if (this.engine) this.engine.addLog(`[物流] ${factory.name || factory.type1} 派出 ${v.configName || '工人'}，送出 ${conn.filter} 至第 ${routeNumber} 條路線。`, 'LOGISTICS');
+                                console.log(`[成功] 工人 ${v.id} 帶著 ${conn.filter} 出門了！`);
                             }
                         } else if (factory.outputBuffer) {
                             for (let resType in factory.outputBuffer) {
                                 if (factory.outputBuffer[resType] >= 1) {
-                                    let validConn = factory.outputTargets.find(t => !t.filter || t.filter === resType);
+                                    let validConn = this.pickLogisticsConnectionForWorker(v, factory, factory.outputTargets, (candidate) => {
+                                        return !candidate.filter || candidate.filter === resType;
+                                    });
                                     if (!validConn && v.logisticsSourceId) {
                                         validConn = { id: v.logisticsSourceId, filter: resType, isFallbackReturn: true };
                                     }
@@ -282,6 +288,7 @@ export class WorkerSystem {
                                         v.state = 'TRANSPORTING_LOGISTICS';
                                         v.logisticsTargetId = validConn.id;
                                         v.logisticsHomeId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
+                                        this.markWorkerOutsideBuilding(v, factory);
                                         v.visible = true;
                                         if (v.sprite && typeof v.sprite.setVisible === 'function') v.sprite.setVisible(true);
                                         if (v.gameObject && typeof v.gameObject.setVisible === 'function') v.gameObject.setVisible(true);
@@ -295,7 +302,7 @@ export class WorkerSystem {
                                 }
                             }
                         }
-                    } else if (!isWarehouse && factory.currentRecipe && !v.logisticsSourceId && !factory._missingOutputRouteLogged) {
+                    } else if (factory && !isWarehouse && factory.currentRecipe && !v.logisticsSourceId && !factory._missingOutputRouteLogged) {
                         this.engine.addLog(`[物流] ${factory.name || factory.type1} 尚未設定對外輸出路線，成品暫時無法搬出。`, 'LOGISTICS');
                         factory._missingOutputRouteLogged = true;
                     }
@@ -314,8 +321,9 @@ export class WorkerSystem {
                 const logisticsMoveSpeed = this.getUnitMoveSpeed(v, false);
                 const logisticsIgnoreEnts = [...ignoreEnts, target];
                 if (homeForTransport) logisticsIgnoreEnts.push(homeForTransport);
-                if (typeof this.moveDetailed === 'function') this.moveDetailed(v, target.x, target.y, logisticsMoveSpeed, deltaTime, logisticsIgnoreEnts);
-                else if (typeof this.moveTowards === 'function') this.moveTowards(v, target.x, target.y, logisticsMoveSpeed, deltaTime, logisticsIgnoreEnts);
+                const targetApproach = this.getBuildingApproachPoint(v, target, 30);
+                if (typeof this.moveDetailed === 'function') this.moveDetailed(v, targetApproach.x, targetApproach.y, logisticsMoveSpeed, deltaTime, logisticsIgnoreEnts);
+                else if (typeof this.moveTowards === 'function') this.moveTowards(v, targetApproach.x, targetApproach.y, logisticsMoveSpeed, deltaTime, logisticsIgnoreEnts);
 
                 if (this.isTouchingBuilding(v, target, 40)) {
                     if (!target.inputBuffer) target.inputBuffer = {};
@@ -324,7 +332,7 @@ export class WorkerSystem {
                     const deliveredCargoAmount = v.cargoAmount;
                     if (v.cargoAmount > 0 && v.cargoType) {
                         if (['warehouse', 'barn', 'town_center', 'village', 'storehouse'].includes(tType)) {
-                            if (state.resources[v.cargoType] !== undefined) state.resources[v.cargoType] += v.cargoAmount;
+                            state.resources[v.cargoType] = (state.resources[v.cargoType] || 0) + v.cargoAmount;
                         } else {
                             target.inputBuffer[v.cargoType] = (target.inputBuffer[v.cargoType] || 0) + v.cargoAmount;
                             const targetCfg = this.engine.getBuildingConfig(target.type1 || target.type, target.lv || 1);
@@ -365,8 +373,9 @@ export class WorkerSystem {
                 const returnMoveSpeed = this.getUnitMoveSpeed(v, false);
                 const homeIgnoreEnts = [...ignoreEnts, home];
                 if (targetForReturn) homeIgnoreEnts.push(targetForReturn);
-                if (typeof this.moveDetailed === 'function') this.moveDetailed(v, home.x, home.y, returnMoveSpeed, deltaTime, homeIgnoreEnts);
-                else if (typeof this.moveTowards === 'function') this.moveTowards(v, home.x, home.y, returnMoveSpeed, deltaTime, homeIgnoreEnts);
+                const homeApproach = this.getBuildingApproachPoint(v, home, 30);
+                if (typeof this.moveDetailed === 'function') this.moveDetailed(v, homeApproach.x, homeApproach.y, returnMoveSpeed, deltaTime, homeIgnoreEnts);
+                else if (typeof this.moveTowards === 'function') this.moveTowards(v, homeApproach.x, homeApproach.y, returnMoveSpeed, deltaTime, homeIgnoreEnts);
 
                 if (this.isTouchingBuilding(v, home, 40)) {
                     if (this.tryEnterLogisticsBuilding(v, home, 'home')) {
@@ -1353,6 +1362,59 @@ export class WorkerSystem {
         );
     }
 
+    getBuildingApproachPoint(v, building, padding = 30) {
+        if (!building) return { x: v.x, y: v.y };
+        const fp = this.engine.getFootprint(building.type1 || building.type);
+        const halfW = (fp.uw * 20) / 2;
+        const halfH = (fp.uh * 20) / 2;
+        const left = building.x - halfW - padding;
+        const right = building.x + halfW + padding;
+        const top = building.y - halfH - padding;
+        const bottom = building.y + halfH + padding;
+
+        const clampedX = Math.max(left, Math.min(right, v.x));
+        const clampedY = Math.max(top, Math.min(bottom, v.y));
+        const insideX = v.x >= left && v.x <= right;
+        const insideY = v.y >= top && v.y <= bottom;
+
+        if (!insideX || !insideY) {
+            return { x: clampedX, y: clampedY };
+        }
+
+        const distances = [
+            { side: 'left', value: Math.abs(v.x - left) },
+            { side: 'right', value: Math.abs(right - v.x) },
+            { side: 'top', value: Math.abs(v.y - top) },
+            { side: 'bottom', value: Math.abs(bottom - v.y) }
+        ].sort((a, b) => a.value - b.value);
+
+        switch (distances[0].side) {
+            case 'left': return { x: left, y: clampedY };
+            case 'right': return { x: right, y: clampedY };
+            case 'top': return { x: clampedX, y: top };
+            default: return { x: clampedX, y: bottom };
+        }
+    }
+
+    pickLogisticsConnectionForWorker(v, factory, outputTargets, canUse) {
+        if (!factory || !Array.isArray(outputTargets) || outputTargets.length === 0) return null;
+        const usableTargets = outputTargets
+            .map((conn, index) => ({ conn, index }))
+            .filter(({ conn }) => canUse(conn));
+        if (usableTargets.length === 0) return null;
+
+        const factoryId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
+        const assignedWorkers = this.state.units.villagers
+            .filter(worker => worker.assignedWarehouseId === factoryId)
+            .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+        const workerIndex = Math.max(0, assignedWorkers.findIndex(worker => worker.id === v.id));
+        const preferredIndex = outputTargets.length > 0 ? workerIndex % outputTargets.length : 0;
+        const preferred = usableTargets.find(({ index }) => index === preferredIndex) || usableTargets[workerIndex % usableTargets.length];
+
+        preferred.conn._balancedIndex = preferred.index;
+        return preferred.conn;
+    }
+
     getAssignedCountForBuilding(building, excludeVillagerId = null) {
         if (!building) return 0;
         const buildingId = building.id || `${building.type1}_${building.x}_${building.y}`;
@@ -1444,6 +1506,8 @@ export class WorkerSystem {
             if (!building.assignedWorkers.includes(v.id)) {
                 building.assignedWorkers.push(v.id);
             }
+        } else {
+            this.markWorkerInsideBuilding(v, building);
         }
 
         const reservedCount = cfg && cfg.type2 === 'processing_plant'
@@ -1470,6 +1534,19 @@ export class WorkerSystem {
 
     isLogisticsStorageType(type) {
         return this.LOGISTICS_STORAGE_TYPES.includes(String(type || '').toLowerCase());
+    }
+
+    markWorkerOutsideBuilding(v, building) {
+        if (!v || !building || !building.assignedWorkers) return;
+        building.assignedWorkers = building.assignedWorkers.filter(id => id !== v.id);
+    }
+
+    markWorkerInsideBuilding(v, building) {
+        if (!v || !building) return;
+        if (!building.assignedWorkers) building.assignedWorkers = [];
+        if (!building.assignedWorkers.includes(v.id)) {
+            building.assignedWorkers.push(v.id);
+        }
     }
 
     getFootprint(type1) {
