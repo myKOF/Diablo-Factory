@@ -131,16 +131,14 @@ export class SynthesisSystem {
             const cfg = engine.getEntityConfig(ent.type1 || ent.type, ent.lv);
             if (!cfg) return;
 
-            const needVillagers = cfg.need_villagers || 1;
             const isProcessingPlant = cfg.type2 === 'processing_plant';
             const stationedWorkers = ent.assignedWorkers ? ent.assignedWorkers.length : 0;
             const configuredWorkers = ent.targetWorkerCount || 0;
-            const currentWorkers = isProcessingPlant
-                ? Math.max(stationedWorkers, configuredWorkers)
-                : stationedWorkers;
-            const efficiency = Math.min(1.0, currentWorkers / needVillagers);
+            const hasWorkers = isProcessingPlant
+                ? (stationedWorkers > 0 || configuredWorkers > 0)
+                : stationedWorkers > 0;
 
-            if (efficiency <= 0) {
+            if (!hasWorkers) {
                 ent.isCraftingActive = false;
                 return;
             }
@@ -148,8 +146,10 @@ export class SynthesisSystem {
             if (!ent.inputBuffer) ent.inputBuffer = {};
             if (!ent.outputBuffer) ent.outputBuffer = {};
 
-            const ingCfg = state.ingredientConfigs ? state.ingredientConfigs[ent.currentRecipe.type] : null;
-            const baseTime = ingCfg ? (ingCfg.craftTime || 5) : 5;
+            const recipeType = String(ent.currentRecipe.type || '').toLowerCase();
+            const ingCfg = state.ingredientConfigs ? (state.ingredientConfigs[recipeType] || state.ingredientConfigs[ent.currentRecipe.type]) : null;
+            const configuredTime = ingCfg ? (ingCfg.production_times ?? ingCfg.craftTime) : null;
+            const baseTime = Math.max(0.1, parseFloat(configuredTime) || 5);
             const needs = ingCfg ? ingCfg.need_ingredients : {};
 
             // 1. 自動化檢測：檢查 inputBuffer 中的材料是否足夠
@@ -186,7 +186,7 @@ export class SynthesisSystem {
             // 2. 開始自動生產
             ent.isCraftingActive = true;
             if (ent.craftingProgress === undefined) ent.craftingProgress = 0;
-            ent.craftingProgress += (deltaTime / baseTime) * efficiency;
+            ent.craftingProgress += deltaTime / baseTime;
 
             // 3. 生產結算 (無限循環)
             if (ent.craftingProgress >= 1.0) {

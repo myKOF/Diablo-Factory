@@ -313,6 +313,7 @@ export class ConfigManager {
             const idxId = findHIdx('id'), idxName = findHIdx('name'), idxIcon = findHIdx('icon');
             const idxType = findHIdx('type'), idxLv = findHIdx('lv');
             const idxNeed = findHIdx('need_ingredients'), idxStack = findHIdx('stack');
+            const idxProductionTimes = findHIdx('production_times');
 
             state.ingredientConfigs = {};
             for (let i = headerIdx + 1; i < rows.length; i++) {
@@ -322,6 +323,8 @@ export class ConfigManager {
                 const id = parseInt(row[idxId]);
                 const type = row[idxType].trim();
                 
+                const productionTime = parseFloat(row[idxProductionTimes]);
+
                 state.ingredientConfigs[type] = {
                     id: id,
                     name: row[idxName] ? row[idxName].trim() : type,
@@ -329,7 +332,9 @@ export class ConfigManager {
                     type: type,
                     lv: parseInt(row[idxLv]) || 1,
                     need_ingredients: ConfigManager.parseResourceCosts(row[idxNeed] || ''),
-                    stack: parseInt(row[idxStack]) || 1000
+                    stack: parseInt(row[idxStack]) || 1000,
+                    production_times: isNaN(productionTime) ? 5 : productionTime,
+                    craftTime: isNaN(productionTime) ? 5 : productionTime
                 };
             }
             console.log("材料需求表加載成功:", Object.keys(state.ingredientConfigs).length);

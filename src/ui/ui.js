@@ -25,6 +25,67 @@ export class UIManager {
         queueInfo: ""
     };
 
+    static ingredientIconMap = {
+        fruit: "🍎",
+        wolf_meat: "🥩",
+        bear_meat: "🍗",
+        wheat: "🌾",
+        rice: "🍚",
+        wood: "🪵",
+        stone: "🪨",
+        crystal_ore: "💎",
+        coal_ore: "⚫",
+        copper_ore: "🟫",
+        iron_ore: "🔩",
+        silver_ore: "⚪",
+        gold_ore: "🟡",
+        mithril_ore: "💠",
+        wolf_pelts: "🐺",
+        bear_pelts: "🐻",
+        food: "🍖",
+        leather: "🟤",
+        wooden_planks: "🪵",
+        slate_slabs: "🧱",
+        glass: "🥛",
+        crystal_ball: "🔮",
+        coal: "⚫",
+        copper_ingots: "🟧",
+        copper_plates: "🛡️",
+        iron_ingots: "⬛",
+        iron_plates: "⛓️",
+        steel: "🔗",
+        silver_ingots: "🥈",
+        gold_ingots: "🥇",
+        mithril_ingots: "🎖️",
+        gold: "💰"
+    };
+
+    static getIngredientIcon(typeOrIcon) {
+        if (!typeOrIcon) return "📦";
+        const key = String(typeOrIcon).trim().toLowerCase();
+        return this.ingredientIconMap[key] || "📦";
+    }
+
+    static getIngredientProductionTime(type, fallback = 5) {
+        if (!type) return fallback;
+        const state = GameEngine.state;
+        const key = String(type).trim().toLowerCase();
+        const cfg = state.ingredientConfigs
+            ? (state.ingredientConfigs[key] || state.ingredientConfigs[type])
+            : null;
+        const rawTime = cfg ? (cfg.production_times ?? cfg.craftTime) : null;
+        const seconds = parseFloat(rawTime);
+        return Number.isFinite(seconds) && seconds > 0 ? seconds : fallback;
+    }
+
+    static formatProductionCountdown(entity) {
+        if (!entity || !entity.currentRecipe) return "待機中";
+        const totalSeconds = this.getIngredientProductionTime(entity.currentRecipe.type, 5);
+        const progress = Math.max(0, Math.min(1, entity.craftingProgress || 0));
+        const remainingSeconds = Math.max(0, (1 - progress) * totalSeconds);
+        return `${remainingSeconds.toFixed(1)} 秒`;
+    }
+
     static init() {
         this.uiLayer = document.getElementById("ui_layer");
         if (!this.uiLayer) return;
@@ -643,10 +704,9 @@ export class UIManager {
             const currentCount = GameEngine.state.mapEntities.filter(e => e.type1 === cfg.model).length;
 
             const costStr = [];
-            const iconMap = { food: '🍖', wood: '🪵', stone: '🪨', gold_ore: '🪙', gold: '💰' };
             for (let r in cfg.costs) {
                 if (cfg.costs[r] > 0) {
-                    costStr.push(`${iconMap[r] || '📦'}${cfg.costs[r]}`);
+                    costStr.push(`${this.getIngredientIcon(r)}${cfg.costs[r]}`);
                 }
             }
 
@@ -1214,8 +1274,29 @@ export class UIManager {
         const cfg_current = GameEngine.getBuildingConfig(entity.type1, entity.lv || 1);
         const canAssignWorkers = cfg_current && (cfg_current.need_villagers > 0 || (cfg_current.logistics && (cfg_current.logistics.canInput || cfg_current.logistics.canOutput)));
         const isProcessingPlant = cfg_current && cfg_current.type2 === 'processing_plant';
+        if (isProcessingPlant && !isConfirming) menu.style.padding = "16px";
         const nextCfg = GameEngine.getBuildingConfig(entity.type1, (entity.lv || 1) + 1);
         const hCfg = UI_CONFIG.ActionMenuHeader;
+        const eid = entity.id || `${entity.type1}_${entity.x}_${entity.y}`;
+        const assignedWorkerCount = GameEngine.state.units.villagers.filter(v =>
+            v.config && v.config.type === 'villagers' && v.assignedWarehouseId === eid
+        ).length;
+        const workerLightMax = Math.max(1, isProcessingPlant
+            ? (cfg_current?.need_villagers || 5)
+            : (entity.targetWorkerCount || cfg_current?.need_villagers || 5));
+        const workerLightCount = Math.max(0, Math.min(workerLightMax, isProcessingPlant
+            ? new Set(entity.assignedWorkers || []).size
+            : assignedWorkerCount));
+        const maxWorkersForEntity = workerLightMax;
+        const compactWorkerHtml = (!isConfirming && isProcessingPlant && canAssignWorkers && !entity.isUnderConstruction) ? `
+            <div style="display: flex; align-items: center; gap: 6px; margin-left: 10px;">
+                <div class="factory-worker-lights" title="建築內工人 ${workerLightCount} / ${workerLightMax}" style="display: grid; grid-template-columns: repeat(${workerLightMax}, 1fr); width: 118px; height: 20px; background: #202a2f; border: 2px solid #cfd8dc; box-sizing: border-box;">
+                    ${Array.from({ length: workerLightMax }).map((_, i) => `<div class="factory-worker-light" style="background: ${i < workerLightCount ? '#32f06a' : 'rgba(120,130,138,0.55)'}; border-right: ${i < workerLightMax - 1 ? '1px solid rgba(0,0,0,0.5)' : '0'};"></div>`).join('')}
+                </div>
+                <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)"
+                    style="width: 24px; height: 24px; border-radius: 50%; background: #5b3d31; border: 2px solid #c59a79; color: #f6e2cf; font-size: 16px; font-weight: 900; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 5px rgba(0,0,0,0.35);">－</button>
+            </div>
+        ` : "";
 
         // --- 1. 左側標頭：Lv 與 名稱 (垂直堆疊) ---
         let leftHeader = "";
@@ -1242,8 +1323,9 @@ export class UIManager {
                     <div style="display: flex; align-items: center;">
                         <span style="font-size: ${hCfg.levelFontSize}; font-weight: 900; color: #ffffff; line-height: 0.9; font-family: 'Arial Black', sans-serif; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">Lv.${entity.lv || 1}</span>
                         ${dismissHtml}
+                        ${compactWorkerHtml}
                     </div>
-                    <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold; margin-top: 10px; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); white-space: nowrap;">${name}</span>
+                    <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold; margin-top: ${isProcessingPlant ? '6px' : '10px'}; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); white-space: nowrap;">${name}</span>
                 </div>
             `;
         }
@@ -1273,16 +1355,8 @@ export class UIManager {
             const costs = nextCfg?.costs || {};
             const costItems = [];
 
-            // 定義資源圖標映射 (可優化為從 Config 讀取)
-            const iconMap = {
-                food: '🍖', wood: '🪵', stone: '🪨',
-                gold_ore: '🪙', gold: '💰',
-                iron_ore: '⛓️', coal_ore: '💎',
-                crystal_ore: '🔮'
-            };
-
             for (let r in costs) {
-                costItems.push({ key: r, icon: iconMap[r] || '📦', val: costs[r] });
+                costItems.push({ key: r, icon: this.getIngredientIcon(r), val: costs[r] });
             }
 
             const btnSize = hCfg.upgradeBtnSize || 54;
@@ -1329,7 +1403,6 @@ export class UIManager {
             rightHeader = `<div style="color: #fbc02d; font-weight: bold; font-size: 16px; border: 1px solid rgba(251, 192, 45, 0.3); display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgba(0,0,0,0.3); width: ${boxW}; height: ${boxH}; box-sizing: border-box; transform: translate(${rOffset.x}px, ${rOffset.y}px);">已達最高等級 ⭐</div>`;
         }
 
-        const eid = entity.id || `${entity.type1}_${entity.x}_${entity.y}`;
         const btnOpacity = entity.isUpgrading ? "opacity: 0.4; filter: grayscale(1); pointer-events: none;" : "opacity: 1;";
 
         // --- 3. 指令按鈕生成 (格網) ---
@@ -1337,7 +1410,7 @@ export class UIManager {
         // [修正] 改為 nowrap 並使用 space-evenly，確保縮減寬度時，間距會同比調整，且永不換行
         const gridJustify = isConfirming ? "center" : "space-evenly";
         const gridGap = isConfirming ? "20px" : "4px";
-        let gridHtml = `<div id="action_button_grid" style="display:flex; flex-direction:${isProcessingPlant ? 'column' : 'row'}; flex-wrap:nowrap; gap:${isProcessingPlant ? '12px' : gridGap}; justify-content:${isProcessingPlant ? 'flex-start' : gridJustify}; align-items:${isProcessingPlant ? 'stretch' : 'center'}; transition: all 0.3s; width: 100%; transform: translate(${gOffset.x}px, ${gOffset.y}px);">`;
+        let gridHtml = `<div id="action_button_grid" style="display:flex; flex-direction:${isProcessingPlant ? 'column' : 'row'}; flex-wrap:nowrap; gap:${isProcessingPlant ? '8px' : gridGap}; justify-content:${isProcessingPlant ? 'flex-start' : gridJustify}; align-items:${isProcessingPlant ? 'stretch' : 'center'}; transition: all 0.3s; width: 100%; transform: translate(${gOffset.x}px, ${gOffset.y}px);">`;
 
         if (isConfirming) {
             gridHtml += `
@@ -1380,12 +1453,10 @@ export class UIManager {
             }
 
             // --- [新增] 派駐人數加減按鈕 ---
-            if (!isConfirming && canAssignWorkers && !entity.isUnderConstruction) {
-                const current = GameEngine.state.units.villagers.filter(v => 
-                    v.config && v.config.type === 'villagers' && v.assignedWarehouseId === eid
-                ).length;
+            if (!isConfirming && canAssignWorkers && !entity.isUnderConstruction && !isProcessingPlant) {
+                const current = assignedWorkerCount;
                 const wcOff = hCfg.workerControlOffset || { x: 0, y: 15 };
-                const maxWorkers = entity.targetWorkerCount || cfg_current.need_villagers || 5; 
+                const maxWorkers = maxWorkersForEntity; 
                 
                 gridHtml += `
                     <div class="warehouse-controls" style="display: flex; align-items: center; justify-content: center; gap: 20px; background: rgba(0,0,0,0.4); padding: 10px 25px; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); transform: translate(${wcOff.x}px, ${wcOff.y}px); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box; ${isProcessingPlant ? 'width: 100%; justify-content: space-between; padding: 14px 18px;' : ''}">
@@ -1409,68 +1480,85 @@ export class UIManager {
         // --- [新增] 加工廠配方清單 ---
         if (!isConfirming && isProcessingPlant && !entity.isUnderConstruction) {
             const recipes = SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, entity) || [];
-            const bufferEntries = Object.entries(entity.inputBuffer || {}).filter(([, amount]) => (amount || 0) > 0);
             if (recipes.length > 0) {
-                const currentRecipeName = entity.currentRecipe
-                    ? (GameEngine.RESOURCE_NAMES[entity.currentRecipe.type] || entity.currentRecipe.type)
-                    : '未設定';
-                // 圖示對照表 (Fallback)
-                const rIconMap = {
-                    wooden_planks: "🪵", steel: "🧱", copper_plates: "🛡️", iron_plates: "⛓️",
-                    glass: "🥛", silver_ingots: "🥈", gold_ingots: "🥇", mithril_ingots: "🎖️"
+                const state = GameEngine.state;
+                const inputBuffer = entity.inputBuffer || {};
+                const getRecipeConfig = (recipeType) => {
+                    const key = String(recipeType || '').toLowerCase();
+                    return state.ingredientConfigs ? (state.ingredientConfigs[key] || state.ingredientConfigs[recipeType]) : null;
                 };
-                gridHtml += `<div style="width: 100%; display: flex; flex-direction: column; gap: 12px; justify-content: center; padding-top: 2px;">`;
-                gridHtml += `<div style="width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 0.9fr); gap: 10px; align-items: stretch;">`;
-                gridHtml += `<div style="display: flex; flex-direction: column; gap: 6px; background: linear-gradient(180deg, rgba(22,33,18,0.92), rgba(14,18,12,0.88)); border: 1px solid rgba(156,204,101,0.28); border-radius: 14px; padding: 12px 14px; box-sizing: border-box; min-height: 92px;">`;
-                gridHtml += `<div style="font-size: 11px; color: rgba(220,237,200,0.58); text-transform: uppercase; letter-spacing: 1.4px;">當前生產線</div>`;
-                gridHtml += `<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">`;
-                gridHtml += `<div style="font-size: 18px; font-weight: 800; color: ${entity.currentRecipe ? '#fff59d' : '#ffab91'}; text-shadow: 0 2px 8px rgba(0,0,0,0.35);">${currentRecipeName}</div>`;
-                gridHtml += `<div style="min-width: 64px; text-align: center; padding: 8px 10px; border-radius: 12px; background: rgba(139,195,74,0.16); border: 1px solid rgba(220,237,200,0.16); color: #dcedc8; font-size: 12px; font-weight: bold;">${entity.isCraftingActive ? '運作中' : '待機中'}</div>`;
-                gridHtml += `</div>`;
-                gridHtml += `<div style="height: 8px; width: 100%; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden;">`;
-                gridHtml += `<div style="height: 100%; width: ${entity.currentRecipe ? Math.min(100, (entity.craftingProgress || 0) * 100) : 0}%; background: linear-gradient(90deg, #9ccc65, #ffee58); box-shadow: 0 0 12px rgba(255,238,88,0.3);"></div>`;
-                gridHtml += `</div>`;
-                gridHtml += `</div>`;
-                gridHtml += `<div style="display: flex; flex-direction: column; gap: 8px; background: linear-gradient(180deg, rgba(18,20,18,0.92), rgba(10,12,10,0.88)); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 12px 14px; box-sizing: border-box; min-height: 92px;">`;
-                gridHtml += `<div style="font-size: 11px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 1.2px;">當前屯積材料</div>`;
-                if (bufferEntries.length > 0) {
-                    gridHtml += `<div style="display: flex; flex-wrap: wrap; gap: 8px;">`;
-                    bufferEntries.forEach(([type, amount]) => {
-                        const displayName = GameEngine.RESOURCE_NAMES[type] || type;
-                        gridHtml += `<div style="display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; padding: 5px 10px; font-size: 12px; color: #fff;"><span style="color: #c5e1a5;">${displayName}</span><span style="color: #ffecb3; font-weight: bold;">x${amount}</span></div>`;
-                    });
-                } else {
-                    gridHtml += `<div style="display: flex; align-items: center; justify-content: center; flex: 1; min-height: 40px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.45);">目前尚未屯積任何材料</div>`;
-                }
-                gridHtml += `</div>`;
-                gridHtml += `</div>`;
-                gridHtml += `<div style="width: 100%; display: flex; flex-direction: column; gap: 8px; background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 12px 14px; box-sizing: border-box;">`;
-                gridHtml += `<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;"><div style="font-size: 11px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 1.2px;">產品設定</div><div style="font-size: 12px; color: rgba(255,255,255,0.45);">選擇工廠輸出產品</div></div>`;
-                gridHtml += `<div style="width: 100%; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-start;">`;
+                const getRecipeNeedInfo = (recipeType) => {
+                    const ingCfg = getRecipeConfig(recipeType);
+                    const needs = ingCfg && ingCfg.need_ingredients ? ingCfg.need_ingredients : {};
+                    const needKeys = Object.keys(needs);
+                    if (needKeys.length === 0) {
+                        return { materialType: recipeType, stored: 0, required: 0, progress: 0, label: '0 / 0' };
+                    }
+                    const materialType = needKeys[0];
+                    const stored = inputBuffer[materialType] || 0;
+                    const required = needs[materialType] || 0;
+                    const progress = required > 0 ? Math.min(1, stored / required) : 0;
+                    return { materialType, stored, required, progress, label: `${stored} / ${required}` };
+                };
+                const formatRecipeName = (type) => {
+                    const ingCfg = getRecipeConfig(type);
+                    return (ingCfg && ingCfg.name) || GameEngine.RESOURCE_NAMES[type] || type;
+                };
+                const currentRecipe = entity.currentRecipe || recipes.find(r => r.isUnlocked) || recipes[0];
+                const currentNeed = currentRecipe ? getRecipeNeedInfo(currentRecipe.type) : null;
+                const productionProgress = entity.currentRecipe ? Math.max(0, Math.min(1, entity.craftingProgress || 0)) : 0;
+                const currentRecipeName = entity.currentRecipe
+                    ? formatRecipeName(entity.currentRecipe.type)
+                    : '未設定';
+
+                gridHtml += `<div style="width: 100%; display: flex; flex-direction: column; gap: 4px; padding-top: 0;">`;
+                gridHtml += `
+                    <section style="width: 100%; border: 2px solid rgba(11,84,143,0.9); border-radius: 14px; background: rgba(24,28,25,0.82); padding: 8px 14px 10px; box-sizing: border-box;">
+                        <div style="font-size: 13px; color: rgba(255,255,255,0.5); font-weight: 800; margin-bottom: 7px;">當前生產線</div>
+                        <div style="display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; align-items: end;">
+                            <div title="${currentRecipeName}" style="width: 44px; height: 44px; border: 1px solid rgba(139,110,75,0.55); border-radius: 6px; background: rgba(255,255,255,0.05); color: #e8e1d4; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);">
+                                <div style="font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.4));">${currentRecipe ? this.getIngredientIcon(currentRecipe.type) : '📦'}</div>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
+                                <div class="factory-material-ratio" style="height: 16px; display: flex; align-items: center; color: #fff; font-size: 14px; font-weight: 900; text-shadow: 0 2px 3px rgba(0,0,0,0.85), 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;">
+                                    ${currentNeed ? currentNeed.label : '0 / 0'}
+                                </div>
+                                <div style="height: 34px; border: 2px solid #f4f4f4; border-radius: 7px; background: #232323; overflow: hidden; position: relative;">
+                                    <div class="factory-production-fill" style="height: 100%; width: ${productionProgress * 100}%; min-width: ${productionProgress > 0 ? '18px' : '0'}; background: #32f06a; border-radius: 0 7px 7px 0; transition: width 0.04s linear;"></div>
+                                    <div class="factory-production-text" style="position: absolute; inset: 0; display: flex; align-items: center; padding-left: 18px; color: #ffffff; font-size: 18px; font-weight: 900; text-shadow: 0 2px 3px rgba(0,0,0,0.9), 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;">
+                                        ${this.formatProductionCountdown(entity)}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                `;
+
+                gridHtml += `<section style="width: 100%; border: 2px solid rgba(11,84,143,0.9); border-radius: 14px; background: rgba(96,96,96,0.9); padding: 10px 18px; box-sizing: border-box; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-start;">`;
                 recipes.forEach(rec => {
                     const isUnlocked = rec.isUnlocked;
                     const isCrafting = entity.currentRecipe && entity.currentRecipe.type === rec.type;
                     const opacity = isUnlocked ? "1" : "0.4";
                     const filter = isUnlocked ? "none" : "grayscale(100%)";
-                    const activeStyle = isCrafting ? "border: 2px solid #ffeb3b; background: rgba(255,235,59,0.2);" : "border: 1px solid rgba(255,255,255,0.2);";
-                    const name = GameEngine.RESOURCE_NAMES[rec.type] || rec.type;
-                    const icon = rIconMap[rec.type] || "📦";
-                    const prog = isCrafting ? Math.min(100, (entity.craftingProgress || 0) * 100) : 0;
+                    const activeStyle = isCrafting ? "border-color: #ffeb3b; box-shadow: 0 0 0 2px rgba(255,235,59,0.28), inset 0 1px 0 rgba(255,255,255,0.06);" : "";
+                    const name = formatRecipeName(rec.type);
+                    const icon = this.getIngredientIcon(rec.type);
+                    const needInfo = getRecipeNeedInfo(rec.type);
 
                     gridHtml += `
-                            <button class="action-btn recipe-btn" data-type="${rec.type}" onclick="window.UIManager.selectRecipe(event, '${rec.type}')" 
-                                    style="position: relative; overflow: visible; opacity: ${opacity}; filter: ${filter}; ${activeStyle} flex-direction: row; padding: 6px 12px; min-width: 140px; height: 42px; gap: 8px; justify-content: flex-start;" 
-                                    ${isUnlocked ? '' : 'disabled'} title="${isUnlocked ? '點擊加入生產隊列' : '建築等級不足，尚未解鎖'}">
-                                <span style="font-size: 16px; margin: 0; z-index: 2;">${icon}</span>
-                                <span style="font-size: 13px; font-weight: bold; z-index: 2;">${name}</span>
-                                <!-- 隊列數量徽章 -->
-                                <div class="recipe-badge" style="position: absolute; top: -8px; right: -8px; background: #f44336; color: white; border-radius: 10px; min-width: 18px; height: 18px; display: none; align-items: center; justify-content: center; font-size: 10px; border: 1.5px solid white; z-index: 3; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">0</div>
-                                <!-- 即時進度條 -->
-                                <div class="recipe-progress" style="position: absolute; bottom: 0; left: 0; height: 100%; background: rgba(255,235,59,0.25); width: ${isCrafting ? prog : 0}%; z-index: 1; display: ${isCrafting ? 'block' : 'none'};"></div>
-                            </button>
-                        `;
+                        <button class="recipe-btn" data-type="${rec.type}" onclick="window.UIManager.selectRecipe(event, '${rec.type}')"
+                                style="position: relative; width: 68px; min-height: 76px; padding: 0; border: 0; background: transparent; color: #fff; cursor: ${isUnlocked ? 'pointer' : 'not-allowed'}; opacity: ${opacity}; filter: ${filter}; text-align: center; font-family: inherit;"
+                                ${isUnlocked ? '' : 'disabled'} title="${isUnlocked ? `${name}：${needInfo.label}` : '建築等級不足，尚未解鎖'}">
+                            <div style="font-size: 12px; line-height: 14px; font-weight: 800; margin-bottom: 2px; height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${name}</div>
+                            <div style="width: 40px; height: 40px; margin: 0 auto 3px; border: 1px solid rgba(139,110,75,0.55); border-radius: 6px; background: rgba(255,255,255,0.05); color: #e8e1d4; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); ${activeStyle}">
+                                <div style="font-size: 24px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.4));">${icon}</div>
+                            </div>
+                            <div class="recipe-material-ratio" data-recipe-type="${rec.type}" style="font-size: 12px; line-height: 14px; font-weight: 900; color: #fff; text-shadow: 0 2px 3px rgba(0,0,0,0.65);">${needInfo.label}</div>
+                        </button>
+                    `;
                 });
-                gridHtml += `</div></div>`;
+                gridHtml += `</section>`;
+                gridHtml += `</div>`;
             }
         }
         gridHtml += `</div>`; // 結束指令按鈕格網 (action_button_grid)
@@ -1479,16 +1567,16 @@ export class UIManager {
 
 
         // --- 4. 判斷是否顯示指令列 ---
-        const hasActions = gridHtml.includes('action-btn') || gridHtml.includes('warehouse-controls');
+        const hasActions = gridHtml.includes('action-btn') || gridHtml.includes('warehouse-controls') || gridHtml.includes('recipe-btn');
 
         // --- 5. 最終組合 ---
         // 動態調整高度：沒有指令時高度自適應，有指令時使用配置的高度
         if (hasActions) {
             if (isProcessingPlant) {
                 menu.style.height = "auto";
-                menu.style.width = "560px";
-                menu.style.minWidth = "560px";
-                menu.style.maxWidth = "560px";
+                menu.style.width = "620px";
+                menu.style.minWidth = "620px";
+                menu.style.maxWidth = "620px";
                 menu.style.overflow = "visible";
             } else if (cfg.height) {
                 menu.style.height = typeof cfg.height === 'number' ? `${cfg.height}px` : cfg.height;
@@ -1512,16 +1600,15 @@ export class UIManager {
         // 組合內容
         if (hasActions && isProcessingPlant && !isConfirming) {
             menu.innerHTML = `
-                <div style="width: 100%; display: flex; flex-direction: column; gap: 14px; overflow: visible;">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
+                <div style="width: 100%; display: flex; flex-direction: column; gap: 8px; overflow: visible;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
                         <div style="flex: 1; min-width: 0;">${leftHeader}</div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0;">
                             ${rightHeader}
                             ${requirementHtml}
                         </div>
                     </div>
-                    <div style="width: 100%; height: 1px; background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.16), rgba(255,255,255,0.04));"></div>
-                    <div style="width: 100%; display: flex; flex-direction: column; gap: 12px;">
+                    <div style="width: 100%; display: flex; flex-direction: column; gap: 8px;">
                         ${gridHtml}
                     </div>
                 </div>
@@ -1854,15 +1941,6 @@ export class UIManager {
 
         html += `<div style="display:flex; flex-wrap: wrap; gap:10px; padding: 15px; color: #e0e0e0; flex: 1; align-content: flex-start; justify-content: flex-start; background: rgba(0,0,0,0.3); border-radius: 8px; overflow-y: auto; margin-bottom: 5px;">`;
 
-        const ingredientIcons = {
-            wood: "🪵", stone: "🪨", gold: "💰", gold_ore: "🟡", food: "🍖", fruit: "🍎",
-            wolf_meat: "🥩", bear_meat: "🍗", wheat: "🌾", rice: "🍚",
-            crystal_ore: "💎", copper_ore: "🟫", iron_ore: "🔩", silver_ore: "⚪",
-            mithril_ore: "💠", "Wooden planks": "🪵", slate_slabs: "🧱", glass: "🥛",
-            crystal_ball: "🔮", copper_ingots: "🟧", copper_plates: "🛡️", iron_ingots: "⬛",
-            iron_plates: "⛓️", steel: "🧱", silver_ingots: "🥈", gold_ingots: "🥇", mithril_ingots: "🎖️"
-        };
-
         const configs = { ...GameEngine.state.ingredientConfigs };
         // 確保 wood, stone, gold 有配置資料以供顯示
         ['wood', 'stone', 'gold'].forEach(resType => {
@@ -1901,7 +1979,7 @@ export class UIManager {
                 const amount = GameEngine.state.resources[item.type] || 0;
                 const isFull = amount >= item.stack;
                 const amtColor = isFull ? '#ff5252' : '#fff';
-                const displayIcon = ingredientIcons[item.type] || ingredientIcons[item.icon] || item.icon || "📦";
+                const displayIcon = this.getIngredientIcon(item.type);
 
                 // 適應 420px 寬度的 5 欄佈局
                 html += `
@@ -2055,14 +2133,9 @@ export class UIManager {
                 let html = "";
                 initialKeys.forEach(key => {
                     let label = "";
-                    const iconMap = {
-                        wood: "🪵", stone: "🪨", gold_ore: "🟡", food: "🍖", fruit: "🍎",
-                        wolf_hide: "🐺", bear_pelt: "🐻", magic_herb: "🌿", iron_ore: "🔩", coal_ore: "💎"
-                    };
-
                     const cfg = state.ingredientConfigs ? state.ingredientConfigs[key] : null;
                     if (cfg) {
-                        const icon = iconMap[key] || "📦";
+                        const icon = this.getIngredientIcon(key);
                         label = `${icon} ${cfg.name}：`;
                     } else {
                         label = (labels && labels[key]) || `${key}：`;
@@ -2197,12 +2270,7 @@ export class UIManager {
             if (menu && menu.style.display !== "none" && cfg && cfg.type2 === "processing_plant") {
                 const factoryPanelState = [
                     factoryEnt.id || `${factoryEnt.type1}_${factoryEnt.x}_${factoryEnt.y}`,
-                    factoryEnt.currentRecipe ? factoryEnt.currentRecipe.type : "none",
-                    factoryEnt.isCraftingActive ? "active" : "idle",
-                    Object.keys(factoryEnt.inputBuffer || {})
-                        .sort()
-                        .map(key => `${key}:${factoryEnt.inputBuffer[key] || 0}`)
-                        .join("|")
+                    factoryEnt.currentRecipe ? factoryEnt.currentRecipe.type : "none"
                 ].join("::");
 
                 if (this.lastUIState.factoryPanel !== factoryPanelState || forceUpdate) {
@@ -2210,6 +2278,56 @@ export class UIManager {
                     this.showContextMenu(factoryEnt, false);
                     return;
                 }
+
+                const workerLights = menu.querySelector(".factory-worker-lights");
+                if (workerLights) {
+                    const workerMax = Math.max(1, cfg.need_villagers || 5);
+                    const workerCount = Math.max(0, Math.min(workerMax, new Set(factoryEnt.assignedWorkers || []).size));
+                    const cells = workerLights.querySelectorAll(".factory-worker-light");
+                    if (cells.length === workerMax) {
+                        cells.forEach((cell, index) => {
+                            cell.style.background = index < workerCount ? "#32f06a" : "rgba(120,130,138,0.55)";
+                        });
+                        workerLights.title = `建築內工人 ${workerCount} / ${workerMax}`;
+                    }
+                }
+
+                const productionFill = menu.querySelector(".factory-production-fill");
+                const productionText = menu.querySelector(".factory-production-text");
+                const materialRatio = menu.querySelector(".factory-material-ratio");
+                const productionProgress = factoryEnt.currentRecipe ? Math.max(0, Math.min(1, factoryEnt.craftingProgress || 0)) : 0;
+                if (productionFill) {
+                    const lastProgress = parseFloat(productionFill.dataset.progress || "0");
+                    if (productionProgress + 0.02 < lastProgress) {
+                        productionFill.style.transition = "none";
+                        productionFill.style.width = "0%";
+                        productionFill.offsetHeight;
+                        productionFill.style.transition = "width 0.04s linear";
+                    }
+                    productionFill.dataset.progress = String(productionProgress);
+                    productionFill.style.width = `${productionProgress * 100}%`;
+                    productionFill.style.minWidth = productionProgress > 0 ? "18px" : "0";
+                }
+                if (productionText) {
+                    productionText.textContent = this.formatProductionCountdown(factoryEnt);
+                }
+                if (materialRatio && factoryEnt.currentRecipe) {
+                    const ingCfg = GameEngine.state.ingredientConfigs
+                        ? GameEngine.state.ingredientConfigs[String(factoryEnt.currentRecipe.type || '').toLowerCase()]
+                        : null;
+                    const needs = ingCfg && ingCfg.need_ingredients ? ingCfg.need_ingredients : {};
+                    const needKey = Object.keys(needs)[0];
+                    materialRatio.textContent = needKey ? `${(factoryEnt.inputBuffer || {})[needKey] || 0} / ${needs[needKey] || 0}` : "0 / 0";
+                }
+                menu.querySelectorAll(".recipe-material-ratio").forEach(el => {
+                    const recipeType = el.getAttribute("data-recipe-type");
+                    const ingCfg = GameEngine.state.ingredientConfigs
+                        ? GameEngine.state.ingredientConfigs[String(recipeType || '').toLowerCase()]
+                        : null;
+                    const needs = ingCfg && ingCfg.need_ingredients ? ingCfg.need_ingredients : {};
+                    const needKey = Object.keys(needs)[0];
+                    el.textContent = needKey ? `${(factoryEnt.inputBuffer || {})[needKey] || 0} / ${needs[needKey] || 0}` : "0 / 0";
+                });
             }
 
             const recipeBtns = document.querySelectorAll(".recipe-btn");
@@ -2217,6 +2335,7 @@ export class UIManager {
                 const type = btn.getAttribute("data-type");
                 const badge = btn.querySelector(".recipe-badge");
                 const prog = btn.querySelector(".recipe-progress");
+                if (!badge && !prog) return;
 
                 // 1. 計算該配方的總數 (正在生產的 + 隊列中的)
                 let count = 0;
