@@ -470,7 +470,9 @@ export const UI_CONFIG = {
     // -- 尋路系統設定 (Pathfinding) ---------------------------------
     Pathfinding: {
         debugColor: "#00ff00",
-        iterationsPerFrame: 1000
+        iterationsPerFrame: 1000,
+        enablePathSmoothing: true,
+        smoothingLookahead: 24
     },
     // -- 建築集結點 (RallyPoint) ------------------------------------
     RallyPoint: {

@@ -25,6 +25,8 @@ export class PathfindingSystem {
         // 從全域配置讀取 (核心協議：解耦規範)
         const cfg = UI_CONFIG.Pathfinding || { debugColor: '#00ff00', iterationsPerFrame: 1000 };
         this.debugColor = cfg.debugColor;
+        this.enablePathSmoothing = cfg.enablePathSmoothing !== false;
+        this.smoothingLookahead = cfg.smoothingLookahead || 24;
 
         // 每幀限制計算量以確保拖動畫面不卡頓
         if (this.easystar) {
@@ -99,7 +101,8 @@ export class PathfindingSystem {
             // 這裡不再進行 unitId 檢查，因為 findPath 本身不知道是哪個單位的，回傳路徑後由 GameEngine 決定是否輸出日誌
             if (path) {
                 // 將格網座標轉回像素座標 (中心點)
-                const pixelPath = path.map(p => ({
+                const smoothPath = this.enablePathSmoothing ? this.smoothGridPath(path) : path;
+                const pixelPath = smoothPath.map(p => ({
                     x: (p.x + offset.x) * this.tileSize + this.tileSize / 2,
                     y: (p.y + offset.y) * this.tileSize + this.tileSize / 2
                 }));
@@ -108,6 +111,60 @@ export class PathfindingSystem {
                 callback(null);
             }
         });
+    }
+
+    smoothGridPath(path) {
+        if (!path || path.length <= 2) return path;
+
+        const result = [path[0]];
+        let anchorIndex = 0;
+        const maxLookahead = Math.max(2, this.smoothingLookahead || 24);
+
+        while (anchorIndex < path.length - 1) {
+            let nextIndex = Math.min(path.length - 1, anchorIndex + maxLookahead);
+            while (nextIndex > anchorIndex + 1 && !this.hasGridLineOfSight(path[anchorIndex], path[nextIndex])) {
+                nextIndex--;
+            }
+            result.push(path[nextIndex]);
+            anchorIndex = nextIndex;
+        }
+
+        return result;
+    }
+
+    hasGridLineOfSight(a, b) {
+        if (!a || !b) return false;
+        let x0 = a.x;
+        let y0 = a.y;
+        const x1 = b.x;
+        const y1 = b.y;
+        const dx = Math.abs(x1 - x0);
+        const dy = Math.abs(y1 - y0);
+        const sx = x0 < x1 ? 1 : -1;
+        const sy = y0 < y1 ? 1 : -1;
+        let err = dx - dy;
+
+        while (true) {
+            if (!this.isValidAndWalkable(x0, y0, false)) return false;
+            if (x0 === x1 && y0 === y1) return true;
+
+            const e2 = err * 2;
+            const prevX = x0;
+            const prevY = y0;
+            if (e2 > -dy) {
+                err -= dy;
+                x0 += sx;
+            }
+            if (e2 < dx) {
+                err += dx;
+                y0 += sy;
+            }
+
+            if (x0 !== prevX && y0 !== prevY) {
+                if (!this.isValidAndWalkable(prevX + sx, prevY, false)) return false;
+                if (!this.isValidAndWalkable(prevX, prevY + sy, false)) return false;
+            }
+        }
     }
 
     /**
