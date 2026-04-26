@@ -4,11 +4,11 @@
 3=遠程直線火球魔法子彈飛行
 4=遠程投石車拋物線火焰投石特效",中文注釋說明，參考用
 id,name,model,pixel_size,type,camp,population,resource,collection_speed,collection_resource,produce_resource,lv,hp,attack,idle_speed,fighting_speed,attack_speed,range,patrol_range,field_vision,initiative_attack,attack_type,annotation
-1,villagers,meles,{10*10},villagers,player,1,{food=20},3,5,,1,50,5,3,8,0.75,3,0,30,0,1,村民NPC
-2,female villagers,female,{10*10},villagers,player,1,{food=20},3,5,,1,50,5,3,8,0.75,3,0,30,0,1,村民NPC
-3,swordsman,swordsman,{10*10},swordsman,player,2,"{food=50,gold=10}",,,,1,120,15,3,8,2,3,0,8,1,1,劍士，近戰物理單位
-4,mage,mage,{10*10},mage,player,2,"{food=30,gold=30}",,,,1,60,25,3,8,0.5,15,0,12,1,3,法師，遠程魔法單位
-5,archer,archer,{10*10},archer,player,2,"{food=20,wood=20,gold=10}",,,,1,90,20,3,8,0.75,30,0,25,1,2,弓箭手，遠程物理單位
+1,villagers,meles,{10*10},villagers,player,1,{food=20},3,5,,1,50,5,3,10,0.75,3,0,30,0,1,村民NPC
+2,female villagers,female,{10*10},villagers,player,1,{food=20},3,5,,1,50,5,3,10,0.75,3,0,30,0,1,村民NPC
+3,swordsman,swordsman,{10*10},swordsman,player,2,"{food=50,gold=10}",,,,1,120,15,3,10,2,3,0,8,1,1,劍士，近戰物理單位
+4,mage,mage,{10*10},mage,player,2,"{food=30,gold=30}",,,,1,60,25,3,10,0.5,15,0,12,1,3,法師，遠程魔法單位
+5,archer,archer,{10*10},archer,player,2,"{food=20,wood=20,gold=10}",,,,1,90,20,3,10,0.75,30,0,25,1,2,弓箭手，遠程物理單位
 6,狼,wolf,{20*10},wolf,enemy,2,,,,{food=80},1,300,8,3,9,1,3,10,8,1,1,狼
 7,熊,bear,{20*20},bear,enemy,3,,,,{food=180},1,500,20,3,8,0.5,3,10,6,1,1,熊
 8,羊,sheep,{25*10},sheep,neutral,1,,,,{food=100},1,100,2,2,6,0.5,3,10,6,0,1,羊

@@ -130,6 +130,16 @@ export class WorkerSystem {
         if ((v.state === 'GATHERING' || v.state === 'MOVING_TO_RESOURCE') && v.targetId) ignoreEnts.push(v.targetId);
         if ((v.state === 'CONSTRUCTING' || v.state === 'MOVING_TO_CONSTRUCTION') && v.constructionTarget) ignoreEnts.push(v.constructionTarget);
         if (v.state === 'MOVING_TO_BASE' && v.targetBase) ignoreEnts.push(v.targetBase);
+        if (v.state === 'TRANSPORTING_LOGISTICS' || v.state === 'RETURNING_TO_FACTORY') {
+            const logisticsTarget = v.logisticsTargetId
+                ? this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.logisticsTargetId)
+                : null;
+            const logisticsHome = v.logisticsHomeId
+                ? this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.logisticsHomeId)
+                : null;
+            if (logisticsTarget) ignoreEnts.push(logisticsTarget);
+            if (logisticsHome && logisticsHome !== logisticsTarget) ignoreEnts.push(logisticsHome);
+        }
         if (v._isRallyMovement && v.rallySourceBuildingId) {
             const rallySource = this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.rallySourceBuildingId);
             if (rallySource) ignoreEnts.push(rallySource);
@@ -262,7 +272,10 @@ export class WorkerSystem {
                                 v.logisticsTargetId = conn.id;
                                 v.logisticsSourceId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
                                 v.logisticsHomeId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
+                                v._logisticsTransportKey = null;
                                 this.markWorkerOutsideBuilding(v, factory);
+                                const logisticsTarget = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
+                                if (logisticsTarget) this.placeWorkerAtLogisticsEndpoint(v, factory, logisticsTarget, 'source');
 
                                 // [修復 2] 雙重保證顯示工人 (邏輯與 Phaser 渲染層)
                                 v.visible = true;
@@ -292,7 +305,10 @@ export class WorkerSystem {
                                         v.state = 'TRANSPORTING_LOGISTICS';
                                         v.logisticsTargetId = validConn.id;
                                         v.logisticsHomeId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
+                                        v._logisticsTransportKey = null;
                                         this.markWorkerOutsideBuilding(v, factory);
+                                        const logisticsTarget = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === validConn.id);
+                                        if (logisticsTarget) this.placeWorkerAtLogisticsEndpoint(v, factory, logisticsTarget, 'source');
                                         v.visible = true;
                                         if (v.sprite && typeof v.sprite.setVisible === 'function') v.sprite.setVisible(true);
                                         if (v.gameObject && typeof v.gameObject.setVisible === 'function') v.gameObject.setVisible(true);
@@ -320,16 +336,30 @@ export class WorkerSystem {
                     v.state = 'RETURNING_TO_FACTORY'; break;
                 }
                 const homeForTransport = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.logisticsHomeId);
+                if (homeForTransport) {
+                    const transportKey = `${v.logisticsHomeId || ''}->${v.logisticsTargetId || ''}:${v.cargoType || ''}:${v.cargoAmount || 0}`;
+                    if (v._logisticsTransportKey !== transportKey) {
+                        this.placeWorkerAtLogisticsEndpoint(v, homeForTransport, target, 'source');
+                        v._logisticsTransportKey = transportKey;
+                    }
+                }
 
                 // 相容多種移動方法呼叫
                 const logisticsMoveSpeed = this.getUnitMoveSpeed(v, false);
                 const logisticsIgnoreEnts = [...ignoreEnts, target];
                 if (homeForTransport) logisticsIgnoreEnts.push(homeForTransport);
-                const targetApproach = this.getBuildingApproachPoint(v, target, 30);
-                if (typeof this.moveDetailed === 'function') this.moveDetailed(v, targetApproach.x, targetApproach.y, logisticsMoveSpeed, deltaTime, logisticsIgnoreEnts);
-                else if (typeof this.moveTowards === 'function') this.moveTowards(v, targetApproach.x, targetApproach.y, logisticsMoveSpeed, deltaTime, logisticsIgnoreEnts);
+                const transportEndpoint = homeForTransport
+                    ? this.moveAlongLogisticsLine(v, homeForTransport, target, 'target', logisticsMoveSpeed, deltaTime, logisticsIgnoreEnts)
+                    : null;
+                if (!transportEndpoint) {
+                    const targetApproach = this.getBuildingApproachPoint(v, target, 30);
+                    if (typeof this.moveDetailed === 'function') this.moveDetailed(v, targetApproach.x, targetApproach.y, logisticsMoveSpeed, deltaTime, logisticsIgnoreEnts);
+                    else if (typeof this.moveTowards === 'function') this.moveTowards(v, targetApproach.x, targetApproach.y, logisticsMoveSpeed, deltaTime, logisticsIgnoreEnts);
+                }
 
-                if (this.isTouchingBuilding(v, target, 40)) {
+                const reachedTransportEnd = transportEndpoint && Math.hypot(v.x - transportEndpoint.x, v.y - transportEndpoint.y) < 8;
+                if (reachedTransportEnd || this.isTouchingBuilding(v, target, 40)) {
+                    if (homeForTransport) this.placeWorkerAtLogisticsEndpoint(v, homeForTransport, target, 'target');
                     if (!target.inputBuffer) target.inputBuffer = {};
                     const tType = target.type1 || target.type;
                     const deliveredCargoType = v.cargoType;
@@ -377,11 +407,18 @@ export class WorkerSystem {
                 const returnMoveSpeed = this.getUnitMoveSpeed(v, false);
                 const homeIgnoreEnts = [...ignoreEnts, home];
                 if (targetForReturn) homeIgnoreEnts.push(targetForReturn);
-                const homeApproach = this.getBuildingApproachPoint(v, home, 30);
-                if (typeof this.moveDetailed === 'function') this.moveDetailed(v, homeApproach.x, homeApproach.y, returnMoveSpeed, deltaTime, homeIgnoreEnts);
-                else if (typeof this.moveTowards === 'function') this.moveTowards(v, homeApproach.x, homeApproach.y, returnMoveSpeed, deltaTime, homeIgnoreEnts);
+                const returnEndpoint = targetForReturn
+                    ? this.moveAlongLogisticsLine(v, home, targetForReturn, 'source', returnMoveSpeed, deltaTime, homeIgnoreEnts)
+                    : null;
+                if (!returnEndpoint) {
+                    const homeApproach = this.getBuildingApproachPoint(v, home, 30);
+                    if (typeof this.moveDetailed === 'function') this.moveDetailed(v, homeApproach.x, homeApproach.y, returnMoveSpeed, deltaTime, homeIgnoreEnts);
+                    else if (typeof this.moveTowards === 'function') this.moveTowards(v, homeApproach.x, homeApproach.y, returnMoveSpeed, deltaTime, homeIgnoreEnts);
+                }
 
-                if (this.isTouchingBuilding(v, home, 40)) {
+                const reachedReturnEnd = returnEndpoint && Math.hypot(v.x - returnEndpoint.x, v.y - returnEndpoint.y) < 8;
+                if (reachedReturnEnd || this.isTouchingBuilding(v, home, 40)) {
+                    if (targetForReturn) this.placeWorkerAtLogisticsEndpoint(v, home, targetForReturn, 'source');
                     if (this.tryEnterLogisticsBuilding(v, home, 'home')) {
                         break;
                     }
@@ -974,12 +1011,15 @@ export class WorkerSystem {
             v._lastRequestedTarget = { x: tx, y: ty };
             v.isFindingPath = true;
             v._lastPathTime = now;
+            const pathRequestId = (v._pathRequestId || 0) + 1;
+            v._pathRequestId = pathRequestId;
             const isSelected = this.state.selectedUnitIds && this.state.selectedUnitIds.includes(v.id);
             if (isSelected) {
                 this.engine.addLog(`[重新尋路] 距離目標: ${targetDist.toFixed(0)}`, 'PATH');
             }
 
             this.state.pathfinding.findPath(v.x, v.y, tx, ty, (path) => {
+                if (v._pathRequestId !== pathRequestId) return;
                 v.isFindingPath = false;
                 if (path && path.length > 1) {
                     v.fullPath = path;
@@ -1308,11 +1348,8 @@ export class WorkerSystem {
     handleWorkerCommand(v, clickedTarget) {
         // 1. 離職與除名 (中斷防護)：如果工人目前在工廠中，接收任何新指令都要先「離職」
         if (v.state === 'WORKING_IN_FACTORY' || v.state === 'MOVING_TO_FACTORY') {
-            if (v.factoryTarget && v.factoryTarget.assignedWorkers) {
-                v.factoryTarget.assignedWorkers = v.factoryTarget.assignedWorkers.filter(id => id !== v.id);
-            }
+            this.releaseWorkerAssignment(v, { reduceTarget: true });
             v.visible = true; // 恢復顯示
-            v.factoryTarget = null;
             this.engine.addLog(`[任務變更] ${v.configName || '工人'} 已離開加工廠。`, 'INPUT');
         }
 
@@ -1398,6 +1435,139 @@ export class WorkerSystem {
         }
     }
 
+    getLogisticsLinePoints(source, target) {
+        if (!source || !target) return null;
+
+        let sx = source.x;
+        let sy = source.y;
+        let ex = target.x;
+        let ey = target.y;
+        const sourceId = source.id || `${source.type1}_${source.x}_${source.y}`;
+        const isReciprocal = target.outputTargets && target.outputTargets.find(conn => conn.id === sourceId);
+
+        if (isReciprocal) {
+            const dx = ex - sx;
+            const dy = ey - sy;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 0) {
+                const cfg = UI_CONFIG.LogisticsSystem || {};
+                const offset = cfg.lineOffset || 10;
+                const nx = -dy / dist;
+                const ny = dx / dist;
+                sx += nx * offset;
+                sy += ny * offset;
+                ex += nx * offset;
+                ey += ny * offset;
+            }
+        }
+
+        const start = this.getBuildingLineExitPoint(source, { x: sx, y: sy }, { x: ex, y: ey });
+        const end = this.getBuildingLineExitPoint(target, { x: ex, y: ey }, { x: sx, y: sy });
+        return { start, end };
+    }
+
+    getBuildingLineExitPoint(building, from, to) {
+        if (!building || !from || !to) return from;
+        const fp = this.engine.getFootprint(building.type1 || building.type);
+        const collisionCfg = UI_CONFIG.BuildingCollision || {};
+        const clearance = Math.max(18, (collisionCfg.buffer || 10) + 10);
+        const halfW = (fp.uw * 20) / 2 + clearance;
+        const halfH = (fp.uh * 20) / 2 + clearance;
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const candidates = [];
+
+        if (Math.abs(dx) > 0.001) {
+            candidates.push((building.x - halfW - from.x) / dx);
+            candidates.push((building.x + halfW - from.x) / dx);
+        }
+        if (Math.abs(dy) > 0.001) {
+            candidates.push((building.y - halfH - from.y) / dy);
+            candidates.push((building.y + halfH - from.y) / dy);
+        }
+
+        const valid = candidates
+            .filter(t => t >= 0 && t <= 1)
+            .map(t => ({ x: from.x + dx * t, y: from.y + dy * t, t }))
+            .filter(p =>
+                p.x >= building.x - halfW - 0.5 &&
+                p.x <= building.x + halfW + 0.5 &&
+                p.y >= building.y - halfH - 0.5 &&
+                p.y <= building.y + halfH + 0.5
+            )
+            .sort((a, b) => a.t - b.t);
+
+        if (valid.length === 0) return from;
+        const p = valid[0];
+        const len = Math.hypot(dx, dy) || 1;
+        return {
+            x: p.x + (dx / len) * 4,
+            y: p.y + (dy / len) * 4
+        };
+    }
+
+    placeWorkerAtLogisticsEndpoint(v, source, target, endpoint) {
+        const line = this.getLogisticsLinePoints(source, target);
+        if (!line) return;
+        const point = endpoint === 'target' ? line.end : line.start;
+        v.x = point.x;
+        v.y = point.y;
+        v.renderX = point.x;
+        v.renderY = point.y;
+        v.pathTarget = null;
+        v.fullPath = null;
+        v.pathIndex = 0;
+        v._lastRequestedTarget = null;
+        v._pathRequestId = (v._pathRequestId || 0) + 1;
+        v.isFindingPath = false;
+        v._lastPathTime = 0;
+        v._stuckFrames = 0;
+        v.commandCenter = null;
+        v.idleTarget = null;
+        if (v.sprite && typeof v.sprite.setPosition === 'function') v.sprite.setPosition(point.x, point.y);
+        if (v.gameObject && typeof v.gameObject.setPosition === 'function') v.gameObject.setPosition(point.x, point.y);
+    }
+
+    moveAlongLogisticsLine(v, source, target, destination, speed, dt, ignoreEnts = []) {
+        const line = this.getLogisticsLinePoints(source, target);
+        if (!line) return null;
+
+        const from = destination === 'source' ? line.end : line.start;
+        const to = destination === 'source' ? line.start : line.end;
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq <= 0.01) return to;
+
+        const t = Math.max(0, Math.min(1, ((v.x - from.x) * dx + (v.y - from.y) * dy) / lenSq));
+        const len = Math.sqrt(lenSq);
+        const lookAhead = Math.min(120, Math.max(50, speed * 0.9));
+        const nextT = Math.min(1, t + lookAhead / len);
+        let guidePoint = {
+            x: from.x + dx * nextT,
+            y: from.y + dy * nextT
+        };
+
+        if (this.state.pathfinding) {
+            const gx = Math.floor(guidePoint.x / 20);
+            const gy = Math.floor(guidePoint.y / 20);
+            if (!this.state.pathfinding.isValidAndWalkable(gx, gy, true)) {
+                const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 12, true, true);
+                if (nearest) {
+                    guidePoint = {
+                        x: nearest.x * 20 + 10,
+                        y: nearest.y * 20 + 10
+                    };
+                }
+            }
+        }
+
+        this.moveDetailed(v, guidePoint.x, guidePoint.y, speed, dt, ignoreEnts);
+        v.pathTarget = null;
+
+        return to;
+    }
+
     pickLogisticsConnectionForWorker(v, factory, outputTargets, canUse) {
         if (!factory || !Array.isArray(outputTargets) || outputTargets.length === 0) return null;
         const usableTargets = outputTargets
@@ -1424,6 +1594,34 @@ export class WorkerSystem {
             if (excludeVillagerId && worker.id === excludeVillagerId) return false;
             return worker.assignedWarehouseId === buildingId;
         }).length;
+    }
+
+    releaseWorkerAssignment(v, { reduceTarget = false } = {}) {
+        if (!v) return;
+        const buildingId = v.assignedWarehouseId || (v.factoryTarget
+            ? (v.factoryTarget.id || `${v.factoryTarget.type1}_${v.factoryTarget.x}_${v.factoryTarget.y}`)
+            : null);
+        const building = v.factoryTarget || (buildingId
+            ? this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === buildingId)
+            : null);
+
+        if (building) {
+            if (building.assignedWorkers) {
+                building.assignedWorkers = building.assignedWorkers.filter(id => id !== v.id);
+            }
+            if (reduceTarget) {
+                building.targetWorkerCount = Math.max(0, (building.targetWorkerCount || 0) - 1);
+            }
+        }
+
+        v.assignedWarehouseId = null;
+        v.factoryTarget = null;
+        v.logisticsHomeId = null;
+        v.logisticsWorkKey = null;
+        v.logisticsWorkTimer = 0;
+        v.visible = true;
+        if (v.sprite && typeof v.sprite.setVisible === 'function') v.sprite.setVisible(true);
+        if (v.gameObject && typeof v.gameObject.setVisible === 'function') v.gameObject.setVisible(true);
     }
 
     isGatheringBuilding(entity) {
@@ -1550,6 +1748,9 @@ export class WorkerSystem {
         v.pathTarget = null;
         v.fullPath = null;
         v.pathIndex = 0;
+        v._lastRequestedTarget = null;
+        v._pathRequestId = (v._pathRequestId || 0) + 1;
+        v.isFindingPath = false;
         v.commandCenter = null;
         v.visible = false;
 

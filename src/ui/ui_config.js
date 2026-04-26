@@ -714,7 +714,7 @@ export const UI_CONFIG = {
         lineThickness: 14,           // 拖拽中連線的寬度
         lineColor: "#0077ffff",           // 已建立連線的顏色 (綠色)
         lineAlpha: 0.6,
-        selectedLineColor: "#3bb7ffff",   // 被選取連線的顏色 (黃色)
+        selectedLineColor: "#dfffc7ff",   // 被選取連線的顏色 (黃色)
         selectedLineAlpha: 1.0,
         dragLineThickness: 14,           // 拖拽中連線的寬度
         dragLineColor: "#ff8800ff",       // 拖拽中連線的顏色 (淡綠)
