@@ -88,6 +88,19 @@ export class UIManager {
         return { type, amount: outputBuffer[type] || 0, max: null };
     }
 
+    static getFactoryOutputStockpileInfo(entity) {
+        if (!entity) return null;
+        const outputBuffer = entity.outputBuffer || {};
+        const recipeType = entity.currentRecipe ? entity.currentRecipe.type : null;
+        if (recipeType) {
+            return { type: recipeType, amount: outputBuffer[recipeType] || 0 };
+        }
+        const outputKeys = Object.keys(outputBuffer).filter(k => (outputBuffer[k] || 0) > 0);
+        if (outputKeys.length === 0) return null;
+        const type = outputKeys[0];
+        return { type, amount: outputBuffer[type] || 0 };
+    }
+
     static getIngredientProductionTime(type, fallback = 5) {
         if (!type) return fallback;
         const state = GameEngine.state;
@@ -1554,24 +1567,37 @@ export class UIManager {
                 const currentRecipeName = entity.currentRecipe
                     ? formatRecipeName(entity.currentRecipe.type)
                     : '未設定';
+                const outputStockpile = this.getFactoryOutputStockpileInfo(entity);
+                const outputStockpileName = outputStockpile
+                    ? formatRecipeName(outputStockpile.type)
+                    : '成品';
 
                 gridHtml += `<div style="width: 100%; display: flex; flex-direction: column; gap: 4px; padding-top: 0;">`;
                 gridHtml += `
                     <section style="width: 100%; border: 2px solid rgba(11,84,143,0.9); border-radius: 14px; background: rgba(24,28,25,0.82); padding: 8px 14px 10px; box-sizing: border-box;">
                         <div style="font-size: 13px; color: rgba(255,255,255,0.5); font-weight: 800; margin-bottom: 7px;">當前生產線</div>
-                        <div style="display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; align-items: end;">
-                            <div title="${currentRecipeName}" style="width: 44px; height: 44px; border: 1px solid rgba(139,110,75,0.55); border-radius: 6px; background: rgba(255,255,255,0.05); color: #e8e1d4; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);">
-                                <div style="font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.4));">${currentRecipe ? this.getIngredientIcon(currentRecipe.type) : '📦'}</div>
-                            </div>
-                            <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
-                                <div class="factory-material-ratio" style="height: 16px; display: flex; align-items: center; color: #fff; font-size: 14px; font-weight: 900; text-shadow: 0 2px 3px rgba(0,0,0,0.85), 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;">
-                                    ${currentNeed ? currentNeed.label : '0 / 0'}
+                        <div style="display: grid; grid-template-columns: minmax(0, 1fr) 104px; gap: 12px; align-items: stretch;">
+                            <div style="display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; align-items: end; min-width: 0;">
+                                <div title="${currentRecipeName}" style="width: 44px; height: 44px; border: 1px solid rgba(139,110,75,0.55); border-radius: 6px; background: rgba(255,255,255,0.05); color: #e8e1d4; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);">
+                                    <div style="font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.4));">${currentRecipe ? this.getIngredientIcon(currentRecipe.type) : '📦'}</div>
                                 </div>
-                                <div style="height: 34px; border: 2px solid #f4f4f4; border-radius: 7px; background: #232323; overflow: hidden; position: relative;">
-                                    <div class="factory-production-fill" style="height: 100%; width: ${productionProgress * 100}%; min-width: ${productionProgress > 0 ? '18px' : '0'}; background: #32f06a; border-radius: 0 7px 7px 0; transition: width 0.04s linear;"></div>
-                                    <div class="factory-production-text" style="position: absolute; inset: 0; display: flex; align-items: center; padding-left: 18px; color: #ffffff; font-size: 18px; font-weight: 900; text-shadow: 0 2px 3px rgba(0,0,0,0.9), 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;">
-                                        ${this.formatProductionCountdown(entity)}
+                                <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
+                                    <div class="factory-material-ratio" style="height: 16px; display: flex; align-items: center; color: #fff; font-size: 14px; font-weight: 900; text-shadow: 0 2px 3px rgba(0,0,0,0.85), 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;">
+                                        ${currentNeed ? currentNeed.label : '0 / 0'}
                                     </div>
+                                    <div style="height: 34px; border: 2px solid #f4f4f4; border-radius: 7px; background: #232323; overflow: hidden; position: relative;">
+                                        <div class="factory-production-fill" style="height: 100%; width: ${productionProgress * 100}%; min-width: ${productionProgress > 0 ? '18px' : '0'}; background: #32f06a; border-radius: 0 7px 7px 0; transition: width 0.04s linear;"></div>
+                                        <div class="factory-production-text" style="position: absolute; inset: 0; display: flex; align-items: center; padding-left: 18px; color: #ffffff; font-size: 18px; font-weight: 900; text-shadow: 0 2px 3px rgba(0,0,0,0.9), 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;">
+                                            ${this.formatProductionCountdown(entity)}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="factory-output-stockpile" title="${outputStockpileName}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; height: 56px; border-radius: 10px; border: 1.5px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.35); box-sizing: border-box; padding: 6px 8px;">
+                                <div style="font-size: 10px; color: rgba(255,255,255,0.38); font-weight: 900; letter-spacing: 1px;">屯積</div>
+                                <div style="display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; color: #ffffff; font-size: 18px; font-weight: 900; font-family: 'Arial Black', sans-serif; text-shadow: 0 2px 4px rgba(0,0,0,0.65);">
+                                    <span class="factory-output-stockpile-icon" style="font-size: 18px; line-height: 1;">${outputStockpile ? this.getIngredientIcon(outputStockpile.type) : '📦'}</span>
+                                    <span class="factory-output-stockpile-value" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${outputStockpile ? Math.floor(outputStockpile.amount || 0) : 0}</span>
                                 </div>
                             </div>
                         </div>
@@ -2364,6 +2390,9 @@ export class UIManager {
                 const productionFill = menu.querySelector(".factory-production-fill");
                 const productionText = menu.querySelector(".factory-production-text");
                 const materialRatio = menu.querySelector(".factory-material-ratio");
+                const outputStockpileIcon = menu.querySelector(".factory-output-stockpile-icon");
+                const outputStockpileValue = menu.querySelector(".factory-output-stockpile-value");
+                const outputStockpileBox = menu.querySelector(".factory-output-stockpile");
                 const productionProgress = factoryEnt.currentRecipe ? Math.max(0, Math.min(1, factoryEnt.craftingProgress || 0)) : 0;
                 if (productionFill) {
                     const lastProgress = parseFloat(productionFill.dataset.progress || "0");
@@ -2387,6 +2416,19 @@ export class UIManager {
                     const needs = ingCfg && ingCfg.need_ingredients ? ingCfg.need_ingredients : {};
                     const needKey = Object.keys(needs)[0];
                     materialRatio.textContent = needKey ? `${(factoryEnt.inputBuffer || {})[needKey] || 0} / ${needs[needKey] || 0}` : "0 / 0";
+                }
+                if (outputStockpileIcon || outputStockpileValue || outputStockpileBox) {
+                    const outputStockpile = this.getFactoryOutputStockpileInfo(factoryEnt);
+                    if (outputStockpile) {
+                        if (outputStockpileIcon) outputStockpileIcon.textContent = this.getIngredientIcon(outputStockpile.type);
+                        if (outputStockpileValue) outputStockpileValue.textContent = `${Math.floor(outputStockpile.amount || 0)}`;
+                        if (outputStockpileBox) {
+                            const ingCfg = GameEngine.state.ingredientConfigs
+                                ? GameEngine.state.ingredientConfigs[String(outputStockpile.type || '').toLowerCase()]
+                                : null;
+                            outputStockpileBox.title = (ingCfg && ingCfg.name) || GameEngine.RESOURCE_NAMES[outputStockpile.type] || outputStockpile.type;
+                        }
+                    }
                 }
                 menu.querySelectorAll(".recipe-material-ratio").forEach(el => {
                     const recipeType = el.getAttribute("data-recipe-type");

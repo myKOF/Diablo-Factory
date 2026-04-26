@@ -614,7 +614,7 @@ export class MainScene extends Phaser.Scene {
                 if (len > 24) {
                     const ux = dx / len;
                     const uy = dy / len;
-                    const arrowSize = Math.max(logCfg.arrowSize || 8, (logCfg.dragLineThickness || logCfg.lineThickness || 14) * 1.15);
+                    const arrowSize = Math.max(logCfg.dragArrowSize || logCfg.arrowSize || 8, 1);
                     const arrowCenterX = ex - ux * arrowSize;
                     const arrowCenterY = ey - uy * arrowSize;
                     const arrowBaseX = ex - ux * arrowSize * 1.5;

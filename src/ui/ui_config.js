@@ -738,13 +738,14 @@ export const UI_CONFIG = {
         selectedLineColor: "#dfffc7ff",   // 被選取連線的顏色 (黃色)
         selectedLineAlpha: 1.0,
         dragLineThickness: 14,           // 拖拽中連線的寬度
-        dragLineColor: "#ff8800ff",       // 拖拽中連線的顏色 (淡綠)
+        dragLineColor: "#aeff00ff",       // 拖拽中連線的顏色 (淡綠)
         dragLineAlpha: 0.8,
         depth: 150,                     // 渲染深度 (位於地面之上，單位之下)
 
         // --- 動畫與視覺優化 ---
-        arrowColor: "#00ffeaff",        // 箭頭顏色 (亮橘)
-        arrowSize: 8,                   // 箭頭大小
+        arrowColor: "#ffc337ff",        // 物流線的箭頭顏色 (亮橘)
+        arrowSize: 12,                   // 已建立物流線上的流動箭頭大小，範圍建議 6~24；只影響線上動畫箭頭
+        dragArrowSize: 22,               // 拖曳拉線時前端箭頭大小，範圍建議 8~40；數值越大箭頭越長、物流線終點會更早停在箭頭底部
         arrowSpeed: 30,                 // 箭頭前進速度 (像素/秒)
         arrowSpacing: 20,               // 箭頭之間的間距
         lineOffset: 10                   // 雙向連線時的錯開距離 (像素)
