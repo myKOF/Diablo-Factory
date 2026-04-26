@@ -409,7 +409,7 @@ export class CharacterRenderer {
             const angle = isAttacking ? Math.sin(t * combatFreq) * 0.4 : (isActuallyMoving ? Math.sin(t * armFreq) * 0.1 : Math.sin(t * breatheFreq) * 0.03);
             this.drawTool(ctx, x + 8, y + 15, 'BOW', angle);
             ctx.fillRect(x - 14, y + 5 + (isActuallyMoving || isAttacking ? 0 : Math.sin(t * breatheFreq) * 1), 4, 18);
-        } else if (data.cargo > 0) {
+        } else if ((data.cargo || 0) > 0 || (data.cargoAmount || 0) > 0) {
             const cargoType = (data.cargoType || data.type || "DEFAULT").toUpperCase();
             const cargoCfg = UI_CONFIG.CargoColors || {};
             
@@ -443,11 +443,12 @@ export class CharacterRenderer {
             }
 
             // [核心修復] 必須在此確實套用顏色，覆蓋之前的皮膚色
-            this.setCtxStyle(ctx, resColor, 1);
-            ctx.fillRect(x - 8, y + 10 + Math.sin(t * armFreq) * 2, 16, 12);
-            // 加入頂部亮邊增加立體感
-            this.setCtxStyle(ctx, 0xffffff, 0.3);
-            ctx.fillRect(x - 8, y + 10 + Math.sin(t * armFreq) * 2, 16, 3);
+            const carryBob = Math.sin(t * armFreq) * 2;
+            const carryX = x + 7;
+            const carryY = y + 5 + carryBob;
+            ctx.fillRect(x - 14, y + 5 + carryBob, 4, 18);
+            ctx.fillRect(x + 10, y + 5 - carryBob, 4, 18);
+            this.drawItemIcon(ctx, carryX, carryY, 16, cargoType, resColor);
         } else if (state === 'ATTACK') {
             // 通用攻擊動作（針對村民或其他無特定武器單位）
             const swing = Math.sin(t * combatFreq * 1.5) * 10;
@@ -460,6 +461,104 @@ export class CharacterRenderer {
             const idleSwing = Math.sin(t * swingFreq) * 2;
             ctx.fillRect(x - 14, y + 5 + idleSwing, 4, 18);
             ctx.fillRect(x + 10, y + 5 - idleSwing, 4, 18);
+        }
+    }
+
+    static drawItemIcon(ctx, x, y, size = 16, type = 'DEFAULT', fallbackColor = 0x8d6e63) {
+        const key = String(type || '').toUpperCase();
+        const s = size;
+        const cx = x + s / 2;
+        const top = y + s * 0.22;
+        const bottom = y + s * 0.78;
+        const w = s * 0.64;
+        const h = s * 0.62;
+        const left = cx - w / 2;
+
+        const stroke = (color = 0x3e2723, alpha = 0.9, width = 1) => {
+            if (ctx.lineStyle) ctx.lineStyle(width, color, alpha);
+            else {
+                ctx.strokeStyle = `rgba(${(color >> 16) & 255},${(color >> 8) & 255},${color & 255},${alpha})`;
+                ctx.lineWidth = width;
+            }
+        };
+
+        const fillEllipse = (ex, ey, ew, eh, color, alpha = 1) => {
+            this.setCtxStyle(ctx, color, alpha);
+            if (ctx.fillEllipse) ctx.fillEllipse(ex, ey, ew, eh);
+            else if (ctx.beginPath) {
+                ctx.beginPath();
+                ctx.ellipse(ex, ey, ew / 2, eh / 2, 0, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        };
+
+        const drawBarrel = (body = 0x9b5a32, band = 0x6d3f25) => {
+            this.setCtxStyle(ctx, 0x000000, 0.25);
+            if (ctx.fillEllipse) ctx.fillEllipse(cx, y + s * 0.9, s * 0.78, s * 0.18);
+            this.setCtxStyle(ctx, body, 1);
+            ctx.fillRect(left, top, w, h);
+            fillEllipse(cx, top, w, s * 0.34, 0xc7824a, 1);
+            fillEllipse(cx, bottom, w, s * 0.30, body, 1);
+            stroke(0x3e2723, 0.75, 1);
+            if (ctx.strokeEllipse) {
+                ctx.strokeEllipse(cx, top, w, s * 0.34);
+                ctx.strokeEllipse(cx, bottom, w, s * 0.30);
+                ctx.strokeRect(left, top, w, h);
+            }
+            this.setCtxStyle(ctx, band, 1);
+            ctx.fillRect(left + 1, y + s * 0.46, w - 2, Math.max(2, s * 0.12));
+            this.setCtxStyle(ctx, 0xffffff, 0.28);
+            ctx.fillRect(left + 2, top + 2, Math.max(2, s * 0.14), h - 4);
+        };
+
+        if (key.includes('WOOD') || key.includes('PLANK')) {
+            drawBarrel(0xa76437, 0x6f4327);
+        } else if (key.includes('STONE') || key.includes('SLATE') || key.includes('ROCK')) {
+            this.setCtxStyle(ctx, 0x000000, 0.22);
+            if (ctx.fillEllipse) ctx.fillEllipse(cx, y + s * 0.88, s * 0.8, s * 0.18);
+            this.setCtxStyle(ctx, 0x9aa0a4, 1);
+            ctx.fillRect(x + s * 0.2, y + s * 0.34, s * 0.6, s * 0.42);
+            this.setCtxStyle(ctx, 0xcfd3d6, 1);
+            ctx.fillRect(x + s * 0.28, y + s * 0.24, s * 0.54, s * 0.36);
+            stroke(0x424242, 0.7, 1);
+            if (ctx.strokeRect) {
+                ctx.strokeRect(x + s * 0.2, y + s * 0.34, s * 0.6, s * 0.42);
+                ctx.strokeRect(x + s * 0.28, y + s * 0.24, s * 0.54, s * 0.36);
+            }
+        } else if (key.includes('FOOD') || key.includes('FRUIT') || key.includes('MEAT')) {
+            fillEllipse(cx, y + s * 0.58, s * 0.68, s * 0.62, 0xf4511e, 1);
+            this.setCtxStyle(ctx, 0x43a047, 1);
+            ctx.fillRect(cx, y + s * 0.16, s * 0.18, s * 0.18);
+            this.setCtxStyle(ctx, 0xffffff, 0.35);
+            if (ctx.fillCircle) ctx.fillCircle(cx - s * 0.15, y + s * 0.45, s * 0.09);
+        } else if (key.includes('CRYSTAL') || key.includes('GLASS') || key.includes('MITHRIL')) {
+            this.setCtxStyle(ctx, key.includes('GLASS') ? 0x9ee7ff : 0x52d7ff, 1);
+            if (ctx.beginPath) {
+                ctx.beginPath();
+                ctx.moveTo(cx, y + s * 0.12);
+                ctx.lineTo(x + s * 0.82, y + s * 0.52);
+                ctx.lineTo(cx, y + s * 0.9);
+                ctx.lineTo(x + s * 0.18, y + s * 0.52);
+                ctx.closePath();
+                if (ctx.fillPath) ctx.fillPath(); else ctx.fill();
+            }
+            this.setCtxStyle(ctx, 0xffffff, 0.35);
+            ctx.fillRect(cx - 1, y + s * 0.22, 2, s * 0.42);
+        } else if (key.includes('INGOT') || key.includes('IRON') || key.includes('GOLD') || key.includes('COPPER') || key.includes('SILVER') || key.includes('STEEL') || key.includes('COAL')) {
+            let color = fallbackColor;
+            if (key.includes('GOLD')) color = 0xf6c945;
+            else if (key.includes('COPPER')) color = 0xc87533;
+            else if (key.includes('SILVER')) color = 0xcfd8dc;
+            else if (key.includes('COAL')) color = 0x202124;
+            else if (key.includes('IRON') || key.includes('STEEL')) color = 0x90a4ae;
+            this.setCtxStyle(ctx, color, 1);
+            ctx.fillRect(x + s * 0.18, y + s * 0.34, s * 0.68, s * 0.42);
+            this.setCtxStyle(ctx, 0xffffff, 0.28);
+            ctx.fillRect(x + s * 0.24, y + s * 0.38, s * 0.52, s * 0.1);
+            stroke(0x202020, 0.65, 1);
+            if (ctx.strokeRect) ctx.strokeRect(x + s * 0.18, y + s * 0.34, s * 0.68, s * 0.42);
+        } else {
+            drawBarrel(fallbackColor, 0x5d4037);
         }
     }
 

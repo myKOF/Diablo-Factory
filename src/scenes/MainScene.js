@@ -14,6 +14,7 @@ export class MainScene extends Phaser.Scene {
         this.nameLabels = new Map();
         this.levelLabels = new Map();
         this.resourceLabels = new Map();
+        this.productIconBadges = new Map();
         this.unitIconTexts = new Map();
         this.emitters = new Map(); // ID -> ParticleEmitter
         this.occupancyHuds = new Map(); // ID -> Graphics
@@ -1873,6 +1874,63 @@ export class MainScene extends Phaser.Scene {
             const amtTxt = this.resourceLabels.get(id);
             if (amtTxt) amtTxt.setVisible(false);
         }
+
+        this.updateFactoryProductIcon(id, ent, visualX, visualY, uw, uh, showLabels);
+    }
+
+    getResourceIconColor(type) {
+        const key = String(type || '').toUpperCase();
+        const cargoCfg = UI_CONFIG.CargoColors || {};
+        const parse = (c, def = 0x795548) => {
+            if (!c) return def;
+            const clean = String(c).replace('#', '0x');
+            const v = parseInt(clean.length > 8 ? clean.substring(0, 8) : clean);
+            return isNaN(v) ? def : v;
+        };
+
+        if (key.includes('WOOD') || key.includes('PLANK')) return parse(cargoCfg.WOOD, 0x1ce026);
+        if (key.includes('STONE') || key.includes('SLATE') || key.includes('ROCK')) return parse(cargoCfg.STONE, 0xacacac);
+        if (key.includes('FOOD') || key.includes('FRUIT') || key.includes('MEAT') || key.includes('WHEAT') || key.includes('RICE')) return parse(cargoCfg.FOOD || cargoCfg.FRUIT, 0xff5816);
+        if (key.includes('GOLD')) return parse(cargoCfg.GOLD_ORE, 0xffe047);
+        if (key.includes('IRON') || key.includes('STEEL')) return parse(cargoCfg.IRON_ORE, 0x90a4ae);
+        if (key.includes('COAL')) return parse(cargoCfg.COAL, 0x212121);
+        if (key.includes('CRYSTAL') || key.includes('GLASS')) return 0x8de9ff;
+        if (key.includes('COPPER')) return 0xc87533;
+        if (key.includes('SILVER')) return 0xcfd8dc;
+        if (key.includes('LEATHER') || key.includes('HIDE') || key.includes('PELT')) return 0x8d6e63;
+        return parse(cargoCfg.DEFAULT, 0xad9191);
+    }
+
+    updateFactoryProductIcon(id, ent, visualX, visualY, uw, uh, showLabels) {
+        let badge = this.productIconBadges.get(id);
+        const cfg = GameEngine.getEntityConfig(ent.type1, ent.lv || 1);
+        const hasLogisticsLine = ent.outputTargets && ent.outputTargets.length > 0;
+        const recipeType = ent.currentRecipe && ent.currentRecipe.type;
+        const shouldShow = showLabels && cfg && cfg.type2 === 'processing_plant' && hasLogisticsLine && recipeType && !ent.isUnderConstruction;
+
+        if (!shouldShow) {
+            if (badge) badge.setVisible(false);
+            return;
+        }
+
+        if (!badge) {
+            badge = this.add.graphics();
+            this.productIconBadges.set(id, badge);
+        }
+
+        const size = 16;
+        const x = Math.round(visualX - (uw * GameEngine.TILE_SIZE) / 2 + 6);
+        const y = Math.round(visualY - (uh * GameEngine.TILE_SIZE) / 2 + 6);
+        const color = this.getResourceIconColor(recipeType);
+
+        badge.clear();
+        badge.setVisible(true);
+        badge.setDepth(1000002 + ent.y);
+        badge.fillStyle(0x101010, 0.75);
+        badge.fillRect(x - 2, y - 2, size + 4, size + 4);
+        badge.lineStyle(1, 0xffffff, 0.7);
+        badge.strokeRect(x - 2, y - 2, size + 4, size + 4);
+        CharacterRenderer.drawItemIcon(badge, x, y, size, recipeType, color);
     }
 
     hideEntityLabel(id) {
