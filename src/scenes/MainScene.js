@@ -234,6 +234,11 @@ export class MainScene extends Phaser.Scene {
         let lastPointer = { x: 0, y: 0 };
         this.isDragging = false;
 
+        const cancelMiddleDrag = () => {
+            this.isMiddleDragging = false;
+            this.dragStartPos = null;
+        };
+
         // 核心設定：地圖範圍邊界
         const TS = GameEngine.TILE_SIZE;
         const mapCfg = (GameEngine.state.systemConfig && GameEngine.state.systemConfig.map_size) || { w: 7500, h: 7500 };
@@ -280,6 +285,12 @@ export class MainScene extends Phaser.Scene {
             this.lastLocalMouse = { x: pointer.x, y: pointer.y };
 
             if (this.isMiddleDragging && this.dragStartPos) {
+                if (!pointer.middleButtonDown()) {
+                    cancelMiddleDrag();
+                    lastPointer = { x: pointer.x, y: pointer.y };
+                    return;
+                }
+
                 const dx = pointer.x - lastPointer.x;
                 const dy = pointer.y - lastPointer.y;
                 cam.scrollX -= dx;
@@ -303,8 +314,10 @@ export class MainScene extends Phaser.Scene {
             if (pointer.button === 0) {
                 this.selectionStartPos = null;
             } else if (pointer.button === 1) { // Middle button
-                this.isMiddleDragging = false;
-                this.dragStartPos = null;
+                if (pointer.event && (pointer.event.buttons & 4) !== 0) {
+                    return;
+                }
+                cancelMiddleDrag();
             }
         });
 
@@ -314,6 +327,11 @@ export class MainScene extends Phaser.Scene {
             if (e.button === 0 && this.selectionStartPos) {
                 this.handleSelectionEnd(e);
                 this.selectionStartPos = null;
+            } else if (e.button === 1) {
+                if ((e.buttons & 4) !== 0) {
+                    return;
+                }
+                cancelMiddleDrag();
             }
         };
         window.addEventListener('mousemove', globalMove);
