@@ -289,7 +289,7 @@ export class CharacterRenderer {
         } else {
             // 普通單位依據工作狀態配色
             const state = data.state;
-            const resType = (data.type || "").toUpperCase();
+            const resType = (data.cargoType || data.type || "").toUpperCase();
             if (data.vTint !== undefined && data.vTint !== 0xffffff) {
                 clothColor = data.vTint;
             } else if (state === 'IDLE' || state === 'MOVING_TO_FACTORY') {
@@ -301,13 +301,22 @@ export class CharacterRenderer {
             } else {
                 if (resType.includes('WOOD')) clothColor = parseColor(colors.WOOD, 0x388e3c);
                 else if (resType.includes('STONE')) clothColor = parseColor(colors.STONE, 0x757575);
-                else if (resType.includes('FOOD') || resType.includes('FRUIT')) clothColor = parseColor(colors.FRUIT || colors.FOOD, 0xfd8763);
+                else if (resType.includes('FRUIT')) clothColor = parseColor(colors.FRUIT, 0xfd8763);
+                else if (resType.includes('FOOD')) clothColor = parseColor(colors.FOOD, 0xfd8763);
+                else if (resType.includes('WHEAT')) clothColor = parseColor(colors.WHEAT, 0xd6b54a);
+                else if (resType.includes('RICE')) clothColor = parseColor(colors.RICE, 0xf4f0d8);
+                else if (resType.includes('WOLF_MEAT')) clothColor = parseColor(colors.WOLF_MEAT, 0xb85c4c);
+                else if (resType.includes('BEAR_MEAT')) clothColor = parseColor(colors.BEAR_MEAT, 0x8d4a32);
                 else if (resType.includes('GOLD')) clothColor = parseColor(colors.GOLD_ORE, 0xe4b20d);
                 else if (resType.includes('IRON')) clothColor = parseColor(colors.IRON_ORE, 0x78909c);
-                else if (resType.includes('COAL')) clothColor = parseColor(colors.COAL, 0x212121);
+                else if (resType.includes('COAL')) clothColor = parseColor(colors.COAL_ORE, 0x212121);
+                else if (resType.includes('CRYSTAL')) clothColor = parseColor(colors.CRYSTAL_ORE, 0x80deff);
+                else if (resType.includes('COPPER')) clothColor = parseColor(colors.COPPER_ORE, 0xb76532);
+                else if (resType.includes('SILVER')) clothColor = parseColor(colors.SILVER_ORE, 0xd7dde0);
+                else if (resType.includes('MITHRIL')) clothColor = parseColor(colors.MITHRIL_ORE, 0x59e0c8);
                 else if (resType.includes('HERB')) clothColor = parseColor(colors.MAGIC_HERB, 0x81c784);
-                else if (resType.includes('WOLF')) clothColor = parseColor(colors.WOLF_HIDE, 0xa1887f);
-                else if (resType.includes('BEAR')) clothColor = parseColor(colors.BEAR_PELT, 0x5d4037);
+                else if (resType.includes('WOLF')) clothColor = parseColor(colors.WOLF_PELTS || colors.WOLF_HIDE, 0xa1887f);
+                else if (resType.includes('BEAR')) clothColor = parseColor(colors.BEAR_PELTS || colors.BEAR_PELT, 0x5d4037);
                 else clothColor = parseColor(colors.DEFAULT);
             }
         }
