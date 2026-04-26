@@ -76,7 +76,8 @@ export class ResourceSystem {
     }
 
     /**
-     * 尋找最近的存放點 (城鎮中心、各類工廠)
+     * 尋找最近的自動存放點。
+     * 一般倉庫不作為採集工人的自動放回目標；玩家手動右鍵存放時仍可放入倉庫。
      * @param {Object} state GameEngine.state 引用
      * @param {number} x 工人當前 X 座標
      * @param {number} y 工人當前 Y 座標
@@ -94,7 +95,6 @@ export class ResourceSystem {
         const supportMap = {
             'village': 'ALL',
             'town_center': 'ALL',
-            'storehouse': 'ALL',
             'timber_factory': ['WOOD', 'TREE'],
             'stone_factory': ['STONE', 'ROCK'],
             'gold_mining_factory': ['GOLD', 'GOLD_ORE'],

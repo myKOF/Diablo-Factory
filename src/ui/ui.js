@@ -287,8 +287,9 @@ export class UIManager {
         const logContent = document.createElement("div");
         logContent.id = "log_content";
         logContent.style.cssText = `
-            flex: 1; width: 100%; overflow-y: auto;
-            pointer-events: auto; padding: 0;
+            flex: 1; width: 100%; overflow-y: auto; overflow-x: hidden;
+            pointer-events: auto; padding: 0; box-sizing: border-box;
+            white-space: normal; overflow-wrap: anywhere; word-break: break-word;
         `;
         logPanel.appendChild(logContent);
 
@@ -1618,7 +1619,7 @@ export class UIManager {
                                         ${currentNeed ? currentNeed.label : '0 / 0'}
                                     </div>
                                     <div style="height: 34px; border: 2px solid #f4f4f4; border-radius: 7px; background: #232323; overflow: hidden; position: relative;">
-                                        <div class="factory-production-fill" style="height: 100%; width: ${productionProgress * 100}%; min-width: ${productionProgress > 0 ? '18px' : '0'}; background: #32f06a; border-radius: 0 7px 7px 0; transition: width 0.04s linear;"></div>
+                                        <div class="factory-production-fill" style="height: 100%; width: 100%; transform: scaleX(${productionProgress}); transform-origin: left center; background: #32f06a; border-radius: 0 7px 7px 0; transition: transform 0.08s linear; will-change: transform;"></div>
                                         <div class="factory-production-text" style="position: absolute; inset: 0; display: flex; align-items: center; padding-left: 18px; color: #ffffff; font-size: 18px; font-weight: 900; text-shadow: 0 2px 3px rgba(0,0,0,0.9), 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;">
                                             ${this.formatProductionCountdown(entity)}
                                         </div>
@@ -1639,20 +1640,20 @@ export class UIManager {
                 gridHtml += `<section style="width: 100%; border: 2px solid rgba(11,84,143,0.9); border-radius: 14px; background: rgba(96,96,96,0.9); padding: 10px 18px; box-sizing: border-box; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-start;">`;
                 recipes.forEach(rec => {
                     const isUnlocked = rec.isUnlocked;
-                    const isCrafting = entity.currentRecipe && entity.currentRecipe.type === rec.type;
+                    const isCrafting = entity.currentRecipe && (entity.currentRecipe.uid ? entity.currentRecipe.uid === rec.uid : entity.currentRecipe.type === rec.type);
                     const opacity = isUnlocked ? "1" : "0.4";
                     const filter = isUnlocked ? "none" : "grayscale(100%)";
-                    const activeStyle = isCrafting ? "border-color: #ffeb3b; box-shadow: 0 0 0 2px rgba(255,235,59,0.28), inset 0 1px 0 rgba(255,255,255,0.06);" : "";
+                    const activeStyle = isCrafting ? "outline: 3px solid #ffeb3b; box-shadow: 0 0 0 2px rgba(255,235,59,0.35), 0 0 10px rgba(255,235,59,0.55); border-radius: 7px;" : "";
                     const name = formatRecipeName(rec.type);
                     const icon = this.getIngredientIcon(rec.type);
                     const needInfo = getRecipeNeedInfo(rec.type);
 
                     gridHtml += `
-                        <button class="recipe-btn" data-type="${rec.type}" onclick="window.UIManager.selectRecipe(event, '${rec.type}')"
-                                style="position: relative; width: 68px; min-height: 76px; padding: 0; border: 0; background: transparent; color: #fff; cursor: ${isUnlocked ? 'pointer' : 'not-allowed'}; opacity: ${opacity}; filter: ${filter}; text-align: center; font-family: inherit;"
+                        <button class="recipe-btn" data-uid="${rec.uid}" data-type="${rec.type}" onclick="window.UIManager.selectRecipe(event, '${rec.uid}', '${rec.type}')"
+                                style="position: relative; width: 68px; min-height: 76px; padding: 3px 4px; border: 0; border-radius: 7px; background: ${isCrafting ? 'rgba(255,235,59,0.16)' : 'transparent'}; color: #fff; cursor: ${isUnlocked ? 'pointer' : 'not-allowed'}; opacity: ${opacity}; filter: ${filter}; text-align: center; font-family: inherit; box-sizing: border-box; ${activeStyle}"
                                 ${isUnlocked ? '' : 'disabled'} title="${isUnlocked ? `${name}：${needInfo.label}` : '建築等級不足，尚未解鎖'}">
                             <div style="font-size: 12px; line-height: 14px; font-weight: 800; margin-bottom: 2px; height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${name}</div>
-                            <div style="width: 40px; height: 40px; margin: 0 auto 3px; border: 1px solid rgba(139,110,75,0.55); border-radius: 6px; background: rgba(255,255,255,0.05); color: #e8e1d4; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); ${activeStyle}">
+                            <div class="recipe-icon-frame" style="width: 40px; height: 40px; margin: 0 auto 3px; border: 2px solid ${isCrafting ? '#ffeb3b' : 'rgba(139,110,75,0.55)'}; border-radius: 6px; background: ${isCrafting ? 'rgba(255,235,59,0.14)' : 'rgba(255,255,255,0.05)'}; color: #e8e1d4; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);">
                                 <div style="font-size: 24px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.4));">${icon}</div>
                             </div>
                             <div class="recipe-material-ratio" data-recipe-type="${rec.type}" style="font-size: 12px; line-height: 14px; font-weight: 900; color: #fff; text-shadow: 0 2px 3px rgba(0,0,0,0.65);">${needInfo.label}</div>
@@ -1814,20 +1815,18 @@ export class UIManager {
         GameEngine.destroyBuilding(ent);
     }
 
-    static selectRecipe(event, recipeType) {
+    static selectRecipe(event, recipeUid, recipeType) {
         if (event) event.stopPropagation();
         if (!this.activeMenuEntity) return;
         const activeId = this.activeMenuEntity.id || `${this.activeMenuEntity.type1}_${this.activeMenuEntity.x}_${this.activeMenuEntity.y}`;
         const targetEntity = GameEngine.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === activeId) || this.activeMenuEntity;
         const recipes = SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, targetEntity) || [];
-        const rec = recipes.find(r => r.type === recipeType);
+        // 優先使用 uid 匹配，若無則回退到 type 匹配
+        const rec = recipes.find(r => r.uid === recipeUid) || recipes.find(r => r.type === recipeType);
         if (rec && rec.isUnlocked) {
-            const applied = SynthesisSystem.setCraftingTarget(GameEngine.state, GameEngine, targetEntity, rec);
-            GameEngine.addLog(`[加工廠] 點擊配方按鈕：building=${activeId}, selectedRecipeType=${recipeType}, applied=${applied ? 'yes' : 'no'}`, 'LOGISTICS');
+            SynthesisSystem.setCraftingTarget(GameEngine.state, GameEngine, targetEntity, rec);
             this.activeMenuEntity = targetEntity;
             this.showContextMenu(targetEntity); // 點擊後刷新選單顯示高亮狀態
-        } else {
-            GameEngine.addLog(`[加工廠] 點擊配方按鈕失敗：building=${activeId}, selectedRecipeType=${recipeType}, foundRecipe=${rec ? 'yes' : 'no'}, unlocked=${rec ? (rec.isUnlocked ? 'yes' : 'no') : 'no'}`, 'LOGISTICS');
         }
     }
 
@@ -2217,10 +2216,10 @@ export class UIManager {
 
                 // 適應 420px 寬度的 5 欄佈局
                 html += `
-                    <div style="position: relative; width: calc(20% - 8px); aspect-ratio: 1; min-width: 50px; background: rgba(255,255,255,0.05); border: 1px solid rgba(139,110,75,0.5); border-radius: 6px; display:flex; justify-content:center; align-items:center; overflow: hidden; cursor: help; transition: all 0.2s;" 
-                         onmouseover="this.style.background='rgba(255,255,255,0.1)'; this.style.borderColor='#fbc02d'"
-                         onmouseout="this.style.background='rgba(255,255,255,0.05)'; this.style.borderColor='rgba(139,110,75,0.5)'"
-                         title="${stack.name} (ID:${stack.id})\n數量: ${stack.currentAmount} / ${stack.stack}">
+                    <div style="position: relative; width: calc(20% - 8px); aspect-ratio: 1; min-width: 50px; background: rgba(255,255,255,0.05); border: 1px solid rgba(139,110,75,0.5); border-radius: 6px; display:flex; justify-content:center; align-items:center; overflow: hidden; cursor: default; transition: all 0.2s;" 
+                         onmouseenter="this.style.background='rgba(255,255,255,0.1)'; this.style.borderColor='#fbc02d'; window.UIManager.showItemTooltip(event, '${stack.name}', '${stack.id}', '${stack.currentAmount}', '${stack.stack}')"
+                         onmousemove="window.UIManager.moveItemTooltip(event)"
+                         onmouseleave="this.style.background='rgba(255,255,255,0.05)'; this.style.borderColor='rgba(139,110,75,0.5)'; window.UIManager.hideItemTooltip()">
                         <div style="font-size: ${cfg.itemIconSize || 28}px; pointer-events: none;">${displayIcon}</div>
                         <div style="position: absolute; bottom: 2px; left: 0; right: 0; text-align: center; font-size: ${cfg.itemFontSize || 10}px; font-family: monospace; color: ${amtColor}; font-weight: bold; text-shadow: 1px 1px 1px #000; pointer-events: none;">
                             ${(cfg.useAbbreviation !== false && stack.currentAmount >= 1000) ? (stack.currentAmount / 1000).toFixed(1) + 'k' : stack.currentAmount}
@@ -2233,6 +2232,42 @@ export class UIManager {
         html += `</div>`; // end grid
 
         panel.innerHTML = html;
+    }
+
+    static getItemTooltipEl() {
+        let tip = document.getElementById("item_tooltip");
+        if (!tip) {
+            tip = document.createElement("div");
+            tip.id = "item_tooltip";
+            tip.style.cssText = "position:absolute; z-index:3000; display:none; pointer-events:none; background:rgba(12,12,12,0.96); color:#f5f5f5; border:2px solid #f5f5f5; padding:6px 9px; font-size:16px; line-height:1.35; white-space:nowrap; box-shadow:0 3px 8px rgba(0,0,0,0.55);";
+            document.body.appendChild(tip);
+        }
+        return tip;
+    }
+
+    static showItemTooltip(event, name, id, amount, stack) {
+        const tip = this.getItemTooltipEl();
+        tip.innerHTML = `<div>${name} (ID:${id})</div><div>數量: ${amount} / ${stack}</div>`;
+        tip.style.display = "block";
+        this.moveItemTooltip(event);
+    }
+
+    static moveItemTooltip(event) {
+        const tip = document.getElementById("item_tooltip");
+        if (!tip || tip.style.display === "none") return;
+        const margin = 12;
+        const rect = tip.getBoundingClientRect();
+        let left = event.clientX + margin;
+        let top = event.clientY + margin;
+        if (left + rect.width > window.innerWidth - 6) left = event.clientX - rect.width - margin;
+        if (top + rect.height > window.innerHeight - 6) top = event.clientY - rect.height - margin;
+        tip.style.left = `${Math.max(6, left)}px`;
+        tip.style.top = `${Math.max(6, top)}px`;
+    }
+
+    static hideItemTooltip() {
+        const tip = document.getElementById("item_tooltip");
+        if (tip) tip.style.display = "none";
     }
 
     static hideWarehousePanel() {
@@ -2492,7 +2527,8 @@ export class UIManager {
                     }
                 }
 
-                return `<div${colorAttr}>> ${text}</div>`;
+                const colorStyle = colorAttr ? (colorAttr.match(/style="([^"]*)"/)?.[1] || '') : '';
+                return `<div style="${colorStyle} white-space: normal; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; box-sizing: border-box;">> ${text}</div>`;
             }).join("");
 
             if (lp.innerHTML !== content) {
@@ -2586,13 +2622,12 @@ export class UIManager {
                     const lastProgress = parseFloat(productionFill.dataset.progress || "0");
                     if (productionProgress + 0.02 < lastProgress) {
                         productionFill.style.transition = "none";
-                        productionFill.style.width = "0%";
+                        productionFill.style.transform = "scaleX(0)";
                         productionFill.offsetHeight;
-                        productionFill.style.transition = "width 0.04s linear";
+                        productionFill.style.transition = "transform 0.08s linear";
                     }
                     productionFill.dataset.progress = String(productionProgress);
-                    productionFill.style.width = `${productionProgress * 100}%`;
-                    productionFill.style.minWidth = productionProgress > 0 ? "18px" : "0";
+                    productionFill.style.transform = `scaleX(${productionProgress})`;
                 }
                 if (productionText) {
                     productionText.textContent = this.formatProductionCountdown(factoryEnt);
@@ -2663,12 +2698,16 @@ export class UIManager {
 
                 // 3. 更新按鈕邊框高亮 (Active 狀態)
                 const isCrafting = factoryEnt.currentRecipe && factoryEnt.currentRecipe.type === type;
-                if (isCrafting) {
-                    btn.style.border = "2px solid #ffeb3b";
-                    btn.style.background = "rgba(255,235,59,0.2)";
-                } else {
-                    btn.style.border = "1px solid rgba(255,255,255,0.2)";
-                    btn.style.background = "";
+                btn.style.background = isCrafting ? "rgba(255,235,59,0.16)" : "transparent";
+                btn.style.outline = isCrafting ? "3px solid #ffeb3b" : "none";
+                btn.style.boxShadow = isCrafting
+                    ? "0 0 0 2px rgba(255,235,59,0.35), 0 0 10px rgba(255,235,59,0.55)"
+                    : "none";
+                const iconFrame = btn.querySelector(".recipe-icon-frame");
+                if (iconFrame) {
+                    iconFrame.style.border = isCrafting ? "2px solid #ffeb3b" : "2px solid rgba(139,110,75,0.55)";
+                    iconFrame.style.background = isCrafting ? "rgba(255,235,59,0.14)" : "rgba(255,255,255,0.05)";
+                    iconFrame.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.04)";
                 }
             });
         }

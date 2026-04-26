@@ -383,6 +383,16 @@ export class GameEngine {
                     v.constructionTarget = targetEnt;
                     v.isPlayerLocked = true;
                     GameEngine.addLog(`[集結] 已自動指派至建造任務。`);
+                } else if (this.isAssignableRallyBuilding(targetEnt)) {
+                    const handled = this.workerSystem && this.workerSystem.handleWorkerCommand(v, targetEnt);
+                    if (handled && v.assignedWarehouseId) {
+                        v.isPlayerLocked = true;
+                        GameEngine.addLog(`[集結] 已自動派駐至 ${targetEnt.name || targetEnt.type1}。`);
+                    } else {
+                        v.idleTarget = this.findAvailableRallySpot(this.resolveRallyStandPoint(rp, targetEnt, v));
+                        v._isRallyMovement = true;
+                        v.isPlayerLocked = true;
+                    }
                 } else if (targetEnt.type1 === 'RESOURCE' || targetEnt.type1 === 'corpse') {
                     // [核心修正] 支援屍體集結連動
                     v.state = 'MOVING_TO_RESOURCE';
@@ -440,6 +450,12 @@ export class GameEngine {
             this.assignNextTask(v);
         }
         return true;
+    }
+
+    static isAssignableRallyBuilding(entity) {
+        if (!entity || entity.isUnderConstruction || !entity.type1) return false;
+        const cfg = this.getBuildingConfig(entity.type1, entity.lv || 1);
+        return !!(cfg && (cfg.need_villagers > 0 || (cfg.logistics && (cfg.logistics.canInput || cfg.logistics.canOutput))));
     }
 
     static resolveRallyStandPoint(rallyPoint, targetEnt = null, unit = null) {

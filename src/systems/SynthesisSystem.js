@@ -79,7 +79,7 @@ export class SynthesisSystem {
                         // 建立唯一鍵 (類型+產量+需求等級)，確保相同配方不重複，但不同產量/等級的同型材料都會顯示
                         const key = `${r.type}_${r.amount}_${r.reqLv}`;
                         if (!recipeMap.has(key)) {
-                            recipeMap.set(key, r);
+                            recipeMap.set(key, { ...r, uid: key });
                         }
                     });
                 }
@@ -88,7 +88,10 @@ export class SynthesisSystem {
         } else {
             // 一般建築：僅顯示當前等級配置的配方
             if (currentCfg.ingredients_production_raw) {
-                recipes = this.parseRecipes(currentCfg.ingredients_production_raw);
+                recipes = this.parseRecipes(currentCfg.ingredients_production_raw).map(r => ({
+                    ...r,
+                    uid: `${r.type}_${r.amount}_${r.reqLv}`
+                }));
             }
         }
 

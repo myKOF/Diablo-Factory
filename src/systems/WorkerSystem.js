@@ -1492,12 +1492,15 @@ export class WorkerSystem {
     getBuildingApproachPoint(v, building, padding = 30) {
         if (!building) return { x: v.x, y: v.y };
         const fp = this.engine.getFootprint(building.type1 || building.type);
+        const collCfg = UI_CONFIG.BuildingCollision || { buffer: 10, feetOffset: 8 };
+        const logicY = building.y - (collCfg.feetOffset || 0);
+        const clearance = Math.max(padding, (collCfg.buffer || 0) + Math.max((v.width || 20) / 2, 10));
         const halfW = (fp.uw * 20) / 2;
         const halfH = (fp.uh * 20) / 2;
-        const left = building.x - halfW - padding;
-        const right = building.x + halfW + padding;
-        const top = building.y - halfH - padding;
-        const bottom = building.y + halfH + padding;
+        const left = building.x - halfW - clearance;
+        const right = building.x + halfW + clearance;
+        const top = logicY - halfH - clearance;
+        const bottom = logicY + halfH + clearance;
 
         const clampedX = Math.max(left, Math.min(right, v.x));
         const clampedY = Math.max(top, Math.min(bottom, v.y));
@@ -1561,6 +1564,7 @@ export class WorkerSystem {
         const clearance = Math.max(18, (collisionCfg.buffer || 10) + 10);
         const halfW = (fp.uw * 20) / 2 + clearance;
         const halfH = (fp.uh * 20) / 2 + clearance;
+        const centerY = building.y - (collisionCfg.feetOffset || 0);
         const dx = to.x - from.x;
         const dy = to.y - from.y;
         const candidates = [];
@@ -1570,8 +1574,8 @@ export class WorkerSystem {
             candidates.push((building.x + halfW - from.x) / dx);
         }
         if (Math.abs(dy) > 0.001) {
-            candidates.push((building.y - halfH - from.y) / dy);
-            candidates.push((building.y + halfH - from.y) / dy);
+            candidates.push((centerY - halfH - from.y) / dy);
+            candidates.push((centerY + halfH - from.y) / dy);
         }
 
         const valid = candidates
@@ -1580,8 +1584,8 @@ export class WorkerSystem {
             .filter(p =>
                 p.x >= building.x - halfW - 0.5 &&
                 p.x <= building.x + halfW + 0.5 &&
-                p.y >= building.y - halfH - 0.5 &&
-                p.y <= building.y + halfH + 0.5
+                p.y >= centerY - halfH - 0.5 &&
+                p.y <= centerY + halfH + 0.5
             )
             .sort((a, b) => a.t - b.t);
 
@@ -1589,8 +1593,8 @@ export class WorkerSystem {
         const p = valid[0];
         const len = Math.hypot(dx, dy) || 1;
         return {
-            x: p.x + (dx / len) * 4,
-            y: p.y + (dy / len) * 4
+            x: p.x - (dx / len) * 2,
+            y: p.y - (dy / len) * 2
         };
     }
 
