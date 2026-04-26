@@ -331,6 +331,7 @@ export class GameEngine {
             attack_type: config.attack_type || 1,
             field_vision: (config.field_vision !== undefined) ? config.field_vision : 15,
             initiative_attack: (config.initiative_attack !== undefined) ? config.initiative_attack : 1,
+            collection_resource: config.collection_resource || 1,
             facing: 1, // 1: 右, -1: 左
             isPlayerLocked: false, // [新協定] 玩家指令鎖定旗標，啟動時屏蔽系統自動化
             // 物理碰撞尺寸 (寬, 高)

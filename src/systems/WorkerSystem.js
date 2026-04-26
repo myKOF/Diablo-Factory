@@ -24,6 +24,12 @@ export class WorkerSystem {
         return configSpeed * 13 * (hasCargo ? cargoMultiplier : 1);
     }
 
+    getWorkerCollectionAmount(v, fallback = 1) {
+        const rawAmount = v?.collection_resource ?? v?.config?.collection_resource;
+        const amount = parseInt(rawAmount);
+        return Number.isFinite(amount) && amount > 0 ? amount : fallback;
+    }
+
     /**
      * 更新所有工人的狀態與移動
      */
@@ -271,9 +277,16 @@ export class WorkerSystem {
                                 v.logisticsWorkTimer = 0;
                                 v.logisticsWorkKey = null;
 
-                                state.resources[conn.filter] -= 1;
+                                const cargoAmount = Math.min(this.getWorkerCollectionAmount(v, 1), state.resources[conn.filter] || 0);
+                                if (cargoAmount <= 0) {
+                                    v.logisticsWorkTimer = 0;
+                                    v.logisticsWorkKey = null;
+                                    break;
+                                }
+
+                                state.resources[conn.filter] -= cargoAmount;
                                 v.cargoType = conn.filter;
-                                v.cargoAmount = 1;
+                                v.cargoAmount = cargoAmount;
                                 v.state = 'TRANSPORTING_LOGISTICS';
                                 v.logisticsTargetId = conn.id;
                                 v.logisticsSourceId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
@@ -319,9 +332,16 @@ export class WorkerSystem {
 
                                         v.logisticsWorkTimer = 0;
                                         v.logisticsWorkKey = null;
-                                        factory.outputBuffer[resType] -= 1;
+                                        const cargoAmount = Math.min(this.getWorkerCollectionAmount(v, 1), factory.outputBuffer[resType] || 0);
+                                        if (cargoAmount <= 0) {
+                                            v.logisticsWorkTimer = 0;
+                                            v.logisticsWorkKey = null;
+                                            break;
+                                        }
+
+                                        factory.outputBuffer[resType] -= cargoAmount;
                                         v.cargoType = resType;
-                                        v.cargoAmount = 1;
+                                        v.cargoAmount = cargoAmount;
                                         v.state = 'TRANSPORTING_LOGISTICS';
                                         v.logisticsTargetId = validConn.id;
                                         v.logisticsHomeId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
@@ -569,25 +589,7 @@ export class WorkerSystem {
                 }
 
                 if (v.gatherTimer >= harvestTime) {
-                    let harvestTotal = 5;
-                    if (v.targetId.gx !== undefined && v.targetId.gy !== undefined) {
-                        const res = this.state.mapData.getResource(v.targetId.gx, v.targetId.gy);
-                        if (res) {
-                            const typeName = ResourceSystem.getResourceTypeName(res.type);
-                            const cfg = this.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
-                            if (cfg && cfg.collection_resource) harvestTotal = cfg.collection_resource;
-                        }
-                    } else {
-                        let targetEnt = (typeof v.targetId === 'string') ?
-                            this.state.mapEntities.find(e => e.id === v.targetId) :
-                            (this.state.mapEntities.includes(v.targetId) ? v.targetId : null);
-                        if (targetEnt) {
-                            const cfg = this.engine.getEntityConfig(targetEnt.type1, targetEnt.lv || 1);
-                            if (cfg && cfg.collection_resource) {
-                                harvestTotal = cfg.collection_resource;
-                            }
-                        }
-                    }
+                    const harvestTotal = this.getWorkerCollectionAmount(v, 1);
 
                     if (v.targetId.gx !== undefined && v.targetId.gy !== undefined) {
                         const resBeforeConsume = this.state.mapData.getResource(v.targetId.gx, v.targetId.gy);

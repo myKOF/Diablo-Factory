@@ -99,6 +99,7 @@ export class ConfigManager {
                 idxAtk = hIdx('attack'),
                 idxAtkSpeed = hIdx('attack_speed'),
                 idxRange = hIdx('range'),
+                idxColRes = hIdx('collection_resource'),
                 idxAttackType = hIdx('attack_type'),
                 idxType = hIdx('type'),
                 idxCamp = hIdx('camp'),
@@ -131,6 +132,7 @@ export class ConfigManager {
                     combatSpeed: parseFloat(row[idxFightingSpeed]) || 5.5, // 備援欄位：兼容 spawnNPC 的調用
                     idle_speed: parseFloat(row[idxIdleSpeed]) || 2.5,
                     collection_speed: parseFloat(row[idxColSpeed]) || 3,
+                    collection_resource: parseInt(row[idxColRes]) || 1,
                     need_resource: row[idxNeed],
                     lv: parseInt(row[idxLv]) || 1,
                     hp: parseInt(row[idxHp]) || 100,
