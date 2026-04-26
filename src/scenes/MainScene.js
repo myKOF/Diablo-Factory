@@ -950,7 +950,8 @@ export class MainScene extends Phaser.Scene {
             // 這樣進度條會顯示在建築上方，但當工人站在建築前方 (y 較大) 時會遮住進度條。
             const id = ent.id || `${ent.type1}_${ent.x}_${ent.y}`;
             const bCfg = GameEngine.getBuildingConfig(ent.type1, ent.lv || 1);
-            if (bCfg && bCfg.need_villagers > 0 && !ent.isUnderConstruction) {
+            const canShowWorkerOccupancy = bCfg && !ent.isUnderConstruction && (bCfg.need_villagers > 0 || ent.targetWorkerCount > 0);
+            if (canShowWorkerOccupancy) {
                 let occG = this.occupancyHuds.get(id);
                 if (!occG) {
                     occG = this.add.graphics();
@@ -2287,10 +2288,15 @@ export class MainScene extends Phaser.Scene {
 
         // 使用引擎標準方法獲獲取建築配置
         const bCfg = GameEngine.getBuildingConfig(ent.type1, ent.lv || 1);
-        if (!bCfg || !bCfg.need_villagers || bCfg.need_villagers <= 0) return;
+        if (!bCfg) return;
 
-        const max = bCfg.need_villagers;
-        const current = (ent.assignedWorkers ? ent.assignedWorkers.length : 0);
+        const buildingId = ent.id || `${ent.type1}_${ent.x}_${ent.y}`;
+        const max = Math.max(1, ent.targetWorkerCount || bCfg.need_villagers || 0);
+        if (max <= 0) return;
+        const assignedById = GameEngine.state.units && GameEngine.state.units.villagers
+            ? GameEngine.state.units.villagers.filter(v => v.assignedWarehouseId === buildingId).length
+            : 0;
+        const current = Math.max(ent.assignedWorkers ? ent.assignedWorkers.length : 0, assignedById);
 
         let lw = cfg.lightWidth;
         const lh = cfg.lightHeight;
@@ -2304,12 +2310,12 @@ export class MainScene extends Phaser.Scene {
         }
         const totalW = (lw + sp) * max - sp;
 
-        const startX = offX - totalW / 2;
-        const startY = offY - (uh * TS) / 2 + cfg.offsetY;
-
         // 背景深色底座
         const bg = this.hexOrRgba(cfg.bgColor);
         const padding = cfg.basePadding || 2;
+        const startX = offX - totalW / 2;
+        const bottomInset = cfg.bottomInset !== undefined ? cfg.bottomInset : 8;
+        const startY = offY + (uh * TS) / 2 - lh - padding - bottomInset;
         g.fillStyle(bg.color, alpha * (cfg.bgAlpha || 0.8));
         g.fillRect(startX - padding, startY - padding, totalW + padding * 2, lh + padding * 2);
 

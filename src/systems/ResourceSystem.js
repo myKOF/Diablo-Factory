@@ -150,7 +150,9 @@ export class ResourceSystem {
             timber_factory: ['WOOD', 'TREE'],
             stone_factory: ['STONE', 'ROCK'],
             gold_mining_factory: ['GOLD', 'GOLD_ORE'],
-            barn: ['FOOD', 'FRUIT', 'BERRY', 'MEAT', 'WHEAT', 'RICE']
+            barn: ['FOOD', 'FRUIT', 'BERRY', 'MEAT', 'WHEAT', 'RICE'],
+            farmland: ['FOOD', 'FRUIT', 'BERRY', 'MEAT', 'WHEAT', 'RICE'],
+            tree_plantation: ['WOOD', 'TREE']
         };
 
         const supported = supportMap[building.type1];
@@ -174,6 +176,18 @@ export class ResourceSystem {
 
         const cfg = engine && engine.getEntityConfig ? engine.getEntityConfig(building.type1, building.lv || 1) : null;
         const resKey = String(type).toLowerCase();
+        const isGatheringOutput = cfg && (
+            cfg.type2 === 'gathering' ||
+            ['farmland', 'tree_plantation'].includes(building.type1) ||
+            (cfg.logistics && cfg.logistics.canOutput && !cfg.logistics.canInput)
+        );
+        if (isGatheringOutput) {
+            if (!building.outputBuffer) building.outputBuffer = {};
+            building.outputBuffer[resKey] = (building.outputBuffer[resKey] || 0) + amount;
+            if (addLog) addLog(`[資源屯積] ${building.name || building.type1} 收到 ${amount} 單位的 ${resKey.toUpperCase()}`, 'TASK');
+            return true;
+        }
+
         if (cfg && cfg.logistics && cfg.logistics.canInput && cfg.type2 === 'processing_plant') {
             if (!building.inputBuffer) building.inputBuffer = {};
             building.inputBuffer[resKey] = (building.inputBuffer[resKey] || 0) + amount;

@@ -66,6 +66,28 @@ export class UIManager {
         return this.ingredientIconMap[key] || "📦";
     }
 
+    static getBuildingStockpileInfo(entity, cfg) {
+        if (!entity) return null;
+        const outputBuffer = entity.outputBuffer || {};
+        const outputKeys = Object.keys(outputBuffer).filter(k => (outputBuffer[k] || 0) > 0);
+        if (outputKeys.length > 0) {
+            const type = outputKeys[0];
+            return { type, amount: outputBuffer[type] || 0, max: null };
+        }
+
+        const produce = (cfg && cfg.produce_resource) || {};
+        let type = Object.keys(produce)[0] || null;
+        if (!type) {
+            if (entity.type1 === 'timber_factory' || entity.type1 === 'tree_plantation') type = 'wood';
+            else if (entity.type1 === 'stone_factory') type = 'stone';
+            else if (entity.type1 === 'barn' || entity.type1 === 'farmland') type = 'food';
+            else if (entity.type1 === 'gold_mining_factory') type = 'gold_ore';
+        }
+
+        if (!type) return null;
+        return { type, amount: outputBuffer[type] || 0, max: null };
+    }
+
     static getIngredientProductionTime(type, fallback = 5) {
         if (!type) return fallback;
         const state = GameEngine.state;
@@ -1288,6 +1310,11 @@ export class UIManager {
             ? new Set(entity.assignedWorkers || []).size
             : assignedWorkerCount));
         const maxWorkersForEntity = workerLightMax;
+        const isGatheringBuilding = cfg_current && (
+            cfg_current.type2 === 'gathering' ||
+            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(entity.type1)
+        );
+        const stockpileInfo = isGatheringBuilding ? this.getBuildingStockpileInfo(entity, cfg_current) : null;
         const compactWorkerHtml = (!isConfirming && isProcessingPlant && canAssignWorkers && !entity.isUnderConstruction) ? `
             <div style="display: flex; align-items: center; gap: 6px; margin-left: 10px;">
                 <div class="factory-worker-lights" title="建築內工人 ${workerLightCount} / ${workerLightMax}" style="display: grid; grid-template-columns: repeat(${workerLightMax}, 1fr); width: 118px; height: 20px; background: #202a2f; border: 2px solid #cfd8dc; box-sizing: border-box;">
@@ -1457,23 +1484,40 @@ export class UIManager {
                 const current = assignedWorkerCount;
                 const wcOff = hCfg.workerControlOffset || { x: 0, y: 15 };
                 const maxWorkers = maxWorkersForEntity; 
+                const stockpileLabel = stockpileInfo
+                    ? `${Math.floor(stockpileInfo.amount || 0)}${stockpileInfo.max ? ` / ${Math.floor(stockpileInfo.max)}` : ''}`
+                    : '';
+                const stockpileName = stockpileInfo
+                    ? ((GameEngine.state.ingredientConfigs && GameEngine.state.ingredientConfigs[stockpileInfo.type]?.name) || GameEngine.RESOURCE_NAMES[stockpileInfo.type] || stockpileInfo.type)
+                    : '';
                 
                 gridHtml += `
-                    <div class="warehouse-controls" style="display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 18px; background: rgba(0,0,0,0.4); padding: 10px 28px; margin: 0 auto; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); transform: translate(${wcOff.x}px, ${wcOff.y}px); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box; width: calc(100% - 32px); flex: 0 0 calc(100% - 32px); max-width: calc(100% - 32px);">
-                        <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)" 
-                                style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; flex: 0 0 ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
-                                onmouseover="this.style.background='#6d4c41'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='${hCfg.workerAdjustBtnBg || '#4e342e'}'; this.style.transform='scale(1)';">－</button>
-                        
-                        <div style="display: flex; flex-direction: column; align-items: center; min-width: 90px; flex: 1 1 auto;">
-                            <span style="font-size: 11px; color: rgba(255,255,255,0.35); font-weight: bold; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 1px;">Villagers</span>
-                            <div style="font-size: ${hCfg.workerCountFontSize || '22px'}; font-weight: 900; color: #fff; font-family: 'Arial Black', sans-serif; text-shadow: 0 2px 4px rgba(0,0,0,0.5); line-height: 1;">
-                                <span style="color: #76ff03;">${current}</span> <span style="color: rgba(255,255,255,0.2); margin: 0 4px;">/</span> <span style="color: #fbc02d;">${maxWorkers}</span>
+                    <div style="display: flex; align-items: stretch; gap: 12px; transform: translate(${wcOff.x}px, ${wcOff.y}px); width: calc(100% - 32px); flex: 0 0 calc(100% - 32px); max-width: calc(100% - 32px); margin: 0 auto; height: 60px; box-sizing: border-box;">
+                        <div class="warehouse-controls" style="display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; background: rgba(0,0,0,0.4); padding: 10px 14px; margin: 0; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box; width: ${stockpileInfo ? '62%' : '100%'}; flex: 0 0 ${stockpileInfo ? '62%' : '100%'}; max-width: ${stockpileInfo ? '62%' : '100%'};">
+                            <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)" 
+                                    style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; flex: 0 0 ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
+                                    onmouseover="this.style.background='#6d4c41'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='${hCfg.workerAdjustBtnBg || '#4e342e'}'; this.style.transform='scale(1)';">－</button>
+                            
+                            <div style="display: flex; flex-direction: column; align-items: center; min-width: 72px; flex: 1 1 auto;">
+                                <span style="font-size: 10px; color: rgba(255,255,255,0.35); font-weight: bold; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 1px;">Villagers</span>
+                                <div style="font-size: ${hCfg.workerCountFontSize || '22px'}; font-weight: 900; color: #fff; font-family: 'Arial Black', sans-serif; text-shadow: 0 2px 4px rgba(0,0,0,0.5); line-height: 1;">
+                                    <span style="color: #76ff03;">${current}</span> <span style="color: rgba(255,255,255,0.2); margin: 0 3px;">/</span> <span style="color: #fbc02d;">${maxWorkers}</span>
+                                </div>
                             </div>
-                        </div>
 
-                        <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, 1)" 
-                                style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; flex: 0 0 ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
-                                onmouseover="this.style.background='#6d4c41'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='${hCfg.workerAdjustBtnBg || '#4e342e'}'; this.style.transform='scale(1)';">＋</button>
+                            <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, 1)" 
+                                    style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; flex: 0 0 ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
+                                    onmouseover="this.style.background='#6d4c41'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='${hCfg.workerAdjustBtnBg || '#4e342e'}'; this.style.transform='scale(1)';">＋</button>
+                        </div>
+                        ${stockpileInfo ? `
+                            <div title="${stockpileName}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: rgba(0,0,0,0.4); padding: 8px 10px; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box; flex: 1 1 auto; min-width: 0;">
+                                <span style="font-size: 10px; color: rgba(255,255,255,0.35); font-weight: bold; text-transform: uppercase; letter-spacing: 1px; white-space: nowrap;">屯積</span>
+                                <div style="display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; color: #fff; font-size: 17px; font-weight: 900; font-family: 'Arial Black', sans-serif; text-shadow: 0 2px 4px rgba(0,0,0,0.5); line-height: 1;">
+                                    <span id="building_stockpile_icon" style="font-size: 18px; line-height: 1;">${this.getIngredientIcon(stockpileInfo.type)}</span>
+                                    <span id="building_stockpile_value" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${stockpileLabel}</span>
+                                </div>
+                            </div>
+                        ` : ''}
                     </div>`;
             }
         }
@@ -1624,10 +1668,6 @@ export class UIManager {
                                 ${rightHeader}
                                 <div style="display: flex; flex-direction: column; align-items: flex-end; margin-top: 8px; gap: 4px;">
                                     ${requirementHtml}
-                                    ${(entity.type1 === 'farmland' || entity.type1 === 'tree_plantation') ? `
-                                    <div style="color: #fbc02d; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px black; white-space: nowrap;">
-                                        剩餘量 ${Math.floor(entity.amount || 0)}/${Math.floor(entity.maxAmount || entity.amount || 0)}
-                                    </div>` : ''}
                                 </div>
                             </div>
                         </div>
@@ -2267,6 +2307,18 @@ export class UIManager {
         if (factoryEnt && !factoryEnt.isUnderConstruction) {
             const menu = document.getElementById("context_menu");
             const cfg = GameEngine.getBuildingConfig(factoryEnt.type1, factoryEnt.lv || 1);
+            if (menu && menu.style.display !== "none") {
+                const stockpileValue = document.getElementById("building_stockpile_value");
+                const stockpileIcon = document.getElementById("building_stockpile_icon");
+                if (stockpileValue || stockpileIcon) {
+                    const stockpileInfo = this.getBuildingStockpileInfo(factoryEnt, cfg);
+                    if (stockpileInfo) {
+                        const stockpileLabel = `${Math.floor(stockpileInfo.amount || 0)}${stockpileInfo.max ? ` / ${Math.floor(stockpileInfo.max)}` : ''}`;
+                        if (stockpileValue) stockpileValue.textContent = stockpileLabel;
+                        if (stockpileIcon) stockpileIcon.textContent = this.getIngredientIcon(stockpileInfo.type);
+                    }
+                }
+            }
             if (menu && menu.style.display !== "none" && cfg && cfg.type2 === "processing_plant") {
                 const factoryPanelState = [
                     factoryEnt.id || `${factoryEnt.type1}_${factoryEnt.x}_${factoryEnt.y}`,

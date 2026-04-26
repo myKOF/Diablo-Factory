@@ -1,4 +1,4 @@
-編號,名稱,模型,建築類型1,建築類型2,建造上限,尺寸,碰撞開關,建築等級,解鎖條件,升級資源,升級時間(秒),人口提供,維持村民數量,資源總量,生產npc單位,生產npc模式，rand=隨機生產，normal=單獨生產,生產材料,材料輸入/輸出,注釋說明
+﻿編號,名稱,模型,建築類型1,建築類型2,建造上限,尺寸,碰撞開關,建築等級,解鎖條件,升級資源,升級時間(秒),人口提供,維持村民數量,資源總量,生產npc單位,生產npc模式，rand=隨機生產，normal=單獨生產,生產材料,材料輸入/輸出,注釋說明
 id,name,model,type1,type2,max_count,size,collision,lv,build_unlock,upgrade_need_Ingredients,upgrade_times,population,need_villagers,resource_value,npc_production,npc_production,Ingredients_production,production_place,annotation
 1,城鎮中心,village,village,core,5,"{8,8}",1,1,{0},"{food=100,gold_ore=50}",10,10,0,,"{1,2}",rand,,,城鎮中心：提供基礎人口上限與訓練工人
 2,城鎮中心,village,village,core,5,"{8,8}",1,2,{0},"{food=200,wood=200,gold_ore=100}",30,10,0,,"{1,2}",rand,,,城鎮中心：提供基礎人口上限與訓練工人

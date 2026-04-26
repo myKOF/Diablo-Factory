@@ -238,6 +238,10 @@ export class WorkerSystem {
                     const isWarehouse = this.isLogisticsStorageType(fType);
 
                     if (factory && factory.outputTargets && factory.outputTargets.length > 0) {
+                        if (this.isGatheringBuilding(factory) && !this.shouldWorkerTransportForGatheringBuilding(v, factory)) {
+                            this.assignWorkerToGathering(v, factory, factory.id || `${factory.type1}_${factory.x}_${factory.y}`);
+                            break;
+                        }
 
                         // 每 100 幀隨機抽樣印出日誌，讓我們知道工人在想什麼
                         if (Math.random() < 0.01) {
@@ -301,6 +305,20 @@ export class WorkerSystem {
                                         validConn = { id: v.logisticsSourceId, filter: resType, isFallbackReturn: true };
                                     }
                                     if (validConn) {
+                                        const workKey = `${validConn.id || ''}|${resType}`;
+                                        if (v.logisticsWorkKey !== workKey) {
+                                            v.logisticsWorkKey = workKey;
+                                            v.logisticsWorkTimer = 0;
+                                        }
+
+                                        const workTime = this.getIngredientProductionTime(resType, 1);
+                                        v.logisticsWorkTimer = (v.logisticsWorkTimer || 0) + deltaTime;
+                                        if (v.logisticsWorkTimer < workTime) {
+                                            break;
+                                        }
+
+                                        v.logisticsWorkTimer = 0;
+                                        v.logisticsWorkKey = null;
                                         factory.outputBuffer[resType] -= 1;
                                         v.cargoType = resType;
                                         v.cargoAmount = 1;
@@ -321,6 +339,9 @@ export class WorkerSystem {
                                         }
                                         break;
                                     }
+                                } else if (v.logisticsWorkKey && v.logisticsWorkKey.endsWith(`|${resType}`)) {
+                                    v.logisticsWorkTimer = 0;
+                                    v.logisticsWorkKey = null;
                                 }
                             }
                         }
@@ -619,8 +640,9 @@ export class WorkerSystem {
                                     if (targetEnt.amount <= 0) v._lastTaskWasCorpse = true;
                                 }
                             } else {
-                                if (targetEnt.type1 === 'farmland') this.state.resources.food += canTake;
-                                else if (targetEnt.type1 === 'tree_plantation') this.state.resources.wood += canTake;
+                                const outputType = targetEnt.type1 === 'farmland' ? 'food' : 'wood';
+                                if (!targetEnt.outputBuffer) targetEnt.outputBuffer = {};
+                                targetEnt.outputBuffer[outputType] = (targetEnt.outputBuffer[outputType] || 0) + canTake;
                                 v.cargo = 0;
                                 v.cargoType = null;
                             }
@@ -718,8 +740,13 @@ export class WorkerSystem {
                 if (distB < depositDist) {
                     const depositAmount = (v.cargoAmount || 0) > 0 ? v.cargoAmount : v.cargo;
                     const depositType = v.cargoType || v.type;
+                    const assignedDepositTarget = (!v.manualDepositTarget && v.assignedWarehouseId && v.targetBase && !v.targetBase.gx)
+                        ? v.targetBase
+                        : null;
                     const didDeposit = v.manualDepositTarget
                         ? ResourceSystem.depositResourceToBuilding(this.state, this.engine, v.manualDepositTarget, depositType, depositAmount, this.engine.addLog.bind(this.engine))
+                        : assignedDepositTarget
+                            ? ResourceSystem.depositResourceToBuilding(this.state, this.engine, assignedDepositTarget, depositType, depositAmount, this.engine.addLog.bind(this.engine))
                         : (ResourceSystem.depositResource(this.state, depositType, depositAmount, this.engine.addLog.bind(this.engine)) !== false);
                     if (!didDeposit) {
                         this.engine.addLog(`[存放失敗] ${v.manualDepositTarget?.name || '目標建築'} 無法存放 ${String(depositType || '').toUpperCase()}。`, 'TASK');
@@ -1315,6 +1342,10 @@ export class WorkerSystem {
                 });
                 data.workers = workers.slice(0, target);
             }
+
+            if (this.isGatheringBuilding(entity)) {
+                this.rebalanceGatheringBuildingWorkers(entity, wid, data.workers);
+            }
         });
 
         let needsRefill = true;
@@ -1326,13 +1357,13 @@ export class WorkerSystem {
                 if (workers.length < target && allIdle.length > 0) {
                     const v = allIdle.shift();
                     if (this.isGatheringBuilding(entity)) {
-                        v.assignedWarehouseId = wid;
-                        v.type = this.getGatheringResourceType(entity);
-                        v.state = 'MOVING_TO_RESOURCE';
-                        if (entity.type1 === 'farmland' || entity.type1 === 'tree_plantation') {
-                            v.targetId = entity;
+                        const split = this.getGatheringBuildingWorkerSplit(entity);
+                        const gatherers = workers.filter(worker => this.isGatheringWorkerForBuilding(worker, wid)).length;
+                        const transporters = workers.filter(worker => this.isLogisticsWorkerForBuilding(worker, wid)).length;
+                        if (transporters < split.transporters && gatherers >= split.gatherers) {
+                            this.assignWorkerToIndoorLogistics(v, entity, wid);
                         } else {
-                            v.targetId = null;
+                            this.assignWorkerToGathering(v, entity, wid);
                         }
                     } else {
                         this.assignWorkerToIndoorLogistics(v, entity, wid);
@@ -1414,13 +1445,25 @@ export class WorkerSystem {
             // 3. 設定派駐任務
             const eid = clickedTarget.id || `${clickedTarget.type1}_${clickedTarget.x}_${clickedTarget.y}`;
             this.ensureBuildingWorkerTarget(clickedTarget, totalAssigned + 1);
-            v.state = 'MOVING_TO_FACTORY';
-            v.factoryTarget = clickedTarget;
-            v.assignedWarehouseId = eid; // 同步設置 ID 以便 UI 統計
-            v.targetId = null;
+            if (this.isGatheringBuilding(clickedTarget)) {
+                const existingWorkers = this.state.units.villagers.filter(worker => worker.assignedWarehouseId === eid && worker.id !== v.id);
+                const split = this.getGatheringBuildingWorkerSplit(clickedTarget);
+                const gatherers = existingWorkers.filter(worker => this.isGatheringWorkerForBuilding(worker, eid)).length;
+                const transporters = existingWorkers.filter(worker => this.isLogisticsWorkerForBuilding(worker, eid)).length;
+                if (transporters < split.transporters && gatherers >= split.gatherers) {
+                    this.assignWorkerToIndoorLogistics(v, clickedTarget, eid);
+                } else {
+                    this.assignWorkerToGathering(v, clickedTarget, eid);
+                }
+            } else {
+                v.state = 'MOVING_TO_FACTORY';
+                v.factoryTarget = clickedTarget;
+                v.assignedWarehouseId = eid; // 同步設置 ID 以便 UI 統計
+                v.targetId = null;
+                v.pathTarget = null;
+                v.fullPath = null;
+            }
             v.isPlayerLocked = true;
-            v.pathTarget = null;
-            v.fullPath = null;
             this.engine.addLog(`[物流] ${v.configName || '工人'} 正在前往 ${clickedTarget.name || clickedTarget.type1} 報到。`, 'LOGISTICS');
             return true;
         }
@@ -1617,7 +1660,7 @@ export class WorkerSystem {
 
         const factoryId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
         const assignedWorkers = this.state.units.villagers
-            .filter(worker => worker.assignedWarehouseId === factoryId)
+            .filter(worker => worker.assignedWarehouseId === factoryId && this.isLogisticsWorkerForBuilding(worker, factoryId))
             .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
         const workerIndex = Math.max(0, assignedWorkers.findIndex(worker => worker.id === v.id));
         const preferredIndex = outputTargets.length > 0 ? workerIndex % outputTargets.length : 0;
@@ -1657,6 +1700,7 @@ export class WorkerSystem {
         v.assignedWarehouseId = null;
         v.factoryTarget = null;
         v.logisticsHomeId = null;
+        v._assignmentRole = null;
         v.logisticsWorkKey = null;
         v.logisticsWorkTimer = 0;
         v.visible = true;
@@ -1667,6 +1711,92 @@ export class WorkerSystem {
     isGatheringBuilding(entity) {
         if (!entity) return false;
         return ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(entity.type1);
+    }
+
+    getGatheringBuildingWorkerSplit(entity) {
+        const total = Math.max(0, entity ? (entity.targetWorkerCount || 0) : 0);
+        const hasOutputRoute = !!(entity && Array.isArray(entity.outputTargets) && entity.outputTargets.length > 0);
+        if (!hasOutputRoute) {
+            return { gatherers: total, transporters: 0 };
+        }
+        const gatherers = Math.ceil(total / 2);
+        return { gatherers, transporters: Math.max(0, total - gatherers) };
+    }
+
+    isGatheringWorkerForBuilding(v, buildingId) {
+        if (!v || v.assignedWarehouseId !== buildingId) return false;
+        return v._assignmentRole === 'gather' ||
+            (['MOVING_TO_RESOURCE', 'GATHERING', 'MOVING_TO_BASE'].includes(v.state) && v.logisticsHomeId !== buildingId);
+    }
+
+    isLogisticsWorkerForBuilding(v, buildingId) {
+        if (!v || v.assignedWarehouseId !== buildingId) return false;
+        return v._assignmentRole === 'transport' ||
+            v.logisticsHomeId === buildingId ||
+            ['MOVING_TO_FACTORY', 'WORKING_IN_FACTORY', 'TRANSPORTING_LOGISTICS', 'RETURNING_TO_FACTORY'].includes(v.state);
+    }
+
+    shouldWorkerTransportForGatheringBuilding(v, entity) {
+        if (!v || !entity) return false;
+        const buildingId = entity.id || `${entity.type1}_${entity.x}_${entity.y}`;
+        const split = this.getGatheringBuildingWorkerSplit(entity);
+        if (split.transporters <= 0) return false;
+
+        const assignedWorkers = this.state.units.villagers
+            .filter(worker => worker.assignedWarehouseId === buildingId)
+            .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+        const workerIndex = assignedWorkers.findIndex(worker => worker.id === v.id);
+        if (workerIndex < 0) return false;
+        return workerIndex >= split.gatherers && workerIndex < split.gatherers + split.transporters;
+    }
+
+    canSwitchGatheringAssignmentRole(v) {
+        if (!v) return false;
+        if ((v.cargo || 0) > 0 || (v.cargoAmount || 0) > 0) return false;
+        return !['TRANSPORTING_LOGISTICS', 'RETURNING_TO_FACTORY', 'MOVING_TO_BASE'].includes(v.state);
+    }
+
+    assignWorkerToGathering(v, entity, buildingId) {
+        v.assignedWarehouseId = buildingId;
+        v.factoryTarget = null;
+        v.logisticsHomeId = null;
+        v.logisticsTargetId = null;
+        v.logisticsSourceId = null;
+        v.logisticsWorkKey = null;
+        v.logisticsWorkTimer = 0;
+        v._assignmentRole = 'gather';
+        v.type = this.getGatheringResourceType(entity);
+        v.state = 'MOVING_TO_RESOURCE';
+        v.targetId = (entity.type1 === 'farmland' || entity.type1 === 'tree_plantation') ? entity : null;
+        v.gatherPoint = null;
+        v.pathTarget = null;
+        v.fullPath = null;
+        v.visible = true;
+        if (v.sprite && typeof v.sprite.setVisible === 'function') v.sprite.setVisible(true);
+        if (v.gameObject && typeof v.gameObject.setVisible === 'function') v.gameObject.setVisible(true);
+    }
+
+    rebalanceGatheringBuildingWorkers(entity, buildingId, workers) {
+        const split = this.getGatheringBuildingWorkerSplit(entity);
+        if (split.transporters <= 0) {
+            workers.forEach(v => {
+                if (!this.isGatheringWorkerForBuilding(v, buildingId)) {
+                    this.assignWorkerToGathering(v, entity, buildingId);
+                }
+            });
+            return;
+        }
+
+        const sorted = [...workers].sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+        sorted.forEach((v, index) => {
+            if (index < split.gatherers) {
+                if (!this.isGatheringWorkerForBuilding(v, buildingId) && this.canSwitchGatheringAssignmentRole(v)) {
+                    this.assignWorkerToGathering(v, entity, buildingId);
+                }
+            } else if (!this.isLogisticsWorkerForBuilding(v, buildingId) && this.canSwitchGatheringAssignmentRole(v)) {
+                this.assignWorkerToIndoorLogistics(v, entity, buildingId);
+            }
+        });
     }
 
     getIngredientProductionTime(type, fallback = 3) {
@@ -1771,6 +1901,7 @@ export class WorkerSystem {
         v.targetId = null;
         v.type = null;
         v.state = 'MOVING_TO_FACTORY';
+        v._assignmentRole = 'transport';
         v.pathTarget = null;
         v.fullPath = null;
         v.isPlayerLocked = false;
@@ -1818,6 +1949,7 @@ export class WorkerSystem {
 
         v.assignedWarehouseId = buildingId;
         v.factoryTarget = cfg && cfg.type2 === 'processing_plant' ? building : null;
+        v._assignmentRole = 'transport';
         v.state = 'WORKING_IN_FACTORY';
         v.pathTarget = null;
         v.fullPath = null;
