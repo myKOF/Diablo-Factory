@@ -582,12 +582,17 @@ export class MainScene extends Phaser.Scene {
                                 const isSelected = (window.UIManager.activeLogisticsConnection &&
                                                   window.UIManager.activeLogisticsConnection.source === ent &&
                                                   window.UIManager.activeLogisticsConnection.targetId === conn.id);
-                                const lColor = isSelected ? (logCfg.selectedLineColor || "#ffff00") : logCfg.lineColor;
-                                const lAlpha = isSelected ? (logCfg.selectedLineAlpha || 1.0) : logCfg.lineAlpha;
+                                const isConnected = !!conn.filter;
+                                const lColor = !isConnected
+                                    ? (logCfg.disconnectedLineColor || "#6b6b6b")
+                                    : (isSelected ? (logCfg.selectedLineColor || "#ffff00") : logCfg.lineColor);
+                                const lAlpha = !isConnected
+                                    ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha)
+                                    : (isSelected ? (logCfg.selectedLineAlpha || 1.0) : logCfg.lineAlpha);
                                 this.logisticsGraphics.lineStyle(logCfg.lineThickness, parseColor(lColor), lAlpha);
                                 this.logisticsGraphics.beginPath(); this.logisticsGraphics.moveTo(sx, sy); this.logisticsGraphics.lineTo(ex, ey); this.logisticsGraphics.strokePath();
                                 const adx = ex - sx, ady = ey - sy; const alen = Math.hypot(adx, ady);
-                                if (alen > 20) {
+                                if (isConnected && alen > 20) {
                                     const ux = adx / alen, uy = ady / alen;
                                     const speed = logCfg.arrowSpeed || 60; const spacing = logCfg.arrowSpacing || 40;
                                     const arrowOffset = (currentTime * speed) % spacing;

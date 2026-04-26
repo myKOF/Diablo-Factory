@@ -735,6 +735,8 @@ export const UI_CONFIG = {
         lineThickness: 14,           // 拖拽中連線的寬度
         lineColor: "#0077ffff",           // 已建立連線的顏色 (綠色)
         lineAlpha: 0.6,
+        disconnectedLineColor: "#6b6b6bff", // 未設定搬運品項時的物流線顏色；此狀態物流線不通、箭頭不流動
+        disconnectedLineAlpha: 0.75,      // 未設定搬運品項時的物流線透明度，範圍 0~1
         selectedLineColor: "#dfffc7ff",   // 被選取連線的顏色 (黃色)
         selectedLineAlpha: 1.0,
         dragLineThickness: 14,           // 拖拽中連線的寬度

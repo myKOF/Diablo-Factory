@@ -312,7 +312,7 @@ export class WorkerSystem {
                             for (let resType in factory.outputBuffer) {
                                 if (factory.outputBuffer[resType] >= 1) {
                                     let validConn = this.pickLogisticsConnectionForWorker(v, factory, factory.outputTargets, (candidate) => {
-                                        return !candidate.filter || candidate.filter === resType;
+                                        return candidate.filter && candidate.filter === resType;
                                     });
                                     if (!validConn && v.logisticsSourceId) {
                                         validConn = { id: v.logisticsSourceId, filter: resType, isFallbackReturn: true };

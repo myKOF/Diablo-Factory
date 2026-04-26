@@ -2208,9 +2208,11 @@ export class UIManager {
             ? (sourceEnt.currentRecipe
                 ? `這裡只控制這條物流線要搬什麼。目前加工廠生產線為：${GameEngine.RESOURCE_NAMES[sourceEnt.currentRecipe.type] || sourceEnt.currentRecipe.type}。`
                 : `這裡只控制這條物流線要搬什麼。此加工廠尚未設定生產線，因此不應在這裡看到可量產成品。`)
-            : '這裡只控制這條物流線要搬什麼，不會自動設定加工廠的生產線。';
+            : '這裡只控制這條物流線要搬什麼，不會自動設定加工廠的生產線。未設定品項前，物流線不會通行。';
         let html = `<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 5px; gap: 20px;"><span style="color: #4caf50; font-weight: bold; font-size: 15px;">設定此物流線搬運品項</span><button onclick="window.UIManager.deleteLogisticsLine(event)" style="background: #f44336; color: white; border: 1px solid #ff8a80; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-weight: bold; font-size: 12px;">刪除連線 ✖</button></div><div style="font-size: 12px; color: #c8e6c9; margin-bottom: 8px; line-height: 1.45;">${helperText}</div><div style="display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px;">`;
-        html += `<button onclick="window.UIManager.setLogisticsFilter(event, null)" style="padding: 6px 12px; background: ${currentFilter === null ? '#4caf50' : '#333'}; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer;">不限品項</button>`;
+        if (!currentFilter) {
+            html += `<div style="width: 100%; color: #ffca28; font-size: 12px; font-weight: bold; margin-bottom: 2px;">尚未設定品項，物流線目前不通</div>`;
+        }
         availableItems.forEach(item => {
             const cfg = GameEngine.state.ingredientConfigs ? GameEngine.state.ingredientConfigs[item] : null;
             const displayName = (cfg && cfg.name) ? cfg.name : (GameEngine.RESOURCE_NAMES[item] || item);
@@ -2226,7 +2228,7 @@ export class UIManager {
             const conn = this.activeLogisticsConnection.source.outputTargets.find(t => t.id === this.activeLogisticsConnection.targetId);
             if (conn) {
                 conn.filter = filterItem;
-                const filterName = filterItem ? (GameEngine.RESOURCE_NAMES[filterItem] || filterItem) : '不限品項';
+                const filterName = GameEngine.RESOURCE_NAMES[filterItem] || filterItem;
                 GameEngine.addLog(`[物流] 路線搬運品項已更新：${filterName}。這只影響搬運，不會改變加工廠生產線。`, 'LOGISTICS');
             }
             const menu = document.getElementById('logistics_menu');

@@ -278,33 +278,24 @@ export class GameEngine {
 
         if (building) {
             if (building.spawnIdx === undefined) building.spawnIdx = 0;
-            const fp = GameEngine.getFootprint(building.type1);
-            const perimeter = 2 * (fp.uw + fp.uh) + 4;
-
-            // [核心修復] 動態起始點：若設有集結點，尋找距離集結點最近的周長點作為起始索引
-            let bestIdx = 0;
             if (building.rallyPoint) {
-                let minDistSq = Infinity;
-                for (let i = 0; i < perimeter; i++) {
-                    const p = GameEngine.getBuildingPerimeterPos(building, i, 1);
-                    const dSq = (p.x - building.rallyPoint.x) ** 2 + (p.y - building.rallyPoint.y) ** 2;
-                    if (dSq < minDistSq) {
-                        minDistSq = dSq;
-                        bestIdx = i;
-                    }
-                }
+                const pos = GameEngine.getBuildingExitPointToward(building, building.rallyPoint);
+                spawnX = pos.x;
+                spawnY = pos.y;
+            } else {
+                const fp = GameEngine.getFootprint(building.type1);
+                const perimeter = 2 * (fp.uw + fp.uh) + 4;
+                const idx = building.spawnIdx;
+                building.spawnIdx++;
+
+                const currentIdx = idx % perimeter;
+                const layer = Math.floor(idx / perimeter);
+                const R = 1 + layer; // 距離邊緣的層數 (格)
+
+                const pos = GameEngine.getBuildingPerimeterPos(building, currentIdx, R);
+                spawnX = pos.x;
+                spawnY = pos.y;
             }
-
-            const idx = bestIdx + building.spawnIdx;
-            building.spawnIdx++;
-
-            const currentIdx = idx % perimeter;
-            const layer = Math.floor(idx / perimeter);
-            const R = 1 + layer; // 距離邊緣的層數 (格)
-
-            const pos = GameEngine.getBuildingPerimeterPos(building, currentIdx, R);
-            spawnX = pos.x;
-            spawnY = pos.y;
         }
 
         if (options && options.x !== undefined) spawnX = options.x;
@@ -543,6 +534,38 @@ export class GameEngine {
             ty = -(uh + 1) / 2 + k;
         }
         return { x: building.x + tx * TS, y: building.y - footY + ty * TS };
+    }
+
+    /**
+     * 取得建築朝指定目標方向的出口點，讓集結出生位置固定在合理的邊界上。
+     */
+    static getBuildingExitPointToward(building, target, outwardOffset = 8) {
+        if (!building || !target) return { x: building ? building.x : 0, y: building ? building.y : 0 };
+
+        const fp = GameEngine.getFootprint(building.type1);
+        const TS = this.TILE_SIZE;
+        const collCfg = UI_CONFIG.BuildingCollision || { feetOffset: 8 };
+        const footY = collCfg.feetOffset || 0;
+        const centerX = building.x;
+        const centerY = building.y - footY;
+        const halfW = Math.max(TS / 2, (fp.uw * TS) / 2);
+        const halfH = Math.max(TS / 2, (fp.uh * TS) / 2);
+        let dx = target.x - centerX;
+        let dy = target.y - centerY;
+
+        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
+            return GameEngine.getBuildingPerimeterPos(building, 0, 1);
+        }
+
+        const tx = Math.abs(dx) > 0.001 ? halfW / Math.abs(dx) : Infinity;
+        const ty = Math.abs(dy) > 0.001 ? halfH / Math.abs(dy) : Infinity;
+        const t = Math.min(tx, ty);
+        const len = Math.hypot(dx, dy) || 1;
+
+        return {
+            x: centerX + dx * t + (dx / len) * outwardOffset,
+            y: centerY + dy * t + (dy / len) * outwardOffset
+        };
     }
 
     static getBuildingConfig(type1, lv) {
