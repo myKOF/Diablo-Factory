@@ -32,7 +32,7 @@ export class BattleSystem {
             // 1. 處理所有活著的單位 (村民與 NPC 並列處理)
             const villagers = state.units.villagers || [];
             const npcs = state.units.npcs || [];
-            const allAliveUnits = [...villagers, ...npcs].filter(u => u && u.hp > 0);
+            const allAliveUnits = [...villagers, ...npcs].filter(u => u && u.hp > 0 && u.visible !== false);
 
             allAliveUnits.forEach(unit => {
                 this.processCombat(unit, dt, state, TILE_SIZE, shouldScan);
@@ -71,7 +71,7 @@ export class BattleSystem {
 
         const target = this.findEntityById(unit.targetId, state);
         // [核心修正] 如果目標不存在或已是資源點，則解除鎖定。如果是友軍單位則允許跟隨 (HP可無效或存續)。
-        if (!target || target.isCorpse) {
+        if (!target || target.isCorpse || target.visible === false) {
             unit.targetId = null;
             if (unit.state === 'ATTACK' || unit.state === 'CHASE') {
                 unit.state = 'IDLE';
@@ -166,7 +166,7 @@ export class BattleSystem {
 
         allPotentialTargets.forEach(target => {
             // [修正] 確保索敵目標有 HP 且不是屍體
-            if (target === unit || !(target.hp > 0) || target.isCorpse) return;
+            if (target === unit || !(target.hp > 0) || target.isCorpse || target.visible === false) return;
             const targetCamp = (target.config && target.config.camp) || target.camp || 'neutral';
             if (targetCamp === camp || targetCamp === 'neutral') return;
 
@@ -222,7 +222,7 @@ export class BattleSystem {
      * @param {string} attackerId 
      */
     static applyDamage(target, dmg, state, attackerId = null) {
-        if (!target || !(target.hp > 0) || target.isCorpse) return;
+        if (!target || !(target.hp > 0) || target.isCorpse || target.visible === false) return;
 
         target.hp -= dmg;
         target.hitTimer = 1.0;
@@ -260,6 +260,8 @@ export class BattleSystem {
                 if (u && u.hp <= 0) {
                     const deadId = u.id;
                     const produce = u.produce_resource || (u.config && u.config.produce_resource);
+                    this.releaseDeadWorkerAssignment(u, state);
+                    this.clearUnitAsTarget(deadId, state);
 
                     if (produce) {
                         const corpse = this.spawnCorpse(u, state);
@@ -320,6 +322,39 @@ export class BattleSystem {
         });
     }
 
+    static releaseDeadWorkerAssignment(unit, state) {
+        if (!unit || !unit.assignedWarehouseId || !state || !Array.isArray(state.mapEntities)) return;
+        const buildingId = unit.assignedWarehouseId;
+        const building = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === buildingId);
+        if (!building) return;
+
+        if (building.assignedWorkers) {
+            building.assignedWorkers = building.assignedWorkers.filter(id => id !== unit.id);
+        }
+        building.targetWorkerCount = Math.max(0, (building.targetWorkerCount || 0) - 1);
+    }
+
+    static clearUnitAsTarget(unitId, state) {
+        if (!unitId || !state || !state.units) return;
+        const allUnits = [...(state.units.villagers || []), ...(state.units.npcs || [])];
+        allUnits.forEach(unit => {
+            if (!unit || unit.id === unitId) return;
+            if (unit.targetId === unitId || (unit.targetId && typeof unit.targetId === 'object' && unit.targetId.id === unitId)) {
+                unit.targetId = null;
+                unit.attackTimer = 0;
+                unit.pathTarget = null;
+                unit.fullPath = null;
+                if (unit.state === 'ATTACK' || unit.state === 'CHASE') {
+                    unit.state = 'IDLE';
+                    unit.isPlayerLocked = false;
+                }
+            }
+        });
+        if (Array.isArray(state.projectiles)) {
+            state.projectiles = state.projectiles.filter(p => p.targetId !== unitId);
+        }
+    }
+
     static spawnCorpse(unit, state) {
         const produce = unit.produce_resource || (unit.config && unit.config.produce_resource);
         if (!produce) return null;
@@ -356,8 +391,8 @@ export class BattleSystem {
         if (!id || !state) return null;
         if (typeof id === 'object') return id;
 
-        return (state.units.villagers || []).find(u => u.id === id) ||
-            (state.units.npcs || []).find(u => u.id === id) ||
+        return (state.units.villagers || []).find(u => u.id === id && u.visible !== false) ||
+            (state.units.npcs || []).find(u => u.id === id && u.visible !== false) ||
             (state.mapEntities || []).find(e => e.id === id);
     }
 

@@ -29,15 +29,15 @@ export class EffectSystem {
                 // 彈道抵達
                 if (onHit) {
                     const target = this.findEntityById(p.targetId, state);
-                    if (target && target.hp > 0) {
+                    if (target && target.hp > 0 && target.visible !== false) {
                         onHit(target, p.damage, state, p.attackerId);
                     }
                 }
                 state.projectiles.splice(i, 1);
             } else {
                 const target = this.findEntityById(p.targetId, state);
-                const tx = (target && target.hp > 0) ? target.x : p.lastX;
-                const ty = (target && target.hp > 0) ? target.y : p.lastY;
+                const tx = (target && target.hp > 0 && target.visible !== false) ? target.x : p.lastX;
+                const ty = (target && target.hp > 0 && target.visible !== false) ? target.y : p.lastY;
                 
                 p.x = p.startX + (tx - p.startX) * p.progress;
                 p.y = p.startY + (ty - p.startY) * p.progress;
@@ -107,8 +107,8 @@ export class EffectSystem {
         if (!id || !state) return null;
         if (typeof id === 'object') return id;
 
-        return (state.units.villagers || []).find(u => u.id === id) ||
-               (state.units.npcs || []).find(u => u.id === id) ||
-               (state.mapEntities || []).find(e => e.id === id);
+          return (state.units.villagers || []).find(u => u.id === id && u.visible !== false) ||
+                 (state.units.npcs || []).find(u => u.id === id && u.visible !== false) ||
+                 (state.mapEntities || []).find(e => e.id === id);
     }
 }

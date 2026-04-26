@@ -730,26 +730,34 @@ export const UI_CONFIG = {
         workerEfficiencyText: "生產效率: {0}%" // 效率顯示文字格式，{0} 會被替換為百分比數字
     },
 
-    // -- 物流連線系統 (LogisticsSystem) --------------------------
+    // -- 物流線相關設置 (LogisticsSystem) --------------------------
     LogisticsSystem: {
-        lineThickness: 14,           // 拖拽中連線的寬度
-        lineColor: "#0077ffff",           // 已建立連線的顏色 (綠色)
-        lineAlpha: 0.6,
-        disconnectedLineColor: "#6b6b6bff", // 未設定搬運品項時的物流線顏色；此狀態物流線不通、箭頭不流動
+        // --- 物流線顏色 ---
+        lineColor: "#0077ffff",           // 已建立物流線的顏色
+        lineAlpha: 0.6,                   // 已建立物流線的透明度，範圍 0~1
+        disconnectedLineColor: "#6b6b6bff", // 未設定搬運品項時的物流線顏色；此狀態物流線不通
         disconnectedLineAlpha: 0.75,      // 未設定搬運品項時的物流線透明度，範圍 0~1
-        selectedLineColor: "#dfffc7ff",   // 被選取連線的顏色 (黃色)
-        selectedLineAlpha: 1.0,
-        dragLineThickness: 14,           // 拖拽中連線的寬度
+        selectedLineColor: "#dfffc7ff",   // 被選取物流線的顏色
+        selectedLineAlpha: 1.0,           // 被選取物流線的透明度，範圍 0~1
         dragLineColor: "#aeff00ff",       // 拖拽中連線的顏色 (淡綠)
-        dragLineAlpha: 0.8,
-        depth: 150,                     // 渲染深度 (位於地面之上，單位之下)
+        dragLineAlpha: 0.8,               // 拖拽中連線的透明度，範圍 0~1
 
-        // --- 動畫與視覺優化 ---
+        // --- 物流線尺寸 ---
+        lineThickness: 14,                // 已建立物流線的寬度
+        dragLineThickness: 14,            // 拖拽中連線的寬度
+        lineOffset: 10,                   // 雙向連線時的錯開距離 (像素)
+
+        // --- 物流線箭頭 ---
         arrowColor: "#00ffeeff",        // 物流線的箭頭顏色 
+        disconnectedArrowColor: "#9a9a9aff", // 未設定搬運品項時的箭頭顏色；箭頭會顯示但不流動
+        disconnectedArrowAlpha: 0.85,    // 未設定搬運品項時的箭頭透明度，範圍 0~1
         arrowSize: 12,                   // 已建立物流線上的流動箭頭大小，範圍建議 6~24；只影響線上動畫箭頭
+        disconnectedArrowSize: 12,       // 未設定搬運品項時的靜止箭頭大小
         dragArrowSize: 22,               // 拖曳拉線時前端箭頭大小，範圍建議 8~40；數值越大箭頭越長、物流線終點會更早停在箭頭底部
         arrowSpeed: 30,                 // 箭頭前進速度 (像素/秒)
         arrowSpacing: 20,               // 箭頭之間的間距
-        lineOffset: 10                   // 雙向連線時的錯開距離 (像素)
+
+        // --- 其它 ---
+        depth: 150                       // 渲染深度 (位於地面之上，單位之下)
     }
 };

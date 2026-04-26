@@ -1,6 +1,7 @@
 import { UI_CONFIG } from "../ui/ui_config.js";
 import { ResourceSystem } from "./ResourceSystem.js";
 import { SynthesisSystem } from "./SynthesisSystem.js";
+import { BattleSystem } from "./BattleSystem.js";
 
 /**
  * 工人系統 (WorkerSystem.js)
@@ -1323,7 +1324,7 @@ export class WorkerSystem {
 
         warehouseMap.forEach((data, wid) => {
             const { entity, workers } = data;
-            const target = entity.targetWorkerCount || 0;
+            const target = this.getBuildingWorkerTarget(entity);
             if (workers.length > target) {
                 const overflow = workers.slice(target);
                 overflow.forEach(v => {
@@ -1355,7 +1356,7 @@ export class WorkerSystem {
             needsRefill = false;
             warehouseMap.forEach((data, wid) => {
                 const { entity, workers } = data;
-                const target = entity.targetWorkerCount || 0;
+                const target = this.getBuildingWorkerTarget(entity);
                 if (workers.length < target && allIdle.length > 0) {
                     const v = allIdle.shift();
                     if (this.isGatheringBuilding(entity)) {
@@ -1716,7 +1717,7 @@ export class WorkerSystem {
     }
 
     getGatheringBuildingWorkerSplit(entity) {
-        const total = Math.max(0, entity ? (entity.targetWorkerCount || 0) : 0);
+        const total = this.getBuildingWorkerTarget(entity);
         const hasOutputRoute = !!(entity && Array.isArray(entity.outputTargets) && entity.outputTargets.length > 0);
         if (!hasOutputRoute) {
             return { gatherers: total, transporters: 0 };
@@ -1920,14 +1921,32 @@ export class WorkerSystem {
             return capacity <= 0 ? false : currentInside < capacity;
         }
 
-        const capacity = building.targetWorkerCount || cfg.need_villagers || 0;
+        const capacity = this.isGatheringBuilding(building)
+            ? (cfg.need_villagers || 0)
+            : (building.targetWorkerCount || cfg.need_villagers || 0);
         if (capacity <= 0) return false;
         return this.getAssignedCountForBuilding(building, v.id) < capacity;
     }
 
     ensureBuildingWorkerTarget(building, minimumCount = 1) {
         if (!building) return;
+        if (this.isGatheringBuilding(building)) {
+            const cfg = this.engine.getBuildingConfig(building.type1, building.lv || 1);
+            const capacity = cfg ? (cfg.need_villagers || 0) : 0;
+            building.targetWorkerCount = Math.min(capacity, Math.max(building.targetWorkerCount || 0, minimumCount));
+            return;
+        }
         building.targetWorkerCount = Math.max(building.targetWorkerCount || 0, minimumCount);
+    }
+
+    getBuildingWorkerTarget(entity) {
+        if (!entity) return 0;
+        const cfg = this.engine.getBuildingConfig(entity.type1, entity.lv || 1);
+        if (this.isGatheringBuilding(entity)) {
+            const capacity = cfg ? (cfg.need_villagers || 0) : 0;
+            return Math.max(0, Math.min(capacity, entity.targetWorkerCount || 0));
+        }
+        return Math.max(0, entity.targetWorkerCount || 0);
     }
 
     tryEnterLogisticsBuilding(v, building, role = 'target') {
@@ -1961,6 +1980,7 @@ export class WorkerSystem {
         v.isFindingPath = false;
         v.commandCenter = null;
         v.visible = false;
+        BattleSystem.clearUnitAsTarget(v.id, this.state);
 
         if (v.sprite && typeof v.sprite.setVisible === 'function') v.sprite.setVisible(false);
         if (v.gameObject && typeof v.gameObject.setVisible === 'function') v.gameObject.setVisible(false);

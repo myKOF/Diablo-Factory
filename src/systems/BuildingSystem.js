@@ -334,7 +334,7 @@ export class BuildingSystem {
             amount: cfg.resourceValue || 0,
             maxAmount: cfg.resourceValue || 0,
             isResource: (type1 === 'farmland' || type1 === 'tree_plantation'),
-            targetWorkerCount: (type1 === 'farmland' || type1 === 'tree_plantation') ? 1 : (['timber_factory', 'stone_factory', 'barn', 'quarry', 'gold_mining_factory'].includes(type1) ? 1 : 0),
+            targetWorkerCount: 0,
             ...(cfg.npcProduction && cfg.npcProduction.length > 0 ? { queue: [], productionTimer: 0 } : {})
         };
         state.mapEntities.push(newBuilding);

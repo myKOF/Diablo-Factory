@@ -1316,17 +1316,19 @@ export class UIManager {
         const assignedWorkerCount = GameEngine.state.units.villagers.filter(v =>
             v.config && v.config.type === 'villagers' && v.assignedWarehouseId === eid
         ).length;
+        const isGatheringBuilding = cfg_current && (
+            cfg_current.type2 === 'gathering' ||
+            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(entity.type1)
+        );
         const workerLightMax = Math.max(1, isProcessingPlant
             ? (cfg_current?.need_villagers || 5)
+            : isGatheringBuilding
+                ? (cfg_current?.need_villagers || 1)
             : (entity.targetWorkerCount || cfg_current?.need_villagers || 5));
         const workerLightCount = Math.max(0, Math.min(workerLightMax, isProcessingPlant
             ? new Set(entity.assignedWorkers || []).size
             : assignedWorkerCount));
         const maxWorkersForEntity = workerLightMax;
-        const isGatheringBuilding = cfg_current && (
-            cfg_current.type2 === 'gathering' ||
-            ['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory', 'farmland', 'tree_plantation'].includes(entity.type1)
-        );
         const stockpileInfo = isGatheringBuilding ? this.getBuildingStockpileInfo(entity, cfg_current) : null;
         const compactWorkerHtml = (!isConfirming && isProcessingPlant && canAssignWorkers && !entity.isUnderConstruction) ? `
             <div style="display: flex; align-items: center; gap: 6px; margin-left: 10px;">
@@ -1356,6 +1358,10 @@ export class UIManager {
                 const dOffX = hCfg.dismissBtnOffsetX !== undefined ? hCfg.dismissBtnOffsetX : 15;
                 const dOffY = hCfg.dismissBtnOffsetY !== undefined ? hCfg.dismissBtnOffsetY : -3;
                 dismissHtml = `<button class="dismiss-btn" onclick="window.UIManager.dismissWorkers(event)" style="margin-left: ${dOffX}px; transform: translateY(${dOffY}px); padding: 0 8px; height: ${hCfg.dismissBtnHeight || '24px'}; background: ${hCfg.dismissBtnBg || '#c62828'}; color: ${hCfg.dismissBtnColor || 'white'}; border: 1.5px solid ${hCfg.dismissBtnBorder || '#ff8a80'}; border-radius: 4px; font-size: ${hCfg.dismissBtnFontSize || '12px'}; cursor: pointer; font-weight: bold; white-space: nowrap; pointer-events: auto;">解散</button>`;
+                if (isGatheringBuilding) {
+                    dismissHtml += `<button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)"
+                        style="margin-left: 18px; width: 26px; height: 26px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 17px; font-weight: 900; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 5px rgba(0,0,0,0.35); pointer-events: auto;">－</button>`;
+                }
             }
 
             leftHeader = `
@@ -1503,24 +1509,50 @@ export class UIManager {
                 const stockpileName = stockpileInfo
                     ? ((GameEngine.state.ingredientConfigs && GameEngine.state.ingredientConfigs[stockpileInfo.type]?.name) || GameEngine.RESOURCE_NAMES[stockpileInfo.type] || stockpileInfo.type)
                     : '';
+                const assignedWorkersForSlots = isGatheringBuilding
+                    ? GameEngine.state.units.villagers
+                        .filter(v => v.config && v.config.type === 'villagers' && v.assignedWarehouseId === eid)
+                        .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')))
+                    : [];
+                const workerSlotsHtml = isGatheringBuilding
+                    ? Array.from({ length: maxWorkers }).map((_, i) => {
+                        const worker = assignedWorkersForSlots[i];
+                        const progress = worker ? this.getBuildingWorkerCooldown(worker) : 0;
+                        const deg = Math.round(progress * 360);
+                        return `
+                            <div class="building-worker-slot" data-worker-id="${worker ? worker.id : ''}" title="${worker ? '派駐工人' : '空位'}" style="width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid ${worker ? '#c59a79' : 'rgba(255,255,255,0.16)'}; background: ${worker ? `conic-gradient(rgba(50,240,106,0.75) ${deg}deg, rgba(255,255,255,0.08) ${deg}deg 360deg)` : 'rgba(0,0,0,0.28)'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 5px rgba(0,0,0,0.35); color: #f6e2cf; font-size: 15px; line-height: 1; flex: 0 0 30px;">
+                                <div style="width: 22px; height: 22px; border-radius: 50%; background: ${worker ? '#5b3d31' : 'rgba(255,255,255,0.03)'}; display: flex; align-items: center; justify-content: center; line-height: 1;">${worker ? '👨' : ''}</div>
+                            </div>`;
+                    }).join('')
+                    : '';
                 
                 gridHtml += `
                     <div style="display: flex; align-items: stretch; gap: 12px; transform: translate(${wcOff.x}px, ${wcOff.y}px); width: calc(100% - 32px); flex: 0 0 calc(100% - 32px); max-width: calc(100% - 32px); margin: 0 auto; height: 60px; box-sizing: border-box;">
-                        <div class="warehouse-controls" style="display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; background: rgba(0,0,0,0.4); padding: 10px 14px; margin: 0; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box; width: ${stockpileInfo ? '62%' : '100%'}; flex: 0 0 ${stockpileInfo ? '62%' : '100%'}; max-width: ${stockpileInfo ? '62%' : '100%'};">
+                        <div class="warehouse-controls" style="display: flex; flex-direction: row; align-items: center; justify-content: ${isGatheringBuilding ? 'flex-start' : 'space-between'}; gap: 10px; background: rgba(0,0,0,0.4); padding: 10px 14px; margin: 0; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box; width: ${stockpileInfo ? '62%' : '100%'}; flex: 0 0 ${stockpileInfo ? '62%' : '100%'}; max-width: ${stockpileInfo ? '62%' : '100%'}; overflow: hidden;">
+                            ${!isGatheringBuilding ? `
                             <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)" 
                                     style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; flex: 0 0 ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
                                     onmouseover="this.style.background='#6d4c41'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='${hCfg.workerAdjustBtnBg || '#4e342e'}'; this.style.transform='scale(1)';">－</button>
+                            ` : ''}
                             
+                            ${isGatheringBuilding ? `
+                                <div style="display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; overflow: hidden;">
+                                    ${workerSlotsHtml}
+                                </div>
+                            ` : `
                             <div style="display: flex; flex-direction: column; align-items: center; min-width: 72px; flex: 1 1 auto;">
                                 <span style="font-size: 10px; color: rgba(255,255,255,0.35); font-weight: bold; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 1px;">Villagers</span>
                                 <div style="font-size: ${hCfg.workerCountFontSize || '22px'}; font-weight: 900; color: #fff; font-family: 'Arial Black', sans-serif; text-shadow: 0 2px 4px rgba(0,0,0,0.5); line-height: 1;">
                                     <span style="color: #76ff03;">${current}</span> <span style="color: rgba(255,255,255,0.2); margin: 0 3px;">/</span> <span style="color: #fbc02d;">${maxWorkers}</span>
                                 </div>
                             </div>
+                            `}
 
+                            ${!isGatheringBuilding ? `
                             <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, 1)" 
                                     style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; flex: 0 0 ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
                                     onmouseover="this.style.background='#6d4c41'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='${hCfg.workerAdjustBtnBg || '#4e342e'}'; this.style.transform='scale(1)';">＋</button>
+                            ` : ''}
                         </div>
                         ${stockpileInfo ? `
                             <div title="${stockpileName}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: rgba(0,0,0,0.4); padding: 8px 10px; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box; flex: 1 1 auto; min-width: 0;">
@@ -1991,6 +2023,53 @@ export class UIManager {
         return Math.max(0, Math.min(1, (worker.logisticsWorkTimer || 0) / total));
     }
 
+    static getBuildingWorkerCooldown(worker) {
+        if (!worker) return 0;
+        if (worker.state === 'GATHERING') {
+            const total = GameEngine.workerSystem && typeof GameEngine.workerSystem.getGatheringProductionTime === 'function'
+                ? GameEngine.workerSystem.getGatheringProductionTime(worker)
+                : 1;
+            return total > 0 ? Math.max(0, Math.min(1, (worker.gatherTimer || 0) / total)) : 0;
+        }
+        return this.getWarehouseWorkerCooldown(worker);
+    }
+
+    static updateBuildingWorkerSlots() {
+        const container = document.getElementById("context_menu");
+        if (!container || !this.activeMenuEntity) return;
+        const slots = container.querySelectorAll(".building-worker-slot");
+        if (!slots.length) return;
+
+        const eid = this.activeMenuEntity.id || `${this.activeMenuEntity.type1}_${this.activeMenuEntity.x}_${this.activeMenuEntity.y}`;
+        const workers = GameEngine.state.units.villagers
+            .filter(v => v.config && v.config.type === 'villagers' && v.assignedWarehouseId === eid)
+            .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+
+        slots.forEach((slot, index) => {
+            const worker = workers[index];
+            slot.dataset.workerId = worker ? worker.id : '';
+            if (!worker) {
+                slot.style.borderColor = 'rgba(255,255,255,0.16)';
+                slot.style.background = 'rgba(0,0,0,0.28)';
+                const face = slot.firstElementChild;
+                if (face) {
+                    face.textContent = '';
+                    face.style.background = 'rgba(255,255,255,0.03)';
+                }
+                return;
+            }
+
+            const deg = Math.round(this.getBuildingWorkerCooldown(worker) * 360);
+            slot.style.borderColor = '#c59a79';
+            slot.style.background = `conic-gradient(rgba(50,240,106,0.75) ${deg}deg, rgba(255,255,255,0.08) ${deg}deg 360deg)`;
+            const face = slot.firstElementChild;
+            if (face) {
+                face.textContent = '👨';
+                face.style.background = '#5b3d31';
+            }
+        });
+    }
+
     static renderWarehouseWorkerSlots(ent) {
         if (!ent) return '';
         const bCfg = GameEngine.getBuildingConfig(ent.type1, ent.lv || 1) || {};
@@ -2005,8 +2084,8 @@ export class UIManager {
             const deg = Math.round(progress * 360);
             const face = worker ? '👨' : '';
             slots.push(`
-                <div class="warehouse-worker-slot" data-worker-id="${worker ? worker.id : ''}" style="width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid ${worker ? '#c59a79' : 'rgba(255,255,255,0.16)'}; background: ${worker ? `conic-gradient(rgba(50,240,106,0.75) ${deg}deg, rgba(255,255,255,0.08) ${deg}deg 360deg)` : 'rgba(0,0,0,0.28)'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 5px rgba(0,0,0,0.35);">
-                    <div style="width: 25px; height: 25px; border-radius: 50%; background: ${worker ? '#5b3d31' : 'rgba(255,255,255,0.03)'}; display: flex; align-items: center; justify-content: center; color: #f6e2cf; font-size: 15px; line-height: 1;">
+                <div class="warehouse-worker-slot" data-worker-id="${worker ? worker.id : ''}" style="width: 27px; height: 27px; min-width: 27px; min-height: 27px; flex: 0 0 27px; aspect-ratio: 1 / 1; border-radius: 50%; border: 1.5px solid ${worker ? '#c59a79' : 'rgba(255,255,255,0.16)'}; background: ${worker ? `conic-gradient(rgba(50,240,106,0.75) ${deg}deg, rgba(255,255,255,0.08) ${deg}deg 360deg)` : 'rgba(0,0,0,0.28)'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 5px rgba(0,0,0,0.35);">
+                    <div style="width: 20px; height: 20px; min-width: 20px; min-height: 20px; flex: 0 0 20px; aspect-ratio: 1 / 1; border-radius: 50%; background: ${worker ? '#5b3d31' : 'rgba(255,255,255,0.03)'}; display: flex; align-items: center; justify-content: center; color: #f6e2cf; font-size: 13px; line-height: 1;">
                         ${face}
                     </div>
                 </div>
@@ -2014,7 +2093,7 @@ export class UIManager {
         }
 
         return `
-            <div id="warehouse_worker_slots" style="display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 12px; margin-bottom: 10px; border: 1.5px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(0,0,0,0.26); box-sizing: border-box; overflow-x: auto;">
+            <div id="warehouse_worker_slots" style="display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 8px 10px; margin-bottom: 10px; border: 1.5px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(0,0,0,0.26); box-sizing: border-box; overflow: hidden;">
                 ${slots.join('')}
             </div>
         `;
@@ -2184,7 +2263,13 @@ export class UIManager {
         let availableItems = [];
         const sourceCfg = GameEngine.getBuildingConfig(sourceEnt.type1, sourceEnt.lv || 1);
         const isProcessingPlantSource = sourceCfg && sourceCfg.type2 === 'processing_plant';
-        if (isProcessingPlantSource) {
+        const isGatheringSource = sourceCfg && (
+            sourceCfg.type2 === 'gathering' ||
+            ['timber_factory', 'tree_plantation', 'stone_factory', 'quarry', 'barn', 'farmland', 'gold_mining_factory'].includes(sourceEnt.type1)
+        );
+        if (isGatheringSource) {
+            availableItems = this.getGatheringLogisticsItems(sourceEnt, sourceCfg);
+        } else if (isProcessingPlantSource) {
             const recipes = typeof SynthesisSystem !== 'undefined'
                 ? (SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, sourceEnt) || [])
                 : [];
@@ -2203,6 +2288,9 @@ export class UIManager {
         }
         availableItems = [...new Set(availableItems)];
         const conn = sourceEnt.outputTargets.find(t => t.id === targetId);
+        if (conn && conn.filter && availableItems.length > 0 && !availableItems.includes(conn.filter)) {
+            conn.filter = null;
+        }
         const currentFilter = conn ? conn.filter : null;
         const helperText = isProcessingPlantSource
             ? (sourceEnt.currentRecipe
@@ -2220,6 +2308,25 @@ export class UIManager {
         });
         menu.innerHTML = html + `</div>`; menu.style.display = "flex";
         menu.style.left = `${Math.min(mouseX + 15, window.innerWidth - 300)}px`; menu.style.top = `${Math.min(mouseY - 20, window.innerHeight - 200)}px`;
+    }
+
+    static getGatheringLogisticsItems(sourceEnt, sourceCfg) {
+        if (!sourceEnt) return [];
+        const produce = (sourceCfg && sourceCfg.produce_resource) || {};
+        const producedKeys = Object.keys(produce).map(k => String(k).toLowerCase()).filter(Boolean);
+        if (producedKeys.length > 0) return producedKeys;
+
+        const typeMap = {
+            timber_factory: 'wood',
+            tree_plantation: 'wood',
+            stone_factory: 'stone',
+            quarry: 'stone',
+            barn: 'food',
+            farmland: 'food',
+            gold_mining_factory: 'gold_ore'
+        };
+        const mapped = typeMap[sourceEnt.type1];
+        return mapped ? [mapped] : [];
     }
 
     static setLogisticsFilter(event, filterItem) {
@@ -2571,6 +2678,7 @@ export class UIManager {
             countDisplay.innerText = `${current} / ${ent.targetWorkerCount || 0}`;
             if (statusHint) statusHint.innerText = `派遣狀態`;
         }
+        this.updateBuildingWorkerSlots();
 
         // 更新指令高亮狀態
         ['WOOD', 'STONE', 'GOLD', 'FOOD', 'RETURN'].forEach(cmd => {

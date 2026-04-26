@@ -592,13 +592,16 @@ export class MainScene extends Phaser.Scene {
                                 this.logisticsGraphics.lineStyle(logCfg.lineThickness, parseColor(lColor), lAlpha);
                                 this.logisticsGraphics.beginPath(); this.logisticsGraphics.moveTo(sx, sy); this.logisticsGraphics.lineTo(ex, ey); this.logisticsGraphics.strokePath();
                                 const adx = ex - sx, ady = ey - sy; const alen = Math.hypot(adx, ady);
-                                if (isConnected && alen > 20) {
+                                if (alen > 20) {
                                     const ux = adx / alen, uy = ady / alen;
                                     const speed = logCfg.arrowSpeed || 60; const spacing = logCfg.arrowSpacing || 40;
-                                    const arrowOffset = (currentTime * speed) % spacing;
-                                    this.logisticsGraphics.fillStyle(parseColor(logCfg.arrowColor), 0.9);
+                                    const arrowOffset = isConnected ? ((currentTime * speed) % spacing) : spacing * 0.5;
+                                    const arrowColor = isConnected ? logCfg.arrowColor : (logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
+                                    const arrowAlpha = isConnected ? 0.9 : (logCfg.disconnectedArrowAlpha ?? 0.85);
+                                    const arrowSize = isConnected ? (logCfg.arrowSize || 8) : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8);
+                                    this.logisticsGraphics.fillStyle(parseColor(arrowColor), arrowAlpha);
                                     for (let d = arrowOffset; d < alen - 10; d += spacing) {
-                                        this.drawArrowhead(this.logisticsGraphics, sx + ux * d, sy + uy * d, ux, uy, logCfg.arrowSize || 8);
+                                        this.drawArrowhead(this.logisticsGraphics, sx + ux * d, sy + uy * d, ux, uy, arrowSize);
                                     }
                                 }
                             }
