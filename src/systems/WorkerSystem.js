@@ -1680,6 +1680,37 @@ export class WorkerSystem {
         return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
     }
 
+    getSceneResourceGatherTime(target, fallback = 3) {
+        if (!target || target.gx === undefined || target.gy === undefined || !this.state.mapData) return null;
+        const res = this.state.mapData.getResource(target.gx, target.gy);
+        const typeNum = res ? res.type : target._lastResType;
+        if (!typeNum) return null;
+        const typeName = ResourceSystem.getResourceTypeName(typeNum);
+        const timeTypeMap = {
+            SCENE_WOOD: 'wood',
+            SCENE_STONE: 'stone',
+            SCENE_FRUIT: 'fruit',
+            SCENE_GOLD_ORE: 'gold_ore',
+            SCENE_GOLD_MINE: 'gold_ore',
+            SCENE_IRON_ORE: 'iron_ore',
+            SCENE_IRON_MINE: 'iron_ore',
+            SCENE_COAL: 'coal_ore',
+            SCENE_COAL_ORE: 'coal_ore',
+            SCENE_COAL_MINE: 'coal_ore',
+            SCENE_MAGIC_HERB: 'magic_herb',
+            SCENE_CRYSTAL_ORE: 'crystal_ore',
+            SCENE_CRYSTAL_MINE: 'crystal_ore',
+            SCENE_COPPER_ORE: 'copper_ore',
+            SCENE_COPPER_MINE: 'copper_ore',
+            SCENE_SILVER_ORE: 'silver_ore',
+            SCENE_SILVER_MINE: 'silver_ore',
+            SCENE_MITHRIL_ORE: 'mithril_ore',
+            SCENE_MITHRIL_MINE: 'mithril_ore'
+        };
+        const timeType = timeTypeMap[typeName] || typeName;
+        return this.getIngredientProductionTime(timeType, fallback);
+    }
+
     getResourceOutputTypes(target) {
         if (!target) return [];
 
@@ -1714,6 +1745,9 @@ export class WorkerSystem {
     }
 
     getGatheringProductionTime(v) {
+        const sceneResourceTime = this.getSceneResourceGatherTime(v.targetId, 3);
+        if (sceneResourceTime !== null) return sceneResourceTime;
+
         const outputTypes = this.getResourceOutputTypes(v.targetId);
         if (outputTypes.length > 0) {
             return Math.max(...outputTypes.map(type => this.getIngredientProductionTime(type, 3)));

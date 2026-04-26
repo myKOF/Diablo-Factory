@@ -34,12 +34,16 @@ export class ResourceSystem {
         1: 'SCENE_WOOD',
         2: 'SCENE_STONE',
         3: 'SCENE_FRUIT',
-        4: 'SCENE_GOLD_ORE',
-        5: 'SCENE_IRON_ORE',
-        6: 'SCENE_COAL',
+        4: 'SCENE_GOLD_MINE',
+        5: 'SCENE_IRON_MINE',
+        6: 'SCENE_COAL_MINE',
         7: 'SCENE_MAGIC_HERB',
         8: 'SCENE_WOLF_CORPSE',
-        9: 'SCENE_BEAR_CORPSE'
+        9: 'SCENE_BEAR_CORPSE',
+        10: 'SCENE_CRYSTAL_MINE',
+        11: 'SCENE_COPPER_MINE',
+        12: 'SCENE_SILVER_MINE',
+        13: 'SCENE_MITHRIL_MINE'
     };
 
     /**
@@ -84,6 +88,7 @@ export class ResourceSystem {
         const supportMap = {
             'village': 'ALL',
             'town_center': 'ALL',
+            'storehouse': 'ALL',
             'timber_factory': ['WOOD', 'TREE'],
             'stone_factory': ['STONE', 'ROCK'],
             'gold_mining_factory': ['GOLD', 'GOLD_ORE'],
@@ -199,12 +204,16 @@ export class ResourceSystem {
         if (upper === 'WOOD' || upper === 'SCENE_WOOD') targetType = 1;
         else if (upper === 'STONE' || upper === 'SCENE_STONE') targetType = 2;
         else if (upper === 'FOOD' || upper === 'FRUIT' || upper === 'SCENE_FRUIT') targetType = 3;
-        else if (upper === 'GOLD' || upper === 'GOLD_ORE' || upper === 'SCENE_GOLD_ORE') targetType = 4;
-        else if (upper === 'IRON' || upper === 'IRON_ORE' || upper === 'SCENE_IRON_ORE') targetType = 5;
-        else if (upper === 'COAL' || upper === 'SCENE_COAL') targetType = 6;
+        else if (upper === 'GOLD' || upper === 'GOLD_ORE' || upper === 'SCENE_GOLD_MINE' || upper === 'SCENE_GOLD_ORE') targetType = 4;
+        else if (upper === 'IRON' || upper === 'IRON_ORE' || upper === 'SCENE_IRON_MINE' || upper === 'SCENE_IRON_ORE') targetType = 5;
+        else if (upper === 'COAL' || upper === 'COAL_ORE' || upper === 'SCENE_COAL' || upper === 'SCENE_COAL_MINE' || upper === 'SCENE_COAL_ORE') targetType = 6;
         else if (upper === 'MAGIC_HERB' || upper === 'SCENE_MAGIC_HERB') targetType = 7;
         else if (upper === 'WOLF' || upper === 'SCENE_WOLF_CORPSE') targetType = 8;
         else if (upper === 'BEAR' || upper === 'SCENE_BEAR_CORPSE') targetType = 9;
+        else if (upper === 'CRYSTAL' || upper === 'CRYSTAL_ORE' || upper === 'SCENE_CRYSTAL_MINE' || upper === 'SCENE_CRYSTAL_ORE') targetType = 10;
+        else if (upper === 'COPPER' || upper === 'COPPER_ORE' || upper === 'SCENE_COPPER_MINE' || upper === 'SCENE_COPPER_ORE') targetType = 11;
+        else if (upper === 'SILVER' || upper === 'SILVER_ORE' || upper === 'SCENE_SILVER_MINE' || upper === 'SCENE_SILVER_ORE') targetType = 12;
+        else if (upper === 'MITHRIL' || upper === 'MITHRIL_ORE' || upper === 'SCENE_MITHRIL_MINE' || upper === 'SCENE_MITHRIL_ORE') targetType = 13;
 
         if (targetType === 0) return null;
 

@@ -356,12 +356,16 @@ export class InputSystem {
                         1: 'SCENE_WOOD', 
                         2: 'SCENE_STONE', 
                         3: 'SCENE_FRUIT', 
-                        4: 'SCENE_GOLD_ORE',
-                        5: 'SCENE_IRON_ORE',
-                        6: 'SCENE_COAL',
+                        4: 'SCENE_GOLD_MINE',
+                        5: 'SCENE_IRON_MINE',
+                        6: 'SCENE_COAL_MINE',
                         7: 'SCENE_MAGIC_HERB',
                         8: 'SCENE_WOLF_CORPSE',
-                        9: 'SCENE_BEAR_CORPSE'
+                        9: 'SCENE_BEAR_CORPSE',
+                        10: 'SCENE_CRYSTAL_MINE',
+                        11: 'SCENE_COPPER_MINE',
+                        12: 'SCENE_SILVER_MINE',
+                        13: 'SCENE_MITHRIL_MINE'
                     };
                     const typeName = typeMap[res.type];
                     const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));

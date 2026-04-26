@@ -1207,12 +1207,16 @@ export class MainScene extends Phaser.Scene {
                     1: 'SCENE_WOOD',
                     2: 'SCENE_STONE',
                     3: 'SCENE_FRUIT',
-                    4: 'SCENE_GOLD_ORE',
-                    5: 'SCENE_IRON_ORE',
-                    6: 'SCENE_COAL',
+                    4: 'SCENE_GOLD_MINE',
+                    5: 'SCENE_IRON_MINE',
+                    6: 'SCENE_COAL_MINE',
                     7: 'SCENE_MAGIC_HERB',
                     8: 'SCENE_WOLF_CORPSE',
-                    9: 'SCENE_BEAR_CORPSE'
+                    9: 'SCENE_BEAR_CORPSE',
+                    10: 'SCENE_CRYSTAL_MINE',
+                    11: 'SCENE_COPPER_MINE',
+                    12: 'SCENE_SILVER_MINE',
+                    13: 'SCENE_MITHRIL_MINE'
                 };
                 const resCfg = GameEngine.state.resourceConfigs.find(c => c.type === typeMap[entity.type] && c.lv === (entity.level || 1));
                 const idx = GameEngine.state.mapData.getIndex(entity.gx, entity.gy);
@@ -1256,10 +1260,10 @@ export class MainScene extends Phaser.Scene {
 
     getTextureKeyFromType(typeNum) {
         const typeMap = {
-            1: 'tex_tree', 2: 'tex_stone', 3: 'tex_food', 4: 'tex_gold_ore',
-            5: 'tex_iron_ore', 6: 'tex_coal', 7: 'tex_magic_herb',
+            1: 'tex_tree', 2: 'tex_stone', 3: 'tex_food', 4: 'tex_gold_mine',
+            5: 'tex_iron_mine', 6: 'tex_coal_mine', 7: 'tex_magic_herb',
             8: 'tex_wolf_corpse', 9: 'tex_bear_corpse',
-            10: 'tex_crystal_ore', 11: 'tex_copper_ore', 12: 'tex_silver_ore', 13: 'tex_mithril_ore'
+            10: 'tex_crystal_mine', 11: 'tex_copper_mine', 12: 'tex_silver_mine', 13: 'tex_mithril_mine'
         };
         return typeMap[typeNum] || 'tex_tree';
     }
@@ -2755,9 +2759,10 @@ export class MainScene extends Phaser.Scene {
                     const res = GameEngine.state.mapData.getResource(gx, gy);
                     if (!res) continue;
                     const typeMap = {
-                        1: 'WOOD', 2: 'STONE', 3: 'FOOD', 4: 'GOLD_ORE',
-                        5: 'IRON_ORE', 6: 'COAL', 7: 'MAGIC_HERB',
-                        8: 'WOLF_HIDE', 9: 'BEAR_PELT'
+                        1: 'SCENE_WOOD', 2: 'SCENE_STONE', 3: 'SCENE_FRUIT', 4: 'SCENE_GOLD_MINE',
+                        5: 'SCENE_IRON_MINE', 6: 'SCENE_COAL_MINE', 7: 'SCENE_MAGIC_HERB',
+                        8: 'SCENE_WOLF_CORPSE', 9: 'SCENE_BEAR_CORPSE',
+                        10: 'SCENE_CRYSTAL_MINE', 11: 'SCENE_COPPER_MINE', 12: 'SCENE_SILVER_MINE', 13: 'SCENE_MITHRIL_MINE'
                     };
                     const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeMap[res.type] && c.lv === (res.level || 1));
                     if (!cfg) continue;
@@ -2894,16 +2899,16 @@ export class MainScene extends Phaser.Scene {
                 'tree': 'SCENE_WOOD',
                 'stone': 'SCENE_STONE',
                 'food': 'SCENE_FRUIT',
-                'gold_ore': 'SCENE_GOLD_ORE',
-                'iron_ore': 'SCENE_IRON_ORE',
-                'coal': 'SCENE_COAL',
+                'gold_ore': 'SCENE_GOLD_MINE',
+                'iron_ore': 'SCENE_IRON_MINE',
+                'coal': 'SCENE_COAL_MINE',
                 'magic_herb': 'SCENE_MAGIC_HERB',
                 'wolf_corpse': 'SCENE_WOLF_CORPSE',
                 'bear_corpse': 'SCENE_BEAR_CORPSE',
-                'crystal_ore': 'SCENE_CRYSTAL_ORE',
-                'copper_ore': 'SCENE_COPPER_ORE',
-                'silver_ore': 'SCENE_SILVER_ORE',
-                'mithril_ore': 'SCENE_MITHRIL_ORE'
+                'crystal_ore': 'SCENE_CRYSTAL_MINE',
+                'copper_ore': 'SCENE_COPPER_MINE',
+                'silver_ore': 'SCENE_SILVER_MINE',
+                'mithril_ore': 'SCENE_MITHRIL_MINE'
             };
             const typeName = typeNameMap[info.type];
             const resCfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (info.lv || 1));
