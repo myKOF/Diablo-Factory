@@ -492,6 +492,10 @@ export const UI_CONFIG = {
         armSwingFreqRunning: 5,
         armSwingFreqWandering: 1
     },
+    // -- 工人移動設定 --------------------------------------------
+    WorkerMovement: {
+        cargoSpeedMultiplier: 0.5
+    },
     // -- 單位視界圈 (VisionRange) ----------------------------------
     VisionRange: {
         lineColor: "#ff0000",

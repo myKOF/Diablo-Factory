@@ -19,7 +19,9 @@ export class WorkerSystem {
 
     getUnitMoveSpeed(v, isNonPlayerWandering = false) {
         const configSpeed = isNonPlayerWandering ? (v.config.idle_speed || 2.5) : (v.config.fighting_speed || 5.5);
-        return configSpeed * 13;
+        const hasCargo = v && ((v.cargo || 0) > 0 || (v.cargoAmount || 0) > 0);
+        const cargoMultiplier = UI_CONFIG.WorkerMovement?.cargoSpeedMultiplier ?? 0.5;
+        return configSpeed * 13 * (hasCargo ? cargoMultiplier : 1);
     }
 
     /**

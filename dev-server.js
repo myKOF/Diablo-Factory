@@ -5,6 +5,7 @@ const path = require('path');
 const PORT = 8080;
 const ROOT_DIR = __dirname;
 const WATCH_DIRS = ['src', 'config', 'assets'];
+const WATCH_FILES = ['index.html', 'style.css'];
 const clients = new Set();
 
 const MIME_TYPES = {
@@ -80,6 +81,15 @@ function watchDirectory(dirName) {
     });
 }
 
+function watchFile(fileName) {
+    const fullPath = path.join(ROOT_DIR, fileName);
+    if (!fs.existsSync(fullPath)) return;
+
+    fs.watch(fullPath, (_, filename) => {
+        broadcastReload(filename || fileName);
+    });
+}
+
 const server = http.createServer((req, res) => {
     if (req.url.startsWith('/__livereload')) {
         res.writeHead(200, {
@@ -122,7 +132,7 @@ const server = http.createServer((req, res) => {
 });
 
 WATCH_DIRS.forEach(watchDirectory);
-watchDirectory('.');
+WATCH_FILES.forEach(watchFile);
 
 server.listen(PORT, () => {
     console.log(`[dev-server] Live reload server 已啟動：http://localhost:${PORT}/`);
