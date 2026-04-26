@@ -2291,12 +2291,14 @@ export class MainScene extends Phaser.Scene {
         if (!bCfg) return;
 
         const buildingId = ent.id || `${ent.type1}_${ent.x}_${ent.y}`;
-        const max = Math.max(1, ent.targetWorkerCount || bCfg.need_villagers || 0);
-        if (max <= 0) return;
         const assignedById = GameEngine.state.units && GameEngine.state.units.villagers
             ? GameEngine.state.units.villagers.filter(v => v.assignedWarehouseId === buildingId).length
             : 0;
         const current = Math.max(ent.assignedWorkers ? ent.assignedWorkers.length : 0, assignedById);
+        const isLogisticsNode = bCfg.logistics && (bCfg.logistics.canInput || bCfg.logistics.canOutput);
+        const baseCapacity = bCfg.need_villagers > 0 ? bCfg.need_villagers : (isLogisticsNode ? 5 : 0);
+        const max = Math.max(1, baseCapacity, ent.targetWorkerCount || 0, current);
+        if (max <= 0) return;
 
         let lw = cfg.lightWidth;
         const lh = cfg.lightHeight;

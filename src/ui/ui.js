@@ -1844,6 +1844,14 @@ export class UIManager {
         this.renderWarehousePanel();
     }
 
+    static adjustWarehousePanelWorkers(event, delta) {
+        if (event) event.stopPropagation();
+        const ent = this.activeWarehouseEntity;
+        if (!ent) return;
+        GameEngine.adjustWarehouseWorkers(ent, delta);
+        this.renderWarehousePanel();
+    }
+
     static adjustWorkers(event, delta) {
         if (event) event.stopPropagation();
         if (!this.activeMenuEntity) return;
@@ -1966,6 +1974,65 @@ export class UIManager {
         this.renderWarehousePanel();
     }
 
+    static getWarehouseAssignedWorkers(ent) {
+        if (!ent || !GameEngine.state.units || !GameEngine.state.units.villagers) return [];
+        const eid = ent.id || `${ent.type1}_${ent.x}_${ent.y}`;
+        return GameEngine.state.units.villagers
+            .filter(v => v.assignedWarehouseId === eid)
+            .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+    }
+
+    static getWarehouseWorkerCooldown(worker) {
+        if (!worker || !worker.logisticsWorkKey) return 0;
+        const parts = String(worker.logisticsWorkKey).split('|');
+        const type = parts[parts.length - 1];
+        const total = this.getIngredientProductionTime(type, 1);
+        if (!Number.isFinite(total) || total <= 0) return 0;
+        return Math.max(0, Math.min(1, (worker.logisticsWorkTimer || 0) / total));
+    }
+
+    static renderWarehouseWorkerSlots(ent) {
+        if (!ent) return '';
+        const bCfg = GameEngine.getBuildingConfig(ent.type1, ent.lv || 1) || {};
+        const workers = this.getWarehouseAssignedWorkers(ent);
+        const targetCount = Math.max(ent.targetWorkerCount || 0, workers.length, bCfg.need_villagers || 5);
+        const slotCount = Math.max(1, targetCount);
+        const slots = [];
+
+        for (let i = 0; i < slotCount; i++) {
+            const worker = workers[i];
+            const progress = worker ? this.getWarehouseWorkerCooldown(worker) : 0;
+            const deg = Math.round(progress * 360);
+            const face = worker ? '👨' : '';
+            slots.push(`
+                <div class="warehouse-worker-slot" data-worker-id="${worker ? worker.id : ''}" style="width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid ${worker ? '#c59a79' : 'rgba(255,255,255,0.16)'}; background: ${worker ? `conic-gradient(rgba(50,240,106,0.75) ${deg}deg, rgba(255,255,255,0.08) ${deg}deg 360deg)` : 'rgba(0,0,0,0.28)'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 5px rgba(0,0,0,0.35);">
+                    <div style="width: 25px; height: 25px; border-radius: 50%; background: ${worker ? '#5b3d31' : 'rgba(255,255,255,0.03)'}; display: flex; align-items: center; justify-content: center; color: #f6e2cf; font-size: 15px; line-height: 1;">
+                        ${face}
+                    </div>
+                </div>
+            `);
+        }
+
+        return `
+            <div id="warehouse_worker_slots" style="display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 12px; margin-bottom: 10px; border: 1.5px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(0,0,0,0.26); box-sizing: border-box; overflow-x: auto;">
+                ${slots.join('')}
+            </div>
+        `;
+    }
+
+    static updateWarehouseWorkerSlots() {
+        const container = document.getElementById("warehouse_worker_slots");
+        if (!container || !this.activeWarehouseEntity) return;
+        const workers = this.getWarehouseAssignedWorkers(this.activeWarehouseEntity);
+        const workerMap = new Map(workers.map(worker => [worker.id, worker]));
+        container.querySelectorAll(".warehouse-worker-slot").forEach(slot => {
+            const worker = workerMap.get(slot.dataset.workerId);
+            if (!worker) return;
+            const deg = Math.round(this.getWarehouseWorkerCooldown(worker) * 360);
+            slot.style.background = `conic-gradient(rgba(50,240,106,0.75) ${deg}deg, rgba(255,255,255,0.08) ${deg}deg 360deg)`;
+        });
+    }
+
     static renderWarehousePanel() {
         const panel = document.getElementById("warehouse_panel");
         if (!panel) return;
@@ -1990,13 +2057,15 @@ export class UIManager {
             </div>
         `;
 
-        html += `<div class="title" style="text-align:center; font-size: 20px; border-bottom: 2px solid #8b6e4b; margin-bottom: 10px; padding-bottom: 10px; color: ${cfg.titleColor || '#fbc02d'};">${cfg.title}</div>`;
+        html += `<div class="title" style="text-align:center; font-size: 20px; border-bottom: 2px solid #8b6e4b; margin-bottom: 8px; padding-bottom: 10px; color: ${cfg.titleColor || '#fbc02d'};">${cfg.title}</div>`;
 
         html += `
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px; gap: 10px;">
-                <div>
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 8px; gap: 10px; min-height: 30px;">
+                <div style="display:flex; align-items:center; gap: 12px;">
                     ${ent ? `<button onclick="window.UIManager.dismissWarehouseWorkers(event)" 
-                        style="padding: 5px 12px; border: 1px solid #b86b6b; border-radius: 4px; background: #5a1f1f; color: #fff1f1; cursor: pointer; transition: 0.2s; font-weight: bold;" title="解散這間倉庫的派駐工人">解散</button>` : ``}
+                        style="padding: 5px 12px; border: 1px solid #b86b6b; border-radius: 4px; background: #5a1f1f; color: #fff1f1; cursor: pointer; transition: 0.2s; font-weight: bold;" title="解散這間倉庫的派駐工人">解散</button>
+                    <button onclick="window.UIManager.adjustWarehousePanelWorkers(event, -1)"
+                        style="width: 24px; height: 24px; border-radius: 50%; background: #5b3d31; border: 2px solid #c59a79; color: #f6e2cf; font-size: 16px; font-weight: 900; cursor: pointer; display:flex; align-items:center; justify-content:center; line-height:1; box-shadow: 0 2px 5px rgba(0,0,0,0.35);" title="減少 1 位派駐工人">－</button>` : ``}
                 </div>
                 <button onclick="window.UIManager.sortWarehouse(); event.stopPropagation();" 
                         style="padding: 5px 12px; border: 1px solid #6b5232; border-radius: 4px; background: ${this.warehouseSortById ? '#3a2b16' : '#221a10'}; color: #ddd; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 5px;" title="依 ID 排序">
@@ -2004,6 +2073,8 @@ export class UIManager {
                 </button>
             </div>
         `;
+
+        html += this.renderWarehouseWorkerSlots(ent);
 
         html += `<div style="display:flex; flex-wrap: wrap; gap:10px; padding: 15px; color: #e0e0e0; flex: 1; align-content: flex-start; justify-content: flex-start; background: rgba(0,0,0,0.3); border-radius: 8px; overflow-y: auto; margin-bottom: 5px;">`;
 
@@ -2241,10 +2312,11 @@ export class UIManager {
 
         const warehousePanel = document.getElementById("warehouse_panel");
         if (warehousePanel && warehousePanel.style.display !== "none") {
+            this.updateWarehouseWorkerSlots();
             const warehouseState = Object.keys(res || {})
                 .sort()
                 .map(key => `${key}:${res[key] || 0}`)
-                .join("|");
+                .join("|") + `|workers:${this.activeWarehouseEntity ? this.getWarehouseAssignedWorkers(this.activeWarehouseEntity).map(v => v.id).join(',') : ''}`;
             if (this.lastUIState.warehouse !== warehouseState || forceUpdate) {
                 this.lastUIState.warehouse = warehouseState;
                 this.renderWarehousePanel();
