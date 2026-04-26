@@ -101,9 +101,10 @@ export class UIManager {
                 el.style.cursor = "default";
                 el.style.transition = "";
                 
-                // 確保 ID 存在才紀錄
-                if (id) {
-                    this.uiPositions[id] = { left: el.style.left, top: el.style.top };
+                // 確保 ID 存在才紀錄 (優先使用動態綁定的 dragId)
+                const saveId = el.dataset.dragId || id;
+                if (saveId) {
+                    this.uiPositions[saveId] = { left: el.style.left, top: el.style.top };
                     this.saveUIPositions();
                 }
                 
@@ -746,25 +747,22 @@ export class UIManager {
     /**
      * 套用錨點對齊樣式
      */
-        static applyAnchorStyle(el, cfg) {
+        static applyAnchorStyle(el, cfg, customId = null) {
         if (!el || !cfg) return;
 
         el.style.position = "absolute";
 
         // [新增] 優先套用保存的位置 (只要有 ID 且有記錄就套用)
-        let hasSavedPos = false;
-        if (el.id && this.uiPositions && this.uiPositions[el.id]) {
-            const saved = this.uiPositions[el.id];
+        const lookupId = customId || el.dataset.dragId || el.id;
+        if (lookupId && this.uiPositions && this.uiPositions[lookupId]) {
+            const saved = this.uiPositions[lookupId];
             el.style.left = saved.left;
             el.style.top = saved.top;
             el.style.right = "auto";
             el.style.bottom = "auto";
             el.style.transform = "none";
             el.style.margin = "0";
-            hasSavedPos = true;
-        }
-
-        if (!hasSavedPos && cfg.anchor) {
+        } else if (cfg.anchor) {
             const offX = cfg.offsetX || 0;
             const offY = cfg.offsetY || 0;
 
@@ -822,10 +820,10 @@ export class UIManager {
         }
 
         // 尺寸設定 (支援寬高及最小/最大值)
-        const dimensions = ['width', 'height', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight'];
+        const dimensions = ["width", "height", "minWidth", "maxWidth", "minHeight", "maxHeight"];
         dimensions.forEach(dim => {
             if (cfg[dim] !== undefined) {
-                el.style[dim] = typeof cfg[dim] === 'number' ? `${cfg[dim]}px` : cfg[dim];
+                el.style[dim] = typeof cfg[dim] === "number" ? `${cfg[dim]}px` : cfg[dim];
             }
         });
 
@@ -1329,11 +1327,11 @@ export class UIManager {
             return mx > ent.x - w / 2 && mx < ent.x + w / 2 && my > ent.y - h / 2 && my < ent.y + h / 2;
         });
 
-        if (clicked) {
+                if (clicked) {
             const now = Date.now();
             const buildingId = clicked.id || `${clicked.type1}_${clicked.x}_${clicked.y}`;
 
-            // 雙擊全選邏輯：移至 UIManager 以避開 UI 遮擋造成的 Phaser 事件丟失
+            // 雙擊全選邏輯
             const isDoubleClick = (GameEngine.state.lastSelectedBuildingId === buildingId && (now - GameEngine.state.lastSelectionTime < 500));
 
             if (isDoubleClick) {
@@ -1341,9 +1339,9 @@ export class UIManager {
                 const scene = window.PhaserScene;
                 if (scene) {
                     const view = scene.cameras.main.worldView;
-                    const visibleBuildings = GameEngine.state.mapEntities.filter(e =>
-                        e.type1 === type1 &&
-                        e.x >= view.x && e.x <= view.x + view.width &&
+                    const visibleBuildings = GameEngine.state.mapEntities.filter(e => 
+                        e.type1 === type1 && 
+                        e.x >= view.x && e.x <= view.x + view.width && 
                         e.y >= view.y && e.y <= view.y + view.height
                     );
                     GameEngine.state.selectedBuildingIds = visibleBuildings.map(e => e.id || `${e.type1}_${e.x}_${e.y}`);
@@ -1359,7 +1357,7 @@ export class UIManager {
             GameEngine.state.selectedUnitIds = [];
             GameEngine.state.selectedResourceId = null;
 
-            if (!clicked.isUnderConstruction && (clicked.type1 === 'storehouse' || clicked.type2 === 'storehouse')) {
+            if (!clicked.isUnderConstruction && (clicked.type1 === "storehouse" || clicked.type2 === "storehouse")) {
                 const panel = document.getElementById("warehouse_panel");
                 if (panel && panel.style.display === "none") {
                     this.toggleWarehousePanel(clicked);
@@ -1370,7 +1368,7 @@ export class UIManager {
             return;
         }
 
-        // [核心修復] 物流線點擊優先級降至建築之下，並縮小判定範圍以防止誤觸
+        // [核心修復] 物流線點擊優先級降至建築之下
         const distToSegmentSquared = (p, v, w) => {
             let l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2);
             if (l2 === 0) return Math.pow(p.x - v.x, 2) + Math.pow(p.y - v.y, 2);
@@ -1415,9 +1413,13 @@ export class UIManager {
         const menu = document.getElementById("context_menu");
         const cfg = UI_CONFIG.ActionMenu;
 
+        // 設置動態識別碼，使不同建築擁有獨立位置
+        const customId = `context_menu_${entity.id || `${entity.type1}_${entity.x}_${entity.y}`}`;
+        menu.dataset.dragId = customId;
+
         // 套用錨點樣式 (包含寬高、最小寬度等尺寸設定)
         if (cfg.anchor) {
-            this.applyAnchorStyle(menu, cfg);
+            this.applyAnchorStyle(menu, cfg, customId);
         }
 
         menu.style.display = "flex";
@@ -2103,6 +2105,12 @@ export class UIManager {
         if (panel.style.display === "none") {
             this.hideContextMenu(); // 先關閉其它選單
             this.hideSettingsPanel();
+            
+            const ent = this.activeWarehouseEntity;
+            const customId = ent ? `warehouse_panel_${ent.id || `${ent.type1}_${ent.x}_${ent.y}`}` : "warehouse_panel_global";
+            panel.dataset.dragId = customId;
+            this.applyAnchorStyle(panel, UI_CONFIG.WarehousePanel, customId);
+
             this.renderWarehousePanel();
             panel.style.display = "flex";
             panel.style.flexDirection = "column";
@@ -2934,19 +2942,13 @@ export class UIManager {
      * 相機快速回歸村莊中心
      */
     static panToTownCenter() {
-        // 同時檢查 village 與 town_center
         const tc = GameEngine.state.mapEntities.find(e => e.type1 === 'town_center' || e.type1 === 'village');
         if (!tc || !window.PhaserScene) return;
 
         const cam = window.PhaserScene.cameras.main;
-        const cfg = UI_CONFIG.TownCenterPointer;
-
         const centerX = cam.scrollX + cam.width / 2;
         const centerY = cam.scrollY + cam.height / 2;
         const dist = Math.hypot(tc.x - centerX, tc.y - centerY);
-
-        // 動態調整 pan 時間：距離越大，時間稍長但速度加快 (以免過卡)
-        // 限制在 400ms ~ 1500ms 之間
         const duration = Math.min(1500, Math.max(400, dist / 4));
 
         cam.pan(tc.x, tc.y, duration, 'Cubic.easeInOut');
@@ -2954,10 +2956,10 @@ export class UIManager {
     }
 }
 
+
+
+
 window.GameEngine = GameEngine;
 window.UIManager = UIManager;
-
-
-
 
 
