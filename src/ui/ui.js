@@ -13,6 +13,108 @@ export class UIManager {
     static logisticsSourceEntity = null; static activeLogisticsConnection = null;
     static activeWarehouseEntity = null;
     static activeBuilding = null;
+    static uiPositions = {};
+
+    static loadUIPositions() {
+        // 重置為空，不再從 localStorage 讀取，實現重啟遊戲歸位
+        this.uiPositions = {};
+    }
+
+    static saveUIPositions() {
+        // 僅保留在內存中，不寫入 localStorage
+    }
+
+    /**
+     * 使元素可拖曳，並記錄位置
+     */
+    static makeDraggable(el, id) {
+        if (!el || !id) return;
+        
+        let isDragging = false;
+        let startVX, startVY;
+        let startEX, startEY;
+
+        const handleMouseDown = (e) => {
+            if (e.target.tagName === "BUTTON" || e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.closest('.no-drag')) {
+                return;
+            }
+            // 日誌面板頂部區域用於縮放，不啟動拖曳
+            if (id === "log_panel" && (e.clientY <= el.getBoundingClientRect().top + 15)) return;
+
+            e.stopPropagation();
+            isDragging = true;
+            
+            // 1. 獲取初始虛擬鼠標位置
+            const localStart = this.getLocalMouse(e);
+            startVX = localStart.x;
+            startVY = localStart.y;
+
+            // 2. 獲取元素當前的虛擬左上角座標 (考慮到容器縮放與 transform 偏移)
+            const rect = el.getBoundingClientRect();
+            const localEl = this.getLocalMouse({ clientX: rect.left, clientY: rect.top });
+            startEX = localEl.x;
+            startEY = localEl.y;
+
+            el.style.cursor = "grabbing";
+            el.style.transition = "none"; // 拖動時關閉動畫
+            
+            const onMouseMove = (moveE) => {
+                if (!isDragging) return;
+                
+                const localMove = this.getLocalMouse(moveE);
+                const dx = localMove.x - startVX;
+                const dy = localMove.y - startVY;
+
+                // 3. 套用新的虛擬像素位置 (加入邊界限制：至少保留 50px 在 1920x1080 範圍內)
+                const margin = 50;
+                const virtualWidth = 1920;
+                const virtualHeight = 1080;
+                
+                // 計算原始目標位置
+                let targetX = startEX + dx;
+                let targetY = startEY + dy;
+
+                // 限制範圍：
+                // 左邊界：X 最小為 -(寬度 - margin)
+                // 右邊界：X 最大為 (畫布寬 - margin)
+                // 上邊界：Y 最小為 -(高度 - margin)
+                // 下邊界：Y 最大為 (畫布高 - margin)
+                const elW = el.offsetWidth;
+                const elH = el.offsetHeight;
+
+                const finalX = Math.max(-elW + margin, Math.min(virtualWidth - margin, targetX));
+                const finalY = Math.max(-elH + margin, Math.min(virtualHeight - margin, targetY));
+
+                el.style.left = `${finalX}px`;
+                el.style.top = `${finalY}px`;
+                
+                // 4. 清除可能干擾絕對定位的屬性
+                el.style.right = "auto";
+                el.style.bottom = "auto";
+                el.style.transform = "none";
+                el.style.margin = "0";
+            };
+
+            const onMouseUp = () => {
+                if (!isDragging) return;
+                isDragging = false;
+                el.style.cursor = "default";
+                el.style.transition = "";
+                
+                // 確保 ID 存在才紀錄
+                if (id) {
+                    this.uiPositions[id] = { left: el.style.left, top: el.style.top };
+                    this.saveUIPositions();
+                }
+                
+                window.removeEventListener("mousemove", onMouseMove);
+                window.removeEventListener("mouseup", onMouseUp);
+            };
+            window.addEventListener("mousemove", onMouseMove);
+            window.addEventListener("mouseup", onMouseUp);
+        };
+        el.addEventListener("mousedown", handleMouseDown);
+    }
     static logHeight = 200; // 預設日誌高度
     static isResizingLog = false;
     static logFilters = { COMMON: false, PATH: false, INPUT: false, BATTLE: false, SYSTEM: false, TASK: false, GATHER: false, LOGISTICS: true }; // 日誌篩選器
@@ -128,8 +230,8 @@ export class UIManager {
         // [核心修正] 將 UIManager 暴露至全域，確保 HTML 字串中的 onclick 能正確呼叫方法
         window.UIManager = this;
 
+        this.loadUIPositions();
         this.renderAll();
-        // ... (其餘事件綁定保持不變)
 
         // 綁定世界級事件
         window.addEventListener("mousedown", (e) => this.handleWorldMouseDown(e));
@@ -165,15 +267,14 @@ export class UIManager {
             if (e.key === "Escape") this.cancelBuildingMode();
             if (e.key === "Tab") {
                 const state = GameEngine.state;
-                if (state.placingType && (state.buildingMode === 'DRAG' || state.buildingMode === 'LINE' || state.buildingMode === 'STAMP')) {
-                    e.preventDefault(); // 防止焦點切換
+                if (state.placingType && (state.buildingMode === "DRAG" || state.buildingMode === "LINE" || state.buildingMode === "STAMP")) {
+                    e.preventDefault(); 
 
                     if (state.buildingSpacing === undefined) state.buildingSpacing = 1;
                     state.buildingSpacing++;
                     if (state.buildingSpacing > 5) state.buildingSpacing = 0;
 
-                    // 如果正在拉線，即時更新預覽
-                    if (state.buildingMode === 'LINE' && state.lineStartPos && state.previewPos) {
+                    if (state.buildingMode === "LINE" && state.lineStartPos && state.previewPos) {
                         state.linePreviewEntities = GameEngine.getLinePositions(
                             state.placingType,
                             state.lineStartPos.x,
@@ -183,19 +284,16 @@ export class UIManager {
                         );
                     }
 
-                    GameEngine.addLog(`建築間距已切換為：${state.buildingSpacing} 格`, 'SYSTEM');
+                    GameEngine.addLog(`建築間距已切換為：${state.buildingSpacing} 格`, "SYSTEM");
                 }
             }
         });
         window.addEventListener("contextmenu", (e) => {
-            // [核心修復] 無條件封鎖原生右鍵選單，防止它在一般地面右鍵（移動指令）時彈出並打斷事件流
-            // 所有右鍵遊戲邏輯（取消建築、設定集結點、單位移動）已全數交由 InputSystem.js 處理
             e.preventDefault();
         });
 
         setInterval(() => this.updateValues(), 500);
 
-        // 用於監听拖曳啟動
         window.addEventListener("mousemove", (e) => {
             if (this.potentialDragType && !this.dragGhost) {
                 const dist = Math.hypot(e.clientX - this.mouseDownPos.x, e.clientY - this.mouseDownPos.y);
@@ -244,8 +342,10 @@ export class UIManager {
         const bpCfg = UI_CONFIG.BuildingPanel;
         const buildingPanel = document.createElement("div");
         buildingPanel.className = "panel";
+        buildingPanel.id = "building_panel";
         this.applyAnchorStyle(buildingPanel, bpCfg);
         buildingPanel.style.pointerEvents = "auto";
+        this.makeDraggable(buildingPanel, "building_panel");
 
         const title = document.createElement("div");
         title.className = "title";
@@ -465,6 +565,7 @@ export class UIManager {
         logPanel.appendChild(filterBtn);
 
         this.uiLayer.appendChild(logPanel);
+        this.makeDraggable(logPanel, "log_panel");
 
         // 4. 系統設置按鈕 (齒輪)
         const setBtnCfg = UI_CONFIG.SettingsButton;
@@ -497,6 +598,7 @@ export class UIManager {
         setPanel.style.pointerEvents = "auto";
         this.applyAnchorStyle(setPanel, UI_CONFIG.SettingsPanel);
         this.uiLayer.appendChild(setPanel);
+        this.makeDraggable(setPanel, "settings_panel");
 
         // 5.5 倉庫按鈕與面板
         const warehouseBtnCfg = UI_CONFIG.WarehouseButton;
@@ -532,6 +634,7 @@ export class UIManager {
             warehousePanel.style.pointerEvents = "auto";
             this.applyAnchorStyle(warehousePanel, warehousePanelCfg);
             this.uiLayer.appendChild(warehousePanel);
+            this.makeDraggable(warehousePanel, "warehouse_panel");
         }
 
 
@@ -584,7 +687,7 @@ export class UIManager {
         tcPtr.innerHTML = `
             <div style="font-size: ${tcPtrCfg.fontSize}; filter: drop-shadow(0 0 3px rgba(0,0,0,0.5));">${tcPtrCfg.icon}</div>
             <div id="tc_arrow" style="position: absolute; font-size: 28px; color: #ffffff; text-shadow: 0 0 8px rgba(0,0,0,0.9); font-weight: bold;">${tcPtrCfg.arrowIcon}</div>
-            <div id="tc_distance" style="position: absolute; bottom: 4px; font-size: ${tcPtrCfg.distanceFontSize || '12px'}; color: ${tcPtrCfg.distanceColor || '#fff'}; font-weight: bold; background: rgba(0,0,0,0.4); padding: 0 4px; border-radius: 4px;">--m</div>
+            <div id="tc_distance" style="position: absolute; bottom: 4px; font-size: ${tcPtrCfg.distanceFontSize || "12px"}; color: ${tcPtrCfg.distanceColor || "#fff"}; font-weight: bold; background: rgba(0,0,0,0.4); padding: 0 4px; border-radius: 4px;">--m</div>
         `;
         tcPtr.onclick = (e) => {
             e.stopPropagation();
@@ -602,6 +705,7 @@ export class UIManager {
         menu.style.cssText = `position: absolute; display: none; z-index: 1000; pointer-events: auto; overflow: hidden;`;
         if (menuCfg.anchor) this.applyAnchorStyle(menu, menuCfg);
         this.uiLayer.appendChild(menu);
+        this.makeDraggable(menu, "context_menu");
 
         // 9. 獨立的銷毀按鈕 (跟隨建築物右上角)
         const destroyBtn = document.createElement("div");
@@ -642,17 +746,32 @@ export class UIManager {
     /**
      * 套用錨點對齊樣式
      */
-    static applyAnchorStyle(el, cfg) {
-        if (!cfg || !cfg.anchor) return;
+        static applyAnchorStyle(el, cfg) {
+        if (!el || !cfg) return;
 
         el.style.position = "absolute";
-        const offX = cfg.offsetX || 0;
-        const offY = cfg.offsetY || 0;
 
-        // 重置可能的樣式
-        el.style.left = el.style.right = el.style.top = el.style.bottom = el.style.transform = "";
+        // [新增] 優先套用保存的位置 (只要有 ID 且有記錄就套用)
+        let hasSavedPos = false;
+        if (el.id && this.uiPositions && this.uiPositions[el.id]) {
+            const saved = this.uiPositions[el.id];
+            el.style.left = saved.left;
+            el.style.top = saved.top;
+            el.style.right = "auto";
+            el.style.bottom = "auto";
+            el.style.transform = "none";
+            el.style.margin = "0";
+            hasSavedPos = true;
+        }
 
-        switch (cfg.anchor) {
+        if (!hasSavedPos && cfg.anchor) {
+            const offX = cfg.offsetX || 0;
+            const offY = cfg.offsetY || 0;
+
+            // 重置可能的樣式
+            el.style.left = el.style.right = el.style.top = el.style.bottom = el.style.transform = "";
+
+            switch (cfg.anchor) {
             case "TOP_LEFT":
                 el.style.left = `${offX}px`;
                 el.style.top = `${offY}px`;
@@ -699,6 +818,7 @@ export class UIManager {
                 el.style.transform = `translateY(-50%)`;
                 if (offY) el.style.marginTop = `${offY}px`;
                 break;
+            }
         }
 
         // 尺寸設定 (支援寬高及最小/最大值)
@@ -2836,3 +2956,8 @@ export class UIManager {
 
 window.GameEngine = GameEngine;
 window.UIManager = UIManager;
+
+
+
+
+
