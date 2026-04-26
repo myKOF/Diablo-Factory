@@ -716,12 +716,25 @@ export class WorkerSystem {
 
                 const distB = Math.hypot(v.depositPoint.x - v.x, v.depositPoint.y - v.y);
                 if (distB < depositDist) {
-                    ResourceSystem.depositResource(this.state, v.cargoType || v.type, v.cargo, this.engine.addLog.bind(this.engine));
-                    v.cargo = 0; v.cargoType = null; v.pathTarget = null;
+                    const depositAmount = (v.cargoAmount || 0) > 0 ? v.cargoAmount : v.cargo;
+                    const depositType = v.cargoType || v.type;
+                    const didDeposit = v.manualDepositTarget
+                        ? ResourceSystem.depositResourceToBuilding(this.state, this.engine, v.manualDepositTarget, depositType, depositAmount, this.engine.addLog.bind(this.engine))
+                        : (ResourceSystem.depositResource(this.state, depositType, depositAmount, this.engine.addLog.bind(this.engine)) !== false);
+                    if (!didDeposit) {
+                        this.engine.addLog(`[存放失敗] ${v.manualDepositTarget?.name || '目標建築'} 無法存放 ${String(depositType || '').toUpperCase()}。`, 'TASK');
+                    }
+                    v.cargo = 0; v.cargoAmount = 0; v.cargoType = null; v.pathTarget = null;
                     v.depositPoint = null; v._lastBaseId = null;
                     v.commandCenter = null;
                     v.vTint = 0xffffff;
-                    if (v.nextStateAfterDeposit) {
+                    if (v.manualDepositTarget) {
+                        v.manualDepositTarget = null;
+                        v.manualDepositTargetId = null;
+                        v.state = 'IDLE';
+                        v.isPlayerLocked = true;
+                        this.engine.addLog(`[存入完成] ${v.configName || '工人'} 已完成手動存放，目前待命。`, 'TASK');
+                    } else if (v.nextStateAfterDeposit) {
                         v.state = v.nextStateAfterDeposit;
                         v.nextStateAfterDeposit = null;
                         if (v.nextTypeAfterDeposit) { v.type = v.nextTypeAfterDeposit; v.nextTypeAfterDeposit = null; }
@@ -890,6 +903,31 @@ export class WorkerSystem {
         }
 
         // 已移除冗餘的 MOVING_TO_BASE 邏輯，相關功能已整合至 switch 狀態機中。
+    }
+
+    handleManualDepositCommand(v, clickedTarget) {
+        if (!v || !clickedTarget || !v.config || v.config.type !== 'villagers') return false;
+        const amount = (v.cargoAmount || 0) > 0 ? v.cargoAmount : (v.cargo || 0);
+        const type = v.cargoType || v.type;
+        if (amount <= 0 || !type) return false;
+        if (!this.state.mapEntities.includes(clickedTarget)) return false;
+        if (!ResourceSystem.canBuildingAcceptResource(this.state, this.engine, clickedTarget, type)) return false;
+
+        v.state = 'MOVING_TO_BASE';
+        v.targetBase = clickedTarget;
+        v.manualDepositTarget = clickedTarget;
+        v.manualDepositTargetId = clickedTarget.id || `${clickedTarget.type1}_${clickedTarget.x}_${clickedTarget.y}`;
+        v.targetId = null;
+        v.factoryTarget = null;
+        v.pathTarget = null;
+        v.fullPath = null;
+        v.pathIndex = 0;
+        v.depositPoint = null;
+        v._lastBaseId = null;
+        v.commandCenter = { x: clickedTarget.x, y: clickedTarget.y };
+        v.isPlayerLocked = true;
+        this.engine.addLog(`[命令] ${v.configName || '工人'} 前往 ${clickedTarget.name || clickedTarget.type1} 存放 ${String(type).toUpperCase()}。`, 'INPUT');
+        return true;
     }
 
     restoreVillagerTask(v) {

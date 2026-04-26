@@ -340,6 +340,9 @@ export class MainScene extends Phaser.Scene {
 
         // [核心新增] 加工廠派駐系統連動：先檢查是否為派駐指令，或是否需要解除當前派駐狀態
         if (GameEngine.workerSystem && unit.config.type === 'villagers') {
+            const depositHandled = GameEngine.workerSystem.handleManualDepositCommand(unit, clickedTarget);
+            if (depositHandled) return;
+
             const handled = GameEngine.workerSystem.handleWorkerCommand(unit, clickedTarget);
             if (handled) return; // 如果是工廠派駐相關操作，則中止後續的移動/採集邏輯
         }

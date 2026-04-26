@@ -132,6 +132,54 @@ export class ResourceSystem {
         return nearest;
     }
 
+    static canBuildingAcceptResource(state, engine, building, resourceType) {
+        if (!building || building.isUnderConstruction || !resourceType) return false;
+        const resType = String(resourceType).toUpperCase();
+        const resKey = String(resourceType).toLowerCase();
+        const cfg = engine && engine.getEntityConfig ? engine.getEntityConfig(building.type1, building.lv || 1) : null;
+
+        const supportMap = {
+            village: 'ALL',
+            town_center: 'ALL',
+            storehouse: 'ALL',
+            timber_factory: ['WOOD', 'TREE'],
+            stone_factory: ['STONE', 'ROCK'],
+            gold_mining_factory: ['GOLD', 'GOLD_ORE'],
+            barn: ['FOOD', 'FRUIT', 'BERRY', 'MEAT', 'WHEAT', 'RICE']
+        };
+
+        const supported = supportMap[building.type1];
+        if (supported === 'ALL') return true;
+        if (Array.isArray(supported) && supported.some(s => resType.includes(s))) return true;
+
+        if (cfg && cfg.logistics && cfg.logistics.canInput) {
+            if (!building.currentRecipe) return false;
+            const recipeType = String(building.currentRecipe.type || '').toLowerCase();
+            const ingCfg = state.ingredientConfigs ? (state.ingredientConfigs[recipeType] || state.ingredientConfigs[building.currentRecipe.type]) : null;
+            const needs = ingCfg && ingCfg.need_ingredients ? ingCfg.need_ingredients : {};
+            return Object.keys(needs).some(key => key.toLowerCase() === resKey);
+        }
+
+        return false;
+    }
+
+    static depositResourceToBuilding(state, engine, building, type, amount, addLog) {
+        if (!building || amount <= 0 || !type) return false;
+        if (!this.canBuildingAcceptResource(state, engine, building, type)) return false;
+
+        const cfg = engine && engine.getEntityConfig ? engine.getEntityConfig(building.type1, building.lv || 1) : null;
+        const resKey = String(type).toLowerCase();
+        if (cfg && cfg.logistics && cfg.logistics.canInput && cfg.type2 === 'processing_plant') {
+            if (!building.inputBuffer) building.inputBuffer = {};
+            building.inputBuffer[resKey] = (building.inputBuffer[resKey] || 0) + amount;
+            if (addLog) addLog(`[資源繳庫] 工人將 ${amount} 單位的 ${resKey.toUpperCase()} 放入 ${building.name || building.type1}`, 'TASK');
+            return true;
+        }
+
+        this.depositResource(state, resKey, amount, addLog);
+        return true;
+    }
+
     /**
      * 尋找最近的可採集資源
      * @param {Object} state GameEngine.state 引用
