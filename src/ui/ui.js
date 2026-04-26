@@ -1459,12 +1459,12 @@ export class UIManager {
                 const maxWorkers = maxWorkersForEntity; 
                 
                 gridHtml += `
-                    <div class="warehouse-controls" style="display: flex; align-items: center; justify-content: center; gap: 20px; background: rgba(0,0,0,0.4); padding: 10px 25px; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); transform: translate(${wcOff.x}px, ${wcOff.y}px); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box; ${isProcessingPlant ? 'width: 100%; justify-content: space-between; padding: 14px 18px;' : ''}">
+                    <div class="warehouse-controls" style="display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 18px; background: rgba(0,0,0,0.4); padding: 10px 28px; margin: 0 auto; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); transform: translate(${wcOff.x}px, ${wcOff.y}px); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box; width: calc(100% - 32px); flex: 0 0 calc(100% - 32px); max-width: calc(100% - 32px);">
                         <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)" 
-                                style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
+                                style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; flex: 0 0 ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
                                 onmouseover="this.style.background='#6d4c41'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='${hCfg.workerAdjustBtnBg || '#4e342e'}'; this.style.transform='scale(1)';">－</button>
                         
-                        <div style="display: flex; flex-direction: column; align-items: center; min-width: 90px;">
+                        <div style="display: flex; flex-direction: column; align-items: center; min-width: 90px; flex: 1 1 auto;">
                             <span style="font-size: 11px; color: rgba(255,255,255,0.35); font-weight: bold; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 1px;">Villagers</span>
                             <div style="font-size: ${hCfg.workerCountFontSize || '22px'}; font-weight: 900; color: #fff; font-family: 'Arial Black', sans-serif; text-shadow: 0 2px 4px rgba(0,0,0,0.5); line-height: 1;">
                                 <span style="color: #76ff03;">${current}</span> <span style="color: rgba(255,255,255,0.2); margin: 0 4px;">/</span> <span style="color: #fbc02d;">${maxWorkers}</span>
@@ -1472,7 +1472,7 @@ export class UIManager {
                         </div>
 
                         <button class="adjust-btn" onclick="window.UIManager.adjustWorkers(event, 1)" 
-                                style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
+                                style="width: ${hCfg.workerAdjustBtnSize || 32}px; height: ${hCfg.workerAdjustBtnSize || 32}px; flex: 0 0 ${hCfg.workerAdjustBtnSize || 32}px; border-radius: 50%; background: ${hCfg.workerAdjustBtnBg || '#4e342e'}; border: 2.3px solid ${hCfg.workerAdjustBtnBorder || '#8b6e4b'}; color: ${hCfg.workerAdjustBtnColor || 'white'}; font-size: 20px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.3);"
                                 onmouseover="this.style.background='#6d4c41'; this.style.transform='scale(1.1)';" onmouseout="this.style.background='${hCfg.workerAdjustBtnBg || '#4e342e'}'; this.style.transform='scale(1)';">＋</button>
                     </div>`;
             }

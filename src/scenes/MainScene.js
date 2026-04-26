@@ -233,6 +233,12 @@ export class MainScene extends Phaser.Scene {
         const cam = this.cameras.main;
         let lastPointer = { x: 0, y: 0 };
         this.isDragging = false;
+        this.cameraKeys = this.input.keyboard.addKeys({
+            up: Phaser.Input.Keyboard.KeyCodes.W,
+            left: Phaser.Input.Keyboard.KeyCodes.A,
+            down: Phaser.Input.Keyboard.KeyCodes.S,
+            right: Phaser.Input.Keyboard.KeyCodes.D
+        });
 
         const cancelMiddleDrag = () => {
             this.isMiddleDragging = false;
@@ -341,6 +347,13 @@ export class MainScene extends Phaser.Scene {
             window.removeEventListener('mousemove', globalMove);
             window.removeEventListener('mouseup', globalUp);
         });
+    }
+
+    isTextInputFocused() {
+        const el = document.activeElement;
+        if (!el || el === document.body) return false;
+        const tagName = (el.tagName || '').toUpperCase();
+        return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || el.isContentEditable;
     }
 
     /**
@@ -589,16 +602,45 @@ export class MainScene extends Phaser.Scene {
                 });
             }
             if (state.logisticsDragLine) {
-                this.logisticsGraphics.lineStyle(logCfg.dragLineThickness || logCfg.lineThickness, parseColor(logCfg.dragLineColor), logCfg.dragLineAlpha);
-                this.logisticsGraphics.beginPath();
-                this.logisticsGraphics.moveTo(state.logisticsDragLine.startX, state.logisticsDragLine.startY);
-                this.logisticsGraphics.lineTo(state.logisticsDragLine.endX, state.logisticsDragLine.endY);
-                this.logisticsGraphics.strokePath();
+                const sx = state.logisticsDragLine.startX;
+                const sy = state.logisticsDragLine.startY;
+                const ex = state.logisticsDragLine.endX;
+                const ey = state.logisticsDragLine.endY;
+                const dragColor = parseColor(logCfg.dragLineColor);
+                const dx = ex - sx;
+                const dy = ey - sy;
+                const len = Math.hypot(dx, dy);
+
+                if (len > 24) {
+                    const ux = dx / len;
+                    const uy = dy / len;
+                    const arrowSize = Math.max(logCfg.arrowSize || 8, (logCfg.dragLineThickness || logCfg.lineThickness || 14) * 1.15);
+                    const arrowCenterX = ex - ux * arrowSize;
+                    const arrowCenterY = ey - uy * arrowSize;
+                    const arrowBaseX = ex - ux * arrowSize * 1.5;
+                    const arrowBaseY = ey - uy * arrowSize * 1.5;
+
+                    this.logisticsGraphics.lineStyle(logCfg.dragLineThickness || logCfg.lineThickness, dragColor, logCfg.dragLineAlpha);
+                    this.logisticsGraphics.beginPath();
+                    this.logisticsGraphics.moveTo(sx, sy);
+                    this.logisticsGraphics.lineTo(arrowBaseX, arrowBaseY);
+                    this.logisticsGraphics.strokePath();
+
+                    this.logisticsGraphics.fillStyle(dragColor, logCfg.dragLineAlpha);
+                    this.drawArrowhead(this.logisticsGraphics, arrowCenterX, arrowCenterY, ux, uy, arrowSize);
+                } else {
+                    this.logisticsGraphics.lineStyle(logCfg.dragLineThickness || logCfg.lineThickness, dragColor, logCfg.dragLineAlpha);
+                    this.logisticsGraphics.beginPath();
+                    this.logisticsGraphics.moveTo(sx, sy);
+                    this.logisticsGraphics.lineTo(ex, ey);
+                    this.logisticsGraphics.strokePath();
+                }
             }
         }
 
         // RTS 邊緣捲動實作
         this.updateEdgeScrolling(deltaTime);
+        this.updateKeyboardCameraScrolling(deltaTime);
 
         // [核心新增] 偵測滑鼠懸停優先權 (Requirement 1 & 2)
         this.updateHoverTarget();
@@ -744,6 +786,25 @@ export class MainScene extends Phaser.Scene {
                 this.lastEdgeScrollTime = Date.now();
             }
         }
+    }
+
+    updateKeyboardCameraScrolling(dt) {
+        const cfg = UI_CONFIG.EdgeScrolling;
+        if (!cfg || !cfg.enabled || !this.cameraKeys || this.isTextInputFocused()) return;
+
+        let dx = 0;
+        let dy = 0;
+        if (this.cameraKeys.left.isDown) dx -= 1;
+        if (this.cameraKeys.right.isDown) dx += 1;
+        if (this.cameraKeys.up.isDown) dy -= 1;
+        if (this.cameraKeys.down.isDown) dy += 1;
+        if (dx === 0 && dy === 0) return;
+
+        const len = Math.hypot(dx, dy);
+        const speed = cfg.moveSpeed || 1000;
+        this.cameras.main.scrollX += (dx / len) * speed * dt;
+        this.cameras.main.scrollY += (dy / len) * speed * dt;
+        this.lastEdgeScrollTime = Date.now();
     }
 
     /**
