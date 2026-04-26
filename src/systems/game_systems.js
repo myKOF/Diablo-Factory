@@ -412,7 +412,7 @@ export class GameEngine {
                     v.isPlayerLocked = true;
                     GameEngine.addLog(`[集結] 正在追擊鎖定的敵軍！`);
                 } else {
-                    v.idleTarget = this.findAvailableRallySpot(rp);
+                    v.idleTarget = this.findAvailableRallySpot(this.resolveRallyStandPoint(rp, targetEnt, v));
                     v._isRallyMovement = true;
                     v.isPlayerLocked = true;
                 }
@@ -423,12 +423,12 @@ export class GameEngine {
                     v.targetId = targetEnt.id;
                     GameEngine.addLog(`[集結] 戰鬥單位正在攻擊目標 (${targetCamp === 'neutral' ? '中立物種' : '敵對目標'})！`);
                 } else {
-                    v.idleTarget = this.findAvailableRallySpot(rp);
+                    v.idleTarget = this.findAvailableRallySpot(this.resolveRallyStandPoint(rp, targetEnt, v));
                     v._isRallyMovement = true;
                     v.isPlayerLocked = true;
                 }
             } else {
-                const spot = this.findAvailableRallySpot(rp);
+                const spot = this.findAvailableRallySpot(this.resolveRallyStandPoint(rp, targetEnt, v));
                 v.idleTarget = spot;
                 v._isRallyMovement = true;
                 v.isPlayerLocked = true;
@@ -440,6 +440,18 @@ export class GameEngine {
             this.assignNextTask(v);
         }
         return true;
+    }
+
+    static resolveRallyStandPoint(rallyPoint, targetEnt = null, unit = null) {
+        if (!rallyPoint) return { x: 0, y: 0 };
+        const isBuildingTarget = targetEnt && rallyPoint.targetType === 'BUILDING' && targetEnt.type1 !== 'corpse';
+        if (!isBuildingTarget) return rallyPoint;
+
+        return GameEngine.getBuildingExitPointToward(
+            targetEnt,
+            unit ? { x: unit.x, y: unit.y } : rallyPoint,
+            18
+        );
     }
 
     /**
