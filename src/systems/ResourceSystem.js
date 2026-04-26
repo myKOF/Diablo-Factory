@@ -69,6 +69,12 @@ export class ResourceSystem {
         if (addLog) addLog(`[資源繳庫] 工人存入了 ${amount} 單位的 ${type.toUpperCase()}`, 'TASK');
     }
 
+    static getBuildingStorage(building) {
+        if (!building) return {};
+        if (!building.storage) building.storage = {};
+        return building.storage;
+    }
+
     /**
      * 尋找最近的存放點 (城鎮中心、各類工廠)
      * @param {Object} state GameEngine.state 引用
@@ -192,6 +198,14 @@ export class ResourceSystem {
             if (!building.inputBuffer) building.inputBuffer = {};
             building.inputBuffer[resKey] = (building.inputBuffer[resKey] || 0) + amount;
             if (addLog) addLog(`[資源繳庫] 工人將 ${amount} 單位的 ${resKey.toUpperCase()} 放入 ${building.name || building.type1}`, 'TASK');
+            return true;
+        }
+
+        if (['storehouse', 'warehouse', 'village', 'town_center'].includes(building.type1)) {
+            const storage = this.getBuildingStorage(building);
+            storage[resKey] = (storage[resKey] || 0) + amount;
+            state.resources[resKey] = (state.resources[resKey] || 0) + amount;
+            if (addLog) addLog(`[資源入庫] ${building.name || building.type1} 收到 ${amount} 單位的 ${resKey.toUpperCase()}`, 'TASK');
             return true;
         }
 

@@ -2158,6 +2158,7 @@ export class UIManager {
         html += `<div style="display:flex; flex-wrap: wrap; gap:10px; padding: 15px; color: #e0e0e0; flex: 1; align-content: flex-start; justify-content: flex-start; background: rgba(0,0,0,0.3); border-radius: 8px; overflow-y: auto; margin-bottom: 5px;">`;
 
         const configs = { ...GameEngine.state.ingredientConfigs };
+        const warehouseStorage = ent ? (ent.storage || {}) : {};
         // 確保 wood, stone, gold 有配置資料以供顯示
         ['wood', 'stone', 'gold'].forEach(resType => {
             if (!configs[resType]) {
@@ -2165,8 +2166,8 @@ export class UIManager {
                 configs[resType] = { id: baseId, name: GameEngine.RESOURCE_NAMES[resType] || resType, icon: resType, type: resType, stack: 5000, lv: 1 };
             }
         });
-        Object.keys(GameEngine.state.resources || {}).forEach((resType, index) => {
-            if ((GameEngine.state.resources[resType] || 0) <= 0 || configs[resType]) return;
+        Object.keys(warehouseStorage || {}).forEach((resType, index) => {
+            if ((warehouseStorage[resType] || 0) <= 0 || configs[resType]) return;
             configs[resType] = {
                 id: 9000 + index,
                 name: GameEngine.RESOURCE_NAMES[resType] || resType,
@@ -2179,7 +2180,7 @@ export class UIManager {
 
         let itemsForTab = Object.values(configs).filter(c => {
             if (!c || !c.type) return false;
-            const amount = GameEngine.state.resources[c.type] || 0;
+            const amount = warehouseStorage[c.type] || 0;
             // 顯示所有有庫存的項目，不再區分等級 (頁籤)
             return amount > 0;
         });
@@ -2191,7 +2192,7 @@ export class UIManager {
         // 將資源按堆疊數拆分
         const stackedItems = [];
         itemsForTab.forEach(item => {
-            let total = GameEngine.state.resources[item.type] || 0;
+            let total = warehouseStorage[item.type] || 0;
             const stackLimit = item.stack || 1000;
             if (total <= 0) return;
             while (total > 0) {
@@ -2283,7 +2284,12 @@ export class UIManager {
             if (recipes.length > 0) availableItems = recipes.filter(r => r.isUnlocked).map(r => r.type);
         }
         if (!isProcessingPlantSource && availableItems.length === 0) {
-            availableItems = Object.keys(GameEngine.state.resources).filter(k => GameEngine.state.resources[k] > 0);
+            if (['storehouse', 'warehouse', 'village', 'town_center'].includes(sourceEnt.type1)) {
+                const storage = sourceEnt.storage || {};
+                availableItems = Object.keys(storage).filter(k => storage[k] > 0);
+            } else {
+                availableItems = Object.keys(GameEngine.state.resources).filter(k => GameEngine.state.resources[k] > 0);
+            }
             if (sourceEnt.outputBuffer) availableItems = [...new Set([...availableItems, ...Object.keys(sourceEnt.outputBuffer)])];
         }
         availableItems = [...new Set(availableItems)];
@@ -2422,9 +2428,10 @@ export class UIManager {
         const warehousePanel = document.getElementById("warehouse_panel");
         if (warehousePanel && warehousePanel.style.display !== "none") {
             this.updateWarehouseWorkerSlots();
-            const warehouseState = Object.keys(res || {})
+            const activeStorage = this.activeWarehouseEntity ? (this.activeWarehouseEntity.storage || {}) : {};
+            const warehouseState = Object.keys(activeStorage || {})
                 .sort()
-                .map(key => `${key}:${res[key] || 0}`)
+                .map(key => `${key}:${activeStorage[key] || 0}`)
                 .join("|") + `|workers:${this.activeWarehouseEntity ? this.getWarehouseAssignedWorkers(this.activeWarehouseEntity).map(v => v.id).join(',') : ''}`;
             if (this.lastUIState.warehouse !== warehouseState || forceUpdate) {
                 this.lastUIState.warehouse = warehouseState;

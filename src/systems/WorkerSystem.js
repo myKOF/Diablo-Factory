@@ -256,12 +256,13 @@ export class WorkerSystem {
                         }
 
                         if (isWarehouse) {
+                            const storage = ResourceSystem.getBuildingStorage(factory);
                             const conn = this.pickLogisticsConnectionForWorker(v, factory, factory.outputTargets, (candidate) => {
-                                return candidate.filter && (state.resources[candidate.filter] || 0) >= 1;
+                                return candidate.filter && (storage[candidate.filter] || 0) >= 1;
                             });
                             if (conn) {
-                                const resCount = state.resources[conn.filter] || 0;
-                                if (Math.random() < 0.01) console.log(`[除錯] 檢查連線 -> 過濾器: ${conn.filter}, 全域庫存: ${resCount}`);
+                                const resCount = storage[conn.filter] || 0;
+                                if (Math.random() < 0.01) console.log(`[除錯] 檢查連線 -> 過濾器: ${conn.filter}, 倉庫庫存: ${resCount}`);
 
                                 const workKey = `${conn.id || ''}|${conn.filter || ''}`;
                                 if (v.logisticsWorkKey !== workKey) {
@@ -278,14 +279,15 @@ export class WorkerSystem {
                                 v.logisticsWorkTimer = 0;
                                 v.logisticsWorkKey = null;
 
-                                const cargoAmount = Math.min(this.getWorkerCollectionAmount(v, 1), state.resources[conn.filter] || 0);
+                                const cargoAmount = Math.min(this.getWorkerCollectionAmount(v, 1), storage[conn.filter] || 0);
                                 if (cargoAmount <= 0) {
                                     v.logisticsWorkTimer = 0;
                                     v.logisticsWorkKey = null;
                                     break;
                                 }
 
-                                state.resources[conn.filter] -= cargoAmount;
+                                storage[conn.filter] -= cargoAmount;
+                                state.resources[conn.filter] = Math.max(0, (state.resources[conn.filter] || 0) - cargoAmount);
                                 v.cargoType = conn.filter;
                                 v.cargoAmount = cargoAmount;
                                 v.state = 'TRANSPORTING_LOGISTICS';
@@ -743,7 +745,7 @@ export class WorkerSystem {
                 if (distB < depositDist) {
                     const depositAmount = (v.cargoAmount || 0) > 0 ? v.cargoAmount : v.cargo;
                     const depositType = v.cargoType || v.type;
-                    const assignedDepositTarget = (!v.manualDepositTarget && v.assignedWarehouseId && v.targetBase && !v.targetBase.gx)
+                    const assignedDepositTarget = (!v.manualDepositTarget && v.targetBase && !v.targetBase.gx)
                         ? v.targetBase
                         : null;
                     const didDeposit = v.manualDepositTarget

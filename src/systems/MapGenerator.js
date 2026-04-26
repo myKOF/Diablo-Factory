@@ -82,6 +82,30 @@ export class MapGenerator {
         const vgy = Math.round((villagePos.y - (villageFP.uh * TS) / 2) / TS);
         markOccupiedG(vgx, vgy, villageFP.uw, villageFP.uh);
 
+        const storehousePos = { x: villagePos.x, y: villagePos.y - 180 };
+        const storehouseFP = getFootprint('storehouse');
+        const storehouseCfg = (state.buildingConfigsByType['storehouse'] && state.buildingConfigsByType['storehouse'][1]) || {};
+        const initialStorage = {};
+        Object.keys(state.resources || {}).forEach(key => {
+            const amount = state.resources[key] || 0;
+            if (amount > 0) initialStorage[key] = amount;
+        });
+        state.mapEntities.push({
+            id: 'core_storehouse',
+            model: 'storehouse',
+            type1: 'storehouse',
+            lv: 1,
+            x: storehousePos.x,
+            y: storehousePos.y,
+            name: storehouseCfg.name || "資源倉庫",
+            storage: initialStorage,
+            targetWorkerCount: 0
+        });
+        state.mainWarehouseId = 'core_storehouse';
+        const sgx = Math.round((storehousePos.x - (storehouseFP.uw * TS) / 2) / TS);
+        const sgy = Math.round((storehousePos.y - (storehouseFP.uh * TS) / 2) / TS);
+        markOccupiedG(sgx, sgy, storehouseFP.uw, storehouseFP.uh);
+
         const campfirePos = { x: 1100, y: 640 };
         const campfireFP = getFootprint('campfire');
         state.mapEntities.push({

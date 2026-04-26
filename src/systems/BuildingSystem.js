@@ -1,4 +1,38 @@
 export class BuildingSystem {
+    static spendResources(state, costs) {
+        for (let r in costs) {
+            const cost = costs[r] || 0;
+            if (cost > 0 && (state.resources[r] || 0) < cost) return false;
+        }
+        for (let r in costs) {
+            let remaining = costs[r] || 0;
+            if (remaining <= 0) continue;
+            const warehouses = (state.mapEntities || []).filter(e => e && e.storage && (e.storage[r] || 0) > 0);
+            for (const wh of warehouses) {
+                const take = Math.min(remaining, wh.storage[r] || 0);
+                wh.storage[r] -= take;
+                remaining -= take;
+                if (remaining <= 0) break;
+            }
+            state.resources[r] = Math.max(0, (state.resources[r] || 0) - costs[r]);
+        }
+        return true;
+    }
+
+    static refundResources(state, costs) {
+        const target = (state.mapEntities || []).find(e => e.id === state.mainWarehouseId)
+            || (state.mapEntities || []).find(e => e && ['storehouse', 'warehouse', 'village', 'town_center'].includes(e.type1));
+        for (let r in costs) {
+            const amount = costs[r] || 0;
+            if (amount <= 0) continue;
+            state.resources[r] = (state.resources[r] || 0) + amount;
+            if (target) {
+                if (!target.storage) target.storage = {};
+                target.storage[r] = (target.storage[r] || 0) + amount;
+            }
+        }
+    }
+
     /**
      * 建築邏輯更新：處理生產隊列與升級進度
      */
@@ -119,10 +153,7 @@ export class BuildingSystem {
             }
         }
 
-        // 扣除資源
-        for (let r in nextCosts) {
-            state.resources[r] -= nextCosts[r];
-        }
+        if (!this.spendResources(state, nextCosts)) return;
 
         entity.isUpgrading = true;
         entity.upgradeProgress = 0;
@@ -141,11 +172,7 @@ export class BuildingSystem {
         // 返還資源 (100% 返還)
         const nextCfg = engine.getBuildingConfig(entity.type1, entity.lv + 1);
         const costs = nextCfg?.costs || {};
-        for (let r in costs) {
-            if (state.resources.hasOwnProperty(r)) {
-                state.resources[r] += costs[r];
-            }
-        }
+        this.refundResources(state, costs);
 
         entity.isUpgrading = false;
         entity.upgradeProgress = 0;
@@ -246,13 +273,7 @@ export class BuildingSystem {
                     }
                 }
             }
-            // 扣錢
-            for (let r in cfg.costs) {
-                const cost = cfg.costs[r];
-                if (cost > 0) {
-                    state.resources[r.toLowerCase()] -= cost;
-                }
-            }
+            if (!this.spendResources(state, Object.fromEntries(Object.entries(cfg.costs).map(([r, cost]) => [r.toLowerCase(), cost])))) return;
         }
 
         building.queue.push(finalConfigId);
@@ -316,12 +337,7 @@ export class BuildingSystem {
         }
         if (!engine.isAreaClear(x, y, type1)) { engine.addLog("位置受阻！"); return false; }
 
-        // 扣額
-        for (let r in cfg.costs) {
-            if (state.resources.hasOwnProperty(r)) {
-                state.resources[r] -= cfg.costs[r];
-            }
-        }
+        if (!this.spendResources(state, cfg.costs)) return false;
 
         const newBuilding = {
             id: `build_${type1}_${x}_${y}_${Date.now()}`,
@@ -501,7 +517,7 @@ export class BuildingSystem {
             const refundRate = ent.isUnderConstruction ? 1.0 : 0.5;
             const amount = Math.floor(cfg.costs[r] * refundRate);
             if (amount > 0) {
-                state.resources[r] += amount;
+                this.refundResources(state, { [r]: amount });
                 refundLog.push(`${amount} 單位 ${engine.RESOURCE_NAMES[r] || r}`);
             }
         }
