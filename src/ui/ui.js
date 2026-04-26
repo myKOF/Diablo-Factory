@@ -2012,24 +2012,41 @@ export class UIManager {
             itemsForTab.sort((a, b) => a.id - b.id);
         }
 
-        if (itemsForTab.length === 0) {
+        // 將資源按堆疊數拆分
+        const stackedItems = [];
+        itemsForTab.forEach(item => {
+            let total = GameEngine.state.resources[item.type] || 0;
+            const stackLimit = item.stack || 1000;
+            if (total <= 0) return;
+            while (total > 0) {
+                const current = Math.min(total, stackLimit);
+                stackedItems.push({
+                    ...item,
+                    currentAmount: current,
+                    isFull: current >= stackLimit
+                });
+                total -= current;
+            }
+        });
+
+        if (stackedItems.length === 0) {
             html += `<div style="width:100%; text-align:center; padding: 40px; color: #666; font-size: 14px;">此分類目前無任何物品</div>`;
         } else {
-            itemsForTab.forEach(item => {
-                const amount = GameEngine.state.resources[item.type] || 0;
-                const isFull = amount >= item.stack;
-                const amtColor = isFull ? '#ff5252' : '#fff';
-                const displayIcon = this.getIngredientIcon(item.type);
+            stackedItems.forEach(stack => {
+                const amtColor = cfg.itemTextColor || '#fff';
+                const displayIcon = this.getIngredientIcon(stack.type);
+
+
 
                 // 適應 420px 寬度的 5 欄佈局
                 html += `
                     <div style="position: relative; width: calc(20% - 8px); aspect-ratio: 1; min-width: 50px; background: rgba(255,255,255,0.05); border: 1px solid rgba(139,110,75,0.5); border-radius: 6px; display:flex; justify-content:center; align-items:center; overflow: hidden; cursor: help; transition: all 0.2s;" 
                          onmouseover="this.style.background='rgba(255,255,255,0.1)'; this.style.borderColor='#fbc02d'"
                          onmouseout="this.style.background='rgba(255,255,255,0.05)'; this.style.borderColor='rgba(139,110,75,0.5)'"
-                         title="${item.name} (ID:${item.id})\n數量: ${amount} / ${item.stack}">
-                        <div style="font-size: 28px; pointer-events: none;">${displayIcon}</div>
-                        <div style="position: absolute; bottom: 1px; right: 2px; font-size: 10px; font-family: monospace; color: ${amtColor}; font-weight: bold; text-shadow: 1px 1px 1px #000; pointer-events: none;">
-                            ${amount >= 1000 ? (amount / 1000).toFixed(1) + 'k' : amount}
+                         title="${stack.name} (ID:${stack.id})\n數量: ${stack.currentAmount} / ${stack.stack}">
+                        <div style="font-size: ${cfg.itemIconSize || 28}px; pointer-events: none;">${displayIcon}</div>
+                        <div style="position: absolute; bottom: 2px; left: 0; right: 0; text-align: center; font-size: ${cfg.itemFontSize || 10}px; font-family: monospace; color: ${amtColor}; font-weight: bold; text-shadow: 1px 1px 1px #000; pointer-events: none;">
+                            ${(cfg.useAbbreviation !== false && stack.currentAmount >= 1000) ? (stack.currentAmount / 1000).toFixed(1) + 'k' : stack.currentAmount}
                         </div>
                     </div>
                 `;

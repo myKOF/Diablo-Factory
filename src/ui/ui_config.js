@@ -424,7 +424,12 @@ export const UI_CONFIG = {
         offsetX: 20,
         width: 420, height: 500,
         title: "📦 資源倉庫",
-        glass: true
+        glass: true,
+        // -- 物品顯示設定 ----------------------------------
+        itemIconSize: 28,      // 倉庫內物品圖標的尺寸 (單位: px)
+        itemFontSize: 12,      // 物品數量的文字大小 (單位: px)
+        itemTextColor: "#ffcc00ff", // 物品數量的文字顏色 (支援 Hex, RGB, HSL)
+        useAbbreviation: false  // 是否使用縮寫顯示數量 (例如: 1200 顯示為 1.2k)
     },
     // -- 設置選單 (SettingsPanel) ----------------------------------
     SettingsButton: {
