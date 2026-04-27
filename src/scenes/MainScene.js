@@ -154,6 +154,7 @@ export class MainScene extends Phaser.Scene {
         this.pendingVisibleEntities = true; // 強制首幀加載
         this.inputSystem = new InputSystem(this);
         this.setupCamera();
+        this.setupConstructionHotkeys();
 
         // 設置全局引用
         window.PhaserScene = this;
@@ -209,6 +210,14 @@ export class MainScene extends Phaser.Scene {
             const cfg = GameEngine.getEntityConfig(type);
             const { uw, uh } = this.getFootprint(cfg);
             createTex(`tex_${type}`, uw * TS + 20, uh * TS + 40, wrapDraw(type));
+            for (let rotationSteps = 1; rotationSteps < 4; rotationSteps++) {
+                createTex(`tex_${type}_r${rotationSteps}`, uw * TS + 20, uh * TS + 40, (g, w, h) => {
+                    g.save();
+                    g.translateCanvas && g.translateCanvas(w / 2, h / 2);
+                    this.drawEntity(g, { type1: type, isUnderConstruction: false, rotationSteps }, 1.0);
+                    g.restore();
+                });
+            }
         });
 
         // 資源材質 (樹、石、糧) - 由獨立產生器負責
@@ -360,6 +369,7 @@ export class MainScene extends Phaser.Scene {
             down: Phaser.Input.Keyboard.KeyCodes.S,
             right: Phaser.Input.Keyboard.KeyCodes.D
         });
+        this.rotatePlacementKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
 
         const cancelMiddleDrag = () => {
             this.isMiddleDragging = false;
@@ -474,6 +484,52 @@ export class MainScene extends Phaser.Scene {
             window.removeEventListener('mousemove', globalMove);
             window.removeEventListener('mouseup', globalUp);
         });
+    }
+
+    setupConstructionHotkeys() {
+        if (!this.input || !this.input.keyboard) return;
+        this.input.keyboard.on('keydown-R', (event) => {
+            if (this.isTextInputFocused()) return;
+            this.rotatePlacementClockwise(event);
+        });
+
+        const onWindowKeyDown = (event) => {
+            if (this.isTextInputFocused()) return;
+            if (!this.isPlacementRotateKeyEvent(event)) return;
+            this.rotatePlacementClockwise(event);
+        };
+        window.addEventListener('keydown', onWindowKeyDown, true);
+        this.events.once('shutdown', () => {
+            window.removeEventListener('keydown', onWindowKeyDown, true);
+        });
+    }
+
+    rotatePlacementClockwise(event = null) {
+        const state = GameEngine.state;
+        if (!state.placingType) return false;
+
+        const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+        if (state.lastPlacementRotateAt && now - state.lastPlacementRotateAt < 40) {
+            if (event && event.preventDefault) event.preventDefault();
+            if (event && event.stopPropagation) event.stopPropagation();
+            return true;
+        }
+        state.lastPlacementRotateAt = now;
+        state.placingRotation = ((Number(state.placingRotation) || 0) + 1) % 4;
+        GameEngine.addLog(`[建造] 建築方向已旋轉 ${state.placingRotation * 90} 度。`, "SYSTEM");
+        if (event && event.preventDefault) event.preventDefault();
+        if (event && event.stopPropagation) event.stopPropagation();
+        return true;
+    }
+
+    isPlacementRotateKeyEvent(event) {
+        if (!event) return false;
+        const key = String(event.key || "");
+        return event.code === "KeyR" ||
+            event.keyCode === 82 ||
+            event.which === 82 ||
+            key.toLowerCase() === "r" ||
+            key === "ㄐ";
     }
 
     isTextInputFocused() {
@@ -1010,6 +1066,10 @@ export class MainScene extends Phaser.Scene {
     }
 
     updateKeyboardCameraScrolling(dt) {
+        if (!this.isTextInputFocused() && this.rotatePlacementKey && Phaser.Input.Keyboard.JustDown(this.rotatePlacementKey)) {
+            this.rotatePlacementClockwise();
+        }
+
         const cfg = UI_CONFIG.EdgeScrolling;
         if (!cfg || !cfg.enabled || !this.cameraKeys || this.isTextInputFocused()) return;
 
@@ -1785,7 +1845,7 @@ export class MainScene extends Phaser.Scene {
                     continue;
                 }
 
-                const textureKey = this.getTextureKey(type1);
+                const textureKey = this.getTextureKey(type1, ent.rotationSteps);
                 if (textureKey && this.textures.exists(textureKey)) {
                     displayObj = this.add.image(ent.x, ent.y, textureKey);
                     this.entities.set(id, displayObj);
@@ -1808,6 +1868,11 @@ export class MainScene extends Phaser.Scene {
                 if (displayObj instanceof Phaser.GameObjects.Image) {
                     const targetAlpha = ent.isUnderConstruction ? 0.6 : 1.0;
                     if (displayObj.alpha !== targetAlpha) displayObj.setAlpha(targetAlpha);
+                    const rotatedTextureKey = this.getTextureKey(type1, ent.rotationSteps);
+                    if (rotatedTextureKey && displayObj.texture.key !== rotatedTextureKey && this.textures.exists(rotatedTextureKey)) {
+                        displayObj.setTexture(rotatedTextureKey);
+                    }
+                    if (displayObj.rotation !== 0) displayObj.setRotation(0);
 
                     const cfg = GameEngine.getEntityConfig(type1);
                     if (cfg && cfg.model_size) {
@@ -2333,7 +2398,7 @@ export class MainScene extends Phaser.Scene {
         });
     }
 
-    getTextureKey(type1) {
+    getTextureKey(type1, rotationSteps = 0) {
         if (!type1) return null;
         // 精確匹配建築類型（必須在前綴匹配之前，避免 stone_factory 被誤判為石頭資源）
         const mapping = {
@@ -2358,7 +2423,10 @@ export class MainScene extends Phaser.Scene {
         };
 
         if (!type1) return null;
-        if (mapping[type1]) return mapping[type1];
+        if (mapping[type1]) {
+            const steps = ((Number(rotationSteps) || 0) % 4 + 4) % 4;
+            return steps === 0 ? mapping[type1] : `${mapping[type1]}_r${steps}`;
+        }
 
         // 前綴匹配資源類型（僅對非建築的自然資源）
         if (type1.startsWith('tree') || type1.startsWith('wood')) return 'tex_tree';
@@ -2386,12 +2454,38 @@ export class MainScene extends Phaser.Scene {
 
         const isUnderConstruction = ent.isUnderConstruction === true || ent.isUnderConstruction === 1;
         const finalAlpha = isUnderConstruction ? (alpha * 0.5) : Math.max(alpha, 0.6);
+        const rotationSteps = ((Number(ent.rotationSteps) || 0) % 4 + 4) % 4;
+        const manualRotationSteps = rotationSteps;
 
         // 如果是預覽模式，加強視覺引導：外框與高透明度
         if (alpha < 1.0) {
             const previewColor = ent.previewColor || 0x2196f3; // 預設藍色，若受阻則傳入紅色
             g.lineStyle(2, previewColor, 0.8);
-            g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            if (manualRotationSteps === 0) {
+                g.strokeRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            } else {
+                const corners = [
+                    { x: offX - (uw * TS) / 2, y: offY - (uh * TS) / 2 },
+                    { x: offX + (uw * TS) / 2, y: offY - (uh * TS) / 2 },
+                    { x: offX + (uw * TS) / 2, y: offY + (uh * TS) / 2 },
+                    { x: offX - (uw * TS) / 2, y: offY + (uh * TS) / 2 }
+                ].map(point => {
+                    let relX = point.x - offX;
+                    let relY = point.y - offY;
+                    for (let i = 0; i < manualRotationSteps; i++) {
+                        const nextX = -relY;
+                        const nextY = relX;
+                        relX = nextX;
+                        relY = nextY;
+                    }
+                    return { x: offX + relX, y: offY + relY };
+                });
+                g.beginPath();
+                g.moveTo(corners[0].x, corners[0].y);
+                for (let i = 1; i < corners.length; i++) g.lineTo(corners[i].x, corners[i].y);
+                g.closePath();
+                g.strokePath();
+            }
         }
 
 
@@ -2577,11 +2671,11 @@ export class MainScene extends Phaser.Scene {
         }
 
         if (cfg && Array.isArray(cfg.ports) && cfg.ports.length > 0) {
-            this.drawBuildingPorts(g, offX, offY, uw, uh, cfg.ports, finalAlpha);
+            this.drawBuildingPorts(g, offX, offY, uw, uh, cfg.ports, finalAlpha, manualRotationSteps);
         }
     }
 
-    drawBuildingPorts(g, offX, offY, uw, uh, ports, alpha = 1) {
+    drawBuildingPorts(g, offX, offY, uw, uh, ports, alpha = 1, rotationSteps = 0) {
         const TS = GameEngine.TILE_SIZE;
         const halfW = (uw * TS) / 2;
         const halfH = (uh * TS) / 2;
@@ -2590,6 +2684,40 @@ export class MainScene extends Phaser.Scene {
         const fillAlpha = Math.min(1, Math.max(0.2, alpha * 0.95));
         const edgeAlpha = Math.min(1, Math.max(0.2, alpha));
         const stripDepth = Math.max(4, TS * 0.45);
+        const steps = ((Number(rotationSteps) || 0) % 4 + 4) % 4;
+
+        const rotatePoint = (x, y) => {
+            let relX = x - offX;
+            let relY = y - offY;
+            for (let i = 0; i < steps; i++) {
+                const nextX = -relY;
+                const nextY = relX;
+                relX = nextX;
+                relY = nextY;
+            }
+            return { x: offX + relX, y: offY + relY };
+        };
+
+        const drawPortRect = (x, y, w, h) => {
+            const points = [
+                rotatePoint(x, y),
+                rotatePoint(x + w, y),
+                rotatePoint(x + w, y + h),
+                rotatePoint(x, y + h)
+            ];
+            g.fillStyle(fillColor, fillAlpha);
+            g.beginPath();
+            g.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) g.lineTo(points[i].x, points[i].y);
+            g.closePath();
+            g.fillPath();
+            g.lineStyle(1.5, edgeColor, edgeAlpha);
+            g.beginPath();
+            g.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) g.lineTo(points[i].x, points[i].y);
+            g.closePath();
+            g.strokePath();
+        };
 
         const drawSegment = (dir, segStart, segEnd, axisLen) => {
             const clampedStart = Math.max(0, segStart);
@@ -2600,18 +2728,12 @@ export class MainScene extends Phaser.Scene {
                 const x = offX - halfW + clampedStart * TS;
                 const w = (clampedEnd - clampedStart) * TS;
                 const y = (dir === 'up') ? (offY - halfH) : (offY + halfH - stripDepth);
-                g.fillStyle(fillColor, fillAlpha);
-                g.fillRect(x, y, w, stripDepth);
-                g.lineStyle(1.5, edgeColor, edgeAlpha);
-                g.strokeRect(x, y, w, stripDepth);
+                drawPortRect(x, y, w, stripDepth);
             } else {
                 const y = offY - halfH + clampedStart * TS;
                 const h = (clampedEnd - clampedStart) * TS;
                 const x = (dir === 'left') ? (offX - halfW) : (offX + halfW - stripDepth);
-                g.fillStyle(fillColor, fillAlpha);
-                g.fillRect(x, y, stripDepth, h);
-                g.lineStyle(1.5, edgeColor, edgeAlpha);
-                g.strokeRect(x, y, stripDepth, h);
+                drawPortRect(x, y, stripDepth, h);
             }
         };
 
@@ -3003,6 +3125,7 @@ export class MainScene extends Phaser.Scene {
             const isClear = GameEngine.isAreaClear(state.previewPos.x, state.previewPos.y, state.placingType);
             this.drawEntity(g, {
                 type1: state.placingType,
+                rotationSteps: state.placingRotation || 0,
                 previewColor: isClear ? 0x2196f3 : 0xf44336
             }, isClear ? 0.5 : 0.7, state.previewPos.x, state.previewPos.y);
         }
@@ -3014,6 +3137,7 @@ export class MainScene extends Phaser.Scene {
                 const isClear = GameEngine.isAreaClear(pos.x, pos.y, state.placingType, tempPlaced);
                 this.drawEntity(g, {
                     type1: state.placingType,
+                    rotationSteps: state.placingRotation || 0,
                     previewColor: isClear ? 0x2196f3 : 0xf44336
                 }, isClear ? 0.3 : 0.6, pos.x, pos.y);
 

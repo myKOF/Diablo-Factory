@@ -345,6 +345,7 @@ export class BuildingSystem {
             type1: cfg.type1,
             lv: cfg.lv || 1,
             x: x, y: y, name: "待施工",
+            rotationSteps: ((Number(state.placingRotation) || 0) % 4 + 4) % 4,
             isUnderConstruction: true, buildProgress: 0,
             buildTime: Math.max(1, cfg.buildTime || 5), // 防止 0 或 NaN
             amount: cfg.resourceValue || 0,

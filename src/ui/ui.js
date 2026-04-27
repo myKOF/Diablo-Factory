@@ -283,6 +283,14 @@ export class UIManager {
                     e.stopPropagation();
                 }
             }
+            if (this.isPlacementRotateKeyEvent(e)) {
+                if (this.isTextInputEvent(e)) return;
+                if (this.rotatePlacementPreview(e)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+            }
             if (e.key === "Tab") {
                 if (this.isLogisticsDragging && conveyorSystem.toggleBendMode()) {
                     e.preventDefault();
@@ -1055,12 +1063,14 @@ export class UIManager {
         `;
         document.body.appendChild(this.dragGhost);
         GameEngine.state.placingType = type;
+        GameEngine.state.placingRotation = 0;
     }
 
     static startStampMode(type) {
         this.cancelBuildingMode();
         GameEngine.state.buildingMode = 'STAMP';
         GameEngine.state.placingType = type;
+        GameEngine.state.placingRotation = 0;
         this.activeBuilding = type;
         GameEngine.addLog(`進入建造模式：${GameEngine.state.buildingConfigs[type].name} (ESC 取消)`);
     }
@@ -1069,6 +1079,7 @@ export class UIManager {
         if (!GameEngine.state.placingType) return;
         GameEngine.state.buildingMode = 'NONE';
         GameEngine.state.placingType = null;
+        GameEngine.state.placingRotation = 0;
         GameEngine.state.previewPos = null; // 核心修復：清除上一次的預覽位置，防止跳躍
         this.activeBuilding = null;
         GameEngine.state.linePreviewEntities = [];
@@ -1186,6 +1197,33 @@ export class UIManager {
             return { dir, width: Math.max(1, width), defIndex, slotIndex, x, y };
         };
 
+        const rotateDir = (dir, steps) => {
+            const dirs = ['up', 'right', 'down', 'left'];
+            const index = dirs.indexOf(dir);
+            if (index === -1) return dir;
+            return dirs[(index + steps) % 4];
+        };
+        const rotateSlot = (slot) => {
+            const steps = ((Number(ent.rotationSteps) || 0) % 4 + 4) % 4;
+            if (steps === 0) return slot;
+            const relX = slot.x - ent.x;
+            const relY = slot.y - ent.y;
+            let x = relX;
+            let y = relY;
+            for (let i = 0; i < steps; i++) {
+                const nextX = -y;
+                const nextY = x;
+                x = nextX;
+                y = nextY;
+            }
+            return {
+                ...slot,
+                dir: rotateDir(slot.dir, steps),
+                x: ent.x + x,
+                y: ent.y + y
+            };
+        };
+
         if (defs.length > 0) {
             defs.forEach((p, defIndex) => {
                 const dir = String(p.align || '').toLowerCase();
@@ -1199,17 +1237,17 @@ export class UIManager {
                 for (let i = 0; i < count; i++) {
                     const segStart = axisStart + i * (width + gap);
                     const segEnd = segStart + width;
-                    slots.push(makeSlot(dir, width, defIndex, i, segStart, segEnd));
+                    slots.push(rotateSlot(makeSlot(dir, width, defIndex, i, segStart, segEnd)));
                 }
             });
         }
 
         if (slots.length === 0) {
             // 沒有配置 port 時，提供四側中央的預設端口，避免物流中斷。
-            slots.push({ dir: 'up', width: 1, defIndex: -1, slotIndex: 0, x: ent.x, y: ent.y - halfH });
-            slots.push({ dir: 'down', width: 1, defIndex: -1, slotIndex: 0, x: ent.x, y: ent.y + halfH });
-            slots.push({ dir: 'left', width: 1, defIndex: -1, slotIndex: 0, x: ent.x - halfW, y: ent.y });
-            slots.push({ dir: 'right', width: 1, defIndex: -1, slotIndex: 0, x: ent.x + halfW, y: ent.y });
+            slots.push(rotateSlot({ dir: 'up', width: 1, defIndex: -1, slotIndex: 0, x: ent.x, y: ent.y - halfH }));
+            slots.push(rotateSlot({ dir: 'down', width: 1, defIndex: -1, slotIndex: 0, x: ent.x, y: ent.y + halfH }));
+            slots.push(rotateSlot({ dir: 'left', width: 1, defIndex: -1, slotIndex: 0, x: ent.x - halfW, y: ent.y }));
+            slots.push(rotateSlot({ dir: 'right', width: 1, defIndex: -1, slotIndex: 0, x: ent.x + halfW, y: ent.y }));
         }
         return slots;
     }
@@ -1552,6 +1590,29 @@ export class UIManager {
             scene.marqueeGraphics.clear();
             scene.marqueeGraphics.visible = false;
         }
+    }
+
+    static rotatePlacementPreview(e = null) {
+        const state = GameEngine.state;
+        if (!state.placingType) return false;
+        const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+        if (state.lastPlacementRotateAt && now - state.lastPlacementRotateAt < 40) return true;
+        state.lastPlacementRotateAt = now;
+        state.placingRotation = ((Number(state.placingRotation) || 0) + 1) % 4;
+        GameEngine.addLog(`[建造] 建築方向已旋轉 ${state.placingRotation * 90} 度。`, "SYSTEM");
+        if (e && typeof e.preventDefault === "function") e.preventDefault();
+        if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+        return true;
+    }
+
+    static isPlacementRotateKeyEvent(e) {
+        if (!e) return false;
+        const key = String(e.key || "");
+        return e.code === "KeyR" ||
+            e.keyCode === 82 ||
+            e.which === 82 ||
+            key.toLowerCase() === "r" ||
+            key === "ㄐ";
     }
 
     static cancelLogisticsDrag() {

@@ -35,6 +35,7 @@ export class GameEngine {
         resourceConfigs: [],
         buildingConfigs: {},
         placingType: null,
+        placingRotation: 0,
         previewPos: null,
         buildingMode: 'NONE', // 'NONE', 'DRAG', 'STAMP', 'LINE'
         buildingSpacing: 1, // [新功能] 建築批量放置間距
