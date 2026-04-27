@@ -2985,7 +2985,8 @@ export class MainScene extends Phaser.Scene {
 
         const dragDist = this.mouseDownScreenPos ? Math.hypot(screenX - this.mouseDownScreenPos.x, screenY - this.mouseDownScreenPos.y) : 0;
 
-        if (this.isLodMode && dragDist < 5 && !isShift && !GameEngine.state.placingType) {
+        const clickCount = isPhaserPointer ? (e.event?.detail || 0) : (e.detail || 0);
+        if (this.isLodMode && dragDist < 5 && clickCount >= 2 && !isShift && !GameEngine.state.placingType) {
             const cfg = this.getCameraZoomConfig();
             this.setCameraCenter(endX, endY, cfg.normalZoom, cfg.resetDuration);
             this.marqueeGraphics.clear();
