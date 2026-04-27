@@ -13,6 +13,7 @@ export class UIManager {
     static dragGhost = null;
     static logisticsSourceEntity = null; static logisticsSourceLine = null; static activeLogisticsConnection = null; static activeLogisticsLine = null;
     static isLogisticsDragging = false;
+    static potentialLogisticsDrag = null;
     static activeWarehouseEntity = null;
     static activeBuilding = null;
     static uiPositions = {};
@@ -1530,6 +1531,18 @@ export class UIManager {
         return true;
     }
 
+    static beginLogisticsDragFromBuilding(ent, sourcePort) {
+        if (!ent || !sourcePort) return false;
+        this.clearWorldSelectionMarquee();
+        this.logisticsSourceEntity = ent;
+        this.logisticsSourceLine = null;
+        this.isLogisticsDragging = true;
+        this.hideContextMenu();
+        conveyorSystem.startDrag(sourcePort.x, sourcePort.y, ent, sourcePort);
+        GameEngine.state.logisticsDragLine = { active: true };
+        return true;
+    }
+
     static clearWorldSelectionMarquee() {
         const scene = window.PhaserScene;
         if (!scene) return;
@@ -1547,6 +1560,7 @@ export class UIManager {
         this.clearWorldSelectionMarquee();
         this.logisticsSourceEntity = null;
         this.logisticsSourceLine = null;
+        this.potentialLogisticsDrag = null;
         this.isLogisticsDragging = false;
         GameEngine.state.logisticsDragLine = null;
         GameEngine.addLog(`[物流] 已取消物流線建造。`, 'LOGISTICS');
@@ -1671,18 +1685,14 @@ export class UIManager {
             return this.isPointInsideEntity(ent, worldX, worldY);
         });
         if (clickedBuilding && GameEngine.state.buildingMode === 'NONE') {
-            const bid = this.getEntityId(clickedBuilding);
-            if (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(bid)) {
-                this.clearWorldSelectionMarquee();
-                this.logisticsSourceEntity = clickedBuilding;
-                this.logisticsSourceLine = null;
-                this.isLogisticsDragging = true;
-                const sourcePort = this.getNearestPortSlot(clickedBuilding, worldX, worldY);
-                
-                // Use ConveyorSystem
-                conveyorSystem.startDrag(sourcePort?.x || worldX, sourcePort?.y || worldY, clickedBuilding, sourcePort);
-                GameEngine.state.logisticsDragLine = { active: true }; // Keep flag for rendering/UI
-                return;
+            const sourcePort = this.getNearestPortSlot(clickedBuilding, worldX, worldY);
+            if (sourcePort) {
+                this.potentialLogisticsDrag = {
+                    entity: clickedBuilding,
+                    sourcePort,
+                    startClientX: e.clientX,
+                    startClientY: e.clientY
+                };
             }
         }
 
@@ -1701,6 +1711,23 @@ export class UIManager {
     }
 
     static handleWorldMouseMove(e) {
+        if (this.potentialLogisticsDrag && !this.isLogisticsDragging) {
+            const threshold = UI_CONFIG.Interaction?.minDragDistance || 10;
+            const dist = Math.hypot(
+                e.clientX - this.potentialLogisticsDrag.startClientX,
+                e.clientY - this.potentialLogisticsDrag.startClientY
+            );
+            if (dist > threshold) {
+                const pending = this.potentialLogisticsDrag;
+                this.potentialLogisticsDrag = null;
+                if (this.beginLogisticsDragFromBuilding(pending.entity, pending.sourcePort)) {
+                    const world = this.getWorldPoint(e.clientX, e.clientY);
+                    conveyorSystem.updateDrag(world.x, world.y);
+                    return;
+                }
+            }
+        }
+
         if (this.isLogisticsDragging && GameEngine.state.logisticsDragLine) {
             const world = this.getWorldPoint(e.clientX, e.clientY);
             conveyorSystem.updateDrag(world.x, world.y);
@@ -1743,6 +1770,7 @@ export class UIManager {
 
         // [左鍵邏輯專區]
         if (e.button !== 0) return;
+        this.potentialLogisticsDrag = null;
 
         if (this.isLogisticsDragging) {
             conveyorSystem.submitDrag();
