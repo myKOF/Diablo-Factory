@@ -77,6 +77,37 @@ export class ConfigManager {
         });
         return costs;
     }
+
+    /**
+     * 解析建築 port 設定：
+     * "{{left,2,2,1},{down,1,3,2}}" => [{ align, width, count, gap }, ...]
+     */
+    static parseBuildingPorts(str) {
+        if (!str || typeof str !== 'string') return [];
+        const cleaned = str.trim().replace(/^"|"$/g, '');
+        if (!cleaned) return [];
+
+        const ports = [];
+        const segments = cleaned.match(/\{[^{}]+\}/g) || [];
+        const validDirs = new Set(['up', 'down', 'left', 'right']);
+
+        segments.forEach(seg => {
+            const body = seg.replace(/[{}]/g, '').trim();
+            if (!body) return;
+            const parts = body.split(',').map(s => s.trim());
+            if (parts.length < 4) return;
+
+            const align = (parts[0] || '').toLowerCase();
+            if (!validDirs.has(align)) return;
+
+            const width = Math.max(1, parseInt(parts[1], 10) || 1);
+            const count = Math.max(1, parseInt(parts[2], 10) || 1);
+            const gap = Math.max(0, parseInt(parts[3], 10) || 0);
+            ports.push({ align, width, count, gap });
+        });
+
+        return ports;
+    }
     
     static async loadNPCConfig(state) {
         try {
@@ -355,6 +386,7 @@ export class ConfigManager {
                 idxType1 = hIdx('type1'),
                 idxCol = hIdx('collision'),
                 idxSize = hIdx('size'),
+                idxPort = hIdx('port'),
                 idxPop = hIdx('population'),
                 idxName = headers.find(h => h === 'name' || h === '名稱'),
                 idxDesc = headers.find(h => h === 'desc' || h === '描述'),
@@ -400,6 +432,7 @@ export class ConfigManager {
                 const prodList = this.parseBracketArray(row[idxProd]);
 
                 const resValCosts = ConfigManager.parseResourceCosts(row[idxResourceValue]);
+                const ports = (idxPort !== -1) ? ConfigManager.parseBuildingPorts(row[idxPort]) : [];
                 const cfg = {
                     name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : model,
                     desc: (descIdx !== -1 && row[descIdx]) ? row[descIdx].trim() : "",
@@ -421,7 +454,9 @@ export class ConfigManager {
                     buildUnlock: row[idxUnlock] || "{0}",
                     upgradeTime: parseFloat(row[idxUpgradeTimes]) || 0,
                     need_villagers: (idxNeedVillagers !== -1 && row[idxNeedVillagers]) ? parseInt(row[idxNeedVillagers]) : 0,
-                    ingredients_production_raw: (idxIngredientsProd !== -1 && row[idxIngredientsProd]) ? row[idxIngredientsProd].trim() : ""
+                    ingredients_production_raw: (idxIngredientsProd !== -1 && row[idxIngredientsProd]) ? row[idxIngredientsProd].trim() : "",
+                    ports: ports,
+                    port: ports
                 };
 
                 // 按類型等級儲存

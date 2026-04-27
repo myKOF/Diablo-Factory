@@ -2486,6 +2486,64 @@ export class MainScene extends Phaser.Scene {
             g.fillStyle(0xc2185b, finalAlpha);
             g.fillCircle(offX, offY, 18);
         }
+
+        if (cfg && Array.isArray(cfg.ports) && cfg.ports.length > 0) {
+            this.drawBuildingPorts(g, offX, offY, uw, uh, cfg.ports, finalAlpha);
+        }
+    }
+
+    drawBuildingPorts(g, offX, offY, uw, uh, ports, alpha = 1) {
+        const TS = GameEngine.TILE_SIZE;
+        const halfW = (uw * TS) / 2;
+        const halfH = (uh * TS) / 2;
+        const fillColor = 0xffeb3b;
+        const edgeColor = 0xf57f17;
+        const fillAlpha = Math.min(1, Math.max(0.2, alpha * 0.95));
+        const edgeAlpha = Math.min(1, Math.max(0.2, alpha));
+        const stripDepth = Math.max(4, TS * 0.45);
+
+        const drawSegment = (dir, segStart, segEnd, axisLen) => {
+            const clampedStart = Math.max(0, segStart);
+            const clampedEnd = Math.min(axisLen, segEnd);
+            if (clampedEnd <= clampedStart) return;
+
+            if (dir === 'up' || dir === 'down') {
+                const x = offX - halfW + clampedStart * TS;
+                const w = (clampedEnd - clampedStart) * TS;
+                const y = (dir === 'up') ? (offY - halfH) : (offY + halfH - stripDepth);
+                g.fillStyle(fillColor, fillAlpha);
+                g.fillRect(x, y, w, stripDepth);
+                g.lineStyle(1.5, edgeColor, edgeAlpha);
+                g.strokeRect(x, y, w, stripDepth);
+            } else {
+                const y = offY - halfH + clampedStart * TS;
+                const h = (clampedEnd - clampedStart) * TS;
+                const x = (dir === 'left') ? (offX - halfW) : (offX + halfW - stripDepth);
+                g.fillStyle(fillColor, fillAlpha);
+                g.fillRect(x, y, stripDepth, h);
+                g.lineStyle(1.5, edgeColor, edgeAlpha);
+                g.strokeRect(x, y, stripDepth, h);
+            }
+        };
+
+        ports.forEach(port => {
+            const dir = (port.align || '').toLowerCase();
+            const axisLen = (dir === 'up' || dir === 'down') ? uw : uh;
+            if (!['up', 'down', 'left', 'right'].includes(dir) || axisLen <= 0) return;
+
+            const width = Math.max(1, Number(port.width) || 1);
+            const count = Math.max(1, Number(port.count) || 1);
+            const gap = Math.max(0, Number(port.gap) || 0);
+
+            const totalSpan = count * width + (count - 1) * gap;
+            const start = (axisLen - totalSpan) / 2;
+
+            for (let i = 0; i < count; i++) {
+                const segStart = start + i * (width + gap);
+                const segEnd = segStart + width;
+                drawSegment(dir, segStart, segEnd, axisLen);
+            }
+        });
     }
 
     /**
