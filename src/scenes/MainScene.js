@@ -280,7 +280,7 @@ export class MainScene extends Phaser.Scene {
         // 世界座標起點需根據 scrollX/Y (zoom 1.0 的左上角) 與縮放比例重新計算。
         const worldX = cam.scrollX + (cam.width * (1 - 1 / zoom)) / 2;
         const worldY = cam.scrollY + (cam.height * (1 - 1 / zoom)) / 2;
-        
+
         return {
             x: worldX - padding,
             y: worldY - padding,
@@ -306,7 +306,7 @@ export class MainScene extends Phaser.Scene {
         const cam = this.cameras.main;
         const bounds = cam.getBounds();
         const nextZoom = Phaser.Math.Clamp(zoom, this.getCameraZoomConfig().minZoom, this.getCameraZoomConfig().maxZoom);
-        
+
         // [核心修正] 在 Phaser 3 中，要讓相機中心對準世界座標 (worldX, worldY)，
         // 無論縮放倍率為何，scrollX 應設為 worldX - cam.width / 2。
         // 因為縮放是繞著相機中心 (scrollX + width/2) 進行的。
@@ -701,8 +701,8 @@ export class MainScene extends Phaser.Scene {
                                     }
                                 }
                                 const isSelected = (window.UIManager.activeLogisticsConnection &&
-                                                  window.UIManager.activeLogisticsConnection.source === ent &&
-                                                  window.UIManager.activeLogisticsConnection.targetId === conn.id);
+                                    window.UIManager.activeLogisticsConnection.source === ent &&
+                                    window.UIManager.activeLogisticsConnection.targetId === conn.id);
                                 const isConnected = !!conn.filter;
                                 const lColor = !isConnected
                                     ? (logCfg.disconnectedLineColor || "#6b6b6b")
