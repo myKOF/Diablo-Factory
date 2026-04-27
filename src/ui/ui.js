@@ -1303,6 +1303,15 @@ export class UIManager {
         return `logistics_${sourceId}_${targetKey}_${Date.now().toString(36)}_${Math.floor(Math.random() * 10000).toString(36)}`;
     }
 
+    static getLogisticsSegmentOccupyKey(line) {
+        if (!line) return null;
+        const TS = GameEngine.TILE_SIZE;
+        const align = TS / 2;
+        const gx = line.gridX !== undefined ? line.gridX : Math.round(line.x / align);
+        const gy = line.gridY !== undefined ? line.gridY : Math.round(line.y / align);
+        return `${gx},${gy}`;
+    }
+
     static buildGridRoutePoints(points) {
         if (!Array.isArray(points) || points.length < 2) return [];
         const TS = GameEngine.TILE_SIZE;
@@ -1407,7 +1416,19 @@ export class UIManager {
         const previous = lines.find(item => item.groupId === groupId || item.id === groupId);
         const filter = conn ? (conn.filter || null) : (previous?.filter || null);
         const segments = this.buildLogisticsSegments(groupId, sourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter);
-        GameEngine.state.logisticsLines = lines.filter(item => item.groupId !== groupId && item.id !== groupId).concat(segments);
+        const occupied = new Map();
+        lines.forEach(item => {
+            const key = this.getLogisticsSegmentOccupyKey(item);
+            if (key && !occupied.has(key)) occupied.set(key, item);
+        });
+        const additions = [];
+        segments.forEach(segment => {
+            const key = this.getLogisticsSegmentOccupyKey(segment);
+            if (!key || occupied.has(key)) return;
+            occupied.set(key, segment);
+            additions.push(segment);
+        });
+        GameEngine.state.logisticsLines = lines.concat(additions);
 
         if (conn) {
             conn.lineId = groupId;
@@ -1416,7 +1437,7 @@ export class UIManager {
             conn.sourcePort = cleanSourcePort;
             conn.targetPort = cleanTargetPort;
         }
-        return segments[segments.length - 1] || null;
+        return additions[additions.length - 1] || segments.map(segment => occupied.get(this.getLogisticsSegmentOccupyKey(segment))).filter(Boolean).pop() || null;
     }
 
     static getLogisticsLineRoute(line) {
