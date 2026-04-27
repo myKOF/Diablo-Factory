@@ -283,6 +283,12 @@ export class UIManager {
                 }
             }
             if (e.key === "Tab") {
+                if (this.isLogisticsDragging && conveyorSystem.toggleBendMode()) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    GameEngine.addLog(`[物流] 已切換物流線虛影方向。`, "LOGISTICS");
+                    return;
+                }
                 const state = GameEngine.state;
                 if (state.placingType && (state.buildingMode === "DRAG" || state.buildingMode === "LINE" || state.buildingMode === "STAMP")) {
                     e.preventDefault(); 

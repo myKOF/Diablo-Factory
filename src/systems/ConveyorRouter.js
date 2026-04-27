@@ -14,7 +14,7 @@ export class ConveyorRouter {
     /**
      * Find path using A* or L-Shape
      */
-    findPath(start, end, startDir = null) {
+    findPath(start, end, startDir = null, bendMode = 'x-first') {
         if (!start || !end) return null;
         if (start.x === end.x && start.y === end.y) return [start];
         if (!this.isInsideGrid(start) || !this.isInsideGrid(end)) return null;
@@ -25,7 +25,7 @@ export class ConveyorRouter {
         if (this.grid[start.y]) this.grid[start.y][start.x] = 0;
         if (this.grid[end.y]) this.grid[end.y][end.x] = 0;
 
-        let path = this.getLShapePath(start, end, startDir);
+        let path = this.getLShapePath(start, end, startDir, bendMode);
         if (!path) {
             path = this.findAStarPath(start, end, startDir);
         }
@@ -40,7 +40,7 @@ export class ConveyorRouter {
     /**
      * L-Shape Priority: Max 1 turn
      */
-    getLShapePath(start, end, startDir) {
+    getLShapePath(start, end, startDir, bendMode = 'x-first') {
         const dx = end.x - start.x;
         const dy = end.y - start.y;
 
@@ -60,23 +60,10 @@ export class ConveyorRouter {
         for (let x = start.x + Math.sign(dx); x !== end.x + Math.sign(dx); x += Math.sign(dx)) pathY.push({ x, y: end.y });
         paths.push(pathY);
 
-        // If startDir is provided, prioritize the path that follows it
-        if (startDir) {
-            const dirVec = this.getDirectionVector(startDir);
-            const firstMoveX = { x: Math.sign(dx), y: 0 };
-            const firstMoveY = { x: 0, y: Math.sign(dy) };
-
-            if (dirVec.x === firstMoveX.x && dirVec.y === firstMoveX.y) {
-                if (this.isValidPath(pathX)) return pathX;
-            }
-            if (dirVec.x === firstMoveY.x && dirVec.y === firstMoveY.y) {
-                if (this.isValidPath(pathY)) return pathY;
-            }
-        }
-
-        // Return the first valid one
-        if (this.isValidPath(pathX)) return pathX;
-        if (this.isValidPath(pathY)) return pathY;
+        const primary = bendMode === 'y-first' ? pathY : pathX;
+        const secondary = bendMode === 'y-first' ? pathX : pathY;
+        if (this.isValidPath(primary)) return primary;
+        if (this.isValidPath(secondary)) return secondary;
 
         return null;
     }

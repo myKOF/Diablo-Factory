@@ -35,6 +35,8 @@ export class ConveyorSystem {
             sourceLine,
             targetBuilding: null,
             targetPort: null,
+            bendMode: 'x-first',
+            lastWorldPoint: null,
             startGrid: this.toGrid(startX, startY)
         };
         
@@ -59,6 +61,37 @@ export class ConveyorSystem {
         return Math.round(1 / this.getAlignmentUnit());
     }
 
+    getDirectionVector(dir) {
+        if (dir === 'up') return { x: 0, y: -1 };
+        if (dir === 'down') return { x: 0, y: 1 };
+        if (dir === 'left') return { x: -1, y: 0 };
+        if (dir === 'right') return { x: 1, y: 0 };
+        return { x: 0, y: 0 };
+    }
+
+    getPortAnchorGrid(port, portGrid) {
+        if (!port || !port.dir || !portGrid) return portGrid;
+        const routeScale = this.getRouteScale();
+        const dir = this.getDirectionVector(port.dir);
+        return {
+            x: portGrid.x + dir.x * routeScale,
+            y: portGrid.y + dir.y * routeScale
+        };
+    }
+
+    buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, targetPortGrid, targetRouteGrid) {
+        if (!Array.isArray(routePath) || routePath.length === 0) return routePath;
+        const path = routePath.map(p => ({ x: p.x, y: p.y }));
+        const samePoint = (a, b) => a && b && a.x === b.x && a.y === b.y;
+        if (sourcePortGrid && !samePoint(sourcePortGrid, sourceRouteGrid)) {
+            path.unshift({ x: sourcePortGrid.x, y: sourcePortGrid.y, isPortConnector: true });
+        }
+        if (targetPortGrid && !samePoint(targetPortGrid, targetRouteGrid) && !samePoint(path[path.length - 1], targetPortGrid)) {
+            path.push({ x: targetPortGrid.x, y: targetPortGrid.y, isPortConnector: true });
+        }
+        return path;
+    }
+
     createRoutingGrid(grid) {
         const expanded = [];
         const routeScale = this.getRouteScale();
@@ -71,7 +104,22 @@ export class ConveyorSystem {
             }
             expanded.push(...sourceRows);
         }
-        return expanded;
+        const inflated = expanded.map(row => row.slice());
+        const clearance = Math.max(1, Math.floor(routeScale / 2));
+        for (let y = 0; y < expanded.length; y++) {
+            for (let x = 0; x < expanded[y].length; x++) {
+                if (expanded[y][x] === 0) continue;
+                for (let dy = -clearance; dy <= clearance; dy++) {
+                    for (let dx = -clearance; dx <= clearance; dx++) {
+                        const ny = y + dy;
+                        const nx = x + dx;
+                        if (ny < 0 || ny >= inflated.length || nx < 0 || nx >= inflated[ny].length) continue;
+                        inflated[ny][nx] = expanded[y][x];
+                    }
+                }
+            }
+        }
+        return inflated;
     }
 
     updateDrag(currentX, currentY) {
@@ -94,16 +142,22 @@ export class ConveyorSystem {
 
     updateDragNow(currentX, currentY) {
         if (!this.activeDrag) return;
+        this.activeDrag.lastWorldPoint = { x: currentX, y: currentY };
 
         const dragTarget = this.resolveDragTarget(currentX, currentY);
-        const endGrid = this.toGrid(dragTarget.x, dragTarget.y);
-        const startGrid = this.activeDrag.startGrid;
-        const routeKey = `${startGrid.x},${startGrid.y}->${endGrid.x},${endGrid.y}:${this.activeDrag.sourcePort?.dir || ''}:${dragTarget.building ? window.UIManager?.getEntityId?.(dragTarget.building) : ''}`;
+        const targetPortGrid = this.toGrid(dragTarget.x, dragTarget.y);
+        const sourcePortGrid = this.activeDrag.startGrid;
+        const sourceRouteGrid = this.getPortAnchorGrid(this.activeDrag.sourcePort, sourcePortGrid);
+        const targetRouteGrid = dragTarget.port
+            ? this.getPortAnchorGrid(dragTarget.port, targetPortGrid)
+            : targetPortGrid;
+        const routeKey = `${sourceRouteGrid.x},${sourceRouteGrid.y}->${targetRouteGrid.x},${targetRouteGrid.y}:${sourcePortGrid.x},${sourcePortGrid.y}:${targetPortGrid.x},${targetPortGrid.y}:${this.activeDrag.sourcePort?.dir || ''}:${dragTarget.port?.dir || ''}:${this.activeDrag.bendMode}:${dragTarget.building ? window.UIManager?.getEntityId?.(dragTarget.building) : ''}`;
         if (routeKey === this.lastRouteKey) return;
         this.lastRouteKey = routeKey;
 
         // Auto-Routing with A* Turn Penalty
-        const path = this.router.findPath(startGrid, endGrid, this.activeDrag.sourcePort?.dir);
+        const routePath = this.router.findPath(sourceRouteGrid, targetRouteGrid, this.activeDrag.sourcePort?.dir, this.activeDrag.bendMode);
+        const path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
         
         if (path) {
             this.ghosts = this.router.processPath(path, dragTarget.building, GameEngine.state.logisticsLines || []);
@@ -116,6 +170,18 @@ export class ConveyorSystem {
         // Update global state for rendering
         GameEngine.state.conveyorGhosts = this.ghosts;
         GameEngine.state.conveyorValid = this.isValid;
+    }
+
+    toggleBendMode() {
+        if (!this.activeDrag) return false;
+        this.activeDrag.bendMode = this.activeDrag.bendMode === 'x-first' ? 'y-first' : 'x-first';
+        this.lastRouteKey = null;
+        const point = this.pendingDragPoint || this.activeDrag.lastWorldPoint;
+        if (point) {
+            this.pendingDragPoint = null;
+            this.updateDragNow(point.x, point.y);
+        }
+        return true;
     }
 
     resolveDragTarget(currentX, currentY) {
