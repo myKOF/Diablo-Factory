@@ -691,15 +691,16 @@ export class MainScene extends Phaser.Scene {
                         ent.outputTargets.forEach(conn => {
                             const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
                             if (target) {
-                                let sx = ent.x, sy = ent.y, ex = target.x, ey = target.y;
-                                const isReciprocal = target.outputTargets && target.outputTargets.find(t => (t.id === (ent.id || getCoordId(ent))));
-                                if (isReciprocal) {
-                                    const dx = ex - sx, dy = ey - sy; const dist = Math.hypot(dx, dy);
-                                    if (dist > 0) {
-                                        const nx = -dy / dist, ny = dx / dist; const offset = logCfg.lineOffset || 10;
-                                        sx += nx * offset; sy += ny * offset; ex += nx * offset; ey += ny * offset;
-                                    }
-                                }
+                                const route = (window.UIManager && typeof window.UIManager.getConnectionRoute === 'function')
+                                    ? window.UIManager.getConnectionRoute(ent, target, conn)
+                                    : null;
+                                const points = route && Array.isArray(route.points) && route.points.length >= 2
+                                    ? route.points
+                                    : [{ x: ent.x, y: ent.y }, { x: target.x, y: target.y }];
+                                const widthTiles = route && route.width ? route.width : 1;
+                                const baseThickness = logCfg.lineThickness || 3;
+                                const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE * 0.8);
+
                                 const isSelected = (window.UIManager.activeLogisticsConnection &&
                                     window.UIManager.activeLogisticsConnection.source === ent &&
                                     window.UIManager.activeLogisticsConnection.targetId === conn.id);
@@ -710,20 +711,17 @@ export class MainScene extends Phaser.Scene {
                                 const lAlpha = !isConnected
                                     ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha)
                                     : (isSelected ? (logCfg.selectedLineAlpha || 1.0) : logCfg.lineAlpha);
-                                this.logisticsGraphics.lineStyle(logCfg.lineThickness, parseColor(lColor), lAlpha);
-                                this.logisticsGraphics.beginPath(); this.logisticsGraphics.moveTo(sx, sy); this.logisticsGraphics.lineTo(ex, ey); this.logisticsGraphics.strokePath();
-                                const adx = ex - sx, ady = ey - sy; const alen = Math.hypot(adx, ady);
-                                if (alen > 20) {
-                                    const ux = adx / alen, uy = ady / alen;
+                                this.logisticsGraphics.lineStyle(thickPx, parseColor(lColor), lAlpha);
+                                this.strokePolyline(this.logisticsGraphics, points);
+                                const polyLen = this.getPolylineLength(points);
+                                if (polyLen > 24) {
                                     const speed = logCfg.arrowSpeed || 60; const spacing = logCfg.arrowSpacing || 40;
                                     const arrowOffset = isConnected ? ((currentTime * speed) % spacing) : spacing * 0.5;
                                     const arrowColor = isConnected ? logCfg.arrowColor : (logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
                                     const arrowAlpha = isConnected ? 0.9 : (logCfg.disconnectedArrowAlpha ?? 0.85);
                                     const arrowSize = isConnected ? (logCfg.arrowSize || 8) : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8);
                                     this.logisticsGraphics.fillStyle(parseColor(arrowColor), arrowAlpha);
-                                    for (let d = arrowOffset; d < alen - 10; d += spacing) {
-                                        this.drawArrowhead(this.logisticsGraphics, sx + ux * d, sy + uy * d, ux, uy, arrowSize);
-                                    }
+                                    this.drawArrowsOnPolyline(this.logisticsGraphics, points, arrowOffset, spacing, arrowSize);
                                 }
                             }
                         });
@@ -731,38 +729,26 @@ export class MainScene extends Phaser.Scene {
                 });
             }
             if (state.logisticsDragLine) {
-                const sx = state.logisticsDragLine.startX;
-                const sy = state.logisticsDragLine.startY;
-                const ex = state.logisticsDragLine.endX;
-                const ey = state.logisticsDragLine.endY;
+                const dragPoints = Array.isArray(state.logisticsDragLine.points) && state.logisticsDragLine.points.length >= 2
+                    ? state.logisticsDragLine.points
+                    : [
+                        { x: state.logisticsDragLine.startX, y: state.logisticsDragLine.startY },
+                        { x: state.logisticsDragLine.endX, y: state.logisticsDragLine.endY }
+                    ];
                 const dragColor = parseColor(logCfg.dragLineColor);
-                const dx = ex - sx;
-                const dy = ey - sy;
-                const len = Math.hypot(dx, dy);
+                const dragLen = this.getPolylineLength(dragPoints);
+                const dragWidthTiles = Math.max(1, Number(state.logisticsDragLine.lineWidth) || 1);
+                const dragThickness = Math.max(
+                    logCfg.dragLineThickness || logCfg.lineThickness || 3,
+                    dragWidthTiles * GameEngine.TILE_SIZE * 0.8
+                );
 
-                if (len > 24) {
-                    const ux = dx / len;
-                    const uy = dy / len;
+                this.logisticsGraphics.lineStyle(dragThickness, dragColor, logCfg.dragLineAlpha);
+                this.strokePolyline(this.logisticsGraphics, dragPoints);
+                if (dragLen > 18) {
                     const arrowSize = Math.max(logCfg.dragArrowSize || logCfg.arrowSize || 8, 1);
-                    const arrowCenterX = ex - ux * arrowSize;
-                    const arrowCenterY = ey - uy * arrowSize;
-                    const arrowBaseX = ex - ux * arrowSize * 1.5;
-                    const arrowBaseY = ey - uy * arrowSize * 1.5;
-
-                    this.logisticsGraphics.lineStyle(logCfg.dragLineThickness || logCfg.lineThickness, dragColor, logCfg.dragLineAlpha);
-                    this.logisticsGraphics.beginPath();
-                    this.logisticsGraphics.moveTo(sx, sy);
-                    this.logisticsGraphics.lineTo(arrowBaseX, arrowBaseY);
-                    this.logisticsGraphics.strokePath();
-
                     this.logisticsGraphics.fillStyle(dragColor, logCfg.dragLineAlpha);
-                    this.drawArrowhead(this.logisticsGraphics, arrowCenterX, arrowCenterY, ux, uy, arrowSize);
-                } else {
-                    this.logisticsGraphics.lineStyle(logCfg.dragLineThickness || logCfg.lineThickness, dragColor, logCfg.dragLineAlpha);
-                    this.logisticsGraphics.beginPath();
-                    this.logisticsGraphics.moveTo(sx, sy);
-                    this.logisticsGraphics.lineTo(ex, ey);
-                    this.logisticsGraphics.strokePath();
+                    this.drawArrowAtPolylineEnd(this.logisticsGraphics, dragPoints, arrowSize);
                 }
             }
         }
@@ -2963,6 +2949,78 @@ export class MainScene extends Phaser.Scene {
         g.lineTo(x - ux * size * 0.5 - px, y - uy * size * 0.5 - py); // 底角 2
         g.closePath();
         g.fillPath();
+    }
+
+    strokePolyline(g, points) {
+        if (!Array.isArray(points) || points.length < 2) return;
+        g.beginPath();
+        g.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            g.lineTo(points[i].x, points[i].y);
+        }
+        g.strokePath();
+    }
+
+    getPolylineLength(points) {
+        if (!Array.isArray(points) || points.length < 2) return 0;
+        let total = 0;
+        for (let i = 0; i < points.length - 1; i++) {
+            total += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+        }
+        return total;
+    }
+
+    getPointAndDirectionOnPolyline(points, distance) {
+        if (!Array.isArray(points) || points.length < 2) return null;
+        let remain = distance;
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const segLen = Math.hypot(dx, dy);
+            if (segLen < 0.001) continue;
+            if (remain <= segLen) {
+                const t = remain / segLen;
+                return {
+                    x: a.x + dx * t,
+                    y: a.y + dy * t,
+                    ux: dx / segLen,
+                    uy: dy / segLen
+                };
+            }
+            remain -= segLen;
+        }
+        const a = points[points.length - 2];
+        const b = points[points.length - 1];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const segLen = Math.hypot(dx, dy) || 1;
+        return { x: b.x, y: b.y, ux: dx / segLen, uy: dy / segLen };
+    }
+
+    drawArrowsOnPolyline(g, points, offset, spacing, size) {
+        const len = this.getPolylineLength(points);
+        if (len <= 8) return;
+        for (let d = offset; d < len - 8; d += spacing) {
+            const info = this.getPointAndDirectionOnPolyline(points, d);
+            if (info) this.drawArrowhead(g, info.x, info.y, info.ux, info.uy, size);
+        }
+    }
+
+    drawArrowAtPolylineEnd(g, points, size) {
+        if (!Array.isArray(points) || points.length < 2) return;
+        const a = points[points.length - 2];
+        const b = points[points.length - 1];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const segLen = Math.hypot(dx, dy);
+        if (segLen < 0.001) return;
+        const ux = dx / segLen;
+        const uy = dy / segLen;
+        const cx = b.x - ux * size;
+        const cy = b.y - uy * size;
+        this.drawArrowhead(g, cx, cy, ux, uy, size);
     }
 
     /**

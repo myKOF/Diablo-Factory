@@ -1097,6 +1097,192 @@ export class UIManager {
         };
     }
 
+    static getEntityId(ent) {
+        return ent && (ent.id || `${ent.type1}_${ent.x}_${ent.y}`);
+    }
+
+    static getEntityFootprint(ent) {
+        const TS = GameEngine.TILE_SIZE;
+        const fp = GameEngine.getFootprint(ent.type1);
+        return {
+            uw: fp && fp.uw ? fp.uw : 1,
+            uh: fp && fp.uh ? fp.uh : 1,
+            w: (fp && fp.uw ? fp.uw : 1) * TS,
+            h: (fp && fp.uh ? fp.uh : 1) * TS
+        };
+    }
+
+    static isPointInsideEntity(ent, worldX, worldY) {
+        if (!ent) return false;
+        const fp = this.getEntityFootprint(ent);
+        return worldX > ent.x - fp.w / 2 && worldX < ent.x + fp.w / 2 &&
+            worldY > ent.y - fp.h / 2 && worldY < ent.y + fp.h / 2;
+    }
+
+    static getDirectionVector(dir) {
+        if (dir === 'up') return { x: 0, y: -1 };
+        if (dir === 'down') return { x: 0, y: 1 };
+        if (dir === 'left') return { x: -1, y: 0 };
+        return { x: 1, y: 0 };
+    }
+
+    static getOppositeDirection(dir) {
+        if (dir === 'up') return 'down';
+        if (dir === 'down') return 'up';
+        if (dir === 'left') return 'right';
+        return 'left';
+    }
+
+    static getBuildingPortSlots(ent) {
+        if (!ent) return [];
+        const TS = GameEngine.TILE_SIZE;
+        const cfg = GameEngine.getEntityConfig(ent.type1) || {};
+        const fp = this.getEntityFootprint(ent);
+        const halfW = fp.w / 2;
+        const halfH = fp.h / 2;
+        const defs = Array.isArray(cfg.ports) ? cfg.ports : (Array.isArray(cfg.port) ? cfg.port : []);
+        const slots = [];
+
+        const makeSlot = (dir, width, defIndex, slotIndex, start, end) => {
+            let x = ent.x;
+            let y = ent.y;
+            if (dir === 'up' || dir === 'down') {
+                const centerAlong = (start + end) / 2;
+                x = ent.x - halfW + centerAlong * TS;
+                y = dir === 'up' ? (ent.y - halfH) : (ent.y + halfH);
+            } else {
+                const centerAlong = (start + end) / 2;
+                y = ent.y - halfH + centerAlong * TS;
+                x = dir === 'left' ? (ent.x - halfW) : (ent.x + halfW);
+            }
+            return { dir, width: Math.max(1, width), defIndex, slotIndex, x, y };
+        };
+
+        if (defs.length > 0) {
+            defs.forEach((p, defIndex) => {
+                const dir = String(p.align || '').toLowerCase();
+                if (!['up', 'down', 'left', 'right'].includes(dir)) return;
+                const width = Math.max(1, Number(p.width) || 1);
+                const count = Math.max(1, Number(p.count) || 1);
+                const gap = Math.max(0, Number(p.gap) || 0);
+                const axisLen = (dir === 'up' || dir === 'down') ? fp.uw : fp.uh;
+                const totalSpan = count * width + (count - 1) * gap;
+                const axisStart = (axisLen - totalSpan) / 2;
+                for (let i = 0; i < count; i++) {
+                    const segStart = axisStart + i * (width + gap);
+                    const segEnd = segStart + width;
+                    slots.push(makeSlot(dir, width, defIndex, i, segStart, segEnd));
+                }
+            });
+        }
+
+        if (slots.length === 0) {
+            // 沒有配置 port 時，提供四側中央的預設端口，避免物流中斷。
+            slots.push({ dir: 'up', width: 1, defIndex: -1, slotIndex: 0, x: ent.x, y: ent.y - halfH });
+            slots.push({ dir: 'down', width: 1, defIndex: -1, slotIndex: 0, x: ent.x, y: ent.y + halfH });
+            slots.push({ dir: 'left', width: 1, defIndex: -1, slotIndex: 0, x: ent.x - halfW, y: ent.y });
+            slots.push({ dir: 'right', width: 1, defIndex: -1, slotIndex: 0, x: ent.x + halfW, y: ent.y });
+        }
+        return slots;
+    }
+
+    static getNearestPortSlot(ent, worldX, worldY, preferredDir = null) {
+        const slots = this.getBuildingPortSlots(ent);
+        if (!slots.length) return null;
+        let best = null;
+        let bestScore = Infinity;
+        for (const slot of slots) {
+            const dist = Math.hypot(slot.x - worldX, slot.y - worldY);
+            const dirPenalty = preferredDir && slot.dir !== preferredDir ? GameEngine.TILE_SIZE * 1.2 : 0;
+            const score = dist + dirPenalty;
+            if (score < bestScore) {
+                bestScore = score;
+                best = slot;
+            }
+        }
+        return best;
+    }
+
+    static buildOrthogonalRoute(startPoint, endPoint, startDir = null, endDir = null, biasPoint = null) {
+        const TS = GameEngine.TILE_SIZE;
+        const margin = TS * 0.7;
+        const pts = [];
+        const pushPoint = (x, y) => {
+            const px = Math.round(x);
+            const py = Math.round(y);
+            const last = pts[pts.length - 1];
+            if (!last || last.x !== px || last.y !== py) {
+                pts.push({ x: px, y: py });
+            }
+        };
+
+        const startVec = startDir ? this.getDirectionVector(startDir) : null;
+        const endVec = endDir ? this.getDirectionVector(endDir) : null;
+
+        const s0 = { x: startPoint.x, y: startPoint.y };
+        const s1 = startVec ? { x: s0.x + startVec.x * margin, y: s0.y + startVec.y * margin } : { ...s0 };
+        const e0 = { x: endPoint.x, y: endPoint.y };
+        const e1 = endVec ? { x: e0.x + endVec.x * margin, y: e0.y + endVec.y * margin } : { ...e0 };
+
+        pushPoint(s0.x, s0.y);
+        pushPoint(s1.x, s1.y);
+
+        const dx = e1.x - s1.x;
+        const dy = e1.y - s1.y;
+        if (Math.abs(dx) < 1 || Math.abs(dy) < 1) {
+            pushPoint(e1.x, e1.y);
+        } else {
+            const bendA = { x: e1.x, y: s1.y }; // 先水平後垂直
+            const bendB = { x: s1.x, y: e1.y }; // 先垂直後水平
+            let chooseA = Math.abs(dx) >= Math.abs(dy);
+            if (biasPoint) {
+                const aScore = Math.hypot(bendA.x - biasPoint.x, bendA.y - biasPoint.y);
+                const bScore = Math.hypot(bendB.x - biasPoint.x, bendB.y - biasPoint.y);
+                chooseA = aScore <= bScore;
+            }
+            const bend = chooseA ? bendA : bendB;
+            pushPoint(bend.x, bend.y);
+            pushPoint(e1.x, e1.y);
+        }
+
+        pushPoint(e0.x, e0.y);
+        return pts;
+    }
+
+    static getLogisticsTargetBuildingAt(worldX, worldY, sourceEnt = null) {
+        return GameEngine.state.mapEntities.find(ent => {
+            if (ent.isUnderConstruction) return false;
+            if (sourceEnt && ent === sourceEnt) return false;
+            const cfg = GameEngine.getEntityConfig(ent.type1);
+            if (!cfg || !cfg.logistics || !cfg.logistics.canInput) return false;
+            return this.isPointInsideEntity(ent, worldX, worldY);
+        }) || null;
+    }
+
+    static getConnectionRoute(sourceEnt, targetEnt, conn = null) {
+        if (!sourceEnt || !targetEnt) return null;
+        if (conn && Array.isArray(conn.routePoints) && conn.routePoints.length >= 2) {
+            return {
+                points: conn.routePoints.map(p => ({ x: p.x, y: p.y })),
+                width: Math.max(1, Number(conn.routeWidth) || 1)
+            };
+        }
+        const sourcePort = this.getNearestPortSlot(sourceEnt, targetEnt.x, targetEnt.y);
+        const preferredDir = sourcePort ? this.getOppositeDirection(sourcePort.dir) : null;
+        const targetPort = this.getNearestPortSlot(targetEnt, sourceEnt.x, sourceEnt.y, preferredDir);
+        if (!sourcePort || !targetPort) return null;
+        return {
+            points: this.buildOrthogonalRoute(
+                { x: sourcePort.x, y: sourcePort.y },
+                { x: targetPort.x, y: targetPort.y },
+                sourcePort.dir,
+                targetPort.dir,
+                { x: (sourceEnt.x + targetEnt.x) / 2, y: (sourceEnt.y + targetEnt.y) / 2 }
+            ),
+            width: Math.max(1, Math.min(sourcePort.width || 1, targetPort.width || 1))
+        };
+    }
+
     static handleWorldMouseDown(e) {
         if (e.target.closest("#ui_layer")) return;
 
@@ -1120,15 +1306,34 @@ export class UIManager {
             if (ent.isUnderConstruction) return false;
             const cfg = GameEngine.getEntityConfig(ent.type1);
             if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false;
-            const em = cfg.size ? cfg.size.match(/\{\s*(\d+)\s*,\s*(\d+)\s*\}/) : null;
-            const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE; const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
-            return worldX > ent.x - w / 2 && worldX < ent.x + w / 2 && worldY > ent.y - h / 2 && worldY < ent.y + h / 2;
+            return this.isPointInsideEntity(ent, worldX, worldY);
         });
         if (clickedBuilding && GameEngine.state.buildingMode === 'NONE') {
-            const bid = clickedBuilding.id || `${clickedBuilding.type1}_${clickedBuilding.x}_${clickedBuilding.y}`;
+            const bid = this.getEntityId(clickedBuilding);
             if (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(bid)) {
                 this.logisticsSourceEntity = clickedBuilding;
-                GameEngine.state.logisticsDragLine = { startX: clickedBuilding.x, startY: clickedBuilding.y, endX: worldX, endY: worldY };
+                const sourcePort = this.getNearestPortSlot(clickedBuilding, worldX, worldY);
+                const routePoints = sourcePort
+                    ? this.buildOrthogonalRoute(
+                        { x: sourcePort.x, y: sourcePort.y },
+                        { x: worldX, y: worldY },
+                        sourcePort.dir,
+                        null,
+                        { x: worldX, y: worldY }
+                    )
+                    : [{ x: clickedBuilding.x, y: clickedBuilding.y }, { x: worldX, y: worldY }];
+                GameEngine.state.logisticsDragLine = {
+                    sourceEntityId: bid,
+                    targetEntityId: null,
+                    startX: sourcePort ? sourcePort.x : clickedBuilding.x,
+                    startY: sourcePort ? sourcePort.y : clickedBuilding.y,
+                    endX: worldX,
+                    endY: worldY,
+                    sourcePort,
+                    targetPort: null,
+                    lineWidth: sourcePort ? Math.max(1, Number(sourcePort.width) || 1) : 1,
+                    points: routePoints
+                };
                 return;
             }
         }
@@ -1144,7 +1349,46 @@ export class UIManager {
     static handleWorldMouseMove(e) {
         if (this.logisticsSourceEntity && GameEngine.state.logisticsDragLine) {
             const world = this.getWorldPoint(e.clientX, e.clientY);
-            GameEngine.state.logisticsDragLine.endX = world.x; GameEngine.state.logisticsDragLine.endY = world.y;
+            const drag = GameEngine.state.logisticsDragLine;
+            const sourceEnt = this.logisticsSourceEntity;
+            const sourcePort = drag.sourcePort || this.getNearestPortSlot(sourceEnt, world.x, world.y);
+            const targetBuilding = this.getLogisticsTargetBuildingAt(world.x, world.y, sourceEnt);
+
+            if (targetBuilding && sourcePort) {
+                const preferredDir = this.getOppositeDirection(sourcePort.dir);
+                const targetPort = this.getNearestPortSlot(targetBuilding, world.x, world.y, preferredDir);
+                if (targetPort) {
+                    drag.targetEntityId = this.getEntityId(targetBuilding);
+                    drag.targetPort = targetPort;
+                    drag.lineWidth = Math.max(1, Math.min(sourcePort.width || 1, targetPort.width || 1));
+                    drag.endX = targetPort.x;
+                    drag.endY = targetPort.y;
+                    drag.points = this.buildOrthogonalRoute(
+                        { x: sourcePort.x, y: sourcePort.y },
+                        { x: targetPort.x, y: targetPort.y },
+                        sourcePort.dir,
+                        targetPort.dir,
+                        { x: world.x, y: world.y }
+                    );
+                }
+            } else if (sourcePort) {
+                drag.targetEntityId = null;
+                drag.targetPort = null;
+                drag.lineWidth = Math.max(1, Number(sourcePort.width) || 1);
+                drag.endX = world.x;
+                drag.endY = world.y;
+                drag.points = this.buildOrthogonalRoute(
+                    { x: sourcePort.x, y: sourcePort.y },
+                    { x: world.x, y: world.y },
+                    sourcePort.dir,
+                    null,
+                    { x: world.x, y: world.y }
+                );
+            } else {
+                drag.endX = world.x;
+                drag.endY = world.y;
+                drag.points = [{ x: sourceEnt.x, y: sourceEnt.y }, { x: world.x, y: world.y }];
+            }
             return;
         }
 
@@ -1187,22 +1431,41 @@ export class UIManager {
 
         if (this.logisticsSourceEntity) {
             const world = this.getWorldPoint(e.clientX, e.clientY);
-            const worldX = world.x; const worldY = world.y;
-            const targetBuilding = GameEngine.state.mapEntities.find(ent => {
-                if (ent === this.logisticsSourceEntity || ent.isUnderConstruction) return false;
-                const cfg = GameEngine.getEntityConfig(ent.type1);
-                if (!cfg || !cfg.logistics || !cfg.logistics.canInput) return false;
-                const em = cfg.size ? cfg.size.match(/\{\s*(\d+)\s*,\s*(\d+)\s*\}/) : null;
-                const w = (em ? parseInt(em[1]) : 1) * GameEngine.TILE_SIZE; const h = (em ? parseInt(em[2]) : 1) * GameEngine.TILE_SIZE;
-                return worldX > ent.x - w / 2 && worldX < ent.x + w / 2 && worldY > ent.y - h / 2 && worldY < ent.y + h / 2;
-            });
+            const drag = GameEngine.state.logisticsDragLine || {};
+            let targetBuilding = null;
+            if (drag.targetEntityId) {
+                targetBuilding = GameEngine.state.mapEntities.find(ent => this.getEntityId(ent) === drag.targetEntityId) || null;
+            }
+            if (!targetBuilding) {
+                targetBuilding = this.getLogisticsTargetBuildingAt(world.x, world.y, this.logisticsSourceEntity);
+            }
             if (targetBuilding) {
                 if (!this.logisticsSourceEntity.outputTargets) this.logisticsSourceEntity.outputTargets = [];
-                const tId = targetBuilding.id || `${targetBuilding.type1}_${targetBuilding.x}_${targetBuilding.y}`;
-                if (!this.logisticsSourceEntity.outputTargets.find(t => t.id === tId)) {
-                    this.logisticsSourceEntity.outputTargets.push({ id: tId, filter: null });
+                const tId = this.getEntityId(targetBuilding);
+                const sourcePort = drag.sourcePort || this.getNearestPortSlot(this.logisticsSourceEntity, targetBuilding.x, targetBuilding.y);
+                const preferredDir = sourcePort ? this.getOppositeDirection(sourcePort.dir) : null;
+                const targetPort = drag.targetPort || this.getNearestPortSlot(targetBuilding, world.x, world.y, preferredDir);
+                const points = (sourcePort && targetPort)
+                    ? this.buildOrthogonalRoute(
+                        { x: sourcePort.x, y: sourcePort.y },
+                        { x: targetPort.x, y: targetPort.y },
+                        sourcePort.dir,
+                        targetPort.dir,
+                        { x: world.x, y: world.y }
+                    )
+                    : [{ x: this.logisticsSourceEntity.x, y: this.logisticsSourceEntity.y }, { x: targetBuilding.x, y: targetBuilding.y }];
+                const routeWidth = Math.max(1, Math.min(sourcePort?.width || 1, targetPort?.width || 1));
+
+                let conn = this.logisticsSourceEntity.outputTargets.find(t => t.id === tId);
+                if (!conn) {
+                    conn = { id: tId, filter: null };
+                    this.logisticsSourceEntity.outputTargets.push(conn);
                     GameEngine.addLog(`[物流] 連線建立：${this.logisticsSourceEntity.name} ➡️ ${targetBuilding.name}`, 'LOGISTICS');
                 }
+                conn.routePoints = points.map(p => ({ x: p.x, y: p.y }));
+                conn.routeWidth = routeWidth;
+                conn.sourcePort = sourcePort ? { dir: sourcePort.dir, slotIndex: sourcePort.slotIndex, defIndex: sourcePort.defIndex, width: sourcePort.width } : null;
+                conn.targetPort = targetPort ? { dir: targetPort.dir, slotIndex: targetPort.slotIndex, defIndex: targetPort.defIndex, width: targetPort.width } : null;
                 this.showLogisticsMenu(this.logisticsSourceEntity, tId, e.clientX, e.clientY);
             }
             this.logisticsSourceEntity = null; GameEngine.state.logisticsDragLine = null;
@@ -1375,24 +1638,26 @@ export class UIManager {
             let t = Math.max(0, Math.min(1, ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2));
             return Math.pow(p.x - (v.x + t * (w.x - v.x)), 2) + Math.pow(p.y - (v.y + t * (w.y - v.y)), 2);
         };
+        const distToPolylineSquared = (p, points) => {
+            if (!Array.isArray(points) || points.length < 2) return Infinity;
+            let best = Infinity;
+            for (let i = 0; i < points.length - 1; i++) {
+                const d2 = distToSegmentSquared(p, points[i], points[i + 1]);
+                if (d2 < best) best = d2;
+            }
+            return best;
+        };
         let clickedConn = null;
         for (let ent of GameEngine.state.mapEntities) {
             if (ent.outputTargets && ent.outputTargets.length > 0) {
                 for (let conn of ent.outputTargets) {
                     let target = GameEngine.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
                     if (target) {
-                        let sx = ent.x, sy = ent.y, ex = target.x, ey = target.y;
-                        const isReciprocal = target.outputTargets && target.outputTargets.find(t => (t.id === (ent.id || `${ent.type1}_${ent.x}_${ent.y}`)));
-                        if (isReciprocal) {
-                            const dx = ex - sx, dy = ey - sy; const d = Math.hypot(dx, dy);
-                            if (d > 0) {
-                                const nx = -dy / d, ny = dx / d;
-                                const offset = (UI_CONFIG.LogisticsSystem && UI_CONFIG.LogisticsSystem.lineOffset) || 10;
-                                sx += nx * offset; sy += ny * offset; ex += nx * offset; ey += ny * offset;
-                            }
-                        }
-                        // 縮小閾值至 144 (12px)，確保在線條錯開 15px 的情況下點擊「中間」不會誤觸
-                        if (distToSegmentSquared({x: worldX, y: worldY}, {x: sx, y: sy}, {x: ex, y: ey}) < 144) {
+                        const route = this.getConnectionRoute(ent, target, conn);
+                        const points = route && route.points ? route.points : [{ x: ent.x, y: ent.y }, { x: target.x, y: target.y }];
+                        const widthPx = Math.max(12, (route && route.width ? route.width : 1) * GameEngine.TILE_SIZE * 0.75);
+                        const threshold2 = Math.pow(widthPx * 0.5 + 6, 2);
+                        if (distToPolylineSquared({ x: worldX, y: worldY }, points) < threshold2) {
                             clickedConn = { source: ent, targetId: conn.id }; break;
                         }
                     }
