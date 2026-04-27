@@ -24,6 +24,10 @@ export class MainScene extends Phaser.Scene {
         this.selectionStartPos = null; // 框選起始位置 (世界座標)
         this.clickEffects = [];      // 點擊反饋效果列表
         this.lastRenderVersion = 0;
+        this.lodIcons = new Map();
+        this.lodResourceIcons = new Map();
+        this.lastCamZoom = -1;
+        this.isLodMode = false;
         this.isMouseIn = false;      // 追蹤滑鼠是否在遊戲畫面內
         this.hasMouseEnteredGame = false; // 追蹤滑鼠是否曾真實進入過遊戲 (防止刷新後的 0,0 漂移)
         this.inputSystem = null; // 在 create 中初始化
@@ -229,6 +233,101 @@ export class MainScene extends Phaser.Scene {
         graphics.destroy();
     }
 
+    getCameraZoomConfig() {
+        const cfg = UI_CONFIG.CameraZoom || {};
+        const minZoom = Math.max(0.05, Number(cfg.minZoom) || 0.22);
+        const maxZoom = Math.max(minZoom, Number(cfg.maxZoom) || 2.2);
+        return {
+            minZoom,
+            maxZoom,
+            normalZoom: Phaser.Math.Clamp(Number(cfg.normalZoom) || 1, minZoom, maxZoom),
+            wheelStep: Math.max(0.01, Number(cfg.wheelStep) || 0.14),
+            lodZoomThreshold: Phaser.Math.Clamp(Number(cfg.lodZoomThreshold) || 0.48, minZoom, maxZoom),
+            lodIconScreenSize: Math.max(8, Number(cfg.lodIconScreenSize) || 26),
+            lodIconAlpha: Phaser.Math.Clamp(cfg.lodIconAlpha ?? 0.92, 0, 1),
+            lodResourceAlpha: Phaser.Math.Clamp(cfg.lodResourceAlpha ?? 0.86, 0, 1),
+            resetDuration: Math.max(0, Number(cfg.resetDuration) || 260)
+        };
+    }
+
+    getCameraWorldView(padding = 0) {
+        const cam = this.cameras.main;
+        const zoomCfg = this.getCameraZoomConfig();
+        const nextLodMode = cam.zoom <= zoomCfg.lodZoomThreshold;
+        if (this.isLodMode !== nextLodMode) {
+            this.isLodMode = nextLodMode;
+            this.pendingVisibleEntities = true;
+        }
+        const zoom = cam.zoom || 1;
+        return {
+            x: cam.scrollX - padding,
+            y: cam.scrollY - padding,
+            width: cam.width / zoom + padding * 2,
+            height: cam.height / zoom + padding * 2,
+            centerX: cam.scrollX + (cam.width / zoom) / 2,
+            centerY: cam.scrollY + (cam.height / zoom) / 2
+        };
+    }
+
+    screenToWorldPoint(screenX, screenY) {
+        const cam = this.cameras.main;
+        const zoom = cam.zoom || 1;
+        return {
+            x: cam.scrollX + screenX / zoom,
+            y: cam.scrollY + screenY / zoom
+        };
+    }
+
+    setCameraCenter(worldX, worldY, zoom = this.cameras.main.zoom, duration = 0) {
+        const cam = this.cameras.main;
+        const bounds = cam.getBounds();
+        const nextZoom = Phaser.Math.Clamp(zoom, this.getCameraZoomConfig().minZoom, this.getCameraZoomConfig().maxZoom);
+        const viewW = cam.width / nextZoom;
+        const viewH = cam.height / nextZoom;
+        const minX = bounds.x;
+        const minY = bounds.y;
+        const maxX = bounds.right - viewW;
+        const maxY = bounds.bottom - viewH;
+        const targetX = (maxX < minX) ? bounds.centerX - viewW / 2 : Phaser.Math.Clamp(worldX - viewW / 2, minX, maxX);
+        const targetY = (maxY < minY) ? bounds.centerY - viewH / 2 : Phaser.Math.Clamp(worldY - viewH / 2, minY, maxY);
+
+        if (duration > 0) {
+            this.tweens.killTweensOf(cam);
+            this.tweens.add({
+                targets: cam,
+                scrollX: targetX,
+                scrollY: targetY,
+                zoom: nextZoom,
+                duration,
+                ease: 'Cubic.easeOut',
+                onUpdate: () => { this.pendingVisibleEntities = true; },
+                onComplete: () => { this.pendingVisibleEntities = true; }
+            });
+        } else {
+            cam.setZoom(nextZoom);
+            cam.setScroll(targetX, targetY);
+            this.pendingVisibleEntities = true;
+        }
+    }
+
+    zoomCameraAtPointer(pointer, deltaY) {
+        if (!pointer || this.isTextInputFocused()) return;
+        const cam = this.cameras.main;
+        const cfg = this.getCameraZoomConfig();
+        const before = this.screenToWorldPoint(pointer.x, pointer.y);
+        const factor = deltaY > 0 ? (1 - cfg.wheelStep) : (1 + cfg.wheelStep);
+        const nextZoom = Phaser.Math.Clamp(cam.zoom * factor, cfg.minZoom, cfg.maxZoom);
+        const nextScrollX = before.x - pointer.x / nextZoom;
+        const nextScrollY = before.y - pointer.y / nextZoom;
+
+        cam.setZoom(nextZoom);
+        this.setCameraCenter(
+            nextScrollX + (cam.width / nextZoom) / 2,
+            nextScrollY + (cam.height / nextZoom) / 2,
+            nextZoom
+        );
+    }
+
     setupCamera() {
         const cam = this.cameras.main;
         let lastPointer = { x: 0, y: 0 };
@@ -259,10 +358,17 @@ export class MainScene extends Phaser.Scene {
         const boundsH = rows * TS;
 
         cam.setBounds(boundsX, boundsY, boundsW, boundsH);
+        const zoomCfg = this.getCameraZoomConfig();
+        cam.setZoom(zoomCfg.normalZoom);
 
         if (cam.scrollX < boundsX || cam.scrollX > boundsX + boundsW) {
-            cam.setScroll(960 - 960, 560 - 540);
+            this.setCameraCenter(960, 560, zoomCfg.normalZoom);
         }
+
+        this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
+            if (window.UIManager && window.UIManager.dragGhost) return;
+            this.zoomCameraAtPointer(pointer, deltaY);
+        });
 
         this.input.on('pointerdown', (pointer) => {
             const isPlacement = !!GameEngine.state.placingType;
@@ -271,7 +377,7 @@ export class MainScene extends Phaser.Scene {
             const isMiddleDrag = pointer.middleButtonDown();
 
             if (pointer.leftButtonDown() && !isPlacement && !isMiddleDrag) {
-                this.selectionStartPos = { x: pointer.worldX, y: pointer.worldY };
+                this.selectionStartPos = this.screenToWorldPoint(pointer.x, pointer.y);
                 this.mouseDownScreenPos = { x: pointer.x, y: pointer.y };
             }
 
@@ -299,8 +405,9 @@ export class MainScene extends Phaser.Scene {
 
                 const dx = pointer.x - lastPointer.x;
                 const dy = pointer.y - lastPointer.y;
-                cam.scrollX -= dx;
-                cam.scrollY -= dy;
+                const zoom = cam.zoom || 1;
+                cam.scrollX -= dx / zoom;
+                cam.scrollY -= dy / zoom;
                 this.lastManualDragTime = Date.now();
             }
             lastPointer = { x: pointer.x, y: pointer.y };
@@ -661,9 +768,10 @@ export class MainScene extends Phaser.Scene {
         const cam = this.cameras.main;
 
         // 1. 抓取狀態並更新基礎 UI (此部分負擔極輕，需保證即時性)
-        const camMoved = this.lastCamX !== cam.scrollX || this.lastCamY !== cam.scrollY;
+        const camMoved = this.lastCamX !== cam.scrollX || this.lastCamY !== cam.scrollY || this.lastCamZoom !== cam.zoom;
         this.lastCamX = cam.scrollX;
         this.lastCamY = cam.scrollY;
+        this.lastCamZoom = cam.zoom;
 
         const entitiesCountChanged = (this.lastEntitiesCount !== state.mapEntities.length);
         this.lastEntitiesCount = state.mapEntities.length;
@@ -680,8 +788,9 @@ export class MainScene extends Phaser.Scene {
 
             const coordsEl = document.getElementById("coords_display");
             if (coordsEl) {
-                const centerX = Math.round(cam.scrollX + cam.width / 2);
-                const centerY = Math.round(cam.scrollY + cam.height / 2);
+                const view = this.getCameraWorldView();
+                const centerX = Math.round(view.centerX);
+                const centerY = Math.round(view.centerY);
                 coordsEl.innerText = `X: ${centerX}, Y: ${centerY}`;
             }
 
@@ -706,20 +815,21 @@ export class MainScene extends Phaser.Scene {
             this.updateUnits(allUnits);
             this.updateDynamicHUD(this.lastVisibleEntities);
             // 渲染戰鬥視覺 (HP Bars & Projectiles)
-            BattleRenderer.renderHPBars(this.hudGraphics, allUnits, deltaTime);
+            if (!this.isLodMode) BattleRenderer.renderHPBars(this.hudGraphics, allUnits, deltaTime);
             BattleRenderer.renderProjectiles(this.hudGraphics, state, deltaTime);
             return;
         }
 
         // 3. 執行重度渲染與裁剪
         // 3a. 更新建築實體 (mapEntities)
-        const visibleEntities = GameEngine.getVisibleEntities(cam.scrollX, cam.scrollY, cam.width, cam.height, 200);
+        const view = this.getCameraWorldView(200);
+        const visibleEntities = GameEngine.getVisibleEntities(view.x, view.y, view.width, view.height, 200);
         this.lastVisibleEntities = visibleEntities;
         this.updateEntities(visibleEntities, state.mapEntities);
 
         // 3b. 更新大地圖資源 (MapDataSystem)
         if (state.mapData) {
-            this.updateResources(state.mapData, cam.scrollX, cam.scrollY, cam.width, cam.height);
+            this.updateResources(state.mapData, view.x, view.y, view.width, view.height);
         }
 
         const allUnits = [...(state.units.villagers || []), ...(state.units.npcs || [])];
@@ -728,7 +838,7 @@ export class MainScene extends Phaser.Scene {
 
         // 渲染戰鬥視覺 (HP Bars) - 同時包含單位與具備血量的建築實體
         const allCombatants = [...allUnits, ...state.mapEntities.filter(e => e.hp !== undefined)];
-        BattleRenderer.renderHPBars(this.hudGraphics, allCombatants, deltaTime);
+        if (!this.isLodMode) BattleRenderer.renderHPBars(this.hudGraphics, allCombatants, deltaTime);
         BattleRenderer.renderProjectiles(this.hudGraphics, state, deltaTime);
     }
 
@@ -869,8 +979,9 @@ export class MainScene extends Phaser.Scene {
         const halfH = (uh * TS) / 2;
 
         // 檢查中心點是否在畫面內 (略微寬鬆一點)
-        const isVisible = (tc.x + halfW >= cam.scrollX && tc.x - halfW <= cam.scrollX + cam.width &&
-            tc.y + halfH >= cam.scrollY && tc.y - halfH <= cam.scrollY + cam.height);
+        const view = this.getCameraWorldView();
+        const isVisible = (tc.x + halfW >= view.x && tc.x - halfW <= view.x + view.width &&
+            tc.y + halfH >= view.y && tc.y - halfH <= view.y + view.height);
 
         if (isVisible) {
             el.style.display = "none";
@@ -880,8 +991,8 @@ export class MainScene extends Phaser.Scene {
             const margin = ptrCfg.margin || 40;
 
             // 計算向量 (從畫面中心指向量村莊中心)
-            let dx = tc.x - (cam.scrollX + cam.width / 2);
-            let dy = tc.y - (cam.scrollY + cam.height / 2);
+            let dx = tc.x - view.centerX;
+            let dy = tc.y - view.centerY;
             const angle = Math.atan2(dy, dx);
 
             // 更新箭頭旋轉與距離
@@ -924,6 +1035,12 @@ export class MainScene extends Phaser.Scene {
     updateDynamicHUD(visibleEntities) {
         const g = this.hudGraphics;
         g.clear();
+        if (this.isLodMode) {
+            for (const txt of this.queueTexts.values()) txt.setVisible(false);
+            for (const txt of this.unitIconTexts.values()) txt.setVisible(false);
+            for (const hud of this.occupancyHuds.values()) hud.setVisible(false);
+            return;
+        }
         if (!visibleEntities) return;
 
         const TS = GameEngine.TILE_SIZE;
@@ -1533,6 +1650,8 @@ export class MainScene extends Phaser.Scene {
         const visibleIds = new Set();
         const MAX_NEW_PER_FRAME = 20;
         let newlyCreatedCount = 0;
+        const lodMode = this.isLodMode;
+        const lodCfg = this.getCameraZoomConfig();
 
         // 1. 處理可見實體 (此處現僅包含 建築物 與 單個實體化資源)
         for (let i = 0; i < visibleEntities.length; i++) {
@@ -1540,6 +1659,20 @@ export class MainScene extends Phaser.Scene {
             const id = ent.id;
             const type1 = ent.type1 || ent.type; // [核心相容] 支援新舊屬性命名
             visibleIds.add(id);
+
+            if (lodMode) {
+                const textureKey = this.getTextureKey(type1);
+                this.updateLodIcon(this.lodIcons, id, ent.x, ent.y, textureKey, lodCfg.lodIconAlpha, ent.vTint);
+                const detailObj = this.entities.get(id);
+                if (detailObj && detailObj.visible) detailObj.setVisible(false);
+                this.hideEntityLabel(id);
+                for (const [eid, emitter] of this.emitters.entries()) {
+                    if (eid.startsWith(id)) emitter.setVisible(false);
+                }
+                continue;
+            }
+
+            this.hideLodIcon(this.lodIcons, id);
 
             let displayObj = this.entities.get(id);
 
@@ -1597,6 +1730,7 @@ export class MainScene extends Phaser.Scene {
         }
 
         if (newlyCreatedCount < MAX_NEW_PER_FRAME) this.pendingVisibleEntities = false;
+        this.hideUnusedLodIcons(this.lodIcons, visibleIds);
 
         // 2. 清理不可見實體 (隱藏與回收)
         for (const [id, displayObj] of this.entities.entries()) {
@@ -1626,6 +1760,8 @@ export class MainScene extends Phaser.Scene {
         const TS = GameEngine.TILE_SIZE;
         const resources = mapData.getVisibleResources(scrollX, scrollY, width, height, TS);
         const visibleKeys = new Set();
+        const lodMode = this.isLodMode;
+        const lodCfg = this.getCameraZoomConfig();
 
         // 核心映射
         const typeMap = {
@@ -1672,6 +1808,27 @@ export class MainScene extends Phaser.Scene {
 
             const finalScaleX = baseMS.x * vScale;
             const finalScaleY = baseMS.y * vScale;
+
+            if (lodMode) {
+                const textureKey = `tex_${typeStr}`;
+                this.updateLodIcon(
+                    this.lodResourceIcons,
+                    key,
+                    res.gx * TS + TS / 2,
+                    res.gy * TS + TS / 2,
+                    textureKey,
+                    lodCfg.lodResourceAlpha,
+                    vTint
+                );
+                if (bobInfo) {
+                    this.returnBobToPool(bobInfo.type, bobInfo.bob);
+                    this.resourceBobs.delete(key);
+                }
+                this.hideEntityLabel(key);
+                continue;
+            }
+
+            this.hideLodIcon(this.lodResourceIcons, key);
 
             // 若類型或等級變動 (或模型發生不可評估變化)，回收舊物件
             if (bobInfo && (bobInfo.type !== typeStr || bobInfo.lv !== res.level)) {
@@ -1723,6 +1880,7 @@ export class MainScene extends Phaser.Scene {
                 this.hideEntityLabel(key);
             }
         }
+        this.hideUnusedLodIcons(this.lodResourceIcons, visibleKeys);
     }
 
     getBobFromPool(type) {
@@ -1741,6 +1899,40 @@ export class MainScene extends Phaser.Scene {
         bob.setVisible(false);
         if (this.resourcePools[type]) {
             this.resourcePools[type].push(bob);
+        }
+    }
+
+    getLodScale(textureKey, screenSize) {
+        const frame = this.textures.getFrame(textureKey);
+        const longest = frame ? Math.max(frame.width, frame.height) : 32;
+        return screenSize / longest / (this.cameras.main.zoom || 1);
+    }
+
+    updateLodIcon(store, id, x, y, textureKey, alpha, tint = null) {
+        if (!textureKey || !this.textures.exists(textureKey)) return;
+        const cfg = this.getCameraZoomConfig();
+        let icon = store.get(id);
+        if (!icon) {
+            icon = this.add.image(x, y, textureKey);
+            store.set(id, icon);
+        }
+        icon.setPosition(x, y);
+        icon.setDepth(900000 + y);
+        icon.setScale(this.getLodScale(textureKey, cfg.lodIconScreenSize));
+        icon.setAlpha(alpha);
+        icon.setVisible(true);
+        if (tint !== null && tint !== undefined) icon.setTint(tint);
+        else icon.clearTint();
+    }
+
+    hideLodIcon(store, id) {
+        const icon = store.get(id);
+        if (icon) icon.setVisible(false);
+    }
+
+    hideUnusedLodIcons(store, visibleIds) {
+        for (const [id, icon] of store.entries()) {
+            if (!visibleIds.has(id)) icon.setVisible(false);
         }
     }
 
@@ -2526,9 +2718,27 @@ export class MainScene extends Phaser.Scene {
 
         const currentIds = new Set();
         const cam = this.cameras.main;
+        const view = this.getCameraWorldView();
+        const lodMode = this.isLodMode;
+        const lodCfg = this.getCameraZoomConfig();
 
         villagers.forEach(v => {
             currentIds.add(v.id);
+            const isVisible = (v.x + 50 > view.x && v.x - 50 < view.x + view.width &&
+                v.y + 50 > view.y && v.y - 50 < view.y + view.height);
+            if (lodMode) {
+                if (isVisible && v.visible !== false) {
+                    this.updateLodIcon(this.lodIcons, `unit_${v.id}`, v.x, v.y, 'tex_villager', lodCfg.lodIconAlpha);
+                } else {
+                    this.hideLodIcon(this.lodIcons, `unit_${v.id}`);
+                }
+                const detailSprite = this.units.get(v.id);
+                if (detailSprite) detailSprite.setVisible(false);
+                this.hideUnitLabel(v.id);
+                return;
+            }
+            this.hideLodIcon(this.lodIcons, `unit_${v.id}`);
+
             let sprite = this.units.get(v.id);
             if (!sprite) {
                 sprite = this.add.graphics();
@@ -2538,9 +2748,6 @@ export class MainScene extends Phaser.Scene {
                 v.renderX = v.x;
                 v.renderY = v.y;
             }
-
-            const isVisible = (v.x + 50 > cam.scrollX && v.x - 50 < cam.scrollX + cam.width &&
-                v.y + 50 > cam.scrollY && v.y - 50 < cam.scrollY + cam.height);
 
             sprite.setVisible(isVisible && v.visible !== false);
             if (isVisible) {
@@ -2713,8 +2920,9 @@ export class MainScene extends Phaser.Scene {
 
         if (!this.lastLocalMouse) return;
 
-        const worldX = cam.scrollX + this.lastLocalMouse.x;
-        const worldY = cam.scrollY + this.lastLocalMouse.y;
+        const worldPoint = this.screenToWorldPoint(this.lastLocalMouse.x, this.lastLocalMouse.y);
+        const worldX = worldPoint.x;
+        const worldY = worldPoint.y;
 
         const bounds = cam.getBounds();
         const clampedX = Math.max(bounds.x, Math.min(worldX, bounds.x + bounds.width));
@@ -2739,16 +2947,18 @@ export class MainScene extends Phaser.Scene {
         let endX, endY, isShift, screenX, screenY;
 
         if (isPhaserPointer) {
-            endX = e.worldX;
-            endY = e.worldY;
+            const worldPoint = this.screenToWorldPoint(e.x, e.y);
+            endX = worldPoint.x;
+            endY = worldPoint.y;
             isShift = e.event.shiftKey;
             screenX = e.x;
             screenY = e.y;
         } else {
             const cam = this.cameras.main;
             const local = window.UIManager ? window.UIManager.getLocalMouse(e) : { x: e.clientX, y: e.clientY };
-            endX = cam.scrollX + local.x;
-            endY = cam.scrollY + local.y;
+            const worldPoint = this.screenToWorldPoint(local.x, local.y);
+            endX = worldPoint.x;
+            endY = worldPoint.y;
             isShift = e.shiftKey;
             screenX = local.x;
             screenY = local.y;
@@ -2760,6 +2970,15 @@ export class MainScene extends Phaser.Scene {
         endY = Math.max(bounds.y, Math.min(endY, bounds.y + bounds.height));
 
         const dragDist = this.mouseDownScreenPos ? Math.hypot(screenX - this.mouseDownScreenPos.x, screenY - this.mouseDownScreenPos.y) : 0;
+
+        if (this.isLodMode && dragDist < 5 && !isShift && !GameEngine.state.placingType) {
+            const cfg = this.getCameraZoomConfig();
+            this.setCameraCenter(endX, endY, cfg.normalZoom, cfg.resetDuration);
+            this.marqueeGraphics.clear();
+            this.selectionStartPos = null;
+            this.mouseDownScreenPos = null;
+            return;
+        }
 
         if (dragDist < 5) {
             let bestDist = 60; // 提高選取寬容度 (原 40)
@@ -2793,10 +3012,11 @@ export class MainScene extends Phaser.Scene {
                 const isDoubleClick = (GameEngine.state.lastSelectedUnitId === clickedUnit.id && (now - GameEngine.state.lastSelectionTime < 300));
                 if (isDoubleClick) {
                     const unitType = clickedUnit.config.type;
+                    const view = this.getCameraWorldView();
                     const newlySelected = GameEngine.state.units.villagers.filter(v =>
                         v.config && v.config.type === unitType && v.visible !== false &&
-                        v.x >= cam.scrollX && v.x <= cam.scrollX + cam.width &&
-                        v.y >= cam.scrollY && v.y <= cam.scrollY + cam.height);
+                        v.x >= view.x && v.x <= view.x + view.width &&
+                        v.y >= view.y && v.y <= view.y + view.height);
                     if (isShift) {
                         newlySelected.forEach(u => { if (!GameEngine.state.selectedUnitIds.includes(u.id)) GameEngine.state.selectedUnitIds.push(u.id); });
                     } else {

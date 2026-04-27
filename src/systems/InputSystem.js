@@ -93,8 +93,9 @@ export class InputSystem {
                 const dy = pointer.y - this.lastY;
                 const cam = this.scene.cameras.main;
                 if (cam) {
-                    cam.scrollX -= dx;
-                    cam.scrollY -= dy;
+                    const zoom = cam.zoom || 1;
+                    cam.scrollX -= dx / zoom;
+                    cam.scrollY -= dy / zoom;
                     this.scene.lastManualDragTime = Date.now();
                 }
             }

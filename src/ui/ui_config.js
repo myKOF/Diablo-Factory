@@ -35,6 +35,19 @@ export const UI_CONFIG = {
         mapCenter: { x: 960, y: 560 }
     },
 
+    // -- 大地圖無極縮放與 LOD ----------------------------------------------
+    CameraZoom: {
+        minZoom: 0.22,              // 最遠縮放倍率；數值越小，看見的世界範圍越大，建議 0.12 ~ 0.5
+        maxZoom: 2.2,               // 最近縮放倍率；數值越大，畫面越貼近細節，建議 1.0 ~ 4.0
+        normalZoom: 1.0,            // 點擊遠距大地圖座標後回正的正常焦點距離
+        wheelStep: 0.14,            // 每格滾輪縮放幅度；數值越大，縮放越快
+        lodZoomThreshold: 0.48,     // 小於等於此倍率時切換成 LOD 小圖示模式
+        lodIconScreenSize: 26,      // LOD 圖示在螢幕上的目標大小，會依 zoom 自動反向縮放
+        lodIconAlpha: 0.92,         // LOD 圖示透明度，範圍 0.0 ~ 1.0
+        lodResourceAlpha: 0.86,     // LOD 資源圖示透明度，範圍 0.0 ~ 1.0
+        resetDuration: 260          // 遠距左鍵點擊座標後，鏡頭回正動畫時間（毫秒）
+    },
+
     // -- 頂部資源列 ------------------------------------------------
     ResourceBar: {
         anchor: "TOP_CENTER",  // 錨點：頂部置中
