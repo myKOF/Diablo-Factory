@@ -1269,6 +1269,22 @@ export class UIManager {
         return best;
     }
 
+    static resolveCurrentPortSlot(ent, port, fallbackX = null, fallbackY = null) {
+        if (!ent || !port) return port || null;
+        const slots = this.getBuildingPortSlots(ent);
+        if (!slots.length) return port;
+
+        const matched = slots.find(slot =>
+            slot.defIndex === port.defIndex &&
+            slot.slotIndex === port.slotIndex
+        );
+        if (matched) return matched;
+
+        const refX = Number.isFinite(fallbackX) ? fallbackX : (Number.isFinite(port.x) ? port.x : ent.x);
+        const refY = Number.isFinite(fallbackY) ? fallbackY : (Number.isFinite(port.y) ? port.y : ent.y);
+        return this.getNearestPortSlot(ent, refX, refY) || port;
+    }
+
     static buildOrthogonalRoute(startPoint, endPoint, startDir = null, endDir = null, biasPoint = null) {
         const TS = GameEngine.TILE_SIZE;
         const margin = TS * 0.7;
@@ -1321,7 +1337,12 @@ export class UIManager {
             if (sourceEnt && ent === sourceEnt) return false;
             const cfg = GameEngine.getEntityConfig(ent.type1);
             if (!cfg || !cfg.logistics || !cfg.logistics.canInput) return false;
-            return this.isPointInsideEntity(ent, worldX, worldY);
+            if (this.isPointInsideEntity(ent, worldX, worldY)) return true;
+
+            const portHitRadius = GameEngine.TILE_SIZE * 0.8;
+            return this.getBuildingPortSlots(ent).some(port =>
+                Math.hypot(port.x - worldX, port.y - worldY) <= portHitRadius
+            );
         }) || null;
     }
 
@@ -1476,8 +1497,8 @@ export class UIManager {
         const targetId = targetEnt ? this.getEntityId(targetEnt) : null;
         const groupId = lineId || conn?.lineId || this.makeLogisticsLineId(sourceId, targetId, targetPoint);
         const cleanTargetPoint = targetId ? null : this.snapPointToGridCenter(targetPoint);
-        const cleanSourcePort = sourcePort ? { dir: sourcePort.dir, slotIndex: sourcePort.slotIndex, defIndex: sourcePort.defIndex, width: sourcePort.width } : null;
-        const cleanTargetPort = targetPort ? { dir: targetPort.dir, slotIndex: targetPort.slotIndex, defIndex: targetPort.defIndex, width: targetPort.width } : null;
+        const cleanSourcePort = sourcePort ? { dir: sourcePort.dir, slotIndex: sourcePort.slotIndex, defIndex: sourcePort.defIndex, width: sourcePort.width, x: sourcePort.x, y: sourcePort.y } : null;
+        const cleanTargetPort = targetPort ? { dir: targetPort.dir, slotIndex: targetPort.slotIndex, defIndex: targetPort.defIndex, width: targetPort.width, x: targetPort.x, y: targetPort.y } : null;
         const gridPoints = this.buildGridRoutePoints(points);
         const previous = lines.find(item => item.groupId === groupId || item.id === groupId);
         const filter = conn ? (conn.filter || null) : (previous?.filter || null);

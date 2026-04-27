@@ -18,6 +18,12 @@ export class ConveyorSystem {
         const grid = state.pathfinding?.grid || [];
         if (grid.length === 0) return;
 
+        const currentSourcePort = sourceEntity && sourcePort && window.UIManager?.resolveCurrentPortSlot
+            ? window.UIManager.resolveCurrentPortSlot(sourceEntity, sourcePort, startX, startY)
+            : sourcePort;
+        const resolvedStartX = currentSourcePort && Number.isFinite(currentSourcePort.x) ? currentSourcePort.x : startX;
+        const resolvedStartY = currentSourcePort && Number.isFinite(currentSourcePort.y) ? currentSourcePort.y : startY;
+
         const rows = grid.length;
         const cols = grid[0].length;
         const routeGrid = this.createRoutingGrid(grid);
@@ -28,16 +34,16 @@ export class ConveyorSystem {
         this.router.maxSearchNodes = Math.max(500, Number(UI_CONFIG.ConveyorBuild?.maxRouteSearchNodes) || 12000);
 
         this.activeDrag = {
-            startX,
-            startY,
+            startX: resolvedStartX,
+            startY: resolvedStartY,
             sourceEntity,
-            sourcePort,
+            sourcePort: currentSourcePort,
             sourceLine,
             targetBuilding: null,
             targetPort: null,
             bendMode: 'x-first',
             lastWorldPoint: null,
-            startGrid: this.toGrid(startX, startY)
+            startGrid: this.toGrid(resolvedStartX, resolvedStartY)
         };
         
         this.ghosts = [];
@@ -45,7 +51,7 @@ export class ConveyorSystem {
         this.pendingDragPoint = null;
         this.isDragFrameQueued = false;
         this.lastRouteKey = null;
-        console.log(`[ConveyorSystem] Drag started at ${startX},${startY}`);
+        console.log(`[ConveyorSystem] Drag started at ${resolvedStartX},${resolvedStartY}`);
     }
 
     getAlignmentUnit() {
@@ -197,8 +203,8 @@ export class ConveyorSystem {
             : null;
         const targetPort = window.UIManager?.getNearestPortSlot(
             targetBuilding,
-            this.activeDrag.startX,
-            this.activeDrag.startY,
+            currentX,
+            currentY,
             preferredDir
         );
 
