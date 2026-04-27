@@ -71,16 +71,11 @@ export class MainScene extends Phaser.Scene {
 
         // 創建地表情境 (使用 AI 生成的無縫貼圖)
         if (UI_CONFIG.Grid && UI_CONFIG.Grid.useTexture) {
-            const TS = GameEngine.TILE_SIZE;
-            const mapCfg = (GameEngine.state.systemConfig && GameEngine.state.systemConfig.map_size) || { w: 7500, h: 7500 };
-            const cols = Math.floor(mapCfg.w / TS);
-            const rows = Math.floor(mapCfg.h / TS);
-            const minGX = Math.floor(960 / TS) - Math.floor(cols / 2);
-            const minGY = Math.floor(560 / TS) - Math.floor(rows / 2);
-            const boundsW = cols * TS;
-            const boundsH = rows * TS;
-            const centerX = minGX * TS + boundsW / 2;
-            const centerY = minGY * TS + boundsH / 2;
+            const mapRect = this.getMapWorldRect();
+            const boundsW = mapRect.width;
+            const boundsH = mapRect.height;
+            const centerX = mapRect.centerX;
+            const centerY = mapRect.centerY;
 
             this.backgroundSprite = this.add.tileSprite(centerX, centerY, boundsW, boundsH, 'ground_texture');
             this.backgroundSprite.setDepth(-10000); // 確保在最底層
@@ -250,6 +245,28 @@ export class MainScene extends Phaser.Scene {
         };
     }
 
+    getMapWorldRect() {
+        const TS = GameEngine.TILE_SIZE;
+        const mapCfg = (GameEngine.state.systemConfig && GameEngine.state.systemConfig.map_size) || { w: 7500, h: 7500 };
+        const cols = Math.floor(mapCfg.w / TS);
+        const rows = Math.floor(mapCfg.h / TS);
+        const fallbackGX = Math.floor(960 / TS) - Math.floor(cols / 2);
+        const fallbackGY = Math.floor(560 / TS) - Math.floor(rows / 2);
+        const mapOffset = GameEngine.state.mapOffset || { x: fallbackGX, y: fallbackGY };
+        const x = mapOffset.x * TS;
+        const y = mapOffset.y * TS;
+        const width = cols * TS;
+        const height = rows * TS;
+        return {
+            x,
+            y,
+            width,
+            height,
+            centerX: x + width / 2,
+            centerY: y + height / 2
+        };
+    }
+
     getCameraWorldView(padding = 0) {
         const cam = this.cameras.main;
         const zoomCfg = this.getCameraZoomConfig();
@@ -259,9 +276,14 @@ export class MainScene extends Phaser.Scene {
             this.pendingVisibleEntities = true;
         }
         const zoom = cam.zoom || 1;
+        // [核心修正] Phaser 3 相機縮放是以中心為基準，
+        // 世界座標起點需根據 scrollX/Y (zoom 1.0 的左上角) 與縮放比例重新計算。
+        const worldX = cam.scrollX + (cam.width * (1 - 1 / zoom)) / 2;
+        const worldY = cam.scrollY + (cam.height * (1 - 1 / zoom)) / 2;
+        
         return {
-            x: cam.scrollX - padding,
-            y: cam.scrollY - padding,
+            x: worldX - padding,
+            y: worldY - padding,
             width: cam.width / zoom + padding * 2,
             height: cam.height / zoom + padding * 2,
             centerX: cam.scrollX + (cam.width / zoom) / 2,
@@ -272,9 +294,11 @@ export class MainScene extends Phaser.Scene {
     screenToWorldPoint(screenX, screenY) {
         const cam = this.cameras.main;
         const zoom = cam.zoom || 1;
+        const worldX = cam.scrollX + (cam.width * (1 - 1 / zoom)) / 2;
+        const worldY = cam.scrollY + (cam.height * (1 - 1 / zoom)) / 2;
         return {
-            x: cam.scrollX + screenX / zoom,
-            y: cam.scrollY + screenY / zoom
+            x: worldX + screenX / zoom,
+            y: worldY + screenY / zoom
         };
     }
 
@@ -282,14 +306,12 @@ export class MainScene extends Phaser.Scene {
         const cam = this.cameras.main;
         const bounds = cam.getBounds();
         const nextZoom = Phaser.Math.Clamp(zoom, this.getCameraZoomConfig().minZoom, this.getCameraZoomConfig().maxZoom);
-        const viewW = cam.width / nextZoom;
-        const viewH = cam.height / nextZoom;
-        const minX = bounds.x;
-        const minY = bounds.y;
-        const maxX = bounds.right - viewW;
-        const maxY = bounds.bottom - viewH;
-        const targetX = (maxX < minX) ? bounds.centerX - viewW / 2 : Phaser.Math.Clamp(worldX - viewW / 2, minX, maxX);
-        const targetY = (maxY < minY) ? bounds.centerY - viewH / 2 : Phaser.Math.Clamp(worldY - viewH / 2, minY, maxY);
+        
+        // [核心修正] 在 Phaser 3 中，要讓相機中心對準世界座標 (worldX, worldY)，
+        // 無論縮放倍率為何，scrollX 應設為 worldX - cam.width / 2。
+        // 因為縮放是繞著相機中心 (scrollX + width/2) 進行的。
+        const targetX = worldX - cam.width / 2;
+        const targetY = worldY - cam.height / 2;
 
         if (duration > 0) {
             this.tweens.killTweensOf(cam);
@@ -345,24 +367,21 @@ export class MainScene extends Phaser.Scene {
         };
 
         // 核心設定：地圖範圍邊界
-        const TS = GameEngine.TILE_SIZE;
-        const mapCfg = (GameEngine.state.systemConfig && GameEngine.state.systemConfig.map_size) || { w: 7500, h: 7500 };
-        const cols = Math.floor(mapCfg.w / TS);
-        const rows = Math.floor(mapCfg.h / TS);
-        const minGX = Math.floor(960 / TS) - Math.floor(cols / 2);
-        const minGY = Math.floor(560 / TS) - Math.floor(rows / 2);
-
-        const boundsX = minGX * TS;
-        const boundsY = minGY * TS;
-        const boundsW = cols * TS;
-        const boundsH = rows * TS;
+        const mapRect = this.getMapWorldRect();
+        const boundsX = mapRect.x;
+        const boundsY = mapRect.y;
+        const boundsW = mapRect.width;
+        const boundsH = mapRect.height;
 
         cam.setBounds(boundsX, boundsY, boundsW, boundsH);
         const zoomCfg = this.getCameraZoomConfig();
         cam.setZoom(zoomCfg.normalZoom);
 
         if (cam.scrollX < boundsX || cam.scrollX > boundsX + boundsW) {
-            this.setCameraCenter(960, 560, zoomCfg.normalZoom);
+            const coreVillage = GameEngine.state.mapEntities.find(e => e.id === 'core_village');
+            const focusX = coreVillage ? coreVillage.x : mapRect.centerX;
+            const focusY = coreVillage ? coreVillage.y : mapRect.centerY;
+            this.setCameraCenter(focusX, focusY, zoomCfg.normalZoom);
         }
 
         this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
@@ -620,14 +639,9 @@ export class MainScene extends Phaser.Scene {
             return parseInt(raw, 16);
         };
 
-        const mapCfg = GameEngine.state.systemConfig.map_size || { w: 3200, h: 2000 };
-        const cols = Math.floor(mapCfg.w / TS);
-        const rows = Math.floor(mapCfg.h / TS);
-        const minGX = Math.floor(960 / TS) - Math.floor(cols / 2);
-        const minGY = Math.floor(560 / TS) - Math.floor(rows / 2);
-
-        const startX = minGX * TS, endX = (minGX + cols) * TS;
-        const startY = minGY * TS, endY = (minGY + rows) * TS;
+        const mapRect = this.getMapWorldRect();
+        const startX = mapRect.x, endX = mapRect.x + mapRect.width;
+        const startY = mapRect.y, endY = mapRect.y + mapRect.height;
 
         g.clear();
 
@@ -810,7 +824,7 @@ export class MainScene extends Phaser.Scene {
 
         // 2. 判斷是否可以跳過重度的實體渲染計算
         // 如果相機沒動、加載完畢、實體數量沒變，且且渲染版本未更新，跳過繁重計算
-        if (!camMoved && !this.pendingVisibleEntities && !entitiesCountChanged && !renderVersionChanged && !state.placingType) {
+        if (!this.isLodMode && !camMoved && !this.pendingVisibleEntities && !entitiesCountChanged && !renderVersionChanged && !state.placingType) {
             const allUnits = [...(state.units.villagers || []), ...(state.units.npcs || [])];
             this.updateUnits(allUnits);
             this.updateDynamicHUD(this.lastVisibleEntities);

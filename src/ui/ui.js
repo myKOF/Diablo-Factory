@@ -1051,13 +1051,7 @@ export class UIManager {
     }
 
     static getWorldMousePos(clientX, clientY) {
-        // 先將螢幕座標轉換為遊戲容器內的虛擬座標 (考慮到 transform: scale)
-        const local = this.getLocalMouse({ clientX, clientY });
-
-        const scene = window.PhaserScene;
-        // Phaser 的相機座標本身就在世界空間，我們需要加上相機位置來獲取世界座標
-        // Phaser 相機 scrollX 為正值時表示畫面往右移，所以在世界空間中座標 = local + scroll
-        const cam = scene ? { x: scene.cameras.main.scrollX, y: scene.cameras.main.scrollY } : { x: 0, y: 0 };
+        const world = this.getWorldPoint(clientX, clientY);
         const TS = GameEngine.TILE_SIZE;
         const cfg = GameEngine.state.buildingConfigs[this.activeBuilding];
 
@@ -1067,25 +1061,39 @@ export class UIManager {
             if (match) { uw = parseInt(match[1]); uh = parseInt(match[2]); }
         }
 
-        // 核心對齊演算法：
-        // 奇數尺寸 (1x1, 3x3) 的建築物中心點應在「格子正中央」 (例如 x.5 * 20)
-        // 偶數尺寸 (2x2) 的建築物中心點應在「格子交界線上」 (例如 x.0 * 20)
         let gx, gy;
         if (uw % 2 !== 0) {
-            gx = Math.floor((local.x + cam.x) / TS) + 0.5;
+            gx = Math.floor(world.x / TS) + 0.5;
         } else {
-            gx = Math.round((local.x + cam.x) / TS);
+            gx = Math.round(world.x / TS);
         }
 
         if (uh % 2 !== 0) {
-            gy = Math.floor((local.y + cam.y) / TS) + 0.5;
+            gy = Math.floor(world.y / TS) + 0.5;
         } else {
-            gy = Math.round((local.y + cam.y) / TS);
+            gy = Math.round(world.y / TS);
         }
 
         return {
             x: gx * TS,
             y: gy * TS
+        };
+    }
+
+    static getWorldPoint(clientX, clientY) {
+        const local = this.getLocalMouse({ clientX, clientY });
+        const scene = window.PhaserScene;
+        if (!scene || !scene.cameras || !scene.cameras.main) {
+            return { x: local.x, y: local.y };
+        }
+        if (typeof scene.screenToWorldPoint === "function") {
+            return scene.screenToWorldPoint(local.x, local.y);
+        }
+        const cam = scene.cameras.main;
+        const zoom = cam.zoom || 1;
+        return {
+            x: cam.scrollX + local.x / zoom,
+            y: cam.scrollY + local.y / zoom
         };
     }
 
@@ -1106,9 +1114,8 @@ export class UIManager {
         if (e.button !== 0) return;
 
         this.leftMouseDownPos = { x: e.clientX, y: e.clientY };
-        const local = this.getLocalMouse(e);
-        const scene = window.PhaserScene; const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
-        const worldX = local.x - cam.x; const worldY = local.y - cam.y;
+        const world = this.getWorldPoint(e.clientX, e.clientY);
+        const worldX = world.x; const worldY = world.y;
         const clickedBuilding = GameEngine.state.mapEntities.find(ent => {
             if (ent.isUnderConstruction) return false;
             const cfg = GameEngine.getEntityConfig(ent.type1);
@@ -1136,9 +1143,8 @@ export class UIManager {
 
     static handleWorldMouseMove(e) {
         if (this.logisticsSourceEntity && GameEngine.state.logisticsDragLine) {
-            const local = this.getLocalMouse(e);
-            const scene = window.PhaserScene; const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
-            GameEngine.state.logisticsDragLine.endX = local.x - cam.x; GameEngine.state.logisticsDragLine.endY = local.y - cam.y;
+            const world = this.getWorldPoint(e.clientX, e.clientY);
+            GameEngine.state.logisticsDragLine.endX = world.x; GameEngine.state.logisticsDragLine.endY = world.y;
             return;
         }
 
@@ -1180,9 +1186,8 @@ export class UIManager {
         if (e.button !== 0) return;
 
         if (this.logisticsSourceEntity) {
-            const local = this.getLocalMouse(e);
-            const scene = window.PhaserScene; const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
-            const worldX = local.x - cam.x; const worldY = local.y - cam.y;
+            const world = this.getWorldPoint(e.clientX, e.clientY);
+            const worldX = world.x; const worldY = world.y;
             const targetBuilding = GameEngine.state.mapEntities.find(ent => {
                 if (ent === this.logisticsSourceEntity || ent.isUnderConstruction) return false;
                 const cfg = GameEngine.getEntityConfig(ent.type1);
@@ -1304,14 +1309,9 @@ export class UIManager {
         // 隱藏右鍵選單邏輯
         this.hideContextMenu();
 
-        const local = this.getLocalMouse(e);
-        const scene = window.PhaserScene;
-        const cam = scene ? { x: -scene.cameras.main.scrollX, y: -scene.cameras.main.scrollY } : { x: 0, y: 0 };
-
-        // [核心修復] 選取優先級優化：偵測滑鼠位置附近是否有單位
-        // 如果點擊點附近有單位，優先交給 Phaser 層處理單位的選取，此處直接退出
-        const worldX = local.x - cam.x;
-        const worldY = local.y - cam.y;
+        const world = this.getWorldPoint(e.clientX, e.clientY);
+        const worldX = world.x;
+        const worldY = world.y;
         const nearbyUnit = GameEngine.state.units.villagers.find(u => u.visible !== false && Math.hypot(u.x - worldX, u.y - worldY) < 50);
         if (nearbyUnit) return;
 
@@ -1323,7 +1323,7 @@ export class UIManager {
             if (!fp) return false;
             const w = fp.uw * GameEngine.TILE_SIZE;
             const h = fp.uh * GameEngine.TILE_SIZE;
-            const mx = local.x - cam.x, my = local.y - cam.y;
+            const mx = worldX, my = worldY;
             return mx > ent.x - w / 2 && mx < ent.x + w / 2 && my > ent.y - h / 2 && my < ent.y + h / 2;
         });
 
