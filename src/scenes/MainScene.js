@@ -683,12 +683,68 @@ export class MainScene extends Phaser.Scene {
             const currentTime = this.time.now / 1000;
 
             const getCoordId = (e) => `${e.type1}_${e.x}_${e.y}`;
+            const drawSelectedLogisticsSegmentOutline = (line) => {
+                if (!line || line.x === undefined || line.y === undefined) return;
+                const TS = GameEngine.TILE_SIZE;
+                const padding = Math.max(0, Number(logCfg.selectedSegmentOutlinePadding) || 0);
+                const outlineColor = parseColor(logCfg.selectedSegmentOutlineColor || "#ff3d00ff");
+                const outlineAlpha = logCfg.selectedSegmentOutlineAlpha ?? 1;
+                const outlineWidth = Math.max(1, Number(logCfg.selectedSegmentOutlineWidth) || 2);
+                this.logisticsGraphics.lineStyle(outlineWidth, outlineColor, outlineAlpha);
+                this.logisticsGraphics.strokeRect(
+                    line.x - TS / 2 - padding,
+                    line.y - TS / 2 - padding,
+                    TS + padding * 2,
+                    TS + padding * 2
+                );
+            };
+
+            const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null) => {
+                const baseThickness = logCfg.lineThickness || 3;
+                const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE * 0.8);
+                const lColor = !isConnected
+                    ? (logCfg.disconnectedLineColor || "#6b6b6b")
+                    : (isSelected ? (logCfg.selectedLineColor || "#ffff00") : logCfg.lineColor);
+                const lAlpha = !isConnected
+                    ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha)
+                    : (isSelected ? (logCfg.selectedLineAlpha || 1.0) : logCfg.lineAlpha);
+                this.logisticsGraphics.lineStyle(thickPx, parseColor(lColor), lAlpha);
+                this.strokePolyline(this.logisticsGraphics, points);
+
+                const polyLen = this.getPolylineLength(points);
+                if (polyLen > 24) {
+                    const speed = logCfg.arrowSpeed || 60;
+                    const spacing = logCfg.arrowSpacing || 40;
+                    const arrowOffset = isConnected ? ((currentTime * speed) % spacing) : spacing * 0.5;
+                    const arrowColor = isConnected ? logCfg.arrowColor : (logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
+                    const arrowAlpha = isConnected ? 0.9 : (logCfg.disconnectedArrowAlpha ?? 0.85);
+                    const arrowSize = isConnected ? (logCfg.arrowSize || 8) : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8);
+                    this.logisticsGraphics.fillStyle(parseColor(arrowColor), arrowAlpha);
+                    this.drawArrowsOnPolyline(this.logisticsGraphics, points, arrowOffset, spacing, arrowSize);
+                }
+                if (isSelected && line) {
+                    drawSelectedLogisticsSegmentOutline(line);
+                }
+            };
+
+            if (Array.isArray(state.logisticsLines)) {
+                state.logisticsLines.forEach(line => {
+                    const route = window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function'
+                        ? window.UIManager.getLogisticsLineRoute(line)
+                        : null;
+                    if (!route || !Array.isArray(route.points) || route.points.length < 2) return;
+                    const isSelected = state.selectedLogisticsLineId === line.id ||
+                        (window.UIManager.activeLogisticsLine && window.UIManager.activeLogisticsLine.id === line.id);
+                    drawLogisticsRoute(route.points, route.width || 1, isSelected, !!line.filter, line);
+                });
+            }
 
             // 1. 建立冗餘連線地圖 (同時支援 ID 與座標查詢)
             if (state.mapEntities) {
                 state.mapEntities.forEach(ent => {
                     if (ent.outputTargets && ent.outputTargets.length > 0) {
                         ent.outputTargets.forEach(conn => {
+                            if (conn.lineId) return;
                             const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
                             if (target) {
                                 const route = (window.UIManager && typeof window.UIManager.getConnectionRoute === 'function')
@@ -697,32 +753,10 @@ export class MainScene extends Phaser.Scene {
                                 const points = route && Array.isArray(route.points) && route.points.length >= 2
                                     ? route.points
                                     : [{ x: ent.x, y: ent.y }, { x: target.x, y: target.y }];
-                                const widthTiles = route && route.width ? route.width : 1;
-                                const baseThickness = logCfg.lineThickness || 3;
-                                const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE * 0.8);
-
                                 const isSelected = (window.UIManager.activeLogisticsConnection &&
                                     window.UIManager.activeLogisticsConnection.source === ent &&
                                     window.UIManager.activeLogisticsConnection.targetId === conn.id);
-                                const isConnected = !!conn.filter;
-                                const lColor = !isConnected
-                                    ? (logCfg.disconnectedLineColor || "#6b6b6b")
-                                    : (isSelected ? (logCfg.selectedLineColor || "#ffff00") : logCfg.lineColor);
-                                const lAlpha = !isConnected
-                                    ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha)
-                                    : (isSelected ? (logCfg.selectedLineAlpha || 1.0) : logCfg.lineAlpha);
-                                this.logisticsGraphics.lineStyle(thickPx, parseColor(lColor), lAlpha);
-                                this.strokePolyline(this.logisticsGraphics, points);
-                                const polyLen = this.getPolylineLength(points);
-                                if (polyLen > 24) {
-                                    const speed = logCfg.arrowSpeed || 60; const spacing = logCfg.arrowSpacing || 40;
-                                    const arrowOffset = isConnected ? ((currentTime * speed) % spacing) : spacing * 0.5;
-                                    const arrowColor = isConnected ? logCfg.arrowColor : (logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
-                                    const arrowAlpha = isConnected ? 0.9 : (logCfg.disconnectedArrowAlpha ?? 0.85);
-                                    const arrowSize = isConnected ? (logCfg.arrowSize || 8) : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8);
-                                    this.logisticsGraphics.fillStyle(parseColor(arrowColor), arrowAlpha);
-                                    this.drawArrowsOnPolyline(this.logisticsGraphics, points, arrowOffset, spacing, arrowSize);
-                                }
+                                drawLogisticsRoute(points, route && route.width ? route.width : 1, isSelected, !!conn.filter);
                             }
                         });
                     }
@@ -736,7 +770,6 @@ export class MainScene extends Phaser.Scene {
                         { x: state.logisticsDragLine.endX, y: state.logisticsDragLine.endY }
                     ];
                 const dragColor = parseColor(logCfg.dragLineColor);
-                const dragLen = this.getPolylineLength(dragPoints);
                 const dragWidthTiles = Math.max(1, Number(state.logisticsDragLine.lineWidth) || 1);
                 const dragThickness = Math.max(
                     logCfg.dragLineThickness || logCfg.lineThickness || 3,
@@ -745,11 +778,6 @@ export class MainScene extends Phaser.Scene {
 
                 this.logisticsGraphics.lineStyle(dragThickness, dragColor, logCfg.dragLineAlpha);
                 this.strokePolyline(this.logisticsGraphics, dragPoints);
-                if (dragLen > 18) {
-                    const arrowSize = Math.max(logCfg.dragArrowSize || logCfg.arrowSize || 8, 1);
-                    this.logisticsGraphics.fillStyle(dragColor, logCfg.dragLineAlpha);
-                    this.drawArrowAtPolylineEnd(this.logisticsGraphics, dragPoints, arrowSize);
-                }
             }
         }
 
@@ -3167,6 +3195,7 @@ export class MainScene extends Phaser.Scene {
                 GameEngine.state.lastSelectedUnitId = clickedUnit.id;
                 this.logUnitDetail(clickedUnit);
                 GameEngine.state.selectedResourceId = null;
+                GameEngine.state.selectedLogisticsLineId = null;
             } else {
                 this._performClassicClickSelection(endX, endY, isShift);
             }
@@ -3184,6 +3213,7 @@ export class MainScene extends Phaser.Scene {
                 GameEngine.state.selectedResourceId = null;
                 GameEngine.state.selectedBuildingId = null;
                 GameEngine.state.selectedBuildingIds = [];
+                GameEngine.state.selectedLogisticsLineId = null;
                 if (window.UIManager) window.UIManager.hideContextMenu();
             }
             if (boxUnits.length > 0) GameEngine.addLog(`[選取] 框選操作選中了 ${boxUnits.length} 個我方單位。`);
@@ -3224,6 +3254,7 @@ export class MainScene extends Phaser.Scene {
             GameEngine.state.selectedResourceId = `${foundRes.gx}_${foundRes.gy}`;
             GameEngine.state.selectedUnitIds = []; GameEngine.state.selectedBuildingId = null;
             GameEngine.state.selectedBuildingIds = [];
+            GameEngine.state.selectedLogisticsLineId = null;
             if (window.UIManager) window.UIManager.hideContextMenu();
             GameEngine.addLog(`[選取] 資源：${foundRes.res.type} (Lv.${foundRes.res.level})`);
         } else {
@@ -3261,7 +3292,9 @@ export class MainScene extends Phaser.Scene {
                     GameEngine.state.selectedUnitIds = [];
                     GameEngine.state.selectedBuildingId = null;
                     GameEngine.state.selectedBuildingIds = [];
+                    GameEngine.state.selectedLogisticsLineId = null;
                 } else if (window.UIManager) {
+                    GameEngine.state.selectedLogisticsLineId = null;
                     window.UIManager.showContextMenu(clickedB);
                 }
                 GameEngine.addLog(`[選取] ${clickedB.type1 === 'corpse' ? '資源' : '建築'}：${clickedB.name || clickedB.type1}`);
@@ -3270,6 +3303,7 @@ export class MainScene extends Phaser.Scene {
                 GameEngine.state.selectedResourceId = null;
                 GameEngine.state.selectedBuildingId = null;
                 GameEngine.state.selectedBuildingIds = [];
+                GameEngine.state.selectedLogisticsLineId = null;
                 if (window.UIManager) window.UIManager.hideContextMenu();
             }
         }

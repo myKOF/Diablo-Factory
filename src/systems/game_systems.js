@@ -62,6 +62,8 @@ export class GameEngine {
         selectedUnitIds: [], // 目前選中的單位 ID 列表
         selectedBuildingIds: [], // 目前選中的建築 ID 列表
         selectedResourceId: null, // 目前選中的資源 ID (gx_gy)
+        selectedLogisticsLineId: null, // 目前選中的物流線實體 ID
+        logisticsLines: [], // 已實體化的物流線段物件；每筆代表一個網格長度，並以 groupId 串成完整路線
         projectiles: [], // [新協定] 存放活躍中的遠程子彈
         lastSelectedUnitId: null, // 上一次選中的單位 ID (用於雙擊檢測)
         lastSelectedBuildingId: null, // 上一次選中的建築 ID (用於雙擊檢測)

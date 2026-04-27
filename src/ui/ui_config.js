@@ -752,12 +752,16 @@ export const UI_CONFIG = {
         disconnectedLineAlpha: 0.75,      // 未設定搬運品項時的物流線透明度，範圍 0~1
         selectedLineColor: "#a5f3ffff",   // 被選取物流線的顏色
         selectedLineAlpha: 1.0,           // 被選取物流線的透明度，範圍 0~1
+        selectedSegmentOutlineColor: "#ff3d00ff", // 被點擊的單格物流線外框顏色，使用高對比橘紅色標示目前選中的網格
+        selectedSegmentOutlineAlpha: 1.0,  // 被點擊的單格物流線外框透明度，範圍 0~1
         dragLineColor: "#aeff00ff",       // 拖拽中連線的顏色 (淡綠)
         dragLineAlpha: 0.8,               // 拖拽中連線的透明度，範圍 0~1
 
         // --- 物流線尺寸 ---
         lineThickness: 14,                // 已建立物流線的寬度
         dragLineThickness: 14,            // 拖拽中連線的寬度
+        selectedSegmentOutlineWidth: 2,    // 被點擊的單格物流線外框線寬，範圍建議 1~4；只影響選取框，不影響物流線本體寬度
+        selectedSegmentOutlinePadding: 0,  // 被點擊的單格物流線外框向外擴張像素，範圍建議 0~4；用於避免外框壓在線體上
         lineOffset: 10,                   // 雙向連線時的錯開距離 (像素)
 
         // --- 物流線箭頭 ---

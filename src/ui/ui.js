@@ -10,7 +10,7 @@ import { SynthesisSystem } from "../systems/SynthesisSystem.js";
 export class UIManager {
     static uiLayer;
     static dragGhost = null;
-    static logisticsSourceEntity = null; static activeLogisticsConnection = null;
+    static logisticsSourceEntity = null; static activeLogisticsConnection = null; static activeLogisticsLine = null;
     static activeWarehouseEntity = null;
     static activeBuilding = null;
     static uiPositions = {};
@@ -1272,15 +1272,226 @@ export class UIManager {
         const targetPort = this.getNearestPortSlot(targetEnt, sourceEnt.x, sourceEnt.y, preferredDir);
         if (!sourcePort || !targetPort) return null;
         return {
-            points: this.buildOrthogonalRoute(
+            points: this.buildGridRoutePoints(this.buildOrthogonalRoute(
                 { x: sourcePort.x, y: sourcePort.y },
                 { x: targetPort.x, y: targetPort.y },
                 sourcePort.dir,
                 targetPort.dir,
                 { x: (sourceEnt.x + targetEnt.x) / 2, y: (sourceEnt.y + targetEnt.y) / 2 }
-            ),
+            )),
             width: Math.max(1, Math.min(sourcePort.width || 1, targetPort.width || 1))
         };
+    }
+
+    static ensureLogisticsLineStore() {
+        const state = GameEngine.state;
+        if (!Array.isArray(state.logisticsLines)) state.logisticsLines = [];
+        return state.logisticsLines;
+    }
+
+    static snapPointToGridCenter(point) {
+        const TS = GameEngine.TILE_SIZE;
+        const align = TS / 2;
+        return {
+            x: Math.round(point.x / align) * align,
+            y: Math.round(point.y / align) * align
+        };
+    }
+
+    static makeLogisticsLineId(sourceId, targetId = null, targetPoint = null) {
+        const targetKey = targetId || `${Math.round(targetPoint?.x || 0)}_${Math.round(targetPoint?.y || 0)}`;
+        return `logistics_${sourceId}_${targetKey}_${Date.now().toString(36)}_${Math.floor(Math.random() * 10000).toString(36)}`;
+    }
+
+    static buildGridRoutePoints(points) {
+        if (!Array.isArray(points) || points.length < 2) return [];
+        const TS = GameEngine.TILE_SIZE;
+        const align = TS / 2;
+        const snapped = points.map(p => this.snapPointToGridCenter(p));
+        const route = [];
+        const push = (p) => {
+            const last = route[route.length - 1];
+            if (!last || last.x !== p.x || last.y !== p.y) route.push({ x: p.x, y: p.y });
+        };
+
+        push(snapped[0]);
+        for (let i = 1; i < snapped.length; i++) {
+            const last = route[route.length - 1];
+            const next = snapped[i];
+            if (!last || (last.x === next.x && last.y === next.y)) continue;
+            if (last.x !== next.x && last.y !== next.y) {
+                push({ x: next.x, y: last.y });
+            }
+            push(next);
+        }
+
+        const expanded = [];
+        const pushExpanded = (p) => {
+            const last = expanded[expanded.length - 1];
+            if (!last || last.x !== p.x || last.y !== p.y) expanded.push({ x: p.x, y: p.y });
+        };
+        pushExpanded(route[0]);
+        for (let i = 1; i < route.length; i++) {
+            const a = expanded[expanded.length - 1];
+            const b = route[i];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const steps = Math.max(Math.abs(dx), Math.abs(dy)) / align;
+            const sx = Math.sign(dx) * align;
+            const sy = Math.sign(dy) * align;
+            for (let step = 1; step <= steps; step++) {
+                pushExpanded({ x: a.x + sx * step, y: a.y + sy * step });
+            }
+        }
+        return expanded;
+    }
+
+    static buildLogisticsSegments(groupId, sourceId, targetId, targetPoint, gridPoints, routeWidth, sourcePort, targetPort, filter) {
+        if (!Array.isArray(gridPoints) || gridPoints.length < 2) return [];
+        const TS = GameEngine.TILE_SIZE;
+        const align = TS / 2;
+        const segments = [];
+        for (let i = 0; i < gridPoints.length - 1; i += 2) {
+            const start = gridPoints[i];
+            const next = gridPoints[Math.min(i + 1, gridPoints.length - 1)];
+            const targetEnd = gridPoints[Math.min(i + 2, gridPoints.length - 1)];
+            const dx = targetEnd.x - start.x;
+            const dy = targetEnd.y - start.y;
+            let end = targetEnd;
+            if (Math.hypot(dx, dy) < TS - 0.001) {
+                const dirX = Math.sign(next.x - start.x);
+                const dirY = Math.sign(next.y - start.y);
+                end = {
+                    x: start.x + dirX * TS,
+                    y: start.y + dirY * TS
+                };
+            }
+            if (start.x === end.x && start.y === end.y) continue;
+            const centerX = (start.x + end.x) / 2;
+            const centerY = (start.y + end.y) / 2;
+            const gx = Math.round(centerX / align);
+            const gy = Math.round(centerY / align);
+            segments.push({
+                id: `${groupId}_seg_${i}`,
+                groupId,
+                type: 'logistics_segment',
+                sourceId,
+                targetId,
+                targetPoint: targetId ? null : targetPoint,
+                gridX: gx,
+                gridY: gy,
+                alignUnit: 0.5,
+                x: centerX,
+                y: centerY,
+                routePoints: [{ x: start.x, y: start.y }, { x: end.x, y: end.y }],
+                routeWidth: Math.max(1, Number(routeWidth) || 1),
+                sourcePort,
+                targetPort,
+                filter: filter || null,
+                order: i,
+                createdAt: Date.now()
+            });
+        }
+        return segments;
+    }
+
+    static upsertLogisticsLine({ lineId = null, sourceEnt, targetEnt = null, targetPoint = null, points = [], routeWidth = 1, sourcePort = null, targetPort = null, conn = null }) {
+        const lines = this.ensureLogisticsLineStore();
+        const sourceId = this.getEntityId(sourceEnt);
+        const targetId = targetEnt ? this.getEntityId(targetEnt) : null;
+        const groupId = lineId || conn?.lineId || this.makeLogisticsLineId(sourceId, targetId, targetPoint);
+        const cleanTargetPoint = targetId ? null : this.snapPointToGridCenter(targetPoint);
+        const cleanSourcePort = sourcePort ? { dir: sourcePort.dir, slotIndex: sourcePort.slotIndex, defIndex: sourcePort.defIndex, width: sourcePort.width } : null;
+        const cleanTargetPort = targetPort ? { dir: targetPort.dir, slotIndex: targetPort.slotIndex, defIndex: targetPort.defIndex, width: targetPort.width } : null;
+        const gridPoints = this.buildGridRoutePoints(points);
+        const previous = lines.find(item => item.groupId === groupId || item.id === groupId);
+        const filter = conn ? (conn.filter || null) : (previous?.filter || null);
+        const segments = this.buildLogisticsSegments(groupId, sourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter);
+        GameEngine.state.logisticsLines = lines.filter(item => item.groupId !== groupId && item.id !== groupId).concat(segments);
+
+        if (conn) {
+            conn.lineId = groupId;
+            conn.routePoints = gridPoints.map(p => ({ x: p.x, y: p.y }));
+            conn.routeWidth = Math.max(1, Number(routeWidth) || 1);
+            conn.sourcePort = cleanSourcePort;
+            conn.targetPort = cleanTargetPort;
+        }
+        return segments[segments.length - 1] || null;
+    }
+
+    static getLogisticsLineRoute(line) {
+        if (!line || !Array.isArray(line.routePoints) || line.routePoints.length < 2) return null;
+        return {
+            points: line.routePoints.map(p => ({ x: p.x, y: p.y })),
+            width: Math.max(1, Number(line.routeWidth) || 1)
+        };
+    }
+
+    static getLogisticsLineById(lineId) {
+        return this.ensureLogisticsLineStore().find(line => line.id === lineId || line.groupId === lineId) || null;
+    }
+
+    static getLogisticsSegmentsByGroupId(groupId) {
+        return this.ensureLogisticsLineStore()
+            .filter(line => line.groupId === groupId || line.id === groupId)
+            .sort((a, b) => (a.order || 0) - (b.order || 0));
+    }
+
+    static setLogisticsGroupFilter(groupId, filterItem) {
+        this.getLogisticsSegmentsByGroupId(groupId).forEach(line => {
+            line.filter = filterItem || null;
+        });
+    }
+
+    static deleteLogisticsLineById(lineId) {
+        const state = GameEngine.state;
+        const line = this.getLogisticsLineById(lineId);
+        if (!line) return false;
+        state.logisticsLines = this.ensureLogisticsLineStore().filter(item => item.id !== line.id);
+        if (line.sourceId && line.targetId && !this.getLogisticsSegmentsByGroupId(line.groupId).length) {
+            const sourceEnt = state.mapEntities.find(ent => this.getEntityId(ent) === line.sourceId);
+            if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
+                sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== line.groupId && conn.id !== line.targetId);
+            }
+        }
+        if (state.selectedLogisticsLineId === line.id) state.selectedLogisticsLineId = null;
+        if (this.activeLogisticsLine && this.activeLogisticsLine.id === line.id) this.activeLogisticsLine = null;
+        if (this.activeLogisticsConnection?.lineId === line.id) this.activeLogisticsConnection = null;
+        GameEngine.addLog(`[物流] 物流線段已刪除`, 'LOGISTICS');
+        return true;
+    }
+
+    static deleteLogisticsLineGroupById(groupId) {
+        const state = GameEngine.state;
+        const segments = this.getLogisticsSegmentsByGroupId(groupId);
+        if (!segments.length) return false;
+        const first = segments[0];
+        state.logisticsLines = this.ensureLogisticsLineStore().filter(item => item.groupId !== groupId && item.id !== groupId);
+        if (first.sourceId && first.targetId) {
+            const sourceEnt = state.mapEntities.find(ent => this.getEntityId(ent) === first.sourceId);
+            if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
+                sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId && conn.id !== first.targetId);
+            }
+        }
+        if (segments.some(line => line.id === state.selectedLogisticsLineId)) state.selectedLogisticsLineId = null;
+        if (this.activeLogisticsLine && this.activeLogisticsLine.groupId === groupId) this.activeLogisticsLine = null;
+        if (this.activeLogisticsConnection?.groupId === groupId) this.activeLogisticsConnection = null;
+        GameEngine.addLog(`[物流] 物流線群組已刪除`, 'LOGISTICS');
+        return true;
+    }
+
+    static getLogisticsLineAt(worldX, worldY) {
+        const TS = GameEngine.TILE_SIZE;
+        return this.ensureLogisticsLineStore()
+            .filter(line =>
+                Math.abs(worldX - line.x) <= TS / 2 &&
+                Math.abs(worldY - line.y) <= TS / 2
+            )
+            .sort((a, b) => {
+                const da = Math.hypot(worldX - a.x, worldY - a.y);
+                const db = Math.hypot(worldX - b.x, worldY - b.y);
+                return da - db || (b.createdAt || 0) - (a.createdAt || 0);
+            })[0] || null;
     }
 
     static handleWorldMouseDown(e) {
@@ -1314,14 +1525,14 @@ export class UIManager {
                 this.logisticsSourceEntity = clickedBuilding;
                 const sourcePort = this.getNearestPortSlot(clickedBuilding, worldX, worldY);
                 const routePoints = sourcePort
-                    ? this.buildOrthogonalRoute(
+                    ? this.buildGridRoutePoints(this.buildOrthogonalRoute(
                         { x: sourcePort.x, y: sourcePort.y },
                         { x: worldX, y: worldY },
                         sourcePort.dir,
                         null,
                         { x: worldX, y: worldY }
-                    )
-                    : [{ x: clickedBuilding.x, y: clickedBuilding.y }, { x: worldX, y: worldY }];
+                    ))
+                    : this.buildGridRoutePoints([{ x: clickedBuilding.x, y: clickedBuilding.y }, { x: worldX, y: worldY }]);
                 GameEngine.state.logisticsDragLine = {
                     sourceEntityId: bid,
                     targetEntityId: null,
@@ -1363,13 +1574,13 @@ export class UIManager {
                     drag.lineWidth = Math.max(1, Math.min(sourcePort.width || 1, targetPort.width || 1));
                     drag.endX = targetPort.x;
                     drag.endY = targetPort.y;
-                    drag.points = this.buildOrthogonalRoute(
+                    drag.points = this.buildGridRoutePoints(this.buildOrthogonalRoute(
                         { x: sourcePort.x, y: sourcePort.y },
                         { x: targetPort.x, y: targetPort.y },
                         sourcePort.dir,
                         targetPort.dir,
                         { x: world.x, y: world.y }
-                    );
+                    ));
                 }
             } else if (sourcePort) {
                 drag.targetEntityId = null;
@@ -1377,17 +1588,17 @@ export class UIManager {
                 drag.lineWidth = Math.max(1, Number(sourcePort.width) || 1);
                 drag.endX = world.x;
                 drag.endY = world.y;
-                drag.points = this.buildOrthogonalRoute(
+                drag.points = this.buildGridRoutePoints(this.buildOrthogonalRoute(
                     { x: sourcePort.x, y: sourcePort.y },
                     { x: world.x, y: world.y },
                     sourcePort.dir,
                     null,
                     { x: world.x, y: world.y }
-                );
+                ));
             } else {
                 drag.endX = world.x;
                 drag.endY = world.y;
-                drag.points = [{ x: sourceEnt.x, y: sourceEnt.y }, { x: world.x, y: world.y }];
+                drag.points = this.buildGridRoutePoints([{ x: sourceEnt.x, y: sourceEnt.y }, { x: world.x, y: world.y }]);
             }
             return;
         }
@@ -1439,34 +1650,56 @@ export class UIManager {
             if (!targetBuilding) {
                 targetBuilding = this.getLogisticsTargetBuildingAt(world.x, world.y, this.logisticsSourceEntity);
             }
+            const sourcePort = drag.sourcePort || this.getNearestPortSlot(this.logisticsSourceEntity, targetBuilding ? targetBuilding.x : world.x, targetBuilding ? targetBuilding.y : world.y);
+            const preferredDir = sourcePort ? this.getOppositeDirection(sourcePort.dir) : null;
+            const targetPort = targetBuilding ? (drag.targetPort || this.getNearestPortSlot(targetBuilding, world.x, world.y, preferredDir)) : null;
+            const endPoint = targetPort || { x: world.x, y: world.y };
+            const points = sourcePort
+                ? this.buildGridRoutePoints(this.buildOrthogonalRoute(
+                    { x: sourcePort.x, y: sourcePort.y },
+                    { x: endPoint.x, y: endPoint.y },
+                    sourcePort.dir,
+                    targetPort ? targetPort.dir : null,
+                    { x: world.x, y: world.y }
+                ))
+                : this.buildGridRoutePoints([{ x: this.logisticsSourceEntity.x, y: this.logisticsSourceEntity.y }, { x: endPoint.x, y: endPoint.y }]);
+            const routeWidth = Math.max(1, targetPort ? Math.min(sourcePort?.width || 1, targetPort.width || 1) : (sourcePort?.width || 1));
+
+            let conn = null;
+            let tId = null;
             if (targetBuilding) {
                 if (!this.logisticsSourceEntity.outputTargets) this.logisticsSourceEntity.outputTargets = [];
-                const tId = this.getEntityId(targetBuilding);
-                const sourcePort = drag.sourcePort || this.getNearestPortSlot(this.logisticsSourceEntity, targetBuilding.x, targetBuilding.y);
-                const preferredDir = sourcePort ? this.getOppositeDirection(sourcePort.dir) : null;
-                const targetPort = drag.targetPort || this.getNearestPortSlot(targetBuilding, world.x, world.y, preferredDir);
-                const points = (sourcePort && targetPort)
-                    ? this.buildOrthogonalRoute(
-                        { x: sourcePort.x, y: sourcePort.y },
-                        { x: targetPort.x, y: targetPort.y },
-                        sourcePort.dir,
-                        targetPort.dir,
-                        { x: world.x, y: world.y }
-                    )
-                    : [{ x: this.logisticsSourceEntity.x, y: this.logisticsSourceEntity.y }, { x: targetBuilding.x, y: targetBuilding.y }];
-                const routeWidth = Math.max(1, Math.min(sourcePort?.width || 1, targetPort?.width || 1));
-
-                let conn = this.logisticsSourceEntity.outputTargets.find(t => t.id === tId);
+                tId = this.getEntityId(targetBuilding);
+                conn = this.logisticsSourceEntity.outputTargets.find(t => t.id === tId);
                 if (!conn) {
                     conn = { id: tId, filter: null };
                     this.logisticsSourceEntity.outputTargets.push(conn);
                     GameEngine.addLog(`[物流] 連線建立：${this.logisticsSourceEntity.name} ➡️ ${targetBuilding.name}`, 'LOGISTICS');
                 }
-                conn.routePoints = points.map(p => ({ x: p.x, y: p.y }));
-                conn.routeWidth = routeWidth;
-                conn.sourcePort = sourcePort ? { dir: sourcePort.dir, slotIndex: sourcePort.slotIndex, defIndex: sourcePort.defIndex, width: sourcePort.width } : null;
-                conn.targetPort = targetPort ? { dir: targetPort.dir, slotIndex: targetPort.slotIndex, defIndex: targetPort.defIndex, width: targetPort.width } : null;
-                this.showLogisticsMenu(this.logisticsSourceEntity, tId, e.clientX, e.clientY);
+            } else {
+                GameEngine.addLog(`[物流] 分段物流線已建立：${this.logisticsSourceEntity.name} ➡️ 地板節點`, 'LOGISTICS');
+            }
+
+            const line = this.upsertLogisticsLine({
+                sourceEnt: this.logisticsSourceEntity,
+                targetEnt: targetBuilding,
+                targetPoint: endPoint,
+                points,
+                routeWidth,
+                sourcePort,
+                targetPort,
+                conn
+            });
+            if (!line) {
+                this.logisticsSourceEntity = null; GameEngine.state.logisticsDragLine = null;
+                return;
+            }
+            GameEngine.state.selectedLogisticsLineId = line.id;
+            this.activeLogisticsLine = line;
+            if (targetBuilding && tId) {
+                this.showLogisticsMenu(this.logisticsSourceEntity, tId, e.clientX, e.clientY, line.id);
+            } else {
+                this.showLogisticsLineMenu(line, e.clientX, e.clientY);
             }
             this.logisticsSourceEntity = null; GameEngine.state.logisticsDragLine = null;
             return;
@@ -1590,9 +1823,11 @@ export class UIManager {
             return mx > ent.x - w / 2 && mx < ent.x + w / 2 && my > ent.y - h / 2 && my < ent.y + h / 2;
         });
 
-                if (clicked) {
+        if (clicked) {
             const now = Date.now();
             const buildingId = clicked.id || `${clicked.type1}_${clicked.x}_${clicked.y}`;
+            GameEngine.state.selectedLogisticsLineId = null;
+            this.activeLogisticsLine = null;
 
             // 雙擊全選邏輯
             const isDoubleClick = (GameEngine.state.lastSelectedBuildingId === buildingId && (now - GameEngine.state.lastSelectionTime < 500));
@@ -1631,46 +1866,29 @@ export class UIManager {
             return;
         }
 
-        // [核心修復] 物流線點擊優先級降至建築之下
-        const distToSegmentSquared = (p, v, w) => {
-            let l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2);
-            if (l2 === 0) return Math.pow(p.x - v.x, 2) + Math.pow(p.y - v.y, 2);
-            let t = Math.max(0, Math.min(1, ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2));
-            return Math.pow(p.x - (v.x + t * (w.x - v.x)), 2) + Math.pow(p.y - (v.y + t * (w.y - v.y)), 2);
-        };
-        const distToPolylineSquared = (p, points) => {
-            if (!Array.isArray(points) || points.length < 2) return Infinity;
-            let best = Infinity;
-            for (let i = 0; i < points.length - 1; i++) {
-                const d2 = distToSegmentSquared(p, points[i], points[i + 1]);
-                if (d2 < best) best = d2;
+        // [物流線實體] 點擊優先級低於建築，高於地板。
+        const clickedLine = this.getLogisticsLineAt(worldX, worldY);
+        if (clickedLine) {
+            GameEngine.state.selectedUnitIds = [];
+            GameEngine.state.selectedBuildingIds = [];
+            GameEngine.state.selectedBuildingId = null;
+            GameEngine.state.selectedResourceId = null;
+            GameEngine.state.selectedLogisticsLineId = clickedLine.id;
+            const source = GameEngine.state.mapEntities.find(ent => this.getEntityId(ent) === clickedLine.sourceId);
+            if (source && clickedLine.targetId) {
+                this.showLogisticsMenu(source, clickedLine.targetId, e.clientX, e.clientY, clickedLine.id);
+            } else {
+                this.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
             }
-            return best;
-        };
-        let clickedConn = null;
-        for (let ent of GameEngine.state.mapEntities) {
-            if (ent.outputTargets && ent.outputTargets.length > 0) {
-                for (let conn of ent.outputTargets) {
-                    let target = GameEngine.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
-                    if (target) {
-                        const route = this.getConnectionRoute(ent, target, conn);
-                        const points = route && route.points ? route.points : [{ x: ent.x, y: ent.y }, { x: target.x, y: target.y }];
-                        const widthPx = Math.max(12, (route && route.width ? route.width : 1) * GameEngine.TILE_SIZE * 0.75);
-                        const threshold2 = Math.pow(widthPx * 0.5 + 6, 2);
-                        if (distToPolylineSquared({ x: worldX, y: worldY }, points) < threshold2) {
-                            clickedConn = { source: ent, targetId: conn.id }; break;
-                        }
-                    }
-                }
-            }
-            if (clickedConn) break;
+            return;
         }
-        if (clickedConn) { this.showLogisticsMenu(clickedConn.source, clickedConn.targetId, e.clientX, e.clientY); return; }
 
         // 點擊地面
         GameEngine.state.selectedBuildingIds = [];
         GameEngine.state.selectedBuildingId = null;
+        GameEngine.state.selectedLogisticsLineId = null;
         this.activeLogisticsConnection = null;
+        this.activeLogisticsLine = null;
     }
 
     static showContextMenu(entity, isConfirming = false) {
@@ -2681,8 +2899,15 @@ export class UIManager {
         // 注意：這裡不再自動隱藏 settings_panel，避免 toggle 時發生衝突
     }
 
-    static showLogisticsMenu(sourceEnt, targetId, mouseX, mouseY) {
-        this.hideContextMenu(); this.activeLogisticsConnection = { source: sourceEnt, targetId: targetId };
+    static showLogisticsMenu(sourceEnt, targetId, mouseX, mouseY, lineId = null) {
+        this.hideContextMenu();
+        const connForLine = sourceEnt?.outputTargets?.find(t => t.id === targetId) || null;
+        const groupId = connForLine?.lineId || null;
+        const selectedSegment = lineId ? this.getLogisticsLineById(lineId) : (groupId ? this.getLogisticsLineById(groupId) : null);
+        const selectedLineId = selectedSegment?.id || null;
+        this.activeLogisticsConnection = { source: sourceEnt, targetId: targetId, lineId: selectedLineId, groupId };
+        this.activeLogisticsLine = selectedSegment;
+        GameEngine.state.selectedLogisticsLineId = selectedLineId;
         let menu = document.getElementById("logistics_menu");
         if (!menu) {
             menu = document.createElement("div"); menu.id = "logistics_menu"; menu.className = "panel glass-panel";
@@ -2724,6 +2949,9 @@ export class UIManager {
         const conn = sourceEnt.outputTargets.find(t => t.id === targetId);
         if (conn && conn.filter && availableItems.length > 0 && !availableItems.includes(conn.filter)) {
             conn.filter = null;
+            if (conn.lineId) {
+                this.setLogisticsGroupFilter(conn.lineId, null);
+            }
         }
         const currentFilter = conn ? conn.filter : null;
         const helperText = isProcessingPlantSource
@@ -2742,6 +2970,24 @@ export class UIManager {
         });
         menu.innerHTML = html + `</div>`; menu.style.display = "flex";
         menu.style.left = `${Math.min(mouseX + 15, window.innerWidth - 300)}px`; menu.style.top = `${Math.min(mouseY - 20, window.innerHeight - 200)}px`;
+    }
+
+    static showLogisticsLineMenu(line, mouseX, mouseY) {
+        if (!line) return;
+        this.hideContextMenu();
+        this.activeLogisticsLine = line;
+        this.activeLogisticsConnection = null;
+        GameEngine.state.selectedLogisticsLineId = line.id;
+        let menu = document.getElementById("logistics_menu");
+        if (!menu) {
+            menu = document.createElement("div"); menu.id = "logistics_menu"; menu.className = "panel glass-panel";
+            menu.style.cssText = `position: absolute; z-index: 2000; padding: 15px; display: flex; flex-direction: column; gap: 10px; background: rgba(20,20,20,0.95); border: 2px solid #4caf50; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); pointer-events: auto;`;
+            this.uiLayer.appendChild(menu);
+        }
+        menu.innerHTML = `<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 5px; gap: 20px;"><span style="color: #4caf50; font-weight: bold; font-size: 15px;">物流線節點</span><button onclick="window.UIManager.deleteLogisticsLine(event)" style="background: #f44336; color: white; border: 1px solid #ff8a80; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-weight: bold; font-size: 12px;">刪除連線 ✖</button></div><div style="font-size: 12px; color: #c8e6c9; margin-bottom: 4px; line-height: 1.45;">此物流線已實體化，可被點擊、選取與刪除。地板終點可作為後續分段建造的節點。</div>`;
+        menu.style.display = "flex";
+        menu.style.left = `${Math.min(mouseX + 15, window.innerWidth - 300)}px`;
+        menu.style.top = `${Math.min(mouseY - 20, window.innerHeight - 160)}px`;
     }
 
     static getGatheringLogisticsItems(sourceEnt, sourceCfg) {
@@ -2769,6 +3015,9 @@ export class UIManager {
             const conn = this.activeLogisticsConnection.source.outputTargets.find(t => t.id === this.activeLogisticsConnection.targetId);
             if (conn) {
                 conn.filter = filterItem;
+                if (conn.lineId) {
+                    this.setLogisticsGroupFilter(conn.lineId, filterItem);
+                }
                 const filterName = GameEngine.RESOURCE_NAMES[filterItem] || filterItem;
                 GameEngine.addLog(`[物流] 路線搬運品項已更新：${filterName}。這只影響搬運，不會改變加工廠生產線。`, 'LOGISTICS');
             }
@@ -2779,12 +3028,19 @@ export class UIManager {
 
     static deleteLogisticsLine(event) {
         if (event) event.stopPropagation();
-        if (this.activeLogisticsConnection) {
-            this.activeLogisticsConnection.source.outputTargets = this.activeLogisticsConnection.source.outputTargets.filter(t => t.id !== this.activeLogisticsConnection.targetId);
-            GameEngine.addLog(`[物流] 路線已刪除`, 'LOGISTICS');
+        if (this.activeLogisticsLine && !this.activeLogisticsConnection) {
+            this.deleteLogisticsLineById(this.activeLogisticsLine.id);
+        } else if (this.activeLogisticsConnection) {
+            if (this.activeLogisticsConnection.groupId) {
+                this.deleteLogisticsLineGroupById(this.activeLogisticsConnection.groupId);
+            } else {
+                this.activeLogisticsConnection.source.outputTargets = this.activeLogisticsConnection.source.outputTargets.filter(t => t.id !== this.activeLogisticsConnection.targetId);
+                GameEngine.addLog(`[物流] 路線已刪除`, 'LOGISTICS');
+            }
         }
         const menu = document.getElementById("logistics_menu"); if (menu) menu.style.display = "none";
         this.activeLogisticsConnection = null;
+        this.activeLogisticsLine = null;
     }
 
     static updateValues(forceUpdate = false) {

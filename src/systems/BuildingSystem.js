@@ -531,6 +531,18 @@ export class BuildingSystem {
             const eid = e.id || `${e.type1}_${e.x}_${e.y}`;
             return eid !== id;
         });
+        if (Array.isArray(state.logisticsLines)) {
+            state.logisticsLines = state.logisticsLines.filter(line => line.sourceId !== id && line.targetId !== id);
+        }
+        state.mapEntities.forEach(e => {
+            if (Array.isArray(e.outputTargets)) {
+                e.outputTargets = e.outputTargets.filter(conn => conn.id !== id);
+            }
+        });
+        if (state.selectedLogisticsLineId) {
+            const selectedExists = Array.isArray(state.logisticsLines) && state.logisticsLines.some(line => line.id === state.selectedLogisticsLineId);
+            if (!selectedExists) state.selectedLogisticsLineId = null;
+        }
 
         state.renderVersion++; // 通知渲染器刷新
 
