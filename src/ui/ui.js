@@ -267,7 +267,14 @@ export class UIManager {
             }
         });
         window.addEventListener("keydown", (e) => {
-            if (e.key === "Escape") this.cancelBuildingMode();
+            if (e.key === "Escape") {
+                if (this.cancelActiveConstructionPreview()) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+                this.cancelBuildingMode();
+            }
             if (e.key === "Delete") {
                 if (this.isTextInputEvent(e)) return;
                 if (this.deleteSelectedLogisticsLine()) {
@@ -1504,6 +1511,7 @@ export class UIManager {
 
     static beginLogisticsDragFromLine(line) {
         if (!line) return false;
+        this.clearWorldSelectionMarquee();
         this.logisticsSourceEntity = null;
         this.logisticsSourceLine = line;
         this.isLogisticsDragging = true;
@@ -1513,6 +1521,38 @@ export class UIManager {
         GameEngine.state.logisticsDragLine = { active: true };
         this.hideContextMenu();
         conveyorSystem.startDrag(line.x, line.y, null, this.getLogisticsLineDragPort(line), line);
+        return true;
+    }
+
+    static clearWorldSelectionMarquee() {
+        const scene = window.PhaserScene;
+        if (!scene) return;
+        scene.selectionStartPos = null;
+        scene.mouseDownScreenPos = null;
+        if (scene.marqueeGraphics) {
+            scene.marqueeGraphics.clear();
+            scene.marqueeGraphics.visible = false;
+        }
+    }
+
+    static cancelLogisticsDrag() {
+        if (!this.isLogisticsDragging && !GameEngine.state.logisticsDragLine) return false;
+        conveyorSystem.cancelDrag();
+        this.clearWorldSelectionMarquee();
+        this.logisticsSourceEntity = null;
+        this.logisticsSourceLine = null;
+        this.isLogisticsDragging = false;
+        GameEngine.state.logisticsDragLine = null;
+        GameEngine.addLog(`[物流] 已取消物流線建造。`, 'LOGISTICS');
+        return true;
+    }
+
+    static cancelActiveConstructionPreview() {
+        if (this.cancelLogisticsDrag()) return true;
+        if (!GameEngine.state.placingType && GameEngine.state.buildingMode === 'NONE') return false;
+        this.cancelBuildingMode();
+        this.clearWorldSelectionMarquee();
+        GameEngine.addLog(`[建造] 已取消建造預覽。`, 'SYSTEM');
         return true;
     }
 
@@ -1594,6 +1634,12 @@ export class UIManager {
     }
 
     static handleWorldMouseDown(e) {
+        if (e.button === 2 && this.cancelActiveConstructionPreview()) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
         if (e.target.closest("#ui_layer")) return;
 
         // 記錄按下的座標，用於在 MouseUp 時判斷是否為「點擊」還是「拖動畫面」
@@ -1621,13 +1667,14 @@ export class UIManager {
         if (clickedBuilding && GameEngine.state.buildingMode === 'NONE') {
             const bid = this.getEntityId(clickedBuilding);
             if (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(bid)) {
+                this.clearWorldSelectionMarquee();
                 this.logisticsSourceEntity = clickedBuilding;
                 this.logisticsSourceLine = null;
                 this.isLogisticsDragging = true;
                 const sourcePort = this.getNearestPortSlot(clickedBuilding, worldX, worldY);
                 
                 // Use ConveyorSystem
-                conveyorSystem.startDrag(worldX, worldY, clickedBuilding, sourcePort);
+                conveyorSystem.startDrag(sourcePort?.x || worldX, sourcePort?.y || worldY, clickedBuilding, sourcePort);
                 GameEngine.state.logisticsDragLine = { active: true }; // Keep flag for rendering/UI
                 return;
             }

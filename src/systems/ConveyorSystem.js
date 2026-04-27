@@ -8,6 +8,9 @@ export class ConveyorSystem {
         this.router = null;
         this.ghosts = [];
         this.isValid = false;
+        this.pendingDragPoint = null;
+        this.isDragFrameQueued = false;
+        this.lastRouteKey = null;
     }
 
     startDrag(startX, startY, sourceEntity = null, sourcePort = null, sourceLine = null) {
@@ -17,10 +20,12 @@ export class ConveyorSystem {
 
         const rows = grid.length;
         const cols = grid[0].length;
+        const routeGrid = this.createRoutingGrid(grid);
+        const routeScale = this.getRouteScale();
         
-        this.router = new ConveyorRouter(grid, cols, rows);
-        this.router.tileSize = GameEngine.TILE_SIZE;
-        this.router.maxSearchNodes = Math.max(500, Number(UI_CONFIG.ConveyorBuild?.maxRouteSearchNodes) || 6000);
+        this.router = new ConveyorRouter(routeGrid, cols * routeScale, rows * routeScale);
+        this.router.tileSize = this.getGridUnitSize();
+        this.router.maxSearchNodes = Math.max(500, Number(UI_CONFIG.ConveyorBuild?.maxRouteSearchNodes) || 12000);
 
         this.activeDrag = {
             startX,
@@ -35,15 +40,67 @@ export class ConveyorSystem {
         
         this.ghosts = [];
         this.isValid = false;
+        this.pendingDragPoint = null;
+        this.isDragFrameQueued = false;
+        this.lastRouteKey = null;
         console.log(`[ConveyorSystem] Drag started at ${startX},${startY}`);
     }
 
+    getAlignmentUnit() {
+        const unit = Number(UI_CONFIG.ConveyorBuild?.alignmentUnit) || 0.5;
+        return Math.max(0.5, Math.min(1, unit));
+    }
+
+    getGridUnitSize() {
+        return GameEngine.TILE_SIZE * this.getAlignmentUnit();
+    }
+
+    getRouteScale() {
+        return Math.round(1 / this.getAlignmentUnit());
+    }
+
+    createRoutingGrid(grid) {
+        const expanded = [];
+        const routeScale = this.getRouteScale();
+        for (let y = 0; y < grid.length; y++) {
+            const sourceRows = [];
+            for (let row = 0; row < routeScale; row++) sourceRows.push([]);
+            for (let x = 0; x < grid[y].length; x++) {
+                const values = Array(routeScale).fill(grid[y][x]);
+                sourceRows.forEach(row => row.push(...values));
+            }
+            expanded.push(...sourceRows);
+        }
+        return expanded;
+    }
+
     updateDrag(currentX, currentY) {
+        if (!this.activeDrag) return;
+        this.pendingDragPoint = { x: currentX, y: currentY };
+        if (this.isDragFrameQueued) return;
+
+        this.isDragFrameQueued = true;
+        const scheduleFrame = typeof requestAnimationFrame === "function"
+            ? requestAnimationFrame
+            : (callback) => setTimeout(callback, 16);
+        scheduleFrame(() => {
+            this.isDragFrameQueued = false;
+            if (!this.activeDrag || !this.pendingDragPoint) return;
+            const point = this.pendingDragPoint;
+            this.pendingDragPoint = null;
+            this.updateDragNow(point.x, point.y);
+        });
+    }
+
+    updateDragNow(currentX, currentY) {
         if (!this.activeDrag) return;
 
         const dragTarget = this.resolveDragTarget(currentX, currentY);
         const endGrid = this.toGrid(dragTarget.x, dragTarget.y);
         const startGrid = this.activeDrag.startGrid;
+        const routeKey = `${startGrid.x},${startGrid.y}->${endGrid.x},${endGrid.y}:${this.activeDrag.sourcePort?.dir || ''}:${dragTarget.building ? window.UIManager?.getEntityId?.(dragTarget.building) : ''}`;
+        if (routeKey === this.lastRouteKey) return;
+        this.lastRouteKey = routeKey;
 
         // Auto-Routing with A* Turn Penalty
         const path = this.router.findPath(startGrid, endGrid, this.activeDrag.sourcePort?.dir);
@@ -96,6 +153,11 @@ export class ConveyorSystem {
     }
 
     submitDrag() {
+        if (this.activeDrag && this.pendingDragPoint) {
+            const point = this.pendingDragPoint;
+            this.pendingDragPoint = null;
+            this.updateDragNow(point.x, point.y);
+        }
         if (!this.activeDrag || !this.isValid || this.ghosts.length < 2) {
             this.cancelDrag();
             return;
@@ -105,11 +167,14 @@ export class ConveyorSystem {
         const drag = this.activeDrag;
         const TS = GameEngine.TILE_SIZE;
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
+        const unit = this.getGridUnitSize();
+        const offsetX = offset.x * (TS / unit);
+        const offsetY = offset.y * (TS / unit);
 
         // Convert Ghost path to world points
         const points = this.ghosts.map(g => ({
-            x: (g.x + offset.x + 0.5) * TS,
-            y: (g.y + offset.y + 0.5) * TS
+            x: (g.x + offsetX) * unit,
+            y: (g.y + offsetY) * unit
         }));
 
         const lastPoint = points[points.length - 1];
@@ -140,6 +205,9 @@ export class ConveyorSystem {
     cancelDrag() {
         this.activeDrag = null;
         this.ghosts = [];
+        this.pendingDragPoint = null;
+        this.isDragFrameQueued = false;
+        this.lastRouteKey = null;
         if (GameEngine.state) {
             GameEngine.state.conveyorGhosts = [];
             GameEngine.state.conveyorValid = false;
@@ -149,9 +217,12 @@ export class ConveyorSystem {
     toGrid(worldX, worldY) {
         const TS = GameEngine.TILE_SIZE;
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
+        const unit = this.getGridUnitSize();
+        const offsetX = offset.x * (TS / unit);
+        const offsetY = offset.y * (TS / unit);
         return {
-            x: Math.floor(worldX / TS) - offset.x,
-            y: Math.floor(worldY / TS) - offset.y
+            x: Math.round(worldX / unit) - offsetX,
+            y: Math.round(worldY / unit) - offsetY
         };
     }
 

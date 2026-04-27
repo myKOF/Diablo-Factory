@@ -108,8 +108,41 @@ export class ConveyorRouter {
      * A* with Turn Penalty
      */
     findAStarPath(start, end, startDir) {
-        const openSet = [];
+        const openHeap = [];
+        const bestOpen = new Map();
         const closedSet = new Set();
+        const pushHeap = (node) => {
+            openHeap.push(node);
+            let index = openHeap.length - 1;
+            while (index > 0) {
+                const parent = Math.floor((index - 1) / 2);
+                if (openHeap[parent].f <= node.f) break;
+                openHeap[index] = openHeap[parent];
+                index = parent;
+            }
+            openHeap[index] = node;
+        };
+        const popHeap = () => {
+            if (openHeap.length === 0) return null;
+            const root = openHeap[0];
+            const last = openHeap.pop();
+            if (openHeap.length > 0) {
+                let index = 0;
+                while (true) {
+                    const left = index * 2 + 1;
+                    const right = left + 1;
+                    if (left >= openHeap.length) break;
+                    let child = left;
+                    if (right < openHeap.length && openHeap[right].f < openHeap[left].f) child = right;
+                    if (openHeap[child].f >= last.f) break;
+                    openHeap[index] = openHeap[child];
+                    index = child;
+                }
+                openHeap[index] = last;
+            }
+            return root;
+        };
+        const getNodeKey = (x, y, dir) => `${x},${y},${dir ? dir.x : 0},${dir ? dir.y : 0}`;
 
         const startNode = {
             x: start.x,
@@ -122,22 +155,24 @@ export class ConveyorRouter {
         };
         startNode.f = startNode.g + startNode.h;
 
-        openSet.push(startNode);
+        pushHeap(startNode);
+        bestOpen.set(getNodeKey(startNode.x, startNode.y, startNode.dir), startNode);
 
         let searchedNodes = 0;
-        while (openSet.length > 0) {
+        while (openHeap.length > 0) {
             searchedNodes++;
             if (searchedNodes > this.maxSearchNodes) return null;
 
-            // Get node with lowest F
-            openSet.sort((a, b) => a.f - b.f);
-            const current = openSet.shift();
+            const current = popHeap();
+            const currentKey = getNodeKey(current.x, current.y, current.dir);
+            if (bestOpen.get(currentKey) !== current) continue;
+            bestOpen.delete(currentKey);
 
             if (current.x === end.x && current.y === end.y) {
                 return this.reconstructPath(current);
             }
 
-            closedSet.add(`${current.x},${current.y},${current.dir ? current.dir.x : 0},${current.dir ? current.dir.y : 0}`);
+            closedSet.add(currentKey);
 
             const neighbors = [
                 { x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }
@@ -150,7 +185,7 @@ export class ConveyorRouter {
                 if (nx < 0 || nx >= this.cols || ny < 0 || ny >= this.rows) continue;
                 if (this.grid[ny][nx] !== 0) continue;
 
-                const key = `${nx},${ny},${n.x},${n.y}`;
+                const key = getNodeKey(nx, ny, n);
                 if (closedSet.has(key)) continue;
 
                 let moveCost = 1;
@@ -162,16 +197,12 @@ export class ConveyorRouter {
                 const h = Math.abs(end.x - nx) + Math.abs(end.y - ny);
                 const f = g + h;
 
-                const existingOpen = openSet.find(o => o.x === nx && o.y === ny && o.dir && o.dir.x === n.x && o.dir.y === n.y);
+                const existingOpen = bestOpen.get(key);
                 if (existingOpen && g >= existingOpen.g) continue;
 
-                if (!existingOpen) {
-                    openSet.push({ x: nx, y: ny, g, h, f, parent: current, dir: n });
-                } else {
-                    existingOpen.g = g;
-                    existingOpen.f = f;
-                    existingOpen.parent = current;
-                }
+                const nextNode = { x: nx, y: ny, g, h, f, parent: current, dir: n };
+                bestOpen.set(key, nextNode);
+                pushHeap(nextNode);
             }
         }
 
@@ -194,6 +225,11 @@ export class ConveyorRouter {
     processPath(path, targetEntity = null, existingLines = []) {
         if (path.length === 0) return [];
         const result = [];
+        const existingLineKeys = new Set(existingLines.map(line => {
+            const lx = line.gridX !== undefined ? line.gridX : Math.round(line.x / (this.tileSize || 20));
+            const ly = line.gridY !== undefined ? line.gridY : Math.round(line.y / (this.tileSize || 20));
+            return `${lx},${ly}`;
+        }));
         for (let i = 0; i < path.length; i++) {
             const curr = path[i];
             const prev = path[i - 1];
@@ -212,13 +248,7 @@ export class ConveyorRouter {
             // Auto-Merge Detection
             let isMerger = false;
             if (i === path.length - 1 && !targetEntity) {
-                // Check if this point hits an existing belt perpendicularly
-                const hitLine = existingLines.find(line => {
-                    const lx = Math.round(line.x / (this.tileSize || 20));
-                    const ly = Math.round(line.y / (this.tileSize || 20));
-                    return lx === curr.x && ly === curr.y;
-                });
-                if (hitLine) {
+                if (existingLineKeys.has(`${curr.x},${curr.y}`)) {
                     isMerger = true;
                 }
             }

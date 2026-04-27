@@ -783,7 +783,8 @@ export const UI_CONFIG = {
         costPerSegment: 10,           // 每小節傳送帶消耗的資源數量 (預設 10)
         costResource: "gold_ingots",  // 消耗的資源種類鍵值 (例如: gold_ingots, soul)
         enableCost: false,            // [需求修正] 目前不消耗道具，以後再做。設為 true 則開啟檢查。
-        maxRouteSearchNodes: 6000,    // 物流線拖曳尋路的最大搜尋節點數，範圍建議 1000~20000；數值越高越能繞遠路，但拖到封閉障礙時越容易造成卡頓。
+        alignmentUnit: 0.5,           // 物流線建造對齊單位，範圍 0.5~1；0.5 代表可吸附半格網格。此參數只影響中心點對齊，不會改變物流線 1x1 網格尺寸。
+        maxRouteSearchNodes: 12000,   // 物流線拖曳尋路的最大搜尋節點數，範圍建議 1000~30000；半格對齊會增加搜尋節點，數值越高越能繞遠路但封閉障礙時越容易卡頓。
         ghostValidColor: 0x00ff00,    // 合法位置預覽顏色 (綠色)
         ghostInvalidColor: 0xff0000,  // 非法位置預覽顏色 (紅色)
         ghostAlpha: 0.5               // 預覽透明度 (0.0 ~ 1.0)

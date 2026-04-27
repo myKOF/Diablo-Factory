@@ -391,6 +391,7 @@ export class MainScene extends Phaser.Scene {
 
         this.input.on('pointerdown', (pointer) => {
             const isPlacement = !!GameEngine.state.placingType;
+            if (window.GAME_STATE && window.GAME_STATE.logisticsDragLine) return;
             if (window.UIManager && window.UIManager.dragGhost) return;
 
             const isMiddleDrag = pointer.middleButtonDown();
@@ -793,9 +794,46 @@ export class MainScene extends Phaser.Scene {
                 this.logisticsGraphics.fillStyle(ghostColor, ghostAlpha);
                 this.logisticsGraphics.lineStyle(2, ghostColor, 0.8);
 
-                state.conveyorGhosts.forEach(ghost => {
-                    const wx = (ghost.x + offset.x + 0.5) * TS;
-                    const wy = (ghost.y + offset.y + 0.5) * TS;
+                const alignUnit = Math.max(0.5, Math.min(1, Number(buildCfg.alignmentUnit) || 0.5));
+                const gridUnit = TS * alignUnit;
+                const offsetScale = TS / gridUnit;
+                const previewSegments = [];
+                const pushPreviewSegment = (start, next, targetEnd) => {
+                    if (!start || !next) return;
+                    let end = targetEnd || next;
+                    const dx = end.x - start.x;
+                    const dy = end.y - start.y;
+                    if (Math.hypot(dx, dy) < offsetScale - 0.001) {
+                        const dirX = Math.sign(next.x - start.x);
+                        const dirY = Math.sign(next.y - start.y);
+                        end = {
+                            x: start.x + dirX * offsetScale,
+                            y: start.y + dirY * offsetScale
+                        };
+                    }
+                    if (start.x === end.x && start.y === end.y) return;
+                    previewSegments.push({
+                        x: (start.x + end.x) / 2,
+                        y: (start.y + end.y) / 2,
+                        dirOut: {
+                            x: Math.sign(end.x - start.x),
+                            y: Math.sign(end.y - start.y)
+                        },
+                        isMerger: !!(targetEnd && targetEnd.isMerger)
+                    });
+                };
+
+                for (let i = 0; i < state.conveyorGhosts.length - 1; i += offsetScale) {
+                    pushPreviewSegment(
+                        state.conveyorGhosts[i],
+                        state.conveyorGhosts[Math.min(i + 1, state.conveyorGhosts.length - 1)],
+                        state.conveyorGhosts[Math.min(i + offsetScale, state.conveyorGhosts.length - 1)]
+                    );
+                }
+
+                previewSegments.forEach(ghost => {
+                    const wx = (ghost.x + offset.x * offsetScale) * gridUnit;
+                    const wy = (ghost.y + offset.y * offsetScale) * gridUnit;
                     
                     // Draw Tile Square
                     this.logisticsGraphics.fillRect(wx - TS/2 + 2, wy - TS/2 + 2, TS - 4, TS - 4);
