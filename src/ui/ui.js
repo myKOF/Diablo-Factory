@@ -1,6 +1,7 @@
 import { UI_CONFIG } from "./ui_config.js";
 import { GameEngine } from "../systems/game_systems.js";
 import { SynthesisSystem } from "../systems/SynthesisSystem.js";
+import { conveyorSystem } from "../systems/ConveyorSystem.js";
 
 
 /**
@@ -10,7 +11,8 @@ import { SynthesisSystem } from "../systems/SynthesisSystem.js";
 export class UIManager {
     static uiLayer;
     static dragGhost = null;
-    static logisticsSourceEntity = null; static activeLogisticsConnection = null; static activeLogisticsLine = null;
+    static logisticsSourceEntity = null; static logisticsSourceLine = null; static activeLogisticsConnection = null; static activeLogisticsLine = null;
+    static isLogisticsDragging = false;
     static activeWarehouseEntity = null;
     static activeBuilding = null;
     static uiPositions = {};
@@ -266,6 +268,13 @@ export class UIManager {
         });
         window.addEventListener("keydown", (e) => {
             if (e.key === "Escape") this.cancelBuildingMode();
+            if (e.key === "Delete") {
+                if (this.isTextInputEvent(e)) return;
+                if (this.deleteSelectedLogisticsLine()) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }
             if (e.key === "Tab") {
                 const state = GameEngine.state;
                 if (state.placingType && (state.buildingMode === "DRAG" || state.buildingMode === "LINE" || state.buildingMode === "STAMP")) {
@@ -317,6 +326,11 @@ export class UIManager {
         const g = parseInt(hex.slice(3, 5), 16);
         const b = parseInt(hex.slice(5, 7), 16);
         return `rgba(${r}, ${g}, ${b}, ${alpha || 1})`;
+    }
+
+    static isTextInputEvent(e) {
+        const tagName = e.target?.tagName ? e.target.tagName.toLowerCase() : "";
+        return tagName === "input" || tagName === "textarea" || tagName === "select" || e.target?.isContentEditable;
     }
 
     static renderAll() {
@@ -1464,6 +1478,44 @@ export class UIManager {
         });
     }
 
+    static isSelectedLogisticsLine(line) {
+        const selectedId = GameEngine.state.selectedLogisticsLineId;
+        if (!line || !selectedId) return false;
+        return line.id === selectedId || line.groupId === selectedId;
+    }
+
+    static getLogisticsLineDragPort(line) {
+        const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+        const first = points[0];
+        const second = points[1];
+        let dir = null;
+        if (first && second) {
+            const dx = second.x - first.x;
+            const dy = second.y - first.y;
+            if (Math.abs(dx) >= Math.abs(dy)) dir = dx >= 0 ? "right" : "left";
+            else dir = dy >= 0 ? "down" : "up";
+        }
+        return {
+            dir,
+            width: Math.max(1, Number(line?.routeWidth) || 1),
+            sourceType: "logistics_line"
+        };
+    }
+
+    static beginLogisticsDragFromLine(line) {
+        if (!line) return false;
+        this.logisticsSourceEntity = null;
+        this.logisticsSourceLine = line;
+        this.isLogisticsDragging = true;
+        this.activeLogisticsLine = line;
+        this.activeLogisticsConnection = null;
+        GameEngine.state.selectedLogisticsLineId = line.id;
+        GameEngine.state.logisticsDragLine = { active: true };
+        this.hideContextMenu();
+        conveyorSystem.startDrag(line.x, line.y, null, this.getLogisticsLineDragPort(line), line);
+        return true;
+    }
+
     static deleteLogisticsLineById(lineId) {
         const state = GameEngine.state;
         const line = this.getLogisticsLineById(lineId);
@@ -1498,6 +1550,32 @@ export class UIManager {
         if (this.activeLogisticsLine && this.activeLogisticsLine.groupId === groupId) this.activeLogisticsLine = null;
         if (this.activeLogisticsConnection?.groupId === groupId) this.activeLogisticsConnection = null;
         GameEngine.addLog(`[物流] 物流線群組已刪除`, 'LOGISTICS');
+        return true;
+    }
+
+    static deleteSelectedLogisticsLine() {
+        const selectedLineId = GameEngine.state.selectedLogisticsLineId;
+        if (!selectedLineId && !this.activeLogisticsLine && !this.activeLogisticsConnection) return false;
+
+        let deleted = false;
+        if (this.activeLogisticsConnection?.groupId) {
+            deleted = this.deleteLogisticsLineGroupById(this.activeLogisticsConnection.groupId);
+        } else if (this.activeLogisticsLine) {
+            deleted = this.deleteLogisticsLineById(this.activeLogisticsLine.id);
+        } else if (selectedLineId) {
+            deleted = this.deleteLogisticsLineById(selectedLineId);
+        }
+
+        if (!deleted) return false;
+
+        const menu = document.getElementById("logistics_menu");
+        if (menu) menu.style.display = "none";
+        this.activeLogisticsConnection = null;
+        this.activeLogisticsLine = null;
+        this.logisticsSourceLine = null;
+        if (GameEngine.state.selectedLogisticsLineId === selectedLineId) {
+            GameEngine.state.selectedLogisticsLineId = null;
+        }
         return true;
     }
 
@@ -1544,30 +1622,21 @@ export class UIManager {
             const bid = this.getEntityId(clickedBuilding);
             if (GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.includes(bid)) {
                 this.logisticsSourceEntity = clickedBuilding;
+                this.logisticsSourceLine = null;
+                this.isLogisticsDragging = true;
                 const sourcePort = this.getNearestPortSlot(clickedBuilding, worldX, worldY);
-                const routePoints = sourcePort
-                    ? this.buildGridRoutePoints(this.buildOrthogonalRoute(
-                        { x: sourcePort.x, y: sourcePort.y },
-                        { x: worldX, y: worldY },
-                        sourcePort.dir,
-                        null,
-                        { x: worldX, y: worldY }
-                    ))
-                    : this.buildGridRoutePoints([{ x: clickedBuilding.x, y: clickedBuilding.y }, { x: worldX, y: worldY }]);
-                GameEngine.state.logisticsDragLine = {
-                    sourceEntityId: bid,
-                    targetEntityId: null,
-                    startX: sourcePort ? sourcePort.x : clickedBuilding.x,
-                    startY: sourcePort ? sourcePort.y : clickedBuilding.y,
-                    endX: worldX,
-                    endY: worldY,
-                    sourcePort,
-                    targetPort: null,
-                    lineWidth: sourcePort ? Math.max(1, Number(sourcePort.width) || 1) : 1,
-                    points: routePoints
-                };
+                
+                // Use ConveyorSystem
+                conveyorSystem.startDrag(worldX, worldY, clickedBuilding, sourcePort);
+                GameEngine.state.logisticsDragLine = { active: true }; // Keep flag for rendering/UI
                 return;
             }
+        }
+
+        const clickedLine = this.getLogisticsLineAt(worldX, worldY);
+        if (clickedLine && this.isSelectedLogisticsLine(clickedLine) && GameEngine.state.buildingMode === 'NONE') {
+            this.beginLogisticsDragFromLine(clickedLine);
+            return;
         }
 
         const state = GameEngine.state;
@@ -1579,48 +1648,9 @@ export class UIManager {
     }
 
     static handleWorldMouseMove(e) {
-        if (this.logisticsSourceEntity && GameEngine.state.logisticsDragLine) {
+        if (this.isLogisticsDragging && GameEngine.state.logisticsDragLine) {
             const world = this.getWorldPoint(e.clientX, e.clientY);
-            const drag = GameEngine.state.logisticsDragLine;
-            const sourceEnt = this.logisticsSourceEntity;
-            const sourcePort = drag.sourcePort || this.getNearestPortSlot(sourceEnt, world.x, world.y);
-            const targetBuilding = this.getLogisticsTargetBuildingAt(world.x, world.y, sourceEnt);
-
-            if (targetBuilding && sourcePort) {
-                const preferredDir = this.getOppositeDirection(sourcePort.dir);
-                const targetPort = this.getNearestPortSlot(targetBuilding, world.x, world.y, preferredDir);
-                if (targetPort) {
-                    drag.targetEntityId = this.getEntityId(targetBuilding);
-                    drag.targetPort = targetPort;
-                    drag.lineWidth = Math.max(1, Math.min(sourcePort.width || 1, targetPort.width || 1));
-                    drag.endX = targetPort.x;
-                    drag.endY = targetPort.y;
-                    drag.points = this.buildGridRoutePoints(this.buildOrthogonalRoute(
-                        { x: sourcePort.x, y: sourcePort.y },
-                        { x: targetPort.x, y: targetPort.y },
-                        sourcePort.dir,
-                        targetPort.dir,
-                        { x: world.x, y: world.y }
-                    ));
-                }
-            } else if (sourcePort) {
-                drag.targetEntityId = null;
-                drag.targetPort = null;
-                drag.lineWidth = Math.max(1, Number(sourcePort.width) || 1);
-                drag.endX = world.x;
-                drag.endY = world.y;
-                drag.points = this.buildGridRoutePoints(this.buildOrthogonalRoute(
-                    { x: sourcePort.x, y: sourcePort.y },
-                    { x: world.x, y: world.y },
-                    sourcePort.dir,
-                    null,
-                    { x: world.x, y: world.y }
-                ));
-            } else {
-                drag.endX = world.x;
-                drag.endY = world.y;
-                drag.points = this.buildGridRoutePoints([{ x: sourceEnt.x, y: sourceEnt.y }, { x: world.x, y: world.y }]);
-            }
+            conveyorSystem.updateDrag(world.x, world.y);
             return;
         }
 
@@ -1661,68 +1691,12 @@ export class UIManager {
         // [左鍵邏輯專區]
         if (e.button !== 0) return;
 
-        if (this.logisticsSourceEntity) {
-            const world = this.getWorldPoint(e.clientX, e.clientY);
-            const drag = GameEngine.state.logisticsDragLine || {};
-            let targetBuilding = null;
-            if (drag.targetEntityId) {
-                targetBuilding = GameEngine.state.mapEntities.find(ent => this.getEntityId(ent) === drag.targetEntityId) || null;
-            }
-            if (!targetBuilding) {
-                targetBuilding = this.getLogisticsTargetBuildingAt(world.x, world.y, this.logisticsSourceEntity);
-            }
-            const sourcePort = drag.sourcePort || this.getNearestPortSlot(this.logisticsSourceEntity, targetBuilding ? targetBuilding.x : world.x, targetBuilding ? targetBuilding.y : world.y);
-            const preferredDir = sourcePort ? this.getOppositeDirection(sourcePort.dir) : null;
-            const targetPort = targetBuilding ? (drag.targetPort || this.getNearestPortSlot(targetBuilding, world.x, world.y, preferredDir)) : null;
-            const endPoint = targetPort || { x: world.x, y: world.y };
-            const points = sourcePort
-                ? this.buildGridRoutePoints(this.buildOrthogonalRoute(
-                    { x: sourcePort.x, y: sourcePort.y },
-                    { x: endPoint.x, y: endPoint.y },
-                    sourcePort.dir,
-                    targetPort ? targetPort.dir : null,
-                    { x: world.x, y: world.y }
-                ))
-                : this.buildGridRoutePoints([{ x: this.logisticsSourceEntity.x, y: this.logisticsSourceEntity.y }, { x: endPoint.x, y: endPoint.y }]);
-            const routeWidth = Math.max(1, targetPort ? Math.min(sourcePort?.width || 1, targetPort.width || 1) : (sourcePort?.width || 1));
-
-            let conn = null;
-            let tId = null;
-            if (targetBuilding) {
-                if (!this.logisticsSourceEntity.outputTargets) this.logisticsSourceEntity.outputTargets = [];
-                tId = this.getEntityId(targetBuilding);
-                conn = this.logisticsSourceEntity.outputTargets.find(t => t.id === tId);
-                if (!conn) {
-                    conn = { id: tId, filter: null };
-                    this.logisticsSourceEntity.outputTargets.push(conn);
-                    GameEngine.addLog(`[物流] 連線建立：${this.logisticsSourceEntity.name} ➡️ ${targetBuilding.name}`, 'LOGISTICS');
-                }
-            } else {
-                GameEngine.addLog(`[物流] 分段物流線已建立：${this.logisticsSourceEntity.name} ➡️ 地板節點`, 'LOGISTICS');
-            }
-
-            const line = this.upsertLogisticsLine({
-                sourceEnt: this.logisticsSourceEntity,
-                targetEnt: targetBuilding,
-                targetPoint: endPoint,
-                points,
-                routeWidth,
-                sourcePort,
-                targetPort,
-                conn
-            });
-            if (!line) {
-                this.logisticsSourceEntity = null; GameEngine.state.logisticsDragLine = null;
-                return;
-            }
-            GameEngine.state.selectedLogisticsLineId = line.id;
-            this.activeLogisticsLine = line;
-            if (targetBuilding && tId) {
-                this.showLogisticsMenu(this.logisticsSourceEntity, tId, e.clientX, e.clientY, line.id);
-            } else {
-                this.showLogisticsLineMenu(line, e.clientX, e.clientY);
-            }
-            this.logisticsSourceEntity = null; GameEngine.state.logisticsDragLine = null;
+        if (this.isLogisticsDragging) {
+            conveyorSystem.submitDrag();
+            this.logisticsSourceEntity = null;
+            this.logisticsSourceLine = null;
+            this.isLogisticsDragging = false;
+            GameEngine.state.logisticsDragLine = null;
             return;
         }
 
@@ -3049,15 +3023,11 @@ export class UIManager {
 
     static deleteLogisticsLine(event) {
         if (event) event.stopPropagation();
-        if (this.activeLogisticsLine && !this.activeLogisticsConnection) {
-            this.deleteLogisticsLineById(this.activeLogisticsLine.id);
-        } else if (this.activeLogisticsConnection) {
-            if (this.activeLogisticsConnection.groupId) {
-                this.deleteLogisticsLineGroupById(this.activeLogisticsConnection.groupId);
-            } else {
-                this.activeLogisticsConnection.source.outputTargets = this.activeLogisticsConnection.source.outputTargets.filter(t => t.id !== this.activeLogisticsConnection.targetId);
-                GameEngine.addLog(`[物流] 路線已刪除`, 'LOGISTICS');
-            }
+        if (this.activeLogisticsConnection && !this.activeLogisticsConnection.groupId && this.activeLogisticsConnection.source) {
+            this.activeLogisticsConnection.source.outputTargets = this.activeLogisticsConnection.source.outputTargets.filter(t => t.id !== this.activeLogisticsConnection.targetId);
+            GameEngine.addLog(`[物流] 路線已刪除`, 'LOGISTICS');
+        } else {
+            this.deleteSelectedLogisticsLine();
         }
         const menu = document.getElementById("logistics_menu"); if (menu) menu.style.display = "none";
         this.activeLogisticsConnection = null;

@@ -779,6 +779,43 @@ export class MainScene extends Phaser.Scene {
                 this.logisticsGraphics.lineStyle(dragThickness, dragColor, logCfg.dragLineAlpha);
                 this.strokePolyline(this.logisticsGraphics, dragPoints);
             }
+
+            // [New] Conveyor Ghost Rendering
+            if (Array.isArray(state.conveyorGhosts) && state.conveyorGhosts.length > 0) {
+                const TS = GameEngine.TILE_SIZE;
+                const offset = state.mapOffset || { x: 0, y: 0 };
+                const isValid = state.conveyorValid;
+                
+                const buildCfg = UI_CONFIG.ConveyorBuild || {};
+                const ghostColor = isValid ? (buildCfg.ghostValidColor ?? 0x00ff00) : (buildCfg.ghostInvalidColor ?? 0xff0000);
+                const ghostAlpha = buildCfg.ghostAlpha ?? 0.5;
+
+                this.logisticsGraphics.fillStyle(ghostColor, ghostAlpha);
+                this.logisticsGraphics.lineStyle(2, ghostColor, 0.8);
+
+                state.conveyorGhosts.forEach(ghost => {
+                    const wx = (ghost.x + offset.x + 0.5) * TS;
+                    const wy = (ghost.y + offset.y + 0.5) * TS;
+                    
+                    // Draw Tile Square
+                    this.logisticsGraphics.fillRect(wx - TS/2 + 2, wy - TS/2 + 2, TS - 4, TS - 4);
+                    
+                    // Draw Directional Arrow if path exists
+                    if (ghost.dirOut) {
+                        const arrowSize = 6;
+                        const tx = wx + ghost.dirOut.x * (TS/2 - 4);
+                        const ty = wy + ghost.dirOut.y * (TS/2 - 4);
+                        this.logisticsGraphics.lineBetween(wx, wy, tx, ty);
+                    }
+                    
+                    // Special marker for mergers
+                    if (ghost.isMerger) {
+                        this.logisticsGraphics.lineStyle(3, 0xffff00, 1);
+                        this.logisticsGraphics.strokeCircle(wx, wy, TS/3);
+                        this.logisticsGraphics.lineStyle(2, ghostColor, 0.8);
+                    }
+                });
+            }
         }
 
         // RTS 邊緣捲動實作
