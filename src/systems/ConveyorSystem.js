@@ -79,8 +79,9 @@ export class ConveyorSystem {
 
     getPortAnchorGrid(port, portGrid) {
         if (!port || !port.dir || !portGrid) return portGrid;
-        const routeScale = this.getRouteScale();
         const dir = this.getDirectionVector(port.dir);
+        // [需求修正] 回歸 0.5 網格下，1.0 Tile 的距離等於 2 格
+        const routeScale = 2; 
         return {
             x: portGrid.x + dir.x * routeScale,
             y: portGrid.y + dir.y * routeScale
@@ -88,26 +89,46 @@ export class ConveyorSystem {
     }
 
     buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, targetPortGrid, targetRouteGrid) {
-        if (!Array.isArray(routePath) || routePath.length === 0) return routePath;
-        const path = routePath.map(p => ({ x: p.x, y: p.y }));
-        const samePoint = (a, b) => a && b && a.x === b.x && a.y === b.y;
-        if (sourcePortGrid && !samePoint(sourcePortGrid, sourceRouteGrid)) {
-            path.unshift({ x: sourcePortGrid.x, y: sourcePortGrid.y, isPortConnector: true });
+        if (!routePath || routePath.length === 0) return [];
+        const path = routePath.map(p => ({ ...p }));
+
+        // 核心修復：將起點與終點的「錨點」也標記為 isPortConnector，
+        // 這樣在轉向點剛好位於建築邊緣時，不會因為浮點數或對齊問題觸發非法碰撞。
+        if (sourcePortGrid) {
+            const alreadyHasStart = path.length > 0 && samePoint(path[0], sourcePortGrid);
+            if (!alreadyHasStart && !samePoint(sourcePortGrid, sourceRouteGrid)) {
+                path.unshift({ x: sourcePortGrid.x, y: sourcePortGrid.y, isPortConnector: true });
+            }
+            // 標記路徑中與錨點重合的點為安全
+            path.forEach(p => {
+                if (samePoint(p, sourceRouteGrid)) p.isPortConnector = true;
+                if (samePoint(p, sourcePortGrid)) p.isPortConnector = true;
+            });
         }
-        if (targetPortGrid && !samePoint(targetPortGrid, targetRouteGrid) && !samePoint(path[path.length - 1], targetPortGrid)) {
-            path.push({ x: targetPortGrid.x, y: targetPortGrid.y, isPortConnector: true });
+
+        if (targetPortGrid) {
+            const alreadyHasEnd = path.length > 0 && path[path.length - 1] && samePoint(path[path.length - 1], targetPortGrid);
+            if (!alreadyHasEnd && !samePoint(targetPortGrid, targetRouteGrid)) {
+                path.push({ x: targetPortGrid.x, y: targetPortGrid.y, isPortConnector: true });
+            }
+            // 標記路徑中與目標錨點重合的點為安全
+            path.forEach(p => {
+                if (samePoint(p, targetRouteGrid)) p.isPortConnector = true;
+                if (samePoint(p, targetPortGrid)) p.isPortConnector = true;
+            });
         }
+
+        function samePoint(a, b) {
+            return a && b && a.x === b.x && a.y === b.y;
+        }
+
         return path;
     }
 
     getWidthOffsets(width) {
-        const count = Math.max(1, Math.round(Number(width) || 1));
-        const routeScale = this.getRouteScale();
-        const offsets = [];
-        for (let i = 0; i < count; i++) {
-            offsets.push((i - (count - 1) / 2) * routeScale);
-        }
-        return offsets;
+        // [核心修正] 在 0.5 網格系統中，1 格寬度的物流線（20px）必須佔用連續的 2 小格
+        // 使用 [-1, 0] 偏移量可以確保線路中心完美的落在網格點上。
+        return [-1, 0];
     }
 
     getGhostOccupiedCells(ghosts, width) {
@@ -165,8 +186,9 @@ export class ConveyorSystem {
     }
 
     createRoutingGrid(grid, ignoreLine = null) {
+        // [需求修正] 恢復網格擴張邏輯。將 1.0 Tile 的尋路格網擴張為 0.5 Tile 的物流格網
         const expanded = [];
-        const routeScale = this.getRouteScale();
+        const routeScale = this.getRouteScale(); // 通常為 2
         for (let y = 0; y < grid.length; y++) {
             const sourceRows = [];
             for (let row = 0; row < routeScale; row++) sourceRows.push([]);
@@ -177,6 +199,7 @@ export class ConveyorSystem {
             expanded.push(...sourceRows);
         }
         const routeGrid = expanded.map(row => row.slice());
+        
         (GameEngine.state.logisticsLines || []).forEach(line => {
             if (ignoreLine && (line.id === ignoreLine.id || line.groupId === ignoreLine.groupId)) return;
             this.markLineOnGrid(routeGrid, line);
@@ -300,7 +323,7 @@ export class ConveyorSystem {
         const offsetX = offset.x * (TS / unit);
         const offsetY = offset.y * (TS / unit);
 
-        // Convert Ghost path to world points
+        // [回歸修正] 取消中心偏移，回歸到絕對網格線對齊 (0, 20, 40...)
         const points = this.ghosts.map(g => ({
             x: (g.x + offsetX) * unit,
             y: (g.y + offsetY) * unit

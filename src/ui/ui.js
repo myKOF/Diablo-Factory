@@ -1287,7 +1287,7 @@ export class UIManager {
 
     static buildOrthogonalRoute(startPoint, endPoint, startDir = null, endDir = null, biasPoint = null) {
         const TS = GameEngine.TILE_SIZE;
-        const margin = TS * 0.7;
+        const margin = TS; // [核心修正] 與 ConveyorSystem.routeScale 保持一致 (1.0 Tile)
         const pts = [];
         const pushPoint = (x, y) => {
             const px = Math.round(x);

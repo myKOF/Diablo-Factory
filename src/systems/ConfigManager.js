@@ -80,7 +80,8 @@ export class ConfigManager {
 
     /**
      * 解析建築 port 設定：
-     * "{{left,2,2,1},{down,1,3,2}}" => [{ align, width, count, gap }, ...]
+     * 新格式：{{left,2,1},{down,1,2}} => [{ align, count, gap, width: 1 }, ...]
+     * 舊格式 (兼容)：{{left,2,2,1}} => [{ align, width: 1, count, gap }, ...]
      */
     static parseBuildingPorts(str) {
         if (!str || typeof str !== 'string') return [];
@@ -95,15 +96,24 @@ export class ConfigManager {
             const body = seg.replace(/[{}]/g, '').trim();
             if (!body) return;
             const parts = body.split(',').map(s => s.trim());
-            if (parts.length < 4) return;
+            if (parts.length < 3) return;
 
             const align = (parts[0] || '').toLowerCase();
             if (!validDirs.has(align)) return;
 
-            const width = Math.max(1, parseInt(parts[1], 10) || 1);
-            const count = Math.max(1, parseInt(parts[2], 10) || 1);
-            const gap = Math.max(0, parseInt(parts[3], 10) || 0);
-            ports.push({ align, width, count, gap });
+            // 新格式：{對齊方向, 數量, 間隔} -> {align, count, gap}
+            // 由於不再有 2 格寬度的物流線，width 固定為 1
+            let count, gap;
+            if (parts.length >= 4) {
+                // 兼容舊格式 {align, width, count, gap}，但忽略 width
+                count = Math.max(1, parseInt(parts[2], 10) || 1);
+                gap = Math.max(0, parseInt(parts[3], 10) || 0);
+            } else {
+                // 新格式 {align, count, gap}
+                count = Math.max(1, parseInt(parts[1], 10) || 1);
+                gap = Math.max(0, parseInt(parts[2], 10) || 0);
+            }
+            ports.push({ align, width: 1, count, gap });
         });
 
         return ports;
