@@ -1,18 +1,26 @@
-import { UI_CONFIG } from "../ui/ui_config.js";
-
 /**
  * Conveyor Routing Engine (Headless)
  * Implements: L-Shape Priority, A* with Turn Penalty, Node Vectoring.
  */
 export class ConveyorRouter {
-    constructor(grid, cols, rows) {
-        this.grid = grid; // 0: walkable, 1: obstacle
+    /**
+     * @param {Array} grid - 2D grid (0: walkable, 1: obstacle)
+     * @param {number} cols - Grid columns
+     * @param {number} rows - Grid rows
+     * @param {Object} config - Routing configuration
+     */
+    constructor(grid, cols, rows, config = {}) {
+        this.grid = grid;
         this.cols = cols;
         this.rows = rows;
-        this.turnPenalty = 100; // High penalty for changing direction
-        this.maxSearchNodes = 6000;
-        this.tileSize = 20;
-        this.widthOffsets = [-1, 0]; // Default for 1-tile width in 0.5 grid
+        
+        // Configuration parameters (Decoupled from UI_CONFIG)
+        this.turnPenalty = config.turnPenalty !== undefined ? config.turnPenalty : 100;
+        this.maxSearchNodes = config.maxRouteSearchNodes || config.maxSearchNodes || 12000;
+        this.alignmentUnit = config.alignmentUnit || 1.0;
+        this.tileSize = config.tileSize || 20;
+        
+        // Internal state
         this.onCollision = null; // Callback: (x, y) => boolean (true to ignore)
     }
 
@@ -24,11 +32,9 @@ export class ConveyorRouter {
         if (start.x === end.x && start.y === end.y) return [start];
         if (!this.isInsideGrid(start) || !this.isInsideGrid(end)) return null;
 
-        const activeOffsets = widthOffsets || this.widthOffsets;
+        const activeOffsets = widthOffsets || this.getWidthOffsets(1);
 
         // Ensure start and end are considered walkable for the routing
-        // Note: we don't clear footprints here to avoid clearing too much, 
-        // just the center points is enough since the caller handles start/end safety.
         const oldStartVal = this.grid[start.y]?.[start.x];
         const oldEndVal = this.grid[end.y]?.[end.x];
         if (this.grid[start.y]) this.grid[start.y][start.x] = 0;
@@ -78,7 +84,7 @@ export class ConveyorRouter {
     }
 
     isValidPath(path, widthOffsets = null) {
-        const offsets = widthOffsets || this.widthOffsets;
+        const offsets = widthOffsets || this.getWidthOffsets(1);
         for (let i = 0; i < path.length; i++) {
             const p = path[i];
             const next = path[i + 1] || path[i];
@@ -96,8 +102,6 @@ export class ConveyorRouter {
 
     isValidNode(x, y, dir, offsets) {
         if (!this.isInsideGrid({ x, y })) return false;
-        // Start and end points are handled by findPath clearing logic, 
-        // but we still check the rest of the footprint.
         
         for (const off of offsets) {
             let cx = x, cy = y;
@@ -136,13 +140,11 @@ export class ConveyorRouter {
      * A* with Turn Penalty
      */
     findAStarPath(start, end, startDir, widthOffsets = null) {
-        const offsets = widthOffsets || this.widthOffsets;
+        const offsets = widthOffsets || this.getWidthOffsets(1);
         const openHeap = [];
         const bestOpen = new Map();
-        const alignUnit = UI_CONFIG.ConveyorBuild?.alignmentUnit || 1.0;
-        this.alignmentUnit = alignUnit;
-        const scale = Math.round(1 / alignUnit);
         const closedSet = new Set();
+        
         const pushHeap = (node) => {
             openHeap.push(node);
             let index = openHeap.length - 1;
@@ -301,12 +303,85 @@ export class ConveyorRouter {
     }
 
     /**
+     * [核心優化] 統一佔用偏移量計算
+     * @param {number} width - 路線寬度
+     */
+    getWidthOffsets(width) {
+        // 在 0.5 網格系統中，1 格寬度（20px）佔用連續的 2 小格
+        // 目前統一返回 [-1, 0] 以確保中心點落在網格線上。
+        return [-1, 0];
+    }
+
+    /**
+     * [核心優化] 統一足跡佔用計算
+     * @param {Array} ghosts - 預覽點陣列
+     * @param {number} width - 路線寬度
+     */
+    getGhostOccupiedCells(ghosts, width) {
+        if (!Array.isArray(ghosts) || ghosts.length === 0) return [];
+        const cells = new Map();
+        const offsets = this.getWidthOffsets(width);
+        const addCell = (x, y) => cells.set(`${x},${y}`, { x, y });
+        const addFootprint = (point, dir) => {
+            if (!point) return;
+            const d = dir || point.dirOut || point.dirIn || { x: 1, y: 0 };
+            if (Math.abs(d.x) > Math.abs(d.y)) {
+                offsets.forEach(offset => addCell(point.x, point.y + offset));
+            } else {
+                offsets.forEach(offset => addCell(point.x + offset, point.y));
+            }
+        };
+
+        ghosts.forEach(ghost => {
+            addFootprint(ghost, ghost.dirOut || ghost.dirIn);
+            if (ghost.isCurve && ghost.dirIn && ghost.dirOut) {
+                addFootprint(ghost, ghost.dirIn);
+                addFootprint(ghost, ghost.dirOut);
+            }
+        });
+        return Array.from(cells.values());
+    }
+
+    /**
+     * [核心優化] 統一足跡與碰撞驗證 (Single Source of Truth)
+     * @param {Array} ghosts - 預覽點陣列
+     * @param {number} width - 路線寬度
+     * @param {Function} costValidator - 可選的資源消耗檢查回調
+     */
+    validateRouteFootprint(ghosts, width, costValidator = null) {
+        if (!Array.isArray(ghosts) || ghosts.length === 0) return false;
+        
+        // 排除 portConnector 點的碰撞檢查
+        const occupiedCells = this.getGhostOccupiedCells(
+            ghosts.filter(g => !g.isPortConnector), 
+            width
+        );
+
+        for (const cell of occupiedCells) {
+            if (cell.y < 0 || cell.y >= this.grid.length || cell.x < 0 || cell.x >= this.grid[cell.y].length) {
+                return false;
+            }
+            if (this.grid[cell.y][cell.x] !== 0) {
+                // 使用 Router 內部的 onCollision 判定
+                if (this.onCollision && this.onCollision(cell.x, cell.y)) continue;
+                return false;
+            }
+        }
+
+        // 執行外部資源消耗檢查
+        if (costValidator && !costValidator(ghosts.length)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Terminal Snapping: Snap to building port if within 1 tile
      */
     getSnapPoint(point, entities, tileSize) {
         for (const ent of entities) {
             if (ent.isUnderConstruction) continue;
-            // Simplified snapping: if within 1 tile of entity footprint center
             const dist = Math.hypot(ent.x - point.x, ent.y - point.y);
             if (dist < tileSize * 1.5) {
                 return { x: ent.x, y: ent.y, entity: ent };

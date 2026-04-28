@@ -30,9 +30,9 @@ export class ConveyorSystem {
         const routeWidth = Math.max(1, Number(currentSourcePort?.width) || 1);
         const routeGrid = this.createRoutingGrid(grid, sourceLine);
 
-        this.router = new ConveyorRouter(routeGrid, cols * routeScale, rows * routeScale);
+        // [核心重構] 傳入 UI_CONFIG 作為初始化參數，解除 Router 的外部依賴
+        this.router = new ConveyorRouter(routeGrid, cols * routeScale, rows * routeScale, UI_CONFIG.ConveyorBuild);
         this.router.tileSize = this.getGridUnitSize();
-        this.router.maxSearchNodes = Math.max(500, Number(UI_CONFIG.ConveyorBuild?.maxRouteSearchNodes) || 12000);
 
         this.activeDrag = {
             startX: resolvedStartX,
@@ -69,18 +69,10 @@ export class ConveyorSystem {
         return Math.round(1 / this.getAlignmentUnit());
     }
 
-    getDirectionVector(dir) {
-        if (dir === 'up') return { x: 0, y: -1 };
-        if (dir === 'down') return { x: 0, y: 1 };
-        if (dir === 'left') return { x: -1, y: 0 };
-        if (dir === 'right') return { x: 1, y: 0 };
-        return { x: 0, y: 0 };
-    }
-
     getPortAnchorGrid(port, portGrid) {
         if (!port || !port.dir || !portGrid) return portGrid;
-        const dir = this.getDirectionVector(port.dir);
-        // [核心修正] 動態獲取縮放倍率，確保錨點偏移與格網細分度對齊
+        // [核心優化] 使用 Router 的向量計算方法
+        const dir = this.router.getDirectionVector(port.dir);
         const routeScale = this.getRouteScale();
         return {
             x: portGrid.x + dir.x * routeScale,
@@ -92,14 +84,11 @@ export class ConveyorSystem {
         if (!routePath || routePath.length === 0) return [];
         const path = routePath.map(p => ({ ...p }));
 
-        // 核心修復：將起點與終點的「錨點」也標記為 isPortConnector，
-        // 這樣在轉向點剛好位於建築邊緣時，不會因為浮點數或對齊問題觸發非法碰撞。
         if (sourcePortGrid) {
             const alreadyHasStart = path.length > 0 && samePoint(path[0], sourcePortGrid);
             if (!alreadyHasStart && !samePoint(sourcePortGrid, sourceRouteGrid)) {
                 path.unshift({ x: sourcePortGrid.x, y: sourcePortGrid.y, isPortConnector: true });
             }
-            // 標記路徑中與錨點重合的點為安全
             path.forEach(p => {
                 if (samePoint(p, sourceRouteGrid)) p.isPortConnector = true;
                 if (samePoint(p, sourcePortGrid)) p.isPortConnector = true;
@@ -111,7 +100,6 @@ export class ConveyorSystem {
             if (!alreadyHasEnd && !samePoint(targetPortGrid, targetRouteGrid)) {
                 path.push({ x: targetPortGrid.x, y: targetPortGrid.y, isPortConnector: true });
             }
-            // 標記路徑中與目標錨點重合的點為安全
             path.forEach(p => {
                 if (samePoint(p, targetRouteGrid)) p.isPortConnector = true;
                 if (samePoint(p, targetPortGrid)) p.isPortConnector = true;
@@ -125,37 +113,6 @@ export class ConveyorSystem {
         return path;
     }
 
-    getWidthOffsets(width) {
-        // [核心修正] 在 0.5 網格系統中，1 格寬度的物流線（20px）必須佔用連續的 2 小格
-        // 使用 [-1, 0] 偏移量可以確保線路中心完美的落在網格點上。
-        return [-1, 0];
-    }
-
-    getGhostOccupiedCells(ghosts, width) {
-        if (!Array.isArray(ghosts) || ghosts.length === 0) return [];
-        const cells = new Map();
-        const offsets = this.getWidthOffsets(width);
-        const addCell = (x, y) => cells.set(`${x},${y}`, { x, y });
-        const addFootprint = (point, dir) => {
-            if (!point) return;
-            const d = dir || point.dirOut || point.dirIn || { x: 1, y: 0 };
-            if (Math.abs(d.x) > Math.abs(d.y)) {
-                offsets.forEach(offset => addCell(point.x, point.y + offset));
-            } else {
-                offsets.forEach(offset => addCell(point.x + offset, point.y));
-            }
-        };
-
-        ghosts.forEach(ghost => {
-            addFootprint(ghost, ghost.dirOut || ghost.dirIn);
-            if (ghost.isCurve && ghost.dirIn && ghost.dirOut) {
-                addFootprint(ghost, ghost.dirIn);
-                addFootprint(ghost, ghost.dirOut);
-            }
-        });
-        return Array.from(cells.values());
-    }
-
     markLineOnGrid(routeGrid, line) {
         if (!routeGrid || !line) return;
         const width = Math.max(1, Number(line.routeWidth) || 1);
@@ -166,6 +123,7 @@ export class ConveyorSystem {
         const points = Array.isArray(line.routePoints) && line.routePoints.length >= 2
             ? line.routePoints
             : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
+            
         for (let i = 0; i < points.length - 1; i++) {
             const a = this.toGrid(points[i].x, points[i].y);
             const b = this.toGrid(points[i + 1].x, points[i + 1].y);
@@ -181,14 +139,14 @@ export class ConveyorSystem {
                     dirIn: { x: dx, y: dy }
                 });
             }
-            this.getGhostOccupiedCells(ghosts, width).forEach(cell => mark(cell.x, cell.y));
+            // [核心優化] 使用 Router 的足跡佔用計算法
+            this.router.getGhostOccupiedCells(ghosts, width).forEach(cell => mark(cell.x, cell.y));
         }
     }
 
     createRoutingGrid(grid, ignoreLine = null) {
-        // [需求修正] 恢復網格擴張邏輯。將 1.0 Tile 的尋路格網擴張為 0.5 Tile 的物流格網
         const expanded = [];
-        const routeScale = this.getRouteScale(); // 通常為 2
+        const routeScale = this.getRouteScale();
         for (let y = 0; y < grid.length; y++) {
             const sourceRows = [];
             for (let row = 0; row < routeScale; row++) sourceRows.push([]);
@@ -240,7 +198,6 @@ export class ConveyorSystem {
         if (routeKey === this.lastRouteKey) return;
         this.lastRouteKey = routeKey;
 
-        // [核心修正] 設置尋路器的碰撞回調，允許與起點/目標建築重疊
         const sourceEnt = this.activeDrag.sourceEntity;
         const targetEnt = dragTarget.building;
         const TS = GameEngine.TILE_SIZE;
@@ -251,23 +208,15 @@ export class ConveyorSystem {
         this.router.onCollision = (gx, gy) => {
             const wx = (gx + offset.x * scale) * gridUnit + gridUnit / 2;
             const wy = (gy + offset.y * scale) * gridUnit + gridUnit / 2;
-            
-            // [核心修正] 忽略起點建築
             if (sourceEnt && window.UIManager?.isPointInsideEntity(sourceEnt, wx, wy)) return true;
-            
-            // [核心修正] 忽略終點建築（已識別的目標）
             if (targetEnt && window.UIManager?.isPointInsideEntity(targetEnt, wx, wy)) return true;
-
-            // [核心修正] 動態忽略游標正下方的建築，確保物流線可以無障礙地伸向任何目標建築
             const bAtCursor = window.UIManager?.getEntityAtPoint?.(currentX, currentY);
             if (bAtCursor && window.UIManager?.isPointInsideEntity(bAtCursor, wx, wy)) return true;
-
             return false;
         };
 
-        const widthOffsets = this.getWidthOffsets(this.activeDrag.routeWidth);
+        const widthOffsets = this.router.getWidthOffsets(this.activeDrag.routeWidth);
 
-        // Auto-Routing with A* Turn Penalty
         const routePath = this.router.findPath(sourceRouteGrid, targetRouteGrid, this.activeDrag.sourcePort?.dir, this.activeDrag.bendMode, widthOffsets);
         const path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
 
@@ -279,14 +228,10 @@ export class ConveyorSystem {
             this.isValid = false;
         }
 
-        // Update global state for rendering
         GameEngine.state.conveyorGhosts = this.ghosts;
         GameEngine.state.conveyorValid = this.isValid;
         GameEngine.state.conveyorRouteWidth = this.activeDrag.routeWidth || 1;
     }
-
-    // ... (toggleBendMode and resolveDragTarget omitted for brevity in replace_file_content but I will include them if I replace a large block)
-    // Wait, I should use replace_file_content carefully. I will replace the block from updateDragNow to the end of the file.
 
     toggleBendMode() {
         if (!this.activeDrag) return false;
@@ -345,14 +290,12 @@ export class ConveyorSystem {
             return;
         }
 
-        const state = GameEngine.state;
         const drag = this.activeDrag;
         const TS = GameEngine.TILE_SIZE;
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
         const scale = this.getRouteScale();
         const gridUnit = TS / scale;
 
-        // [核心修正] 使用細分格網單位 (gridUnit) 計算世界座標，直接對齊格線
         const points = this.ghosts.map(g => ({
             ...g,
             x: (g.x + offset.x * scale) * gridUnit,
@@ -364,7 +307,6 @@ export class ConveyorSystem {
         const targetBuilding = dragTarget.building || drag.targetBuilding;
         const targetPort = dragTarget.port || drag.targetPort || (targetBuilding ? window.UIManager?.getNearestPortSlot(targetBuilding, points[points.length - 2]?.x || points[0].x, points[points.length - 2]?.y || points[0].y) : null);
 
-        // Call UIManager to create the real logistics line
         if (window.UIManager) {
             const createdLine = window.UIManager.upsertLogisticsLine({
                 sourceEnt: drag.sourceEntity,
@@ -403,7 +345,6 @@ export class ConveyorSystem {
         const scale = this.getRouteScale();
         const gridUnit = TS / scale;
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
-        // [核心修正] 將世界座標轉換為細分格網座標 (考慮 0.5 Tile 縮放)
         return {
             x: Math.floor(worldX / gridUnit) - offset.x * scale,
             y: Math.floor(worldY / gridUnit) - offset.y * scale
@@ -411,43 +352,22 @@ export class ConveyorSystem {
     }
 
     validateGhosts(ghosts) {
-        if (ghosts.length === 0) return false;
+        if (!this.router) return false;
         const routeWidth = this.activeDrag?.routeWidth || 1;
-        const routeGrid = this.router?.grid || [];
-        const occupiedCells = this.getGhostOccupiedCells(ghosts.filter(ghost => !ghost.isPortConnector), routeWidth);
+        
+        // [核心優化] 統一調用 Router 的驗證邏輯，保持 Single Source of Truth
+        const isFootprintValid = this.router.validateRouteFootprint(ghosts, routeWidth, (segmentCount) => {
+            const cfg = UI_CONFIG.ConveyorBuild;
+            if (!cfg || cfg.enableCost === false) return true;
 
-        const sourceEnt = this.activeDrag?.sourceEntity;
-        const targetEnt = this.activeDrag?.targetBuilding;
-        const TS = GameEngine.TILE_SIZE;
-        const scale = this.getRouteScale();
-        const gridUnit = TS / scale;
-        const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
+            // 道具消耗檢查
+            const cost = segmentCount * (cfg.costPerSegment || 0);
+            const resKey = cfg.costResource || "gold_ingots";
+            const availableGold = (GameEngine.state.resources[resKey] || 0) + (GameEngine.state.resources.gold || 0);
+            return availableGold >= cost;
+        });
 
-        for (const cell of occupiedCells) {
-            if (cell.y < 0 || cell.y >= routeGrid.length || cell.x < 0 || cell.x >= routeGrid[cell.y].length) {
-                return false;
-            }
-            if (routeGrid[cell.y][cell.x] !== 0) {
-                // [核心修復] 使用與尋路器相同的邏輯進行驗證
-                if (this.router?.onCollision && this.router.onCollision(cell.x, cell.y)) continue;
-
-                return false;
-            }
-        }
-
-        const cfg = UI_CONFIG.ConveyorBuild;
-        if (!cfg || cfg.enableCost === false) return true;
-
-        // 道具消耗檢查
-        const cost = ghosts.length * (cfg.costPerSegment || 0);
-        const resKey = cfg.costResource || "gold_ingots";
-        const availableGold = (GameEngine.state.resources[resKey] || 0) + (GameEngine.state.resources.gold || 0);
-
-        if (availableGold < cost) {
-            return false;
-        }
-
-        return true;
+        return isFootprintValid;
     }
 }
 
