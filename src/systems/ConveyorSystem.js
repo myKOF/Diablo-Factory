@@ -322,11 +322,11 @@ export class ConveyorSystem {
         const scale = this.getRouteScale();
         const gridUnit = TS / scale;
 
-        // [核心修正] 使用細分格網單位 (gridUnit) 計算世界座標，並對齊格點中心 (+gridUnit/2)
+        // [核心修正] 使用細分格網單位 (gridUnit) 計算世界座標，直接對齊格線
         const points = this.ghosts.map(g => ({
             ...g,
-            x: (g.x + offset.x * scale) * gridUnit + gridUnit / 2,
-            y: (g.y + offset.y * scale) * gridUnit + gridUnit / 2
+            x: (g.x + offset.x * scale) * gridUnit,
+            y: (g.y + offset.y * scale) * gridUnit
         }));
 
         const lastPoint = points[points.length - 1];

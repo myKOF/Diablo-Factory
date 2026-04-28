@@ -761,8 +761,9 @@ export class MainScene extends Phaser.Scene {
                     return;
                 }
                 const rects = this.getLogisticsCellRects(points, widthTiles, true);
-                const segmentIndex = Math.max(0, Math.floor((Number(line.order) || 0) / 2));
-                const rect = rects[Math.min(segmentIndex, rects.length - 1)];
+                // [核心修正] 由於傳入的是單一 segment 的路徑點，故不應再用 order 進行二次索引。
+                // 這裡永遠取第一格 rect 即可完美對齊實體。
+                const rect = rects[0];
                 if (!rect) {
                     drawSelectedLogisticsSegmentOutline(line);
                     return;
@@ -930,8 +931,8 @@ export class MainScene extends Phaser.Scene {
                 }
 
                 const rawGhostPoints = state.conveyorGhosts.map(point => ({
-                    x: (point.x + offset.x * offsetScale) * gridUnit + gridUnit / 2,
-                    y: (point.y + offset.y * offsetScale) * gridUnit + gridUnit / 2,
+                    x: (point.x + offset.x * offsetScale) * gridUnit,
+                    y: (point.y + offset.y * offsetScale) * gridUnit,
                     isPortConnector: point.isPortConnector
                 }));
                 let ghostPoints = rawGhostPoints;
@@ -972,8 +973,8 @@ export class MainScene extends Phaser.Scene {
                 }
 
                 previewSegments.forEach((ghost, ghostIndex) => {
-                    const wx = (ghost.x + offset.x * offsetScale) * gridUnit + gridUnit / 2;
-                    const wy = (ghost.y + offset.y * offsetScale) * gridUnit + gridUnit / 2;
+                    const wx = (ghost.x + offset.x * offsetScale) * gridUnit;
+                    const wy = (ghost.y + offset.y * offsetScale) * gridUnit;
 
                     // Special marker for mergers
                     if (ghost.isMerger) {

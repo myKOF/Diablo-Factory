@@ -22,7 +22,17 @@
 - 修正 `ConveyorSystem.js` 中的 `ReferenceError: offset is not defined`。
 - 確保 `submitDrag` 方法中正確定義了 `offset` 變數。
 
-### 4. 自動化測試與 QA
+### 4. 網格對齊優化 (Alignment Optimization)
+- 將 `ui_config.js` 中的 `alignmentUnit` 從 0.5 調整為 1.0，落實全格對齊。
+- 修正 `ConveyorSystem.js` 中的 `getWidthOffsets`，使其在 1.0 網格下不再產生額外的半格佔位偏移。
+- 確保物流線起始點與建築端口（Port）完美對齊，消除初始拉取時的位移感。
+
+### 5. 點擊與框選同步 (Selection Synchronization)
+- **已撤銷 1.0 全格強制對齊**，恢復為用戶偏好的 0.5 半格網格系統。
+- 移除 `ConveyorSystem.js` 與 `MainScene.js` 中多餘的 `+gridUnit/2` (5px) 偏移，使物流線中心點直接對齊 10px 網格線，消除起始格位移感。
+- 修正 `MainScene.js` 中的選取框渲染邏輯，移除對 `order / 2` 的錯誤索引，確保選取框永遠精準覆蓋在點擊的 1.0 Tile 區段上。
+
+### 6. 自動化測試與 QA
 - 執行 `npm run finalize` 進行自動化驗證。
 - 確保物流線拉取時虛影顯示正常，且顏色（有效/無效）正確反映建造限制。
 
