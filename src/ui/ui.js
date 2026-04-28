@@ -1399,6 +1399,24 @@ export class UIManager {
         return `${gx},${gy}`;
     }
 
+    static getLogisticsSegmentOccupiedKeys(line) {
+        const centerKey = this.getLogisticsSegmentOccupyKey(line);
+        if (!centerKey) return [];
+        const routeWidth = Math.max(1, Math.round(Number(line.routeWidth) || 1));
+        const offsets = Array.from({ length: routeWidth }, (_, i) => (i - (routeWidth - 1) / 2) * 2);
+        const points = Array.isArray(line.routePoints) ? line.routePoints : [];
+        const a = points[0] || { x: line.x, y: line.y };
+        const b = points[1] || a;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const [gx, gy] = centerKey.split(',').map(Number);
+        return offsets.map(offset => {
+            const ox = Math.abs(dx) > Math.abs(dy) ? 0 : offset;
+            const oy = Math.abs(dx) > Math.abs(dy) ? offset : 0;
+            return `${gx + ox},${gy + oy}`;
+        });
+    }
+
     static buildGridRoutePoints(points) {
         if (!Array.isArray(points) || points.length < 2) return [];
         const TS = GameEngine.TILE_SIZE;
@@ -1505,14 +1523,15 @@ export class UIManager {
         const segments = this.buildLogisticsSegments(groupId, sourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter);
         const occupied = new Map();
         lines.forEach(item => {
-            const key = this.getLogisticsSegmentOccupyKey(item);
-            if (key && !occupied.has(key)) occupied.set(key, item);
+            this.getLogisticsSegmentOccupiedKeys(item).forEach(key => {
+                if (key && !occupied.has(key)) occupied.set(key, item);
+            });
         });
         const additions = [];
         segments.forEach(segment => {
-            const key = this.getLogisticsSegmentOccupyKey(segment);
-            if (!key || occupied.has(key)) return;
-            occupied.set(key, segment);
+            const keys = this.getLogisticsSegmentOccupiedKeys(segment);
+            if (!keys.length || keys.some(key => occupied.has(key))) return;
+            keys.forEach(key => occupied.set(key, segment));
             additions.push(segment);
         });
         GameEngine.state.logisticsLines = lines.concat(additions);
@@ -1723,16 +1742,93 @@ export class UIManager {
 
     static getLogisticsLineAt(worldX, worldY) {
         const TS = GameEngine.TILE_SIZE;
-        return this.ensureLogisticsLineStore()
-            .filter(line =>
-                Math.abs(worldX - line.x) <= TS / 2 &&
-                Math.abs(worldY - line.y) <= TS / 2
-            )
-            .sort((a, b) => {
-                const da = Math.hypot(worldX - a.x, worldY - a.y);
-                const db = Math.hypot(worldX - b.x, worldY - b.y);
-                return da - db || (b.createdAt || 0) - (a.createdAt || 0);
-            })[0] || null;
+        const getVisibleRects = (line) => {
+            const group = line.groupId ? this.getLogisticsSegmentsByGroupId(line.groupId) : [line];
+            const points = [];
+            group.forEach((segment, index) => {
+                const segPoints = Array.isArray(segment.routePoints) ? segment.routePoints : [];
+                if (segPoints.length < 2) return;
+                if (index === 0) points.push({ x: segPoints[0].x, y: segPoints[0].y });
+                points.push({ x: segPoints[1].x, y: segPoints[1].y });
+            });
+            if (points.length < 2) return [];
+            const width = Math.max(1, Math.round(Number(line.routeWidth) || 1));
+            const eps = 0.001;
+            const rects = [];
+            const stepSegments = [];
+            const getDir = (from, to) => {
+                const dx = to.x - from.x;
+                const dy = to.y - from.y;
+                if (Math.abs(dx) < eps && Math.abs(dy) < eps) return null;
+                return Math.abs(dx) >= Math.abs(dy)
+                    ? { x: Math.sign(dx) || 1, y: 0 }
+                    : { x: 0, y: Math.sign(dy) || 1 };
+            };
+            const firstDir = getDir(points[0], points[1]);
+            if (!firstDir) return [];
+            const first = points[0];
+            let originX = first.x - (width * TS) / 2;
+            let originY = first.y - (width * TS) / 2;
+            if (firstDir.x > 0) {
+                originX = first.x;
+                originY = first.y - (width * TS) / 2;
+            } else if (firstDir.x < 0) {
+                originX = first.x - TS;
+                originY = first.y - (width * TS) / 2;
+            } else if (firstDir.y > 0) {
+                originX = first.x - (width * TS) / 2;
+                originY = first.y;
+            } else if (firstDir.y < 0) {
+                originX = first.x - (width * TS) / 2;
+                originY = first.y - TS;
+            }
+            let cursorCol = 0;
+            let cursorRow = 0;
+            let currentDir = firstDir;
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                const dir = getDir(a, b);
+                if (!dir) continue;
+                const steps = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / TS));
+                for (let step = 0; step < steps; step++) {
+                    if (dir.x !== currentDir.x || dir.y !== currentDir.y) {
+                        cursorCol = cursorCol - currentDir.x + dir.x;
+                        cursorRow = cursorRow - currentDir.y + dir.y;
+                        currentDir = dir;
+                    }
+                    rects.push(dir.x !== 0
+                        ? { x: originX + cursorCol * TS, y: originY + cursorRow * TS, w: TS, h: width * TS, segment: group[Math.min(stepSegments.length, group.length - 1)] || line }
+                        : { x: originX + cursorCol * TS, y: originY + cursorRow * TS, w: width * TS, h: TS, segment: group[Math.min(stepSegments.length, group.length - 1)] || line });
+                    stepSegments.push(rects[rects.length - 1].segment);
+                    cursorCol += dir.x;
+                    cursorRow += dir.y;
+                }
+            }
+            return rects;
+        };
+        const hits = [];
+        const visitedGroups = new Set();
+        this.ensureLogisticsLineStore().forEach(line => {
+            const groupId = line.groupId || line.id;
+            if (visitedGroups.has(groupId)) return;
+            visitedGroups.add(groupId);
+            getVisibleRects(line).forEach(rect => {
+                if (
+                    worldX >= rect.x && worldX <= rect.x + rect.w &&
+                    worldY >= rect.y && worldY <= rect.y + rect.h
+                ) {
+                    const cx = rect.x + rect.w / 2;
+                    const cy = rect.y + rect.h / 2;
+                    hits.push({
+                        line: rect.segment || line,
+                        distance: Math.hypot(worldX - cx, worldY - cy)
+                    });
+                }
+            });
+        });
+        hits.sort((a, b) => a.distance - b.distance || (b.line.createdAt || 0) - (a.line.createdAt || 0));
+        return hits[0]?.line || null;
     }
 
     static handleWorldMouseDown(e) {

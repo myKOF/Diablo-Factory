@@ -755,6 +755,30 @@ export class MainScene extends Phaser.Scene {
                     TS + padding * 2
                 );
             };
+            const drawSelectedLogisticsSegmentOutlineOnRoute = (points, widthTiles, line) => {
+                if (!line || !Array.isArray(points) || points.length < 2) {
+                    drawSelectedLogisticsSegmentOutline(line);
+                    return;
+                }
+                const rects = this.getLogisticsCellRects(points, widthTiles, true);
+                const segmentIndex = Math.max(0, Math.floor((Number(line.order) || 0) / 2));
+                const rect = rects[Math.min(segmentIndex, rects.length - 1)];
+                if (!rect) {
+                    drawSelectedLogisticsSegmentOutline(line);
+                    return;
+                }
+                const padding = Math.max(0, Number(logCfg.selectedSegmentOutlinePadding) || 0);
+                const outlineColor = parseColor(logCfg.selectedSegmentOutlineColor || "#ff3d00ff");
+                const outlineAlpha = logCfg.selectedSegmentOutlineAlpha ?? 1;
+                const outlineWidth = Math.max(1, Number(logCfg.selectedSegmentOutlineWidth) || 2);
+                this.logisticsGraphics.lineStyle(outlineWidth, outlineColor, outlineAlpha);
+                this.logisticsGraphics.strokeRect(
+                    rect.x - padding,
+                    rect.y - padding,
+                    rect.w + padding * 2,
+                    rect.h + padding * 2
+                );
+            };
 
             const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null) => {
                 const baseThickness = logCfg.lineThickness || 3;
@@ -765,34 +789,70 @@ export class MainScene extends Phaser.Scene {
                 const lAlpha = !isConnected
                     ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha)
                     : (isSelected ? (logCfg.selectedLineAlpha || 1.0) : logCfg.lineAlpha);
-                this.logisticsGraphics.lineStyle(thickPx, parseColor(lColor), lAlpha);
-                this.strokePolyline(this.logisticsGraphics, points);
+                this.logisticsGraphics.fillStyle(parseColor(lColor), lAlpha);
+                this.drawLogisticsCells(this.logisticsGraphics, points, widthTiles, 1);
+                const arrowRects = this.getLogisticsCellRects(points, widthTiles, true);
 
-                const polyLen = this.getPolylineLength(points);
-                if (polyLen > 24) {
-                    const speed = logCfg.arrowSpeed || 60;
-                    const spacing = logCfg.arrowSpacing || 40;
-                    const arrowOffset = isConnected ? ((currentTime * speed) % spacing) : spacing * 0.5;
+                if (arrowRects.length > 0) {
                     const arrowColor = isConnected ? logCfg.arrowColor : (logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
                     const arrowAlpha = isConnected ? 0.9 : (logCfg.disconnectedArrowAlpha ?? 0.85);
                     const arrowSize = isConnected ? (logCfg.arrowSize || 8) : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8);
                     this.logisticsGraphics.fillStyle(parseColor(arrowColor), arrowAlpha);
-                    this.drawArrowsOnPolyline(this.logisticsGraphics, points, arrowOffset, spacing, arrowSize);
+                    arrowRects.forEach((rect, index) => {
+                        const next = arrowRects[Math.min(index + 1, arrowRects.length - 1)];
+                        const prev = arrowRects[Math.max(index - 1, 0)];
+                        const dx = next.x - prev.x;
+                        const dy = next.y - prev.y;
+                        const len = Math.hypot(dx, dy) || 1;
+                        this.drawArrowhead(
+                            this.logisticsGraphics,
+                            rect.x + rect.w / 2,
+                            rect.y + rect.h / 2,
+                            dx / len,
+                            dy / len,
+                            arrowSize
+                        );
+                    });
                 }
                 if (isSelected && line) {
-                    drawSelectedLogisticsSegmentOutline(line);
+                    drawSelectedLogisticsSegmentOutlineOnRoute(points, widthTiles, line);
                 }
             };
 
             if (Array.isArray(state.logisticsLines)) {
+                const renderedGroups = new Set();
                 state.logisticsLines.forEach(line => {
-                    const route = window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function'
-                        ? window.UIManager.getLogisticsLineRoute(line)
-                        : null;
+                    const groupId = line.groupId || line.id;
+                    if (groupId && renderedGroups.has(groupId)) return;
+                    if (groupId) renderedGroups.add(groupId);
+                    let route = null;
+                    let routeLine = line;
+                    if (window.UIManager && line.groupId && typeof window.UIManager.getLogisticsSegmentsByGroupId === 'function') {
+                        const segments = window.UIManager.getLogisticsSegmentsByGroupId(line.groupId);
+                        if (segments.length > 0) {
+                            const points = [];
+                            segments.forEach((segment, index) => {
+                                const segPoints = Array.isArray(segment.routePoints) ? segment.routePoints : [];
+                                if (segPoints.length < 2) return;
+                                if (index === 0) points.push({ x: segPoints[0].x, y: segPoints[0].y });
+                                points.push({ x: segPoints[1].x, y: segPoints[1].y });
+                            });
+                            route = {
+                                points,
+                                width: Math.max(1, Number(segments[0].routeWidth) || 1)
+                            };
+                            routeLine = segments.find(segment => state.selectedLogisticsLineId === segment.id) || segments[0];
+                        }
+                    }
+                    if (!route && window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function') {
+                        route = window.UIManager.getLogisticsLineRoute(line);
+                    }
                     if (!route || !Array.isArray(route.points) || route.points.length < 2) return;
-                    const isSelected = state.selectedLogisticsLineId === line.id ||
-                        (window.UIManager.activeLogisticsLine && window.UIManager.activeLogisticsLine.id === line.id);
-                    drawLogisticsRoute(route.points, route.width || 1, isSelected, !!line.filter, line);
+                    const isSelected = (window.UIManager && window.UIManager.getLogisticsSegmentsByGroupId && line.groupId
+                            ? window.UIManager.getLogisticsSegmentsByGroupId(line.groupId).some(segment => state.selectedLogisticsLineId === segment.id)
+                            : state.selectedLogisticsLineId === line.id) ||
+                        (window.UIManager.activeLogisticsLine && (window.UIManager.activeLogisticsLine.id === line.id || window.UIManager.activeLogisticsLine.groupId === line.groupId));
+                    drawLogisticsRoute(route.points, route.width || 1, isSelected, !!line.filter, routeLine);
                 });
             }
 
@@ -853,15 +913,19 @@ export class MainScene extends Phaser.Scene {
                 const alignUnit = Math.max(0.5, Math.min(1, Number(buildCfg.alignmentUnit) || 0.5));
                 const gridUnit = TS * alignUnit;
                 const offsetScale = TS / gridUnit;
+                const routeWidth = Math.max(1, Math.round(Number(state.conveyorRouteWidth) || 1));
                 const previewSegments = [];
                 const pushPreviewSegment = (start, next, targetEnd) => {
                     if (!start || !next) return;
-                    let end = targetEnd || next;
+                    const dirX = Math.sign(next.x - start.x);
+                    const dirY = Math.sign(next.y - start.y);
+                    const canUseTargetEnd = targetEnd &&
+                        Math.sign(targetEnd.x - next.x) === dirX &&
+                        Math.sign(targetEnd.y - next.y) === dirY;
+                    let end = canUseTargetEnd ? targetEnd : next;
                     const dx = end.x - start.x;
                     const dy = end.y - start.y;
                     if (Math.hypot(dx, dy) < offsetScale - 0.001) {
-                        const dirX = Math.sign(next.x - start.x);
-                        const dirY = Math.sign(next.y - start.y);
                         end = {
                             x: start.x + dirX * offsetScale,
                             y: start.y + dirY * offsetScale
@@ -887,20 +951,51 @@ export class MainScene extends Phaser.Scene {
                     );
                 }
 
-                previewSegments.forEach(ghost => {
+                const rawGhostPoints = state.conveyorGhosts.map(point => ({
+                    x: (point.x + offset.x * offsetScale) * gridUnit,
+                    y: (point.y + offset.y * offsetScale) * gridUnit,
+                    isPortConnector: point.isPortConnector
+                }));
+                let ghostPoints = rawGhostPoints;
+                if (window.UIManager && typeof window.UIManager.buildGridRoutePoints === 'function' && typeof window.UIManager.buildLogisticsSegments === 'function') {
+                    const gridPoints = window.UIManager.buildGridRoutePoints(rawGhostPoints);
+                    const segments = window.UIManager.buildLogisticsSegments(
+                        '__preview__',
+                        null,
+                        null,
+                        null,
+                        gridPoints,
+                        routeWidth,
+                        null,
+                        null,
+                        null
+                    );
+                    const routePoints = [];
+                    segments.forEach((segment, index) => {
+                        const segPoints = Array.isArray(segment.routePoints) ? segment.routePoints : [];
+                        if (segPoints.length < 2) return;
+                        if (index === 0) routePoints.push({ x: segPoints[0].x, y: segPoints[0].y });
+                        routePoints.push({ x: segPoints[1].x, y: segPoints[1].y });
+                    });
+                    if (routePoints.length >= 2) ghostPoints = routePoints;
+                }
+                this.drawLogisticsCells(this.logisticsGraphics, ghostPoints, routeWidth, 1);
+                const ghostArrowRects = this.getLogisticsCellRects(ghostPoints, routeWidth, true);
+                if (ghostArrowRects.length > 0) {
+                    this.logisticsGraphics.fillStyle(ghostColor, 0.85);
+                    ghostArrowRects.forEach((rect, index) => {
+                        const next = ghostArrowRects[Math.min(index + 1, ghostArrowRects.length - 1)];
+                        const prev = ghostArrowRects[Math.max(index - 1, 0)];
+                        const dx = next.x - prev.x;
+                        const dy = next.y - prev.y;
+                        const len = Math.hypot(dx, dy) || 1;
+                        this.drawArrowhead(this.logisticsGraphics, rect.x + rect.w / 2, rect.y + rect.h / 2, dx / len, dy / len, 5);
+                    });
+                }
+
+                previewSegments.forEach((ghost, ghostIndex) => {
                     const wx = (ghost.x + offset.x * offsetScale) * gridUnit;
                     const wy = (ghost.y + offset.y * offsetScale) * gridUnit;
-                    
-                    // Draw Tile Square
-                    this.logisticsGraphics.fillRect(wx - TS/2 + 2, wy - TS/2 + 2, TS - 4, TS - 4);
-                    
-                    // Draw Directional Arrow if path exists
-                    if (ghost.dirOut) {
-                        const arrowSize = 6;
-                        const tx = wx + ghost.dirOut.x * (TS/2 - 4);
-                        const ty = wy + ghost.dirOut.y * (TS/2 - 4);
-                        this.logisticsGraphics.lineBetween(wx, wy, tx, ty);
-                    }
                     
                     // Special marker for mergers
                     if (ghost.isMerger) {
@@ -3186,6 +3281,182 @@ export class MainScene extends Phaser.Scene {
             g.lineTo(points[i].x, points[i].y);
         }
         g.strokePath();
+    }
+
+    drawLogisticsCells(g, points, widthTiles = 1, alpha = 1) {
+        const rects = this.getLogisticsCellRects(points, widthTiles);
+        rects.forEach(rect => g.fillRect(rect.x, rect.y, rect.w, rect.h));
+    }
+
+    getLogisticsCellRects(points, widthTiles = 1, perStep = false) {
+        if (!Array.isArray(points) || points.length < 2) return [];
+        const TS = GameEngine.TILE_SIZE;
+        const width = Math.max(1, Math.round(Number(widthTiles) || 1));
+        const eps = 0.001;
+        const cells = new Set();
+        const stepRects = [];
+        const mergedRects = [];
+        const addCell = (col, row) => {
+            if (!Number.isFinite(col) || !Number.isFinite(row)) return;
+            cells.add(`${col},${row}`);
+        };
+        const getDir = (from, to) => {
+            if (!from || !to) return null;
+            const dx = to.x - from.x;
+            const dy = to.y - from.y;
+            if (Math.abs(dx) < eps && Math.abs(dy) < eps) return null;
+            return Math.abs(dx) >= Math.abs(dy)
+                ? { x: Math.sign(dx) || 1, y: 0 }
+                : { x: 0, y: Math.sign(dy) || 1 };
+        };
+        const firstDir = getDir(points[0], points[1]);
+        if (!firstDir) return [];
+        const first = points[0];
+        let originX = first.x - (width * TS) / 2;
+        let originY = first.y - (width * TS) / 2;
+        let cursorCol = 0;
+        let cursorRow = 0;
+        if (firstDir.x > 0) {
+            originX = first.x;
+            originY = first.y - (width * TS) / 2;
+        } else if (firstDir.x < 0) {
+            originX = first.x - TS;
+            originY = first.y - (width * TS) / 2;
+        } else if (firstDir.y > 0) {
+            originX = first.x - (width * TS) / 2;
+            originY = first.y;
+        } else if (firstDir.y < 0) {
+            originX = first.x - (width * TS) / 2;
+            originY = first.y - TS;
+        }
+        const addFootprint = (col, row, dir) => {
+            const rect = dir.x !== 0
+                ? { x: originX + col * TS, y: originY + row * TS, w: TS, h: width * TS }
+                : { x: originX + col * TS, y: originY + row * TS, w: width * TS, h: TS };
+            stepRects.push(rect);
+            if (dir.x !== 0) {
+                for (let lane = 0; lane < width; lane++) addCell(col, row + lane);
+            } else {
+                for (let lane = 0; lane < width; lane++) addCell(col + lane, row);
+            }
+        };
+
+        let currentDir = firstDir;
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            if (!a || !b) continue;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            if (Math.abs(dx) < eps && Math.abs(dy) < eps) continue;
+            const dir = getDir(a, b);
+            const steps = Math.max(1, Math.round(Math.max(Math.abs(dx), Math.abs(dy)) / TS));
+            for (let step = 0; step < steps; step++) {
+                if (dir.x !== currentDir.x || dir.y !== currentDir.y) {
+                    cursorCol = cursorCol - currentDir.x + dir.x;
+                    cursorRow = cursorRow - currentDir.y + dir.y;
+                    currentDir = dir;
+                }
+                addFootprint(cursorCol, cursorRow, dir);
+                cursorCol += dir.x;
+                cursorRow += dir.y;
+            }
+        }
+
+        const rows = new Map();
+        cells.forEach(key => {
+            const [col, row] = key.split(',').map(Number);
+            if (!rows.has(row)) rows.set(row, []);
+            rows.get(row).push(col);
+        });
+        rows.forEach((cols, row) => {
+            cols.sort((a, b) => a - b);
+            let start = null;
+            let prev = null;
+            cols.forEach(col => {
+                if (start === null) {
+                    start = col;
+                    prev = col;
+                    return;
+                }
+                if (col === prev + 1) {
+                    prev = col;
+                    return;
+                }
+                mergedRects.push({ x: originX + start * TS, y: originY + row * TS, w: (prev - start + 1) * TS, h: TS });
+                start = col;
+                prev = col;
+            });
+            if (start !== null) {
+                mergedRects.push({ x: originX + start * TS, y: originY + row * TS, w: (prev - start + 1) * TS, h: TS });
+            }
+        });
+        return perStep ? stepRects : mergedRects;
+    }
+
+    getLogisticsCellCenterline(points, widthTiles = 1) {
+        if (!Array.isArray(points) || points.length < 2) return points || [];
+        const TS = GameEngine.TILE_SIZE;
+        const width = Math.max(1, Math.round(Number(widthTiles) || 1));
+        const eps = 0.001;
+        const getDir = (from, to) => {
+            if (!from || !to) return null;
+            const dx = to.x - from.x;
+            const dy = to.y - from.y;
+            if (Math.abs(dx) < eps && Math.abs(dy) < eps) return null;
+            return Math.abs(dx) >= Math.abs(dy)
+                ? { x: Math.sign(dx) || 1, y: 0 }
+                : { x: 0, y: Math.sign(dy) || 1 };
+        };
+        const first = points[0];
+        const firstDir = getDir(points[0], points[1]);
+        if (!firstDir) return points;
+        let originX = first.x - (width * TS) / 2;
+        let originY = first.y - (width * TS) / 2;
+        if (firstDir.x > 0) {
+            originX = first.x;
+            originY = first.y - (width * TS) / 2;
+        } else if (firstDir.x < 0) {
+            originX = first.x - TS;
+            originY = first.y - (width * TS) / 2;
+        } else if (firstDir.y > 0) {
+            originX = first.x - (width * TS) / 2;
+            originY = first.y;
+        } else if (firstDir.y < 0) {
+            originX = first.x - (width * TS) / 2;
+            originY = first.y - TS;
+        }
+        let cursorCol = 0;
+        let cursorRow = 0;
+        let currentDir = firstDir;
+        const centers = [];
+        const pushCenter = (col, row, dir) => {
+            const last = centers[centers.length - 1];
+            const cx = originX + (col + (dir.x !== 0 ? 0.5 : width / 2)) * TS;
+            const cy = originY + (row + (dir.x !== 0 ? width / 2 : 0.5)) * TS;
+            if (!last || last.x !== cx || last.y !== cy) centers.push({ x: cx, y: cy });
+        };
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            if (!a || !b) continue;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            if (Math.abs(dx) < eps && Math.abs(dy) < eps) continue;
+            const dir = getDir(a, b);
+            const steps = Math.max(1, Math.round(Math.max(Math.abs(dx), Math.abs(dy)) / TS));
+            for (let step = 0; step < steps; step++) {
+                if (dir.x !== currentDir.x || dir.y !== currentDir.y) {
+                    cursorCol = cursorCol - currentDir.x + dir.x;
+                    cursorRow = cursorRow - currentDir.y + dir.y;
+                    currentDir = dir;
+                }
+                pushCenter(cursorCol, cursorRow, dir);
+                cursorCol += dir.x;
+                cursorRow += dir.y;
+            }
+        }
+        return centers.length >= 2 ? centers : points;
     }
 
     getPolylineLength(points) {

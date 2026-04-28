@@ -26,8 +26,9 @@ export class ConveyorSystem {
 
         const rows = grid.length;
         const cols = grid[0].length;
-        const routeGrid = this.createRoutingGrid(grid);
         const routeScale = this.getRouteScale();
+        const routeWidth = Math.max(1, Number(currentSourcePort?.width) || 1);
+        const routeGrid = this.createRoutingGrid(grid, sourceLine);
         
         this.router = new ConveyorRouter(routeGrid, cols * routeScale, rows * routeScale);
         this.router.tileSize = this.getGridUnitSize();
@@ -43,7 +44,8 @@ export class ConveyorSystem {
             targetPort: null,
             bendMode: 'x-first',
             lastWorldPoint: null,
-            startGrid: this.toGrid(resolvedStartX, resolvedStartY)
+            startGrid: this.toGrid(resolvedStartX, resolvedStartY),
+            routeWidth
         };
         
         this.ghosts = [];
@@ -98,7 +100,71 @@ export class ConveyorSystem {
         return path;
     }
 
-    createRoutingGrid(grid) {
+    getWidthOffsets(width) {
+        const count = Math.max(1, Math.round(Number(width) || 1));
+        const routeScale = this.getRouteScale();
+        const offsets = [];
+        for (let i = 0; i < count; i++) {
+            offsets.push((i - (count - 1) / 2) * routeScale);
+        }
+        return offsets;
+    }
+
+    getGhostOccupiedCells(ghosts, width) {
+        if (!Array.isArray(ghosts) || ghosts.length === 0) return [];
+        const cells = new Map();
+        const offsets = this.getWidthOffsets(width);
+        const addCell = (x, y) => cells.set(`${x},${y}`, { x, y });
+        const addFootprint = (point, dir) => {
+            if (!point) return;
+            const d = dir || point.dirOut || point.dirIn || { x: 1, y: 0 };
+            if (Math.abs(d.x) > Math.abs(d.y)) {
+                offsets.forEach(offset => addCell(point.x, point.y + offset));
+            } else {
+                offsets.forEach(offset => addCell(point.x + offset, point.y));
+            }
+        };
+
+        ghosts.forEach(ghost => {
+            addFootprint(ghost, ghost.dirOut || ghost.dirIn);
+            if (ghost.isCurve && ghost.dirIn && ghost.dirOut) {
+                addFootprint(ghost, ghost.dirIn);
+                addFootprint(ghost, ghost.dirOut);
+            }
+        });
+        return Array.from(cells.values());
+    }
+
+    markLineOnGrid(routeGrid, line) {
+        if (!routeGrid || !line) return;
+        const width = Math.max(1, Number(line.routeWidth) || 1);
+        const mark = (x, y) => {
+            if (y < 0 || y >= routeGrid.length || x < 0 || x >= routeGrid[y].length) return;
+            routeGrid[y][x] = 1;
+        };
+        const points = Array.isArray(line.routePoints) && line.routePoints.length >= 2
+            ? line.routePoints
+            : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = this.toGrid(points[i].x, points[i].y);
+            const b = this.toGrid(points[i + 1].x, points[i + 1].y);
+            const dx = Math.sign(b.x - a.x);
+            const dy = Math.sign(b.y - a.y);
+            const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y), 1);
+            const ghosts = [];
+            for (let step = 0; step <= steps; step++) {
+                ghosts.push({
+                    x: a.x + dx * step,
+                    y: a.y + dy * step,
+                    dirOut: { x: dx, y: dy },
+                    dirIn: { x: dx, y: dy }
+                });
+            }
+            this.getGhostOccupiedCells(ghosts, width).forEach(cell => mark(cell.x, cell.y));
+        }
+    }
+
+    createRoutingGrid(grid, ignoreLine = null) {
         const expanded = [];
         const routeScale = this.getRouteScale();
         for (let y = 0; y < grid.length; y++) {
@@ -110,22 +176,12 @@ export class ConveyorSystem {
             }
             expanded.push(...sourceRows);
         }
-        const inflated = expanded.map(row => row.slice());
-        const clearance = Math.max(1, Math.floor(routeScale / 2));
-        for (let y = 0; y < expanded.length; y++) {
-            for (let x = 0; x < expanded[y].length; x++) {
-                if (expanded[y][x] === 0) continue;
-                for (let dy = -clearance; dy <= clearance; dy++) {
-                    for (let dx = -clearance; dx <= clearance; dx++) {
-                        const ny = y + dy;
-                        const nx = x + dx;
-                        if (ny < 0 || ny >= inflated.length || nx < 0 || nx >= inflated[ny].length) continue;
-                        inflated[ny][nx] = expanded[y][x];
-                    }
-                }
-            }
-        }
-        return inflated;
+        const routeGrid = expanded.map(row => row.slice());
+        (GameEngine.state.logisticsLines || []).forEach(line => {
+            if (ignoreLine && (line.id === ignoreLine.id || line.groupId === ignoreLine.groupId)) return;
+            this.markLineOnGrid(routeGrid, line);
+        });
+        return routeGrid;
     }
 
     updateDrag(currentX, currentY) {
@@ -176,6 +232,7 @@ export class ConveyorSystem {
         // Update global state for rendering
         GameEngine.state.conveyorGhosts = this.ghosts;
         GameEngine.state.conveyorValid = this.isValid;
+        GameEngine.state.conveyorRouteWidth = this.activeDrag.routeWidth || 1;
     }
 
     toggleBendMode() {
@@ -261,7 +318,7 @@ export class ConveyorSystem {
                 targetEnt: targetBuilding,
                 targetPoint: targetPort || points[points.length - 1],
                 points: points,
-                routeWidth: drag.sourcePort?.width || 1,
+                routeWidth: drag.routeWidth || drag.sourcePort?.width || 1,
                 sourcePort: drag.sourcePort,
                 targetPort: targetPort
             });
@@ -283,6 +340,7 @@ export class ConveyorSystem {
         if (GameEngine.state) {
             GameEngine.state.conveyorGhosts = [];
             GameEngine.state.conveyorValid = false;
+            GameEngine.state.conveyorRouteWidth = 1;
         }
     }
 
@@ -300,6 +358,17 @@ export class ConveyorSystem {
 
     validateGhosts(ghosts) {
         if (ghosts.length === 0) return false;
+        const routeWidth = this.activeDrag?.routeWidth || 1;
+        const routeGrid = this.router?.grid || [];
+        const occupiedCells = this.getGhostOccupiedCells(ghosts.filter(ghost => !ghost.isPortConnector), routeWidth);
+        for (const cell of occupiedCells) {
+            if (cell.y < 0 || cell.y >= routeGrid.length || cell.x < 0 || cell.x >= routeGrid[cell.y].length) {
+                return false;
+            }
+            if (routeGrid[cell.y][cell.x] !== 0) {
+                return false;
+            }
+        }
         
         const cfg = UI_CONFIG.ConveyorBuild;
         if (!cfg || cfg.enableCost === false) return true;
