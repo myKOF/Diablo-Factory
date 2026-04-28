@@ -240,8 +240,25 @@ export class ConveyorSystem {
         if (routeKey === this.lastRouteKey) return;
         this.lastRouteKey = routeKey;
 
+        // [核心修正] 設置尋路器的碰撞回調，允許與起點/目標建築重疊
+        const sourceEnt = this.activeDrag.sourceEntity;
+        const targetEnt = dragTarget.building;
+        const TS = GameEngine.TILE_SIZE;
+        const scale = this.getRouteScale();
+        const gridUnit = TS / scale;
+        const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
+
+        this.router.onCollision = (gx, gy) => {
+            const wx = (gx + offset.x * scale) * gridUnit + gridUnit / 2;
+            const wy = (gy + offset.y * scale) * gridUnit + gridUnit / 2;
+            return (sourceEnt && window.UIManager?.isPointInsideEntity(sourceEnt, wx, wy)) ||
+                   (targetEnt && window.UIManager?.isPointInsideEntity(targetEnt, wx, wy));
+        };
+
+        const widthOffsets = this.getWidthOffsets(this.activeDrag.routeWidth);
+
         // Auto-Routing with A* Turn Penalty
-        const routePath = this.router.findPath(sourceRouteGrid, targetRouteGrid, this.activeDrag.sourcePort?.dir, this.activeDrag.bendMode);
+        const routePath = this.router.findPath(sourceRouteGrid, targetRouteGrid, this.activeDrag.sourcePort?.dir, this.activeDrag.bendMode, widthOffsets);
         const path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
 
         if (path) {
@@ -257,6 +274,9 @@ export class ConveyorSystem {
         GameEngine.state.conveyorValid = this.isValid;
         GameEngine.state.conveyorRouteWidth = this.activeDrag.routeWidth || 1;
     }
+
+    // ... (toggleBendMode and resolveDragTarget omitted for brevity in replace_file_content but I will include them if I replace a large block)
+    // Wait, I should use replace_file_content carefully. I will replace the block from updateDragNow to the end of the file.
 
     toggleBendMode() {
         if (!this.activeDrag) return false;
@@ -360,6 +380,7 @@ export class ConveyorSystem {
         this.pendingDragPoint = null;
         this.isDragFrameQueued = false;
         this.lastRouteKey = null;
+        if (this.router) this.router.onCollision = null;
         if (GameEngine.state) {
             GameEngine.state.conveyorGhosts = [];
             GameEngine.state.conveyorValid = false;
@@ -384,11 +405,22 @@ export class ConveyorSystem {
         const routeWidth = this.activeDrag?.routeWidth || 1;
         const routeGrid = this.router?.grid || [];
         const occupiedCells = this.getGhostOccupiedCells(ghosts.filter(ghost => !ghost.isPortConnector), routeWidth);
+        
+        const sourceEnt = this.activeDrag?.sourceEntity;
+        const targetEnt = this.activeDrag?.targetBuilding;
+        const TS = GameEngine.TILE_SIZE;
+        const scale = this.getRouteScale();
+        const gridUnit = TS / scale;
+        const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
+
         for (const cell of occupiedCells) {
             if (cell.y < 0 || cell.y >= routeGrid.length || cell.x < 0 || cell.x >= routeGrid[cell.y].length) {
                 return false;
             }
             if (routeGrid[cell.y][cell.x] !== 0) {
+                // [核心修復] 使用與尋路器相同的邏輯進行驗證
+                if (this.router?.onCollision && this.router.onCollision(cell.x, cell.y)) continue;
+
                 return false;
             }
         }

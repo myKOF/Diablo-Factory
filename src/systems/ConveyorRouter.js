@@ -9,25 +9,32 @@ export class ConveyorRouter {
         this.rows = rows;
         this.turnPenalty = 100; // High penalty for changing direction
         this.maxSearchNodes = 6000;
+        this.tileSize = 20;
+        this.widthOffsets = [-1, 0]; // Default for 1-tile width in 0.5 grid
+        this.onCollision = null; // Callback: (x, y) => boolean (true to ignore)
     }
 
     /**
      * Find path using A* or L-Shape
      */
-    findPath(start, end, startDir = null, bendMode = 'x-first') {
+    findPath(start, end, startDir = null, bendMode = 'x-first', widthOffsets = null) {
         if (!start || !end) return null;
         if (start.x === end.x && start.y === end.y) return [start];
         if (!this.isInsideGrid(start) || !this.isInsideGrid(end)) return null;
 
+        const activeOffsets = widthOffsets || this.widthOffsets;
+
         // Ensure start and end are considered walkable for the routing
+        // Note: we don't clear footprints here to avoid clearing too much, 
+        // just the center points is enough since the caller handles start/end safety.
         const oldStartVal = this.grid[start.y]?.[start.x];
         const oldEndVal = this.grid[end.y]?.[end.x];
         if (this.grid[start.y]) this.grid[start.y][start.x] = 0;
         if (this.grid[end.y]) this.grid[end.y][end.x] = 0;
 
-        let path = this.getLShapePath(start, end, startDir, bendMode);
+        let path = this.getLShapePath(start, end, startDir, bendMode, activeOffsets);
         if (!path) {
-            path = this.findAStarPath(start, end, startDir);
+            path = this.findAStarPath(start, end, startDir, activeOffsets);
         }
 
         // Restore grid
@@ -40,7 +47,7 @@ export class ConveyorRouter {
     /**
      * L-Shape Priority: Max 1 turn
      */
-    getLShapePath(start, end, startDir, bendMode = 'x-first') {
+    getLShapePath(start, end, startDir, bendMode = 'x-first', widthOffsets = null) {
         const dx = end.x - start.x;
         const dy = end.y - start.y;
 
@@ -62,17 +69,49 @@ export class ConveyorRouter {
 
         const primary = bendMode === 'y-first' ? pathY : pathX;
         const secondary = bendMode === 'y-first' ? pathX : pathY;
-        if (this.isValidPath(primary)) return primary;
-        if (this.isValidPath(secondary)) return secondary;
+        if (this.isValidPath(primary, widthOffsets)) return primary;
+        if (this.isValidPath(secondary, widthOffsets)) return secondary;
 
         return null;
     }
 
-    isValidPath(path) {
-        for (const p of path) {
-            if (!this.isInsideGrid(p)) return false;
-            // Note: start and end are already cleared in findPath
-            if (this.grid[p.y][p.x] !== 0) return false;
+    isValidPath(path, widthOffsets = null) {
+        const offsets = widthOffsets || this.widthOffsets;
+        for (let i = 0; i < path.length; i++) {
+            const p = path[i];
+            const next = path[i + 1] || path[i];
+            const prev = path[i - 1] || path[i];
+            
+            // Determine direction to apply correct footprint
+            const dx = next.x - p.x || p.x - prev.x || 1;
+            const dy = next.y - p.y || p.y - prev.y || 0;
+            const dir = { x: Math.sign(dx), y: Math.sign(dy) };
+
+            if (!this.isValidNode(p.x, p.y, dir, offsets)) return false;
+        }
+        return true;
+    }
+
+    isValidNode(x, y, dir, offsets) {
+        if (!this.isInsideGrid({ x, y })) return false;
+        // Start and end points are handled by findPath clearing logic, 
+        // but we still check the rest of the footprint.
+        
+        for (const off of offsets) {
+            let cx = x, cy = y;
+            if (Math.abs(dir.x) > Math.abs(dir.y)) {
+                cy += off;
+            } else {
+                cx += off;
+            }
+            
+            if (!this.isInsideGrid({ x: cx, y: cy })) return false;
+            if (this.grid[cy][cx] !== 0) {
+                // Ignore point if it was cleared (start/end) or if custom handler allows it
+                if (cx === x && cy === y) continue;
+                if (this.onCollision && this.onCollision(cx, cy)) continue;
+                return false;
+            }
         }
         return true;
     }
@@ -94,7 +133,8 @@ export class ConveyorRouter {
     /**
      * A* with Turn Penalty
      */
-    findAStarPath(start, end, startDir) {
+    findAStarPath(start, end, startDir, widthOffsets = null) {
+        const offsets = widthOffsets || this.widthOffsets;
         const openHeap = [];
         const bestOpen = new Map();
         const closedSet = new Set();
@@ -169,8 +209,10 @@ export class ConveyorRouter {
                 const nx = current.x + n.x;
                 const ny = current.y + n.y;
 
-                if (nx < 0 || nx >= this.cols || ny < 0 || ny >= this.rows) continue;
-                if (this.grid[ny][nx] !== 0) continue;
+                if (!this.isValidNode(nx, ny, n, offsets)) {
+                    // Special case: if it's the target point, we allow it because findPath cleared it
+                    if (nx !== end.x || ny !== end.y) continue;
+                }
 
                 const key = getNodeKey(nx, ny, n);
                 if (closedSet.has(key)) continue;
