@@ -783,7 +783,7 @@ export const UI_CONFIG = {
         costPerSegment: 10,           // 每小節傳送帶消耗的資源數量 (預設 10)
         costResource: "gold_ingots",  // 消耗的資源種類鍵值 (例如: gold_ingots, soul)
         enableCost: false,            // [需求修正] 目前不消耗道具，以後再做。設為 true 則開啟檢查。
-        alignmentUnit: 0.5,           // [需求修正] 恢復 0.5 對齊以相容不同建築的端口位置（偶數寬對齊邊界，奇數寬對齊中心）
+        alignmentUnit: 1.0,           // [需求修正] 統一使用 1.0 Tile 對齊，消除半格物流線。
         maxRouteSearchNodes: 12000,   // 物流線拖曳尋路的最大搜尋節點數，範圍建議 1000~30000；半格對齊會增加搜尋節點，數值越高越能繞遠路但封閉障礙時越容易卡頓。
         ghostValidColor: 0x00ff00,    // 合法位置預覽顏色 (綠色)
         ghostInvalidColor: 0xff0000,  // 非法位置預覽顏色 (紅色)

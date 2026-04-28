@@ -252,7 +252,7 @@ export class ConveyorSystem {
             const wx = (gx + offset.x * scale) * gridUnit + gridUnit / 2;
             const wy = (gy + offset.y * scale) * gridUnit + gridUnit / 2;
             return (sourceEnt && window.UIManager?.isPointInsideEntity(sourceEnt, wx, wy)) ||
-                   (targetEnt && window.UIManager?.isPointInsideEntity(targetEnt, wx, wy));
+                (targetEnt && window.UIManager?.isPointInsideEntity(targetEnt, wx, wy));
         };
 
         const widthOffsets = this.getWidthOffsets(this.activeDrag.routeWidth);
@@ -405,7 +405,7 @@ export class ConveyorSystem {
         const routeWidth = this.activeDrag?.routeWidth || 1;
         const routeGrid = this.router?.grid || [];
         const occupiedCells = this.getGhostOccupiedCells(ghosts.filter(ghost => !ghost.isPortConnector), routeWidth);
-        
+
         const sourceEnt = this.activeDrag?.sourceEntity;
         const targetEnt = this.activeDrag?.targetBuilding;
         const TS = GameEngine.TILE_SIZE;

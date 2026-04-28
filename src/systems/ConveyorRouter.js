@@ -1,3 +1,5 @@
+import { UI_CONFIG } from "../ui/ui_config.js";
+
 /**
  * Conveyor Routing Engine (Headless)
  * Implements: L-Shape Priority, A* with Turn Penalty, Node Vectoring.
@@ -137,6 +139,9 @@ export class ConveyorRouter {
         const offsets = widthOffsets || this.widthOffsets;
         const openHeap = [];
         const bestOpen = new Map();
+        const alignUnit = UI_CONFIG.ConveyorBuild?.alignmentUnit || 1.0;
+        this.alignmentUnit = alignUnit;
+        const scale = Math.round(1 / alignUnit);
         const closedSet = new Set();
         const pushHeap = (node) => {
             openHeap.push(node);
