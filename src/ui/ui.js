@@ -32,7 +32,7 @@ export class UIManager {
      */
     static makeDraggable(el, id) {
         if (!el || !id) return;
-        
+
         let isDragging = false;
         let startVX, startVY;
         let startEX, startEY;
@@ -46,7 +46,7 @@ export class UIManager {
 
             e.stopPropagation();
             isDragging = true;
-            
+
             // 1. 獲取初始虛擬鼠標位置
             const localStart = this.getLocalMouse(e);
             startVX = localStart.x;
@@ -60,10 +60,10 @@ export class UIManager {
 
             el.style.cursor = "grabbing";
             el.style.transition = "none"; // 拖動時關閉動畫
-            
+
             const onMouseMove = (moveE) => {
                 if (!isDragging) return;
-                
+
                 const localMove = this.getLocalMouse(moveE);
                 const dx = localMove.x - startVX;
                 const dy = localMove.y - startVY;
@@ -72,7 +72,7 @@ export class UIManager {
                 const margin = 50;
                 const virtualWidth = 1920;
                 const virtualHeight = 1080;
-                
+
                 // 計算原始目標位置
                 let targetX = startEX + dx;
                 let targetY = startEY + dy;
@@ -90,7 +90,7 @@ export class UIManager {
 
                 el.style.left = `${finalX}px`;
                 el.style.top = `${finalY}px`;
-                
+
                 // 4. 清除可能干擾絕對定位的屬性
                 el.style.right = "auto";
                 el.style.bottom = "auto";
@@ -103,14 +103,14 @@ export class UIManager {
                 isDragging = false;
                 el.style.cursor = "default";
                 el.style.transition = "";
-                
+
                 // 確保 ID 存在才紀錄 (優先使用動態綁定的 dragId)
                 const saveId = el.dataset.dragId || id;
                 if (saveId) {
                     this.uiPositions[saveId] = { left: el.style.left, top: el.style.top };
                     this.saveUIPositions();
                 }
-                
+
                 window.removeEventListener("mousemove", onMouseMove);
                 window.removeEventListener("mouseup", onMouseUp);
             };
@@ -300,7 +300,7 @@ export class UIManager {
                 }
                 const state = GameEngine.state;
                 if (state.placingType && (state.buildingMode === "DRAG" || state.buildingMode === "LINE" || state.buildingMode === "STAMP")) {
-                    e.preventDefault(); 
+                    e.preventDefault();
 
                     if (state.buildingSpacing === undefined) state.buildingSpacing = 1;
                     state.buildingSpacing++;
@@ -783,7 +783,7 @@ export class UIManager {
     /**
      * 套用錨點對齊樣式
      */
-        static applyAnchorStyle(el, cfg, customId = null) {
+    static applyAnchorStyle(el, cfg, customId = null) {
         if (!el || !cfg) return;
 
         el.style.position = "absolute";
@@ -806,52 +806,52 @@ export class UIManager {
             el.style.left = el.style.right = el.style.top = el.style.bottom = el.style.transform = "";
 
             switch (cfg.anchor) {
-            case "TOP_LEFT":
-                el.style.left = `${offX}px`;
-                el.style.top = `${offY}px`;
-                break;
-            case "TOP_CENTER":
-                el.style.left = "50%";
-                el.style.top = `${offY}px`;
-                el.style.transform = `translateX(-50%)`;
-                if (offX) el.style.marginLeft = `${offX}px`;
-                break;
-            case "TOP_RIGHT":
-                el.style.right = `${offX}px`;
-                el.style.top = `${offY}px`;
-                break;
-            case "BOTTOM_LEFT":
-                el.style.left = `${offX}px`;
-                el.style.bottom = `${offY}px`;
-                break;
-            case "BOTTOM_CENTER":
-                el.style.left = "50%";
-                el.style.bottom = `${offY}px`;
-                el.style.transform = `translateX(-50%)`;
-                if (offX) el.style.marginLeft = `${offX}px`;
-                break;
-            case "BOTTOM_RIGHT":
-                el.style.right = `${offX}px`;
-                el.style.bottom = `${offY}px`;
-                break;
-            case "CENTER":
-                el.style.left = "50%";
-                el.style.top = "50%";
-                el.style.transform = `translate(-50%, -50%)`;
-                if (offX || offY) el.style.transform += ` translate(${offX}px, ${offY}px)`;
-                break;
-            case "LEFT_CENTER":
-                el.style.left = `${offX}px`;
-                el.style.top = "50%";
-                el.style.transform = `translateY(-50%)`;
-                if (offY) el.style.marginTop = `${offY}px`;
-                break;
-            case "RIGHT_CENTER":
-                el.style.right = `${offX}px`;
-                el.style.top = "50%";
-                el.style.transform = `translateY(-50%)`;
-                if (offY) el.style.marginTop = `${offY}px`;
-                break;
+                case "TOP_LEFT":
+                    el.style.left = `${offX}px`;
+                    el.style.top = `${offY}px`;
+                    break;
+                case "TOP_CENTER":
+                    el.style.left = "50%";
+                    el.style.top = `${offY}px`;
+                    el.style.transform = `translateX(-50%)`;
+                    if (offX) el.style.marginLeft = `${offX}px`;
+                    break;
+                case "TOP_RIGHT":
+                    el.style.right = `${offX}px`;
+                    el.style.top = `${offY}px`;
+                    break;
+                case "BOTTOM_LEFT":
+                    el.style.left = `${offX}px`;
+                    el.style.bottom = `${offY}px`;
+                    break;
+                case "BOTTOM_CENTER":
+                    el.style.left = "50%";
+                    el.style.bottom = `${offY}px`;
+                    el.style.transform = `translateX(-50%)`;
+                    if (offX) el.style.marginLeft = `${offX}px`;
+                    break;
+                case "BOTTOM_RIGHT":
+                    el.style.right = `${offX}px`;
+                    el.style.bottom = `${offY}px`;
+                    break;
+                case "CENTER":
+                    el.style.left = "50%";
+                    el.style.top = "50%";
+                    el.style.transform = `translate(-50%, -50%)`;
+                    if (offX || offY) el.style.transform += ` translate(${offX}px, ${offY}px)`;
+                    break;
+                case "LEFT_CENTER":
+                    el.style.left = `${offX}px`;
+                    el.style.top = "50%";
+                    el.style.transform = `translateY(-50%)`;
+                    if (offY) el.style.marginTop = `${offY}px`;
+                    break;
+                case "RIGHT_CENTER":
+                    el.style.right = `${offX}px`;
+                    el.style.top = "50%";
+                    el.style.transform = `translateY(-50%)`;
+                    if (offY) el.style.marginTop = `${offY}px`;
+                    break;
             }
         }
 
@@ -1378,10 +1378,10 @@ export class UIManager {
 
     static snapPointToGridCenter(point) {
         const TS = GameEngine.TILE_SIZE;
-        const align = TS / 2;
+        const align = TS;
         return {
-            x: Math.round(point.x / align) * align,
-            y: Math.round(point.y / align) * align
+            x: Math.floor(point.x / align) * align + align / 2,
+            y: Math.floor(point.y / align) * align + align / 2
         };
     }
 
@@ -1393,9 +1393,9 @@ export class UIManager {
     static getLogisticsSegmentOccupyKey(line) {
         if (!line) return null;
         const TS = GameEngine.TILE_SIZE;
-        const align = TS / 2;
-        const gx = line.gridX !== undefined ? line.gridX : Math.round(line.x / align);
-        const gy = line.gridY !== undefined ? line.gridY : Math.round(line.y / align);
+        const align = TS;
+        const gx = line.gridX !== undefined ? line.gridX : Math.floor(line.x / align);
+        const gy = line.gridY !== undefined ? line.gridY : Math.floor(line.y / align);
         return `${gx},${gy}`;
     }
 
@@ -2104,9 +2104,9 @@ export class UIManager {
                 const scene = window.PhaserScene;
                 if (scene) {
                     const view = scene.cameras.main.worldView;
-                    const visibleBuildings = GameEngine.state.mapEntities.filter(e => 
-                        e.type1 === type1 && 
-                        e.x >= view.x && e.x <= view.x + view.width && 
+                    const visibleBuildings = GameEngine.state.mapEntities.filter(e =>
+                        e.type1 === type1 &&
+                        e.x >= view.x && e.x <= view.x + view.width &&
                         e.y >= view.y && e.y <= view.y + view.height
                     );
                     GameEngine.state.selectedBuildingIds = visibleBuildings.map(e => e.id || `${e.type1}_${e.x}_${e.y}`);
@@ -2197,7 +2197,7 @@ export class UIManager {
             ? (cfg_current?.need_villagers || 5)
             : isGatheringBuilding
                 ? (cfg_current?.need_villagers || 1)
-            : (entity.targetWorkerCount || cfg_current?.need_villagers || 5));
+                : (entity.targetWorkerCount || cfg_current?.need_villagers || 5));
         const workerLightCount = Math.max(0, Math.min(workerLightMax, isProcessingPlant
             ? new Set(entity.assignedWorkers || []).size
             : assignedWorkerCount));
@@ -2225,7 +2225,7 @@ export class UIManager {
             `;
         } else {
             const showDismiss = !isConfirming && canAssignWorkers && !entity.isUnderConstruction;
-            
+
             let dismissHtml = "";
             if (showDismiss) {
                 const dOffX = hCfg.dismissBtnOffsetX !== undefined ? hCfg.dismissBtnOffsetX : 15;
@@ -2375,7 +2375,7 @@ export class UIManager {
             if (!isConfirming && canAssignWorkers && !entity.isUnderConstruction && !isProcessingPlant) {
                 const current = assignedWorkerCount;
                 const wcOff = hCfg.workerControlOffset || { x: 0, y: 15 };
-                const maxWorkers = maxWorkersForEntity; 
+                const maxWorkers = maxWorkersForEntity;
                 const stockpileLabel = stockpileInfo
                     ? `${Math.floor(stockpileInfo.amount || 0)}${stockpileInfo.max ? ` / ${Math.floor(stockpileInfo.max)}` : ''}`
                     : '';
@@ -2398,7 +2398,7 @@ export class UIManager {
                             </div>`;
                     }).join('')
                     : '';
-                
+
                 gridHtml += `
                     <div style="display: flex; align-items: stretch; gap: 12px; transform: translate(${wcOff.x}px, ${wcOff.y}px); width: calc(100% - 32px); flex: 0 0 calc(100% - 32px); max-width: calc(100% - 32px); margin: 0 auto; height: 60px; box-sizing: border-box;">
                         <div class="warehouse-controls" style="display: flex; flex-direction: row; align-items: center; justify-content: ${isGatheringBuilding ? 'flex-start' : 'space-between'}; gap: 10px; background: rgba(0,0,0,0.4); padding: 10px 14px; margin: 0; border-radius: 12px; border: 1.5px solid rgba(255,255,255,0.1); box-shadow: 0 4px 15px rgba(0,0,0,0.5); height: 60px; box-sizing: border-box; width: ${stockpileInfo ? '62%' : '100%'}; flex: 0 0 ${stockpileInfo ? '62%' : '100%'}; max-width: ${stockpileInfo ? '62%' : '100%'}; overflow: hidden;">
@@ -2855,7 +2855,7 @@ export class UIManager {
         if (panel.style.display === "none") {
             this.hideContextMenu(); // 先關閉其它選單
             this.hideSettingsPanel();
-            
+
             const ent = this.activeWarehouseEntity;
             const customId = ent ? `warehouse_panel_${ent.id || `${ent.type1}_${ent.x}_${ent.y}`}` : "warehouse_panel_global";
             panel.dataset.dragId = customId;

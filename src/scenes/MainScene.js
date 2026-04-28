@@ -820,39 +820,17 @@ export class MainScene extends Phaser.Scene {
             };
 
             if (Array.isArray(state.logisticsLines)) {
-                const renderedGroups = new Set();
                 state.logisticsLines.forEach(line => {
-                    const groupId = line.groupId || line.id;
-                    if (groupId && renderedGroups.has(groupId)) return;
-                    if (groupId) renderedGroups.add(groupId);
-                    let route = null;
-                    let routeLine = line;
-                    if (window.UIManager && line.groupId && typeof window.UIManager.getLogisticsSegmentsByGroupId === 'function') {
-                        const segments = window.UIManager.getLogisticsSegmentsByGroupId(line.groupId);
-                        if (segments.length > 0) {
-                            const points = [];
-                            segments.forEach((segment, index) => {
-                                const segPoints = Array.isArray(segment.routePoints) ? segment.routePoints : [];
-                                if (segPoints.length < 2) return;
-                                if (index === 0) points.push({ x: segPoints[0].x, y: segPoints[0].y });
-                                points.push({ x: segPoints[1].x, y: segPoints[1].y });
-                            });
-                            route = {
-                                points,
-                                width: Math.max(1, Number(segments[0].routeWidth) || 1)
-                            };
-                            routeLine = segments.find(segment => state.selectedLogisticsLineId === segment.id) || segments[0];
-                        }
-                    }
-                    if (!route && window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function') {
-                        route = window.UIManager.getLogisticsLineRoute(line);
-                    }
+                    let route = (window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function')
+                        ? window.UIManager.getLogisticsLineRoute(line)
+                        : null;
+
                     if (!route || !Array.isArray(route.points) || route.points.length < 2) return;
-                    const isSelected = (window.UIManager && window.UIManager.getLogisticsSegmentsByGroupId && line.groupId
-                            ? window.UIManager.getLogisticsSegmentsByGroupId(line.groupId).some(segment => state.selectedLogisticsLineId === segment.id)
-                            : state.selectedLogisticsLineId === line.id) ||
-                        (window.UIManager.activeLogisticsLine && (window.UIManager.activeLogisticsLine.id === line.id || window.UIManager.activeLogisticsLine.groupId === line.groupId));
-                    drawLogisticsRoute(route.points, route.width || 1, isSelected, !!line.filter, routeLine);
+
+                    const isSelected = (state.selectedLogisticsLineId === line.id) ||
+                        (window.UIManager.activeLogisticsLine && window.UIManager.activeLogisticsLine.id === line.id);
+
+                    drawLogisticsRoute(route.points, route.width || 1, isSelected, !!line.filter, line);
                 });
             }
 
@@ -902,7 +880,7 @@ export class MainScene extends Phaser.Scene {
                 const TS = GameEngine.TILE_SIZE;
                 const offset = state.mapOffset || { x: 0, y: 0 };
                 const isValid = state.conveyorValid;
-                
+
                 const buildCfg = UI_CONFIG.ConveyorBuild || {};
                 const ghostColor = isValid ? (buildCfg.ghostValidColor ?? 0x00ff00) : (buildCfg.ghostInvalidColor ?? 0xff0000);
                 const ghostAlpha = buildCfg.ghostAlpha ?? 0.5;
@@ -996,11 +974,11 @@ export class MainScene extends Phaser.Scene {
                 previewSegments.forEach((ghost, ghostIndex) => {
                     const wx = (ghost.x + offset.x * offsetScale) * gridUnit;
                     const wy = (ghost.y + offset.y * offsetScale) * gridUnit;
-                    
+
                     // Special marker for mergers
                     if (ghost.isMerger) {
                         this.logisticsGraphics.lineStyle(3, 0xffff00, 1);
-                        this.logisticsGraphics.strokeCircle(wx, wy, TS/3);
+                        this.logisticsGraphics.strokeCircle(wx, wy, TS / 3);
                         this.logisticsGraphics.lineStyle(2, ghostColor, 0.8);
                     }
                 });
@@ -3311,87 +3289,44 @@ export class MainScene extends Phaser.Scene {
         };
         const firstDir = getDir(points[0], points[1]);
         if (!firstDir) return [];
-        const first = points[0];
-        let originX = first.x - (width * TS) / 2;
-        let originY = first.y - (width * TS) / 2;
-        let cursorCol = 0;
-        let cursorRow = 0;
-        if (firstDir.x > 0) {
-            originX = first.x;
-            originY = first.y - (width * TS) / 2;
-        } else if (firstDir.x < 0) {
-            originX = first.x - TS;
-            originY = first.y - (width * TS) / 2;
-        } else if (firstDir.y > 0) {
-            originX = first.x - (width * TS) / 2;
-            originY = first.y;
-        } else if (firstDir.y < 0) {
-            originX = first.x - (width * TS) / 2;
-            originY = first.y - TS;
-        }
-        const addFootprint = (col, row, dir) => {
-            const rect = dir.x !== 0
-                ? { x: originX + col * TS, y: originY + row * TS, w: TS, h: width * TS }
-                : { x: originX + col * TS, y: originY + row * TS, w: width * TS, h: TS };
-            stepRects.push(rect);
-            if (dir.x !== 0) {
-                for (let lane = 0; lane < width; lane++) addCell(col, row + lane);
-            } else {
-                for (let lane = 0; lane < width; lane++) addCell(col + lane, row);
-            }
-        };
-
-        let currentDir = firstDir;
         for (let i = 0; i < points.length - 1; i++) {
             const a = points[i];
             const b = points[i + 1];
             if (!a || !b) continue;
             const dx = b.x - a.x;
             const dy = b.y - a.y;
-            if (Math.abs(dx) < eps && Math.abs(dy) < eps) continue;
-            const dir = getDir(a, b);
-            const steps = Math.max(1, Math.round(Math.max(Math.abs(dx), Math.abs(dy)) / TS));
+            const dist = Math.hypot(dx, dy);
+            if (dist < eps) continue;
+
+            const dir = { x: dx / dist, y: dy / dist };
+            const steps = Math.max(1, Math.round(dist / TS)); // 1.0-tile steps
+            const stepSize = dist / steps;
+
             for (let step = 0; step < steps; step++) {
-                if (dir.x !== currentDir.x || dir.y !== currentDir.y) {
-                    cursorCol = cursorCol - currentDir.x + dir.x;
-                    cursorRow = cursorRow - currentDir.y + dir.y;
-                    currentDir = dir;
+                const px = a.x + dir.x * stepSize * step;
+                const py = a.y + dir.y * stepSize * step;
+
+                // [核心修正] 直接繪製對齊格點中心的正方形，達成「滿格」佔位效果
+                const rect = {
+                    x: px - TS / 2,
+                    y: py - TS / 2,
+                    w: TS,
+                    h: TS
+                };
+
+                stepRects.push(rect);
+
+                // 為了兼容性，將格網座標也加入 cells Set
+                const gx = Math.floor(px / TS);
+                const gy = Math.floor(py / TS);
+                for (let lw = 0; lw < width; lw++) {
+                    if (Math.abs(dir.x) > Math.abs(dir.y)) addCell(gx, gy + lw - Math.floor(width / 2));
+                    else addCell(gx + Math.floor(width / 2), gy);
                 }
-                addFootprint(cursorCol, cursorRow, dir);
-                cursorCol += dir.x;
-                cursorRow += dir.y;
             }
         }
 
-        const rows = new Map();
-        cells.forEach(key => {
-            const [col, row] = key.split(',').map(Number);
-            if (!rows.has(row)) rows.set(row, []);
-            rows.get(row).push(col);
-        });
-        rows.forEach((cols, row) => {
-            cols.sort((a, b) => a - b);
-            let start = null;
-            let prev = null;
-            cols.forEach(col => {
-                if (start === null) {
-                    start = col;
-                    prev = col;
-                    return;
-                }
-                if (col === prev + 1) {
-                    prev = col;
-                    return;
-                }
-                mergedRects.push({ x: originX + start * TS, y: originY + row * TS, w: (prev - start + 1) * TS, h: TS });
-                start = col;
-                prev = col;
-            });
-            if (start !== null) {
-                mergedRects.push({ x: originX + start * TS, y: originY + row * TS, w: (prev - start + 1) * TS, h: TS });
-            }
-        });
-        return perStep ? stepRects : mergedRects;
+        return stepRects;
     }
 
     getLogisticsCellCenterline(points, widthTiles = 1) {

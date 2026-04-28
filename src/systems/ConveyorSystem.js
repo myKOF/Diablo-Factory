@@ -29,7 +29,7 @@ export class ConveyorSystem {
         const routeScale = this.getRouteScale();
         const routeWidth = Math.max(1, Number(currentSourcePort?.width) || 1);
         const routeGrid = this.createRoutingGrid(grid, sourceLine);
-        
+
         this.router = new ConveyorRouter(routeGrid, cols * routeScale, rows * routeScale);
         this.router.tileSize = this.getGridUnitSize();
         this.router.maxSearchNodes = Math.max(500, Number(UI_CONFIG.ConveyorBuild?.maxRouteSearchNodes) || 12000);
@@ -47,7 +47,7 @@ export class ConveyorSystem {
             startGrid: this.toGrid(resolvedStartX, resolvedStartY),
             routeWidth
         };
-        
+
         this.ghosts = [];
         this.isValid = false;
         this.pendingDragPoint = null;
@@ -62,7 +62,7 @@ export class ConveyorSystem {
     }
 
     getGridUnitSize() {
-        return GameEngine.TILE_SIZE * this.getAlignmentUnit();
+        return GameEngine.TILE_SIZE;
     }
 
     getRouteScale() {
@@ -81,7 +81,7 @@ export class ConveyorSystem {
         if (!port || !port.dir || !portGrid) return portGrid;
         const dir = this.getDirectionVector(port.dir);
         // [需求修正] 回歸 0.5 網格下，1.0 Tile 的距離等於 2 格
-        const routeScale = 2; 
+        const routeScale = 2;
         return {
             x: portGrid.x + dir.x * routeScale,
             y: portGrid.y + dir.y * routeScale
@@ -199,7 +199,7 @@ export class ConveyorSystem {
             expanded.push(...sourceRows);
         }
         const routeGrid = expanded.map(row => row.slice());
-        
+
         (GameEngine.state.logisticsLines || []).forEach(line => {
             if (ignoreLine && (line.id === ignoreLine.id || line.groupId === ignoreLine.groupId)) return;
             this.markLineOnGrid(routeGrid, line);
@@ -243,7 +243,7 @@ export class ConveyorSystem {
         // Auto-Routing with A* Turn Penalty
         const routePath = this.router.findPath(sourceRouteGrid, targetRouteGrid, this.activeDrag.sourcePort?.dir, this.activeDrag.bendMode);
         const path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
-        
+
         if (path) {
             this.ghosts = this.router.processPath(path, dragTarget.building, GameEngine.state.logisticsLines || []);
             this.isValid = this.validateGhosts(this.ghosts);
@@ -323,10 +323,11 @@ export class ConveyorSystem {
         const offsetX = offset.x * (TS / unit);
         const offsetY = offset.y * (TS / unit);
 
-        // [回歸修正] 取消中心偏移，回歸到絕對網格線對齊 (0, 20, 40...)
+        // [回歸修正] 使用格中心對齊 (10, 30, 50...)
         const points = this.ghosts.map(g => ({
-            x: (g.x + offsetX) * unit,
-            y: (g.y + offsetY) * unit
+            ...g,
+            x: (g.x + offset.x) * TS + TS / 2,
+            y: (g.y + offset.y) * TS + TS / 2
         }));
 
         const lastPoint = points[points.length - 1];
@@ -370,12 +371,9 @@ export class ConveyorSystem {
     toGrid(worldX, worldY) {
         const TS = GameEngine.TILE_SIZE;
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
-        const unit = this.getGridUnitSize();
-        const offsetX = offset.x * (TS / unit);
-        const offsetY = offset.y * (TS / unit);
         return {
-            x: Math.round(worldX / unit) - offsetX,
-            y: Math.round(worldY / unit) - offsetY
+            x: Math.floor(worldX / TS) - offset.x,
+            y: Math.floor(worldY / TS) - offset.y
         };
     }
 
@@ -392,15 +390,15 @@ export class ConveyorSystem {
                 return false;
             }
         }
-        
+
         const cfg = UI_CONFIG.ConveyorBuild;
         if (!cfg || cfg.enableCost === false) return true;
 
         // 道具消耗檢查
         const cost = ghosts.length * (cfg.costPerSegment || 0);
         const resKey = cfg.costResource || "gold_ingots";
-        const availableGold = (GameEngine.state.resources[resKey] || 0) + (GameEngine.state.resources.gold || 0); 
-        
+        const availableGold = (GameEngine.state.resources[resKey] || 0) + (GameEngine.state.resources.gold || 0);
+
         if (availableGold < cost) {
             return false;
         }
