@@ -220,6 +220,15 @@ export class ConveyorSystem {
         const routePath = this.router.findPath(sourceRouteGrid, targetRouteGrid, this.activeDrag.sourcePort?.dir, this.activeDrag.bendMode, widthOffsets);
         const path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
 
+        // [核心修復] 處理 N-1 渲染落差：如果是拖曳到空地，順著最後方向延伸一個虛擬節點，迫使渲染器畫滿游標當前格
+        if (!dragTarget.port && path && path.length >= 2) {
+            const last = path[path.length - 1];
+            const prev = path[path.length - 2];
+            const dx = Math.sign(last.x - prev.x);
+            const dy = Math.sign(last.y - prev.y);
+            path.push({ x: last.x + dx, y: last.y + dy, isVirtualEnd: true });
+        }
+
         if (path) {
             this.ghosts = this.router.processPath(path, dragTarget.building, GameEngine.state.logisticsLines || []);
             this.isValid = this.validateGhosts(this.ghosts);

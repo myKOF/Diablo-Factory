@@ -1,42 +1,20 @@
-# 物流線建造虛影修復計畫
+# 修復物流線拖曳時「最後一格無法渲染」問題計畫
 
-## 問題分析
-物流線（Conveyor/Logistics Line）在建造時的虛影（Ghost）消失了。經過初步分析，問題可能源於 `ConveyorSystem.js` 中的座標轉換邏輯與尋路格網（Routing Grid）不匹配。
+## 問題描述
+目前物流線在空地拖曳時，游標所在的最後一格無法顯示綠色虛影。這是因為渲染邏輯為 Edge-based（N個節點渲染 N-1 個實體）。
 
-### 核心原因
-1. **座標縮放不一致**：`ConveyorSystem.toGrid` 目前使用 `GameEngine.TILE_SIZE` (20px) 進行取整，這適用於 1.0 Tile 的建築系統。但物流系統（Logistics）採用了 0.5 Tile 的細分網格（`routeScale = 2`），因此座標應該以 10px 為單位進行轉換。
-2. **尋路失敗**：由於輸入尋路算法的起始點和終點座標錯誤（縮小了一倍），尋路器（Router）可能找不到路徑，導致 `conveyorGhosts` 為空，進而使渲染層無法繪製虛影。
+## 解決方案
+在路徑陣列末端動態延伸一個「虛擬節點 (Virtual End)」，並讓渲染器識別此節點以補足最後一格的渲染，同時在碰撞驗證中忽略該節點。
 
 ## 執行步驟
+1. **修改 `src/systems/ConveyorSystem.js`**
+    - 在 `updateDragNow` 函數中，於 `buildPortSafePath` 呼叫後加入路徑延伸邏輯。
+    - 在 `validateGhosts` 函數中，過濾掉 `isVirtualEnd` 的節點，避免碰撞驗證失敗。
+2. **修改 `src/systems/ConveyorRouter.js`**
+    - 在 `processPath` 函數中，確保 `isVirtualEnd` 屬性被傳遞到結果物件中。
+3. **驗證與收尾**
+    - 檢查代碼語法。
+    - 執行 `npm run finalize`。
 
-### 1. 修正 `ConveyorSystem.js`
-- 更新 `toGrid` 方法，使其根據 `alignmentUnit` (預設 0.5) 動態計算格網單位。
-- 確保所有座標轉換（世界座標到格網座標）都考慮到 `routeScale`。
-- 修正 `getPortAnchorGrid` 中的硬編碼縮放。
-
-### 2. 驗證 `MainScene.js` 渲染邏輯
-- 檢查 `MainScene.js` 中的 `update` 循環，確保 `logisticsGraphics` 正確處理 `state.conveyorGhosts`。
-- 確認座標還原邏輯 `(point.x + offset.x * offsetScale) * gridUnit` 是否與修正後的 `toGrid` 對齊。
-
-### 3. 熱修復 (Hotfix)
-- 修正 `ConveyorSystem.js` 中的 `ReferenceError: offset is not defined`。
-- 確保 `submitDrag` 方法中正確定義了 `offset` 變數。
-
-### 4. 網格對齊優化 (Alignment Optimization)
-- 將 `ui_config.js` 中的 `alignmentUnit` 從 0.5 調整為 1.0，落實全格對齊。
-- 修正 `ConveyorSystem.js` 中的 `getWidthOffsets`，使其在 1.0 網格下不再產生額外的半格佔位偏移。
-- 確保物流線起始點與建築端口（Port）完美對齊，消除初始拉取時的位移感。
-
-### 5. 點擊與框選同步 (Selection Synchronization)
-- **已撤銷 1.0 全格強制對齊**，恢復為用戶偏好的 0.5 半格網格系統。
-- 移除 `ConveyorSystem.js` 與 `MainScene.js` 中多餘的 `+gridUnit/2` (5px) 偏移，使物流線中心點直接對齊 10px 網格線，消除起始格位移感。
-- 修正 `MainScene.js` 中的選取框渲染邏輯，移除對 `order / 2` 的錯誤索引，確保選取框永遠精準覆蓋在點擊的 1.0 Tile 區段上。
-
-### 6. 自動化測試與 QA
-- 執行 `npm run finalize` 進行自動化驗證。
-- 確保物流線拉取時虛影顯示正常，且顏色（有效/無效）正確反映建造限制。
-
-## 定義完成 (DoD)
-- 物流線拉取時，綠色/紅色的虛影正常顯示。
-- 虛影位置與鼠標對齊，且符合 0.5 Tile 的網格吸附。
-- `npm run finalize` 通過。
+## 預期結果
+拖曳物流線時，游標所在的最後一格能正確顯示綠色虛影，且不會因虛擬節點導致建造非法。

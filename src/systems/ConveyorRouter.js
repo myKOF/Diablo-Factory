@@ -13,13 +13,13 @@ export class ConveyorRouter {
         this.grid = grid;
         this.cols = cols;
         this.rows = rows;
-        
+
         // Configuration parameters (Decoupled from UI_CONFIG)
         this.turnPenalty = config.turnPenalty !== undefined ? config.turnPenalty : 100;
         this.maxSearchNodes = config.maxRouteSearchNodes || config.maxSearchNodes || 12000;
         this.alignmentUnit = config.alignmentUnit || 1.0;
         this.tileSize = config.tileSize || 20;
-        
+
         // Internal state
         this.onCollision = null; // Callback: (x, y) => boolean (true to ignore)
     }
@@ -89,7 +89,7 @@ export class ConveyorRouter {
             const p = path[i];
             const next = path[i + 1] || path[i];
             const prev = path[i - 1] || path[i];
-            
+
             // Determine direction to apply correct footprint
             const dx = next.x - p.x || p.x - prev.x || 1;
             const dy = next.y - p.y || p.y - prev.y || 0;
@@ -102,7 +102,7 @@ export class ConveyorRouter {
 
     isValidNode(x, y, dir, offsets) {
         if (!this.isInsideGrid({ x, y })) return false;
-        
+
         for (const off of offsets) {
             let cx = x, cy = y;
             if (Math.abs(dir.x) > Math.abs(dir.y)) {
@@ -110,7 +110,7 @@ export class ConveyorRouter {
             } else {
                 cx += off;
             }
-            
+
             if (!this.isInsideGrid({ x: cx, y: cy })) return false;
             if (this.grid[cy][cx] !== 0) {
                 // Ignore point if it was cleared (start/end) or if custom handler allows it
@@ -144,7 +144,7 @@ export class ConveyorRouter {
         const openHeap = [];
         const bestOpen = new Map();
         const closedSet = new Set();
-        
+
         const pushHeap = (node) => {
             openHeap.push(node);
             let index = openHeap.length - 1;
@@ -296,7 +296,8 @@ export class ConveyorRouter {
                 dirOut,
                 isCurve: dirIn && dirOut && (dirIn.x !== dirOut.x || dirIn.y !== dirOut.y),
                 isMerger,
-                isPortConnector: !!curr.isPortConnector
+                isPortConnector: !!curr.isPortConnector,
+                isVirtualEnd: !!curr.isVirtualEnd
             });
         }
         return result;
@@ -350,10 +351,10 @@ export class ConveyorRouter {
      */
     validateRouteFootprint(ghosts, width, costValidator = null) {
         if (!Array.isArray(ghosts) || ghosts.length === 0) return false;
-        
-        // 排除 portConnector 點的碰撞檢查
+
+        // 排除 portConnector 與 virtualEnd 點的碰撞檢查
         const occupiedCells = this.getGhostOccupiedCells(
-            ghosts.filter(g => !g.isPortConnector), 
+            ghosts.filter(g => !g.isPortConnector && !g.isVirtualEnd),
             width
         );
 
