@@ -68,7 +68,7 @@ export class MapGenerator {
         };
 
         // 1. 放置核心建築
-        const villagePos = { x: 960, y: 560 };
+        const villagePos = { x: 970, y: 570 }; // 從 960, 560 移動到中心點 970, 570
         const villageFP = getFootprint('village');
         const villageCfg = (state.buildingConfigsByType['village'] && state.buildingConfigsByType['village'][1]) || {};
         state.mapEntities.push({
@@ -106,7 +106,7 @@ export class MapGenerator {
         const sgy = Math.round((storehousePos.y - (storehouseFP.uh * TS) / 2) / TS);
         markOccupiedG(sgx, sgy, storehouseFP.uw, storehouseFP.uh);
 
-        const campfirePos = { x: 1100, y: 640 };
+        const campfirePos = { x: 1110, y: 650 }; // 同步對齊中心
         const campfireFP = getFootprint('campfire');
         state.mapEntities.push({
             id: 'core_campfire',
@@ -334,8 +334,8 @@ export class MapGenerator {
 
                 const offset = state.mapOffset || { x: 0, y: 0 };
                 const FOOT_OFFSET = collCfg.feetOffset || 8;
-                // 寬鬆係數 (shrink)：數值越大，寻路越寬鬆。設為 6 可確保在 10px buffer 下仍能穿過 1 格寬的空隙
-                const shrink = 6;
+                // 寬鬆係數 (shrink)：調高至 8，確保物流線在靠近建築邊緣時不會被誤判為碰撞
+                const shrink = 8;
                 const gx1 = Math.max(0, Math.floor((minX + shrink) / TS) - offset.x);
                 const gy1 = Math.max(0, Math.floor((minY - FOOT_OFFSET + shrink) / TS) - offset.y);
                 const gx2 = Math.min(cols - 1, Math.floor((maxX - shrink - 0.1) / TS) - offset.x);

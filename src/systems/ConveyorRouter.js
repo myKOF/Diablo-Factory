@@ -246,7 +246,8 @@ export class ConveyorRouter {
                 dirIn,
                 dirOut,
                 isCurve: dirIn && dirOut && (dirIn.x !== dirOut.x || dirIn.y !== dirOut.y),
-                isMerger
+                isMerger,
+                isPortConnector: !!curr.isPortConnector
             });
         }
         return result;
