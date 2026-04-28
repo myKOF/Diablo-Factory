@@ -66,6 +66,19 @@
 - **依賴爆炸檢查 (Dependency Grep)**：在移動任何檔案、修改核心 API 名稱或調整 Config 結構前，必須先透過腳本全域檢索該模組的「所有引用點」，並確保一次性同步更新所有依賴，嚴防 "undefined" 崩潰。
 - **狀態防篡改 (State Encapsulation)**：全域遊戲狀態 (Game State) 必須嚴格封裝。嚴禁 UI 組件或外部實體「直接覆寫」核心數值，必須統一透過發送 Action 或呼叫特定 Setter 進行變更。
 
+## [物流生產線系統開發協議 (Logistics & Conveyor System)]
+- **[核心概念] 輸送帶非獨立物件**：嚴禁為每格輸送帶設計獨立 `Update()`。物流邏輯由 `LogisticsManager` 進行批次運算。
+- **動態拖拉與尋路**：
+  - 玩家拖曳時生成 Ghost Path 預覽。
+  - A* 避障權重：空白=1，建築/障礙=無限大。
+  - 強制正交限制 (曼哈頓距離)，僅允許 90 度轉彎。
+- **相鄰感知 (Auto-Tiling)**：採用 Bitmask Tiling。根據 4 鄰節點自動切換直線、轉彎或交叉圖示，嚴禁手動選擇。
+- **[CRITICAL] 陣列偏移運輸法**：
+  - 相連輸送帶合併為一個「運輸陣列」。
+  - 物品僅紀錄 Index 與 Offset。每一幀僅更新全域 Offset，達成萬級物品運輸。
+  - 實裝「回壓 (Backpressure)」機制：前方堵塞時停止移動。
+- **接續建造防呆**：拖拉起點若在舊末端，必須自動執行路徑合併 (Merge)。
+
 ## [任務完成強制收尾協議 (MANDATORY FINALIZATION PROTOCOL)]
 - 任務完成的唯一標準：成功執行 `npm run finalize`
 - Agent 不得自行判定任務結束
@@ -82,3 +95,4 @@
    - `finally` 區塊必須包含雙重清理邏輯：先關閉網頁 `if (browser) { await browser.close(); }`，再清理殘留檔案 `fs.rmSync('tmp/', { recursive: true, force: true });`。
    - 僅在「測試失敗 (Failed)」時，允許保留最後一份截圖與 Log 於 `/tmp/` 供 Debug，但必須在下次啟動任務時優先清空。
 4. **無感日誌**：所有除錯用的 `console.log` 必須在 `verify_build.cjs` 通過後自動抹除，嚴禁提交含 `console.log` 的代碼。
+

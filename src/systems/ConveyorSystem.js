@@ -251,8 +251,18 @@ export class ConveyorSystem {
         this.router.onCollision = (gx, gy) => {
             const wx = (gx + offset.x * scale) * gridUnit + gridUnit / 2;
             const wy = (gy + offset.y * scale) * gridUnit + gridUnit / 2;
-            return (sourceEnt && window.UIManager?.isPointInsideEntity(sourceEnt, wx, wy)) ||
-                (targetEnt && window.UIManager?.isPointInsideEntity(targetEnt, wx, wy));
+            
+            // [核心修正] 忽略起點建築
+            if (sourceEnt && window.UIManager?.isPointInsideEntity(sourceEnt, wx, wy)) return true;
+            
+            // [核心修正] 忽略終點建築（已識別的目標）
+            if (targetEnt && window.UIManager?.isPointInsideEntity(targetEnt, wx, wy)) return true;
+
+            // [核心修正] 動態忽略游標正下方的建築，確保物流線可以無障礙地伸向任何目標建築
+            const bAtCursor = window.UIManager?.getEntityAtPoint?.(currentX, currentY);
+            if (bAtCursor && window.UIManager?.isPointInsideEntity(bAtCursor, wx, wy)) return true;
+
+            return false;
         };
 
         const widthOffsets = this.getWidthOffsets(this.activeDrag.routeWidth);
@@ -368,7 +378,7 @@ export class ConveyorSystem {
             if (drag.sourceLine?.filter && createdLine?.groupId) {
                 window.UIManager.setLogisticsGroupFilter(createdLine.groupId, drag.sourceLine.filter);
             }
-            GameEngine.addLog(`[物流] 傳送帶建造完成，共 ${this.ghosts.length} 節。`, 'LOGISTICS');
+            GameEngine.addLog(`[物流] 傳送帶建造完成，共 ${Math.max(1, this.ghosts.length - 1)} 節。`, 'LOGISTICS');
         }
 
         this.cancelDrag();
