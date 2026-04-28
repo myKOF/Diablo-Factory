@@ -930,8 +930,8 @@ export class MainScene extends Phaser.Scene {
                 }
 
                 const rawGhostPoints = state.conveyorGhosts.map(point => ({
-                    x: (point.x + offset.x * offsetScale) * gridUnit,
-                    y: (point.y + offset.y * offsetScale) * gridUnit,
+                    x: (point.x + offset.x * offsetScale) * gridUnit + gridUnit / 2,
+                    y: (point.y + offset.y * offsetScale) * gridUnit + gridUnit / 2,
                     isPortConnector: point.isPortConnector
                 }));
                 let ghostPoints = rawGhostPoints;
@@ -972,8 +972,8 @@ export class MainScene extends Phaser.Scene {
                 }
 
                 previewSegments.forEach((ghost, ghostIndex) => {
-                    const wx = (ghost.x + offset.x * offsetScale) * gridUnit;
-                    const wy = (ghost.y + offset.y * offsetScale) * gridUnit;
+                    const wx = (ghost.x + offset.x * offsetScale) * gridUnit + gridUnit / 2;
+                    const wy = (ghost.y + offset.y * offsetScale) * gridUnit + gridUnit / 2;
 
                     // Special marker for mergers
                     if (ghost.isMerger) {

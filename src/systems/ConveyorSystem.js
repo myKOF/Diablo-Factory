@@ -80,8 +80,8 @@ export class ConveyorSystem {
     getPortAnchorGrid(port, portGrid) {
         if (!port || !port.dir || !portGrid) return portGrid;
         const dir = this.getDirectionVector(port.dir);
-        // [需求修正] 回歸 0.5 網格下，1.0 Tile 的距離等於 2 格
-        const routeScale = 2;
+        // [核心修正] 動態獲取縮放倍率，確保錨點偏移與格網細分度對齊
+        const routeScale = this.getRouteScale();
         return {
             x: portGrid.x + dir.x * routeScale,
             y: portGrid.y + dir.y * routeScale
@@ -319,15 +319,14 @@ export class ConveyorSystem {
         const drag = this.activeDrag;
         const TS = GameEngine.TILE_SIZE;
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
-        const unit = this.getGridUnitSize();
-        const offsetX = offset.x * (TS / unit);
-        const offsetY = offset.y * (TS / unit);
+        const scale = this.getRouteScale();
+        const gridUnit = TS / scale;
 
-        // [回歸修正] 使用格中心對齊 (10, 30, 50...)
+        // [核心修正] 使用細分格網單位 (gridUnit) 計算世界座標，並對齊格點中心 (+gridUnit/2)
         const points = this.ghosts.map(g => ({
             ...g,
-            x: (g.x + offset.x) * TS + TS / 2,
-            y: (g.y + offset.y) * TS + TS / 2
+            x: (g.x + offset.x * scale) * gridUnit + gridUnit / 2,
+            y: (g.y + offset.y * scale) * gridUnit + gridUnit / 2
         }));
 
         const lastPoint = points[points.length - 1];
@@ -370,10 +369,13 @@ export class ConveyorSystem {
 
     toGrid(worldX, worldY) {
         const TS = GameEngine.TILE_SIZE;
+        const scale = this.getRouteScale();
+        const gridUnit = TS / scale;
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
+        // [核心修正] 將世界座標轉換為細分格網座標 (考慮 0.5 Tile 縮放)
         return {
-            x: Math.floor(worldX / TS) - offset.x,
-            y: Math.floor(worldY / TS) - offset.y
+            x: Math.floor(worldX / gridUnit) - offset.x * scale,
+            y: Math.floor(worldY / gridUnit) - offset.y * scale
         };
     }
 

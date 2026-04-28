@@ -1,25 +1,32 @@
-# 物流線網格化改造計畫
+# 物流線建造虛影修復計畫
 
-## 問題描述
-目前物流線已拆為單格實體，但對齊單位仍是 1 格中心。新需求要求物流線位置可用 0.5 格為單位微調，同時物流線實體尺寸、點擊框與外框仍維持 1x1 網格。
+## 問題分析
+物流線（Conveyor/Logistics Line）在建造時的虛影（Ghost）消失了。經過初步分析，問題可能源於 `ConveyorSystem.js` 中的座標轉換邏輯與尋路格網（Routing Grid）不匹配。
+
+### 核心原因
+1. **座標縮放不一致**：`ConveyorSystem.toGrid` 目前使用 `GameEngine.TILE_SIZE` (20px) 進行取整，這適用於 1.0 Tile 的建築系統。但物流系統（Logistics）採用了 0.5 Tile 的細分網格（`routeScale = 2`），因此座標應該以 10px 為單位進行轉換。
+2. **尋路失敗**：由於輸入尋路算法的起始點和終點座標錯誤（縮小了一倍），尋路器（Router）可能找不到路徑，導致 `conveyorGhosts` 為空，進而使渲染層無法繪製虛影。
 
 ## 執行步驟
-1. **資料結構調整**
-   - 保留物流線群組 ID 供建築端點與搬運設定使用。
-   - 將每條群組路線拆成多個 `logistics_segment` 實體，每個實體長度為一個 `GameEngine.TILE_SIZE`。
-2. **路由網格化**
-   - 建線時先將起點、折點與終點吸附到 0.5 格座標。
-   - 依水平或垂直方向用 0.5 格節點校準路徑，但每個 segment 實體仍合併為 1x1 格單位。
-3. **渲染與選取**
-   - 渲染時逐 segment 繪製，確保所有物流線對齊半格座標。
-   - 點擊命中時以 segment 中心的 1x1 格範圍為準，只選取命中的 segment。
-4. **相容既有搬運**
-   - 建築到建築的物流線仍同步 `outputTargets`，避免破壞工人搬運邏輯。
-   - 品項設定與刪除動作可透過 segment 反查群組。
-5. **驗證**
-   - 執行 JS 語法檢查。
-   - 使用 Playwright 驗證物流線 segment 建立、命中與刪除。
-   - 執行 `npm run finalize` 完成任務。
 
-## 預期結果
-物流線由多個 1x1 格大小的實體組成，但中心點可落在 0.5 格座標；玩家點擊物流線時，只會選取命中的那個 segment。
+### 1. 修正 `ConveyorSystem.js`
+- 更新 `toGrid` 方法，使其根據 `alignmentUnit` (預設 0.5) 動態計算格網單位。
+- 確保所有座標轉換（世界座標到格網座標）都考慮到 `routeScale`。
+- 修正 `getPortAnchorGrid` 中的硬編碼縮放。
+
+### 2. 驗證 `MainScene.js` 渲染邏輯
+- 檢查 `MainScene.js` 中的 `update` 循環，確保 `logisticsGraphics` 正確處理 `state.conveyorGhosts`。
+- 確認座標還原邏輯 `(point.x + offset.x * offsetScale) * gridUnit` 是否與修正後的 `toGrid` 對齊。
+
+### 3. 熱修復 (Hotfix)
+- 修正 `ConveyorSystem.js` 中的 `ReferenceError: offset is not defined`。
+- 確保 `submitDrag` 方法中正確定義了 `offset` 變數。
+
+### 4. 自動化測試與 QA
+- 執行 `npm run finalize` 進行自動化驗證。
+- 確保物流線拉取時虛影顯示正常，且顏色（有效/無效）正確反映建造限制。
+
+## 定義完成 (DoD)
+- 物流線拉取時，綠色/紅色的虛影正常顯示。
+- 虛影位置與鼠標對齊，且符合 0.5 Tile 的網格吸附。
+- `npm run finalize` 通過。
