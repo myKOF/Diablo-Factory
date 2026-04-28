@@ -53,7 +53,7 @@ export class ConveyorRouter {
     }
 
     /**
-     * L-Shape Priority: Max 1 turn
+     * L-Shape Priority: Max 1 turn with U-Turn Prevention
      */
     getLShapePath(start, end, startDir, bendMode = 'x-first', widthOffsets = null) {
         const dx = end.x - start.x;
@@ -61,22 +61,44 @@ export class ConveyorRouter {
 
         if (dx === 0 && dy === 0) return [start];
 
-        const paths = [];
+        // 【防呆機制】判斷 L-Shape 的第一步是否會逆向倒拉進入建築物 (180度 U-Turn)
+        let startVec = null;
+        if (startDir) {
+            startVec = typeof startDir === 'string' ? this.getDirectionVector(startDir) : startDir;
+        }
+        const isXFirstUTurn = startVec && startVec.x !== 0 && dx !== 0 && Math.sign(dx) === -Math.sign(startVec.x);
+        const isYFirstUTurn = startVec && startVec.y !== 0 && dy !== 0 && Math.sign(dy) === -Math.sign(startVec.y);
 
-        // Try X then Y
+        // 產生安全的 X-first 路徑
         const pathX = [];
-        for (let x = start.x; x !== end.x + Math.sign(dx); x += Math.sign(dx)) pathX.push({ x, y: start.y });
-        for (let y = start.y + Math.sign(dy); y !== end.y + Math.sign(dy); y += Math.sign(dy)) pathX.push({ x: end.x, y });
-        paths.push(pathX);
+        if (dx !== 0) {
+            for (let x = start.x; x !== end.x + Math.sign(dx); x += Math.sign(dx)) pathX.push({ x, y: start.y });
+            for (let y = start.y + Math.sign(dy); y !== end.y + Math.sign(dy); y += Math.sign(dy)) pathX.push({ x: end.x, y });
+        } else {
+            // 修正 dx 為 0 時遺漏起點的潛在問題
+            for (let y = start.y; y !== end.y + Math.sign(dy); y += Math.sign(dy)) pathX.push({ x: start.x, y });
+        }
 
-        // Try Y then X
+        // 產生安全的 Y-first 路徑
         const pathY = [];
-        for (let y = start.y; y !== end.y + Math.sign(dy); y += Math.sign(dy)) pathY.push({ x: start.x, y });
-        for (let x = start.x + Math.sign(dx); x !== end.x + Math.sign(dx); x += Math.sign(dx)) pathY.push({ x, y: end.y });
-        paths.push(pathY);
+        if (dy !== 0) {
+            for (let y = start.y; y !== end.y + Math.sign(dy); y += Math.sign(dy)) pathY.push({ x: start.x, y });
+            for (let x = start.x + Math.sign(dx); x !== end.x + Math.sign(dx); x += Math.sign(dx)) pathY.push({ x, y: end.y });
+        } else {
+            // 修正 dy 為 0 時遺漏起點的潛在問題
+            for (let x = start.x; x !== end.x + Math.sign(dx); x += Math.sign(dx)) pathY.push({ x, y: start.y });
+        }
 
         const primary = bendMode === 'y-first' ? pathY : pathX;
         const secondary = bendMode === 'y-first' ? pathX : pathY;
+        const primaryIsUTurn = bendMode === 'y-first' ? isYFirstUTurn : isXFirstUTurn;
+        const secondaryIsUTurn = bendMode === 'y-first' ? isXFirstUTurn : isYFirstUTurn;
+
+        // 優先選擇非 U-Turn 且有效的路徑
+        if (!primaryIsUTurn && this.isValidPath(primary, widthOffsets)) return primary;
+        if (!secondaryIsUTurn && this.isValidPath(secondary, widthOffsets)) return secondary;
+
+        // 如果兩者都包含 U-Turn，但不得不走，則回退到原本的邏輯 (儘管這通常代表 A* 會接手)
         if (this.isValidPath(primary, widthOffsets)) return primary;
         if (this.isValidPath(secondary, widthOffsets)) return secondary;
 
