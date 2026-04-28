@@ -157,6 +157,11 @@ export class InputSystem {
 
             // 3. 核心判定：判定為移動才執行動作
             if (canMove) {
+                if (GameEngine.state.suppressRightClickMoveUntil && now < GameEngine.state.suppressRightClickMoveUntil) {
+                    this.rightDownInfo = null;
+                    this.didMove = false;
+                    return;
+                }
                 if (GameEngine.state.placingType || GameEngine.state.rightClickStartedInPlacementMode) {
                     GameEngine.addLog(`[Input] 單擊：取消建築`, 'INPUT');
                     if (this.scene.cancelPlacement) {
@@ -166,6 +171,10 @@ export class InputSystem {
                     } else {
                         GameEngine.state.placingType = null;
                     }
+                    this.rightDownInfo = null;
+                    this.didMove = false;
+                    GameEngine.state.rightClickStartedInPlacementMode = false;
+                    return;
                 } else if (window.UIManager && window.UIManager.activeMenuEntity) {
                     const activeEnt = window.UIManager.activeMenuEntity;
                     const bCfg = GameEngine.state.buildingConfigs[activeEnt.type1];

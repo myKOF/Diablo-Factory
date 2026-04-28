@@ -1673,6 +1673,8 @@ export class UIManager {
         if (!GameEngine.state.placingType && GameEngine.state.buildingMode === 'NONE') return false;
         this.cancelBuildingMode();
         this.clearWorldSelectionMarquee();
+        GameEngine.state.rightClickStartedInPlacementMode = false;
+        GameEngine.state.suppressRightClickMoveUntil = Date.now() + 250;
         GameEngine.addLog(`[建造] 已取消建造預覽。`, 'SYSTEM');
         return true;
     }
@@ -3704,8 +3706,9 @@ export class UIManager {
                 const halfH = (uh * GameEngine.TILE_SIZE) / 2;
 
                 // sx, sy 是建築中心，回歸至模型右上角對齊
-                dBtn.style.left = `${sx + halfW - 20}px`;
-                dBtn.style.top = `${sy - halfH}px`;
+                const btnW = dBtn.offsetWidth || 18;
+                dBtn.style.left = `${sx + halfW - btnW / 2}px`;
+                dBtn.style.top = `${sy - halfH - btnW / 2}px`;
             }
         }
     }
