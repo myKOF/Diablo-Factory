@@ -1576,6 +1576,15 @@ export class UIManager {
         return line.id === selectedId || line.groupId === selectedId;
     }
 
+    static isSelectedBuilding(ent) {
+        if (!ent) return false;
+        const id = this.getEntityId(ent);
+        const selectedIds = GameEngine.state.selectedBuildingIds || [];
+        return this.activeMenuEntity === ent ||
+            GameEngine.state.selectedBuildingId === id ||
+            selectedIds.includes(id);
+    }
+
     static getLogisticsLineDragPort(line) {
         const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
         const first = points[0];
@@ -1611,6 +1620,7 @@ export class UIManager {
 
     static beginLogisticsDragFromBuilding(ent, sourcePort) {
         if (!ent || !sourcePort) return false;
+        if (!this.isSelectedBuilding(ent)) return false;
         this.clearWorldSelectionMarquee();
         this.logisticsSourceEntity = ent;
         this.logisticsSourceLine = null;
@@ -1862,6 +1872,7 @@ export class UIManager {
             if (ent.isUnderConstruction) return false;
             const cfg = GameEngine.getEntityConfig(ent.type1);
             if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false;
+            if (!this.isSelectedBuilding(ent)) return false;
             return this.isPointInsideEntity(ent, worldX, worldY);
         });
         if (clickedBuilding && GameEngine.state.buildingMode === 'NONE') {
@@ -3699,6 +3710,7 @@ export class UIManager {
             // [同步圖 4 需求] 更新銷毀按鈕位置到建築物右上角
             const dBtn = document.getElementById("destroy_btn");
             if (dBtn && dBtn.style.display !== 'none') {
+                const camMain = scene && scene.cameras && scene.cameras.main;
                 const fp = GameEngine.getFootprint(this.activeMenuEntity.type1);
                 const uw = fp ? fp.uw : 1;
                 const uh = fp ? fp.uh : 1;
@@ -3706,9 +3718,14 @@ export class UIManager {
                 const halfH = (uh * GameEngine.TILE_SIZE) / 2;
 
                 // sx, sy 是建築中心，回歸至模型右上角對齊
+                const zoom = camMain ? (camMain.zoom || 1) : 1;
+                const worldX = camMain ? camMain.scrollX + (camMain.width * (1 - 1 / zoom)) / 2 : cam.x;
+                const worldY = camMain ? camMain.scrollY + (camMain.height * (1 - 1 / zoom)) / 2 : cam.y;
+                const cornerX = (this.activeMenuEntity.x + halfW - worldX) * zoom;
+                const cornerY = (this.activeMenuEntity.y - halfH - worldY) * zoom;
                 const btnW = dBtn.offsetWidth || 18;
-                dBtn.style.left = `${sx + halfW - btnW / 2}px`;
-                dBtn.style.top = `${sy - halfH - btnW / 2}px`;
+                dBtn.style.left = `${cornerX - btnW}px`;
+                dBtn.style.top = `${cornerY}px`;
             }
         }
     }
