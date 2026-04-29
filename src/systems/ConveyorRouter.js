@@ -135,8 +135,7 @@ export class ConveyorRouter {
 
             if (!this.isInsideGrid({ x: cx, y: cy })) return false;
             if (this.grid[cy][cx] !== 0) {
-                // Ignore point if it was cleared (start/end) or if custom handler allows it
-                if (cx === x && cy === y) continue;
+                // [核心修復] 不再無條件跳過中心節點，必須經過 onCollision 判定
                 if (this.onCollision && this.onCollision(cx, cy)) continue;
                 return false;
             }

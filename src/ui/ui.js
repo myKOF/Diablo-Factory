@@ -1154,8 +1154,8 @@ export class UIManager {
     static isPointInsideEntity(ent, worldX, worldY) {
         if (!ent) return false;
         const fp = this.getEntityFootprint(ent);
-        // [核心修復] 增加半格以上的緩衝 (12px)，確保貼著建築拉線時，相鄰的網格中心點也能被視為「內部」而免除碰撞
-        const buffer = GameEngine.TILE_SIZE / 2 + 2; 
+        // [核心修復] 增加 1.5 倍網格以上的緩衝 (30px)，確保緊貼建築拉線時，相鄰的所有網格中心點都能被視為「內部」而免除碰撞
+        const buffer = GameEngine.TILE_SIZE * 1.5; 
         return worldX >= ent.x - fp.w / 2 - buffer && worldX <= ent.x + fp.w / 2 + buffer &&
             worldY >= ent.y - fp.h / 2 - buffer && worldY <= ent.y + fp.h / 2 + buffer;
     }

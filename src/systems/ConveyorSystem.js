@@ -44,7 +44,8 @@ export class ConveyorSystem {
             targetPort: null,
             bendMode: 'x-first',
             lastWorldPoint: null,
-            startGrid: this.toGrid(resolvedStartX, resolvedStartY),
+            // [核心修復] 使用方向偏好，確保右/下端口座標歸入建築格網
+            startGrid: this.toGrid(resolvedStartX, resolvedStartY, currentSourcePort?.dir),
             routeWidth
         };
 
@@ -188,7 +189,8 @@ export class ConveyorSystem {
         this.activeDrag.lastWorldPoint = { x: currentX, y: currentY };
 
         const dragTarget = this.resolveDragTarget(currentX, currentY);
-        const targetPortGrid = this.toGrid(dragTarget.x, dragTarget.y);
+        // [核心修復] 獲取目標網格時考慮端口方向偏好
+        const targetPortGrid = this.toGrid(dragTarget.x, dragTarget.y, dragTarget.port?.dir);
         const sourcePortGrid = this.activeDrag.startGrid;
         const sourceRouteGrid = this.getPortAnchorGrid(this.activeDrag.sourcePort, sourcePortGrid);
         const targetRouteGrid = dragTarget.port
@@ -206,12 +208,12 @@ export class ConveyorSystem {
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
 
         this.router.onCollision = (gx, gy) => {
-            // [核心優化] Chebyshev 距離「安全氣泡」：端口周圍 2 格內免除碰撞
+            // [核心優化] Chebyshev 距離「安全氣泡」：端口周圍 3 格內免除碰撞
             const sourceDist = Math.max(Math.abs(gx - sourcePortGrid.x), Math.abs(gy - sourcePortGrid.y));
-            if (sourceDist <= Math.max(2, scale)) return true;
+            if (sourceDist <= Math.max(3, scale)) return true;
 
             const targetDist = Math.max(Math.abs(gx - targetPortGrid.x), Math.abs(gy - targetPortGrid.y));
-            if (targetDist <= Math.max(2, scale)) return true;
+            if (targetDist <= Math.max(3, scale)) return true;
 
             const wx = (gx + offset.x * scale) * gridUnit + gridUnit / 2;
             const wy = (gy + offset.y * scale) * gridUnit + gridUnit / 2;
@@ -360,14 +362,22 @@ export class ConveyorSystem {
         }
     }
 
-    toGrid(worldX, worldY) {
+    toGrid(worldX, worldY, dirBias = null) {
         const TS = GameEngine.TILE_SIZE;
         const scale = this.getRouteScale();
         const gridUnit = TS / scale;
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
+
+        // [核心修復] 處理邊界歧義：對於右側與下側邊界點，微調座標使其歸入「前一格」(即建築內部格子)
+        // 這樣 Anchor (port+1) 才會剛好落在緊貼建築的格子，消除 1 格間距
+        let bx = worldX;
+        let by = worldY;
+        if (dirBias === 'right') bx -= 1;
+        if (dirBias === 'down') by -= 1;
+
         return {
-            x: Math.floor(worldX / gridUnit) - offset.x * scale,
-            y: Math.floor(worldY / gridUnit) - offset.y * scale
+            x: Math.floor(bx / gridUnit) - offset.x * scale,
+            y: Math.floor(by / gridUnit) - offset.y * scale
         };
     }
 
