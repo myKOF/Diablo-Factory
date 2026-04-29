@@ -799,18 +799,16 @@ export class MainScene extends Phaser.Scene {
                     const arrowAlpha = isConnected ? 0.9 : (logCfg.disconnectedArrowAlpha ?? 0.85);
                     const arrowSize = isConnected ? (logCfg.arrowSize || 8) : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8);
                     this.logisticsGraphics.fillStyle(parseColor(arrowColor), arrowAlpha);
-                    arrowRects.forEach((rect, index) => {
-                        const next = arrowRects[Math.min(index + 1, arrowRects.length - 1)];
-                        const prev = arrowRects[Math.max(index - 1, 0)];
-                        const dx = next.x - prev.x;
-                        const dy = next.y - prev.y;
-                        const len = Math.hypot(dx, dy) || 1;
+                    arrowRects.forEach((rect) => {
+                        const adx = rect.dirX !== undefined ? rect.dirX : 0;
+                        const ady = rect.dirY !== undefined ? rect.dirY : 0;
+                        const len = Math.hypot(adx, ady) || 1;
                         this.drawArrowhead(
                             this.logisticsGraphics,
                             rect.x + rect.w / 2,
                             rect.y + rect.h / 2,
-                            dx / len,
-                            dy / len,
+                            adx / len,
+                            ady / len,
                             arrowSize
                         );
                     });
@@ -962,13 +960,18 @@ export class MainScene extends Phaser.Scene {
                 const ghostArrowRects = this.getLogisticsCellRects(ghostPoints, routeWidth, true);
                 if (ghostArrowRects.length > 0) {
                     this.logisticsGraphics.fillStyle(ghostColor, 0.85);
-                    ghostArrowRects.forEach((rect, index) => {
-                        const next = ghostArrowRects[Math.min(index + 1, ghostArrowRects.length - 1)];
-                        const prev = ghostArrowRects[Math.max(index - 1, 0)];
-                        const dx = next.x - prev.x;
-                        const dy = next.y - prev.y;
-                        const len = Math.hypot(dx, dy) || 1;
-                        this.drawArrowhead(this.logisticsGraphics, rect.x + rect.w / 2, rect.y + rect.h / 2, dx / len, dy / len, 5);
+                    ghostArrowRects.forEach((rect) => {
+                        const adx = rect.dirX !== undefined ? rect.dirX : 0;
+                        const ady = rect.dirY !== undefined ? rect.dirY : 0;
+                        const len = Math.hypot(adx, ady) || 1;
+                        this.drawArrowhead(
+                            this.logisticsGraphics,
+                            rect.x + rect.w / 2,
+                            rect.y + rect.h / 2,
+                            adx / len,
+                            ady / len,
+                            5
+                        );
                     });
                 }
 
@@ -3313,7 +3316,9 @@ export class MainScene extends Phaser.Scene {
                     x: px - (isHorizontal ? TS / 2 : (width * TS) / 2),
                     y: py - (isHorizontal ? (width * TS) / 2 : TS / 2),
                     w: (isHorizontal ? TS : width * TS),
-                    h: (isHorizontal ? width * TS : TS)
+                    h: (isHorizontal ? width * TS : TS),
+                    dirX: dir.x,
+                    dirY: dir.y
                 };
 
                 stepRects.push(rect);
