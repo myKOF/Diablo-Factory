@@ -787,6 +787,7 @@ export const UI_CONFIG = {
         maxRouteSearchNodes: 12000,   // 物流線拖曳尋路的最大搜尋節點數，範圍建議 1000~30000；半格對齊會增加搜尋節點，數值越高越能繞遠路但封閉障礙時越容易卡頓。
         ghostValidColor: 0x00ff00,    // 合法位置預覽顏色 (綠色)
         ghostInvalidColor: 0xff0000,  // 非法位置預覽顏色 (紅色)
-        ghostAlpha: 0.5               // 預覽透明度 (0.0 ~ 1.0)
+        ghostAlpha: 0.5,              // 預覽透明度 (0.0 ~ 1.0)
+        directionLockThreshold: 0.5   // L 形路徑方向鎖定閾值 (單位: Grid)；當位移超過此數值時，鎖定第一移動軸向。
     }
 };

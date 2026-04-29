@@ -46,7 +46,8 @@ export class ConveyorSystem {
             lastWorldPoint: null,
             // [核心修復] 使用方向偏好，確保右/下端口座標歸入建築格網
             startGrid: this.toGrid(resolvedStartX, resolvedStartY, currentSourcePort?.dir),
-            routeWidth
+            routeWidth,
+            directionLocked: false // [核心新增] 是否已鎖定移動方向
         };
 
         this.ghosts = [];
@@ -54,7 +55,6 @@ export class ConveyorSystem {
         this.pendingDragPoint = null;
         this.isDragFrameQueued = false;
         this.lastRouteKey = null;
-        console.log(`[ConveyorSystem] Drag started at ${resolvedStartX},${resolvedStartY}`);
     }
 
     getAlignmentUnit() {
@@ -196,6 +196,37 @@ export class ConveyorSystem {
         const targetRouteGrid = dragTarget.port
             ? this.getPortAnchorGrid(dragTarget.port, targetPortGrid)
             : targetPortGrid;
+
+        // [核心優化] 動態判定 L 形彎折模式：根據游標移動方向自動切換 x-first 或 y-first
+        if (this.activeDrag && !this.activeDrag.directionLocked) {
+            const dx = Math.abs(currentX - this.activeDrag.startX);
+            const dy = Math.abs(currentY - this.activeDrag.startY);
+            const TS = GameEngine.TILE_SIZE;
+            const threshold = (UI_CONFIG.ConveyorBuild?.directionLockThreshold || 0.5) * TS;
+
+            if (dx > threshold || dy > threshold) {
+                // 如果 X 軸偏移明顯大於 Y 軸，鎖定為橫向優先
+                if (dx > dy * 1.2) {
+                    this.activeDrag.bendMode = 'x-first';
+                    this.activeDrag.directionLocked = true;
+                }
+                // 如果 Y 軸偏移明顯大於 X 軸，鎖定為縱向優先
+                else if (dy > dx * 1.2) {
+                    this.activeDrag.bendMode = 'y-first';
+                    this.activeDrag.directionLocked = true;
+                }
+            }
+        } else if (this.activeDrag && this.activeDrag.directionLocked) {
+            // [核心優化] 回位解鎖：如果游標回到起點附近，解鎖方向判定，允許重新選擇
+            const dx = Math.abs(currentX - this.activeDrag.startX);
+            const dy = Math.abs(currentY - this.activeDrag.startY);
+            const TS = GameEngine.TILE_SIZE;
+            const resetThreshold = (UI_CONFIG.ConveyorBuild?.directionLockThreshold || 0.5) * 0.4 * TS;
+            if (dx < resetThreshold && dy < resetThreshold) {
+                this.activeDrag.directionLocked = false;
+            }
+        }
+
         const routeKey = `${sourceRouteGrid.x},${sourceRouteGrid.y}->${targetRouteGrid.x},${targetRouteGrid.y}:${sourcePortGrid.x},${sourcePortGrid.y}:${targetPortGrid.x},${targetPortGrid.y}:${this.activeDrag.sourcePort?.dir || ''}:${dragTarget.port?.dir || ''}:${this.activeDrag.bendMode}:${dragTarget.building ? window.UIManager?.getEntityId?.(dragTarget.building) : ''}`;
         if (routeKey === this.lastRouteKey) return;
         this.lastRouteKey = routeKey;
@@ -258,6 +289,7 @@ export class ConveyorSystem {
     toggleBendMode() {
         if (!this.activeDrag) return false;
         this.activeDrag.bendMode = this.activeDrag.bendMode === 'x-first' ? 'y-first' : 'x-first';
+        this.activeDrag.directionLocked = true; // 手動切換後也鎖定，防止自動判定蓋掉玩家意圖
         this.lastRouteKey = null;
         const point = this.pendingDragPoint || this.activeDrag.lastWorldPoint;
         if (point) {
