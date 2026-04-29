@@ -3307,23 +3307,16 @@ export class MainScene extends Phaser.Scene {
                 const px = a.x + dir.x * stepSize * step;
                 const py = a.y + dir.y * stepSize * step;
 
-                // [核心修正] 直接繪製對齊格點中心的正方形，達成「滿格」佔位效果
+                // [核心修正] 考慮寬度 (widthTiles)，計算正交偏移，確保選取框與渲染完全對齊
+                const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
                 const rect = {
-                    x: px - TS / 2,
-                    y: py - TS / 2,
-                    w: TS,
-                    h: TS
+                    x: px - (isHorizontal ? TS / 2 : (width * TS) / 2),
+                    y: py - (isHorizontal ? (width * TS) / 2 : TS / 2),
+                    w: (isHorizontal ? TS : width * TS),
+                    h: (isHorizontal ? width * TS : TS)
                 };
 
                 stepRects.push(rect);
-
-                // 為了兼容性，將格網座標也加入 cells Set
-                const gx = Math.floor(px / TS);
-                const gy = Math.floor(py / TS);
-                for (let lw = 0; lw < width; lw++) {
-                    if (Math.abs(dir.x) > Math.abs(dir.y)) addCell(gx, gy + lw - Math.floor(width / 2));
-                    else addCell(gx + Math.floor(width / 2), gy);
-                }
             }
         }
 

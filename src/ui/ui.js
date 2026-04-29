@@ -1794,54 +1794,33 @@ export class UIManager {
             const width = Math.max(1, Math.round(Number(line.routeWidth) || 1));
             const eps = 0.001;
             const rects = [];
-            const stepSegments = [];
-            const getDir = (from, to) => {
-                const dx = to.x - from.x;
-                const dy = to.y - from.y;
-                if (Math.abs(dx) < eps && Math.abs(dy) < eps) return null;
-                return Math.abs(dx) >= Math.abs(dy)
-                    ? { x: Math.sign(dx) || 1, y: 0 }
-                    : { x: 0, y: Math.sign(dy) || 1 };
-            };
-            const firstDir = getDir(points[0], points[1]);
-            if (!firstDir) return [];
-            const first = points[0];
-            let originX = first.x - (width * TS) / 2;
-            let originY = first.y - (width * TS) / 2;
-            if (firstDir.x > 0) {
-                originX = first.x;
-                originY = first.y - (width * TS) / 2;
-            } else if (firstDir.x < 0) {
-                originX = first.x - TS;
-                originY = first.y - (width * TS) / 2;
-            } else if (firstDir.y > 0) {
-                originX = first.x - (width * TS) / 2;
-                originY = first.y;
-            } else if (firstDir.y < 0) {
-                originX = first.x - (width * TS) / 2;
-                originY = first.y - TS;
-            }
-            let cursorCol = 0;
-            let cursorRow = 0;
-            let currentDir = firstDir;
+            let totalStepIndex = 0;
             for (let i = 0; i < points.length - 1; i++) {
                 const a = points[i];
                 const b = points[i + 1];
-                const dir = getDir(a, b);
-                if (!dir) continue;
-                const steps = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / TS));
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist < 0.001) continue;
+
+                const dir = { x: dx / dist, y: dy / dist };
+                const steps = Math.max(1, Math.round(dist / TS));
+                const stepSize = dist / steps;
+
                 for (let step = 0; step < steps; step++) {
-                    if (dir.x !== currentDir.x || dir.y !== currentDir.y) {
-                        cursorCol = cursorCol - currentDir.x + dir.x;
-                        cursorRow = cursorRow - currentDir.y + dir.y;
-                        currentDir = dir;
-                    }
-                    rects.push(dir.x !== 0
-                        ? { x: originX + cursorCol * TS, y: originY + cursorRow * TS, w: TS, h: width * TS, segment: group[Math.min(stepSegments.length, group.length - 1)] || line }
-                        : { x: originX + cursorCol * TS, y: originY + cursorRow * TS, w: width * TS, h: TS, segment: group[Math.min(stepSegments.length, group.length - 1)] || line });
-                    stepSegments.push(rects[rects.length - 1].segment);
-                    cursorCol += dir.x;
-                    cursorRow += dir.y;
+                    const px = a.x + dir.x * stepSize * step;
+                    const py = a.y + dir.y * stepSize * step;
+
+                    const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
+                    rects.push({
+                        x: px - (isHorizontal ? TS / 2 : (width * TS) / 2),
+                        y: py - (isHorizontal ? (width * TS) / 2 : TS / 2),
+                        w: (isHorizontal ? TS : width * TS),
+                        h: (isHorizontal ? width * TS : TS),
+                        // [核心修正] 確保 segment 索引與渲染步進一致
+                        segment: group[Math.min(totalStepIndex, group.length - 1)] || line
+                    });
+                    totalStepIndex++;
                 }
             }
             return rects;
