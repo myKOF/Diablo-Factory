@@ -67,12 +67,36 @@ export class BuildingSystem {
                     ent.isUpgrading = false;
                     ent.upgradeProgress = 0;
                     ent.lv = (ent.lv || 1) + 1;
-                    const newCfg = engine.getBuildingConfig(ent.type1, ent.lv);
-                    if (newCfg) {
-                        ent.name = newCfg.name;
-                        ent.model = newCfg.model;
+                    
+                    const newLevel = ent.lv;
+                    const entCfg = engine.getBuildingConfig(ent.type1, newLevel);
+                    const isCore = entCfg && entCfg.type2 === 'core';
+
+                    // [核心改造] 如果是核心建築升級完成，同步所有其它建築
+                    if (isCore) {
+                        state.mapEntities.forEach(other => {
+                            if (other === ent) return; // 跳過自己
+                            
+                            // 更新等級
+                            other.lv = newLevel;
+                            
+                            // 更新外觀與名稱 (從 Config 讀取對應等級的設定)
+                            const otherCfg = engine.getBuildingConfig(other.type1, newLevel);
+                            if (otherCfg) {
+                                other.name = otherCfg.name;
+                                other.model = otherCfg.model;
+                            }
+                        });
+                        engine.addLog(`城鎮核心已升級至 ${newLevel} 級，全領地建築已同步升級！`);
+                    } else {
+                        const newCfg = engine.getBuildingConfig(ent.type1, ent.lv);
+                        if (newCfg) {
+                            ent.name = newCfg.name;
+                            ent.model = newCfg.model;
+                        }
+                        engine.addLog(`${ent.name} 升級成功！目前等級：${ent.lv}`);
                     }
-                    engine.addLog(`${ent.name} 升級成功！目前等級：${ent.lv}`);
+
                     engine.triggerWarning("upgrade_success", [ent.name, ent.lv]);
                     if (window.UIManager) {
                         window.UIManager.showWarning(`${ent.name} 升級至 ${ent.lv} 級！`);
@@ -134,6 +158,12 @@ export class BuildingSystem {
 
         if (!nextCfg) {
             engine.addLog("已達最高等級！");
+            return;
+        }
+
+        // [核心改造] 限制：只有核心建築 (type2 === 'core') 可以手動啟動升級
+        if (currentCfg && currentCfg.type2 !== 'core') {
+            engine.addLog("只有城鎮中心可以進行升級。");
             return;
         }
 

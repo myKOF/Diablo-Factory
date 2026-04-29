@@ -2275,7 +2275,7 @@ export class UIManager {
                             onclick="window.GameEngine.cancelUpgrade(event, window.UIManager.activeMenuEntity)">取消</button>
                 </div>
             `;
-        } else if (!isConfirming && nextCfg && !entity.isUnderConstruction) {
+        } else if (!isConfirming && nextCfg && !entity.isUnderConstruction && cfg_current && cfg_current.type2 === 'core') {
             const unlock = GameEngine.isUpgradeUnlocked(entity, nextCfg);
             const costs = nextCfg?.costs || {};
             const costItems = [];
@@ -2324,7 +2324,7 @@ export class UIManager {
                     </div>
                 `;
             }
-        } else if (!isConfirming && entity.lv > 1 && !nextCfg) {
+        } else if (!isConfirming && entity.lv > 1 && !nextCfg && cfg_current && cfg_current.type2 === 'core') {
             rightHeader = `<div style="color: #fbc02d; font-weight: bold; font-size: 16px; border: 1px solid rgba(251, 192, 45, 0.3); display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgba(0,0,0,0.3); width: ${boxW}; height: ${boxH}; box-sizing: border-box; transform: translate(${rOffset.x}px, ${rOffset.y}px);">已達最高等級 ⭐</div>`;
         }
 
