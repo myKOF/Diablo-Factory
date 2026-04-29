@@ -123,7 +123,7 @@ export class ConveyorSystem {
         const points = Array.isArray(line.routePoints) && line.routePoints.length >= 2
             ? line.routePoints
             : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
-            
+
         for (let i = 0; i < points.length - 1; i++) {
             const a = this.toGrid(points[i].x, points[i].y);
             const b = this.toGrid(points[i + 1].x, points[i + 1].y);
@@ -206,10 +206,21 @@ export class ConveyorSystem {
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
 
         this.router.onCollision = (gx, gy) => {
+            // [核心優化] Chebyshev 距離「安全氣泡」：端口周圍 2 格內免除碰撞
+            const sourceDist = Math.max(Math.abs(gx - sourcePortGrid.x), Math.abs(gy - sourcePortGrid.y));
+            if (sourceDist <= Math.max(2, scale)) return true;
+
+            const targetDist = Math.max(Math.abs(gx - targetPortGrid.x), Math.abs(gy - targetPortGrid.y));
+            if (targetDist <= Math.max(2, scale)) return true;
+
             const wx = (gx + offset.x * scale) * gridUnit + gridUnit / 2;
             const wy = (gy + offset.y * scale) * gridUnit + gridUnit / 2;
+
+            // 實體碰撞免除邏輯
             if (sourceEnt && window.UIManager?.isPointInsideEntity(sourceEnt, wx, wy)) return true;
             if (targetEnt && window.UIManager?.isPointInsideEntity(targetEnt, wx, wy)) return true;
+
+            // 游標下實體免除
             const bAtCursor = window.UIManager?.getEntityAtPoint?.(currentX, currentY);
             if (bAtCursor && window.UIManager?.isPointInsideEntity(bAtCursor, wx, wy)) return true;
             return false;
@@ -363,7 +374,7 @@ export class ConveyorSystem {
     validateGhosts(ghosts) {
         if (!this.router) return false;
         const routeWidth = this.activeDrag?.routeWidth || 1;
-        
+
         // [核心優化] 統一調用 Router 的驗證邏輯，保持 Single Source of Truth
         const isFootprintValid = this.router.validateRouteFootprint(ghosts, routeWidth, (segmentCount) => {
             const cfg = UI_CONFIG.ConveyorBuild;

@@ -1154,8 +1154,35 @@ export class UIManager {
     static isPointInsideEntity(ent, worldX, worldY) {
         if (!ent) return false;
         const fp = this.getEntityFootprint(ent);
-        return worldX > ent.x - fp.w / 2 && worldX < ent.x + fp.w / 2 &&
-            worldY > ent.y - fp.h / 2 && worldY < ent.y + fp.h / 2;
+        // [核心修復] 增加半格以上的緩衝 (12px)，確保貼著建築拉線時，相鄰的網格中心點也能被視為「內部」而免除碰撞
+        const buffer = GameEngine.TILE_SIZE / 2 + 2; 
+        return worldX >= ent.x - fp.w / 2 - buffer && worldX <= ent.x + fp.w / 2 + buffer &&
+            worldY >= ent.y - fp.h / 2 - buffer && worldY <= ent.y + fp.h / 2 + buffer;
+    }
+
+    /**
+     * 獲取指定世界座標下的實體 (優先檢索建築)
+     */
+    static getEntityAtPoint(worldX, worldY) {
+        // 優先從 mapEntities 中尋找
+        const found = GameEngine.state.mapEntities.find(ent => this.isPointInsideEntity(ent, worldX, worldY));
+        if (found) return found;
+
+        // 次之從資源中尋找 (MapDataSystem)
+        if (GameEngine.state.mapData) {
+            const gx = Math.floor(worldX / GameEngine.TILE_SIZE);
+            const gy = Math.floor(worldY / GameEngine.TILE_SIZE);
+            const res = GameEngine.state.mapData.getResource(gx, gy);
+            if (res && res.type !== 0) {
+                return {
+                    id: `res_${gx}_${gy}`,
+                    type1: 'RESOURCE',
+                    x: gx * GameEngine.TILE_SIZE + GameEngine.TILE_SIZE / 2,
+                    y: gy * GameEngine.TILE_SIZE + GameEngine.TILE_SIZE / 2
+                };
+            }
+        }
+        return null;
     }
 
     static getDirectionVector(dir) {

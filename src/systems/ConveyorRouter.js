@@ -330,9 +330,24 @@ export class ConveyorRouter {
      * @param {number} width - 路線寬度
      */
     getWidthOffsets(width) {
-        // 在 0.5 網格系統中，1 格寬度（20px）佔用連續的 2 小格
-        // 目前統一返回 [-1, 0] 以確保中心點落在網格線上。
-        return [-1, 0];
+        const scale = Math.round(1 / (this.alignmentUnit || 1.0));
+        const result = [];
+        if (scale <= 1) {
+            // 1.0 網格系統：1.0 寬度佔用 1 格，使用中心對齊 [0]
+            const half = Math.floor(width / 2);
+            for (let i = -half; i < width - half; i++) {
+                result.push(i);
+            }
+            return result.length > 0 ? result : [0];
+        } else {
+            // 0.5 網格系統：1.0 寬度佔用 2 格，使用偏移對齊 [-1, 0]
+            const cellWidth = Math.round(width * scale);
+            const half = Math.floor(cellWidth / 2);
+            for (let i = -half; i < cellWidth - half; i++) {
+                result.push(i);
+            }
+            return result.length > 0 ? result : [-1, 0];
+        }
     }
 
     /**
