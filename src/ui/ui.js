@@ -2088,10 +2088,12 @@ export class UIManager {
 
         // 核心邏輯：明確區分「本身指令選單」與「他者 UI/地面」
         const menuEl = document.getElementById("context_menu");
+        const logisticsMenuEl = document.getElementById("logistics_menu");
         const distBtnEl = document.getElementById("destroy_btn");
         const warehousePanelEl = document.getElementById("warehouse_panel");
         const warehouseBtnEl = document.getElementById("warehouse_btn");
         const isSelfUI = (menuEl && menuEl.contains(e.target)) ||
+            (logisticsMenuEl && logisticsMenuEl.contains(e.target)) ||
             (distBtnEl && distBtnEl.contains(e.target)) ||
             (warehousePanelEl && warehousePanelEl.contains(e.target)) ||
             (warehouseBtnEl && warehouseBtnEl.contains(e.target));
@@ -3284,7 +3286,9 @@ export class UIManager {
             menu = document.createElement("div"); menu.id = "logistics_menu"; menu.className = "panel glass-panel";
             menu.style.cssText = `position: absolute; z-index: 2000; padding: 15px; display: flex; flex-direction: column; gap: 10px; background: rgba(20,20,20,0.95); border: 2px solid #4caf50; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); pointer-events: auto;`;
             this.uiLayer.appendChild(menu);
+            this.makeDraggable(menu, "logistics_menu");
         }
+        menu.dataset.dragId = `logistics_menu_${groupId || targetId || "standalone"}`;
         let availableItems = [];
         const sourceCfg = GameEngine.getBuildingConfig(sourceEnt.type1, sourceEnt.lv || 1);
         const isProcessingPlantSource = sourceCfg && sourceCfg.type2 === 'processing_plant';
@@ -3382,7 +3386,9 @@ export class UIManager {
             menu = document.createElement("div"); menu.id = "logistics_menu"; menu.className = "panel glass-panel";
             menu.style.cssText = `position: absolute; z-index: 2000; padding: 15px; display: flex; flex-direction: column; gap: 10px; background: rgba(20,20,20,0.95); border: 2px solid #4caf50; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); pointer-events: auto;`;
             this.uiLayer.appendChild(menu);
+            this.makeDraggable(menu, "logistics_menu");
         }
+        menu.dataset.dragId = `logistics_menu_${line.groupId || line.id || "standalone"}`;
         menu.innerHTML = `
             <div class="logistics-node-menu">
                 <div class="logistics-node-header">
