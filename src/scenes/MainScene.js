@@ -826,8 +826,9 @@ export class MainScene extends Phaser.Scene {
 
                     if (!route || !Array.isArray(route.points) || route.points.length < 2) return;
 
-                    const isSelected = (state.selectedLogisticsLineId === line.id) ||
-                        (window.UIManager.activeLogisticsLine && window.UIManager.activeLogisticsLine.id === line.id);
+                    const isSelected = window.UIManager && typeof window.UIManager.isSelectedLogisticsLine === 'function'
+                        ? window.UIManager.isSelectedLogisticsLine(line)
+                        : state.selectedLogisticsLineId === line.id;
 
                     drawLogisticsRoute(route.points, route.width || 1, isSelected, !!line.filter, line);
                 });

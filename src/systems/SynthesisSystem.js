@@ -9,6 +9,7 @@ export class SynthesisSystem {
 
     static ensureDefaultRecipe(state, engine, building) {
         if (!building || building.currentRecipe || building.isUnderConstruction) return false;
+        if (building.manualRecipeCleared) return false;
         const recipes = this.getBuildingRecipes(state, engine, building) || [];
         const unlockedRecipes = recipes.filter(r => r.isUnlocked);
         if (unlockedRecipes.length !== 1) return false;
@@ -112,6 +113,7 @@ export class SynthesisSystem {
 
         targetBuilding.currentRecipe = recipe;
         targetBuilding.craftingProgress = 0;
+        targetBuilding.manualRecipeCleared = false;
         targetBuilding._missingRecipeFilterHintLogged = false;
 
         // 初始化物流緩衝區

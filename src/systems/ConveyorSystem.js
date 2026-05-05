@@ -362,14 +362,34 @@ export class ConveyorSystem {
         const targetPort = dragTarget.port || drag.targetPort || (targetBuilding ? window.UIManager?.getNearestPortSlot(targetBuilding, points[points.length - 2]?.x || points[0].x, points[points.length - 2]?.y || points[0].y) : null);
 
         if (window.UIManager) {
+            const sourceEntity = drag.sourceEntity || (
+                drag.sourceLine?.sourceId
+                    ? GameEngine.state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === drag.sourceLine.sourceId)
+                    : null
+            );
+            let conn = null;
+            if (sourceEntity && targetBuilding) {
+                const targetId = window.UIManager.getEntityId(targetBuilding);
+                if (!Array.isArray(sourceEntity.outputTargets)) sourceEntity.outputTargets = [];
+                conn = sourceEntity.outputTargets.find(item => item.id === targetId || (drag.sourceLine?.groupId && item.lineId === drag.sourceLine.groupId));
+                if (!conn) {
+                    conn = { id: targetId, filter: drag.sourceLine?.filter || null };
+                    sourceEntity.outputTargets.push(conn);
+                } else {
+                    conn.id = targetId;
+                    if (!conn.filter && drag.sourceLine?.filter) conn.filter = drag.sourceLine.filter;
+                }
+            }
             const createdLine = window.UIManager.upsertLogisticsLine({
-                sourceEnt: drag.sourceEntity,
+                lineId: drag.sourceLine?.groupId || null,
+                sourceEnt: sourceEntity,
                 targetEnt: targetBuilding,
                 targetPoint: targetPort || points[points.length - 1],
                 points: points,
                 routeWidth: drag.routeWidth || drag.sourcePort?.width || 1,
                 sourcePort: drag.sourcePort,
-                targetPort: targetPort
+                targetPort: targetPort,
+                conn
             });
             if (drag.sourceLine?.filter && createdLine?.groupId) {
                 window.UIManager.setLogisticsGroupFilter(createdLine.groupId, drag.sourceLine.filter);

@@ -22,9 +22,14 @@
 - **異常自癒**：遇錯禁止停下。應立即分析 Log 並自動修正重試。
 
 ## [數據安全與靜默檢索協議]
-- **禁令與替代**：嚴禁使用 PowerShell 搜尋。必須使用 Node.js (fs) 腳本遍歷檔案。
+- **禁令與替代**：嚴禁使用 PowerShell (`Get-ChildItem`, `Select-String`) 或 `rg` 搜尋。若發生 Access Denied，禁止啟動任何 Shell 備案。
 - **統一編碼**：所有檔案讀寫必須強制指定 `UTF-8`。
 - **來源唯一 (SSOT)**：UI 讀取 `ui.config.cjs`，動畫讀取 `animations.json`。嚴禁硬編碼。
+- **唯一合法搜尋工具 (MANDATORY SEARCH TOOL)**：
+  Agent 若需全域搜尋，必須立即在根目錄建立並執行 `tools/safe_search.cjs` 腳本。該腳本必須：
+  1. 使用 Node.js 原生 `fs` 與 `path` 模組。
+  2. 強制忽略 `node_modules`、`.git`、`tmp` 與 `dist` 資料夾。
+  3. 將搜尋結果精簡輸出，確保不佔用過多 Context Token。
 
 ## [大地圖渲染與性能規範]
 - **數據層**：地圖資源必須存於 `Uint16Array` 陣列。

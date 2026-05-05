@@ -219,6 +219,52 @@ export class UIManager {
         return Number.isFinite(seconds) && seconds > 0 ? seconds : fallback;
     }
 
+    static escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, ch => ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;"
+        })[ch]);
+    }
+
+    static getRecipeConfig(type) {
+        if (!type || !GameEngine.state.ingredientConfigs) return null;
+        const key = String(type).trim().toLowerCase();
+        return GameEngine.state.ingredientConfigs[key] || GameEngine.state.ingredientConfigs[type] || null;
+    }
+
+    static getIngredientDisplayName(type) {
+        const cfg = this.getRecipeConfig(type);
+        return (cfg && cfg.name) || GameEngine.RESOURCE_NAMES[type] || type || "未知材料";
+    }
+
+    static getRecipeNeeds(recipeType, inputBuffer = {}) {
+        const ingCfg = this.getRecipeConfig(recipeType);
+        const needs = ingCfg && ingCfg.need_ingredients ? ingCfg.need_ingredients : {};
+        return Object.keys(needs).map(type => {
+            const required = needs[type] || 0;
+            const stored = inputBuffer[type] || 0;
+            return {
+                type,
+                required,
+                stored,
+                progress: required > 0 ? Math.min(1, stored / required) : 0,
+                label: `${stored} / ${required}`
+            };
+        });
+    }
+
+    static getFactoryWorkers(entity) {
+        if (!entity) return [];
+        const ids = new Set(entity.assignedWorkers || []);
+        const eid = entity.id || `${entity.type1}_${entity.x}_${entity.y}`;
+        return GameEngine.state.units.villagers
+            .filter(v => ids.has(v.id) || v.assignedWarehouseId === eid)
+            .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+    }
+
     static formatProductionCountdown(entity) {
         if (!entity || !entity.currentRecipe) return "待機中";
         const totalSeconds = this.getIngredientProductionTime(entity.currentRecipe.type, 5);
@@ -1513,7 +1559,7 @@ export class UIManager {
             const gx = Math.round(centerX / align);
             const gy = Math.round(centerY / align);
             segments.push({
-                id: `${groupId}_seg_${i}`,
+                id: `${groupId}_seg_${gx}_${gy}_${i}`,
                 groupId,
                 type: 'logistics_segment',
                 sourceId,
@@ -1582,7 +1628,11 @@ export class UIManager {
     }
 
     static getLogisticsLineById(lineId) {
-        return this.ensureLogisticsLineStore().find(line => line.id === lineId || line.groupId === lineId) || null;
+        return this.ensureLogisticsLineStore().find(line =>
+            line.id === lineId ||
+            line.groupId === lineId ||
+            this.getLogisticsLineSelectionKey(line) === lineId
+        ) || null;
     }
 
     static getLogisticsSegmentsByGroupId(groupId) {
@@ -1597,10 +1647,22 @@ export class UIManager {
         });
     }
 
+    static getLogisticsLineSourceEntity(line) {
+        if (!line || !line.sourceId || !GameEngine.state?.mapEntities) return null;
+        return GameEngine.state.mapEntities.find(ent => this.getEntityId(ent) === line.sourceId) || null;
+    }
+
+    static getLogisticsLineSelectionKey(line) {
+        if (!line) return null;
+        const gx = line.gridX !== undefined ? line.gridX : Math.round((line.x || 0) / (GameEngine.TILE_SIZE / 2));
+        const gy = line.gridY !== undefined ? line.gridY : Math.round((line.y || 0) / (GameEngine.TILE_SIZE / 2));
+        return `${line.id || line.groupId || 'logistics'}@${gx},${gy}`;
+    }
+
     static isSelectedLogisticsLine(line) {
         const selectedId = GameEngine.state.selectedLogisticsLineId;
         if (!line || !selectedId) return false;
-        return line.id === selectedId || line.groupId === selectedId;
+        return this.getLogisticsLineSelectionKey(line) === selectedId;
     }
 
     static isSelectedBuilding(ent) {
@@ -1638,7 +1700,7 @@ export class UIManager {
         this.isLogisticsDragging = true;
         this.activeLogisticsLine = line;
         this.activeLogisticsConnection = null;
-        GameEngine.state.selectedLogisticsLineId = line.id;
+        GameEngine.state.selectedLogisticsLineId = this.getLogisticsLineSelectionKey(line);
         GameEngine.state.logisticsDragLine = { active: true };
         this.hideContextMenu();
         conveyorSystem.startDrag(line.x, line.y, null, this.getLogisticsLineDragPort(line), line);
@@ -1720,16 +1782,17 @@ export class UIManager {
         const state = GameEngine.state;
         const line = this.getLogisticsLineById(lineId);
         if (!line) return false;
-        state.logisticsLines = this.ensureLogisticsLineStore().filter(item => item.id !== line.id);
+        const lineKey = this.getLogisticsLineSelectionKey(line);
+        state.logisticsLines = this.ensureLogisticsLineStore().filter(item => this.getLogisticsLineSelectionKey(item) !== lineKey);
         if (line.sourceId && line.targetId && !this.getLogisticsSegmentsByGroupId(line.groupId).length) {
             const sourceEnt = state.mapEntities.find(ent => this.getEntityId(ent) === line.sourceId);
             if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
                 sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== line.groupId && conn.id !== line.targetId);
             }
         }
-        if (state.selectedLogisticsLineId === line.id) state.selectedLogisticsLineId = null;
-        if (this.activeLogisticsLine && this.activeLogisticsLine.id === line.id) this.activeLogisticsLine = null;
-        if (this.activeLogisticsConnection?.lineId === line.id) this.activeLogisticsConnection = null;
+        if (state.selectedLogisticsLineId === lineKey) state.selectedLogisticsLineId = null;
+        if (this.activeLogisticsLine && this.getLogisticsLineSelectionKey(this.activeLogisticsLine) === lineKey) this.activeLogisticsLine = null;
+        if (this.activeLogisticsConnection?.lineId === lineKey) this.activeLogisticsConnection = null;
         GameEngine.addLog(`[物流] 物流線段已刪除`, 'LOGISTICS');
         return true;
     }
@@ -1746,7 +1809,7 @@ export class UIManager {
                 sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId && conn.id !== first.targetId);
             }
         }
-        if (segments.some(line => line.id === state.selectedLogisticsLineId)) state.selectedLogisticsLineId = null;
+        if (segments.some(line => this.isSelectedLogisticsLine(line))) state.selectedLogisticsLineId = null;
         if (this.activeLogisticsLine && this.activeLogisticsLine.groupId === groupId) this.activeLogisticsLine = null;
         if (this.activeLogisticsConnection?.groupId === groupId) this.activeLogisticsConnection = null;
         GameEngine.addLog(`[物流] 物流線群組已刪除`, 'LOGISTICS');
@@ -1761,7 +1824,7 @@ export class UIManager {
         if (this.activeLogisticsConnection?.groupId) {
             deleted = this.deleteLogisticsLineGroupById(this.activeLogisticsConnection.groupId);
         } else if (this.activeLogisticsLine) {
-            deleted = this.deleteLogisticsLineById(this.activeLogisticsLine.id);
+            deleted = this.deleteLogisticsLineById(this.getLogisticsLineSelectionKey(this.activeLogisticsLine));
         } else if (selectedLineId) {
             deleted = this.deleteLogisticsLineById(selectedLineId);
         }
@@ -1782,19 +1845,12 @@ export class UIManager {
     static getLogisticsLineAt(worldX, worldY) {
         const TS = GameEngine.TILE_SIZE;
         const getVisibleRects = (line) => {
-            const group = line.groupId ? this.getLogisticsSegmentsByGroupId(line.groupId) : [line];
-            const points = [];
-            group.forEach((segment, index) => {
-                const segPoints = Array.isArray(segment.routePoints) ? segment.routePoints : [];
-                if (segPoints.length < 2) return;
-                if (index === 0) points.push({ x: segPoints[0].x, y: segPoints[0].y });
-                points.push({ x: segPoints[1].x, y: segPoints[1].y });
-            });
+            const points = Array.isArray(line.routePoints)
+                ? line.routePoints.map(p => ({ x: p.x, y: p.y }))
+                : [];
             if (points.length < 2) return [];
             const width = Math.max(1, Math.round(Number(line.routeWidth) || 1));
-            const eps = 0.001;
             const rects = [];
-            let totalStepIndex = 0;
             for (let i = 0; i < points.length - 1; i++) {
                 const a = points[i];
                 const b = points[i + 1];
@@ -1817,20 +1873,15 @@ export class UIManager {
                         y: py - (isHorizontal ? (width * TS) / 2 : TS / 2),
                         w: (isHorizontal ? TS : width * TS),
                         h: (isHorizontal ? width * TS : TS),
-                        // [核心修正] 確保 segment 索引與渲染步進一致
-                        segment: group[Math.min(totalStepIndex, group.length - 1)] || line
+                        // Match the visible cell directly to its persisted segment.
+                        segment: line
                     });
-                    totalStepIndex++;
                 }
             }
             return rects;
         };
         const hits = [];
-        const visitedGroups = new Set();
         this.ensureLogisticsLineStore().forEach(line => {
-            const groupId = line.groupId || line.id;
-            if (visitedGroups.has(groupId)) return;
-            visitedGroups.add(groupId);
             getVisibleRects(line).forEach(rect => {
                 if (
                     worldX >= rect.x && worldX <= rect.x + rect.w &&
@@ -2146,10 +2197,10 @@ export class UIManager {
             GameEngine.state.selectedBuildingIds = [];
             GameEngine.state.selectedBuildingId = null;
             GameEngine.state.selectedResourceId = null;
-            GameEngine.state.selectedLogisticsLineId = clickedLine.id;
+            GameEngine.state.selectedLogisticsLineId = this.getLogisticsLineSelectionKey(clickedLine);
             const source = GameEngine.state.mapEntities.find(ent => this.getEntityId(ent) === clickedLine.sourceId);
             if (source && clickedLine.targetId) {
-                this.showLogisticsMenu(source, clickedLine.targetId, e.clientX, e.clientY, clickedLine.id);
+                this.showLogisticsMenu(source, clickedLine.targetId, e.clientX, e.clientY, this.getLogisticsLineSelectionKey(clickedLine));
             } else {
                 this.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
             }
@@ -2164,9 +2215,14 @@ export class UIManager {
         this.activeLogisticsLine = null;
     }
 
-    static showContextMenu(entity, isConfirming = false) {
-        this.activeMenuEntity = entity;
+    static showContextMenu(entity, isConfirming = false, preservePosition = false) {
         const menu = document.getElementById("context_menu");
+        const previousEntity = this.activeMenuEntity;
+        const previousEntityId = previousEntity ? (previousEntity.id || `${previousEntity.type1}_${previousEntity.x}_${previousEntity.y}`) : null;
+        const nextEntityId = entity ? (entity.id || `${entity.type1}_${entity.x}_${entity.y}`) : null;
+        const previousLeft = menu ? menu.style.left : "";
+        const previousTop = menu ? menu.style.top : "";
+        this.activeMenuEntity = entity;
         const cfg = UI_CONFIG.ActionMenu;
 
         // 設置動態識別碼，使不同建築擁有獨立位置
@@ -2188,6 +2244,17 @@ export class UIManager {
         const cfg_current = GameEngine.getBuildingConfig(entity.type1, entity.lv || 1);
         const canAssignWorkers = cfg_current && (cfg_current.need_villagers > 0 || (cfg_current.logistics && (cfg_current.logistics.canInput || cfg_current.logistics.canOutput)));
         const isProcessingPlant = cfg_current && cfg_current.type2 === 'processing_plant';
+        const keepFactoryMenuPosition = !!(
+            preservePosition ||
+            (isProcessingPlant &&
+                !isConfirming &&
+                previousEntityId &&
+                previousEntityId === nextEntityId &&
+                previousLeft &&
+                previousTop &&
+                previousLeft !== "-9999px" &&
+                previousTop !== "-9999px")
+        );
         if (isProcessingPlant && !isConfirming) menu.style.padding = "16px";
         const nextCfg = GameEngine.getBuildingConfig(entity.type1, (entity.lv || 1) + 1);
         const hCfg = UI_CONFIG.ActionMenuHeader;
@@ -2209,7 +2276,7 @@ export class UIManager {
             : assignedWorkerCount));
         const maxWorkersForEntity = workerLightMax;
         const stockpileInfo = isGatheringBuilding ? this.getBuildingStockpileInfo(entity, cfg_current) : null;
-        const compactWorkerHtml = (!isConfirming && isProcessingPlant && canAssignWorkers && !entity.isUnderConstruction) ? `
+        const compactWorkerHtml = (!isConfirming && false && isProcessingPlant && canAssignWorkers && !entity.isUnderConstruction) ? `
             <div style="display: flex; align-items: center; gap: 6px; margin-left: 10px;">
                 <div class="factory-worker-lights" title="建築內工人 ${workerLightCount} / ${workerLightMax}" style="display: grid; grid-template-columns: repeat(${workerLightMax}, 1fr); width: 118px; height: 20px; background: #202a2f; border: 2px solid #cfd8dc; box-sizing: border-box;">
                     ${Array.from({ length: workerLightMax }).map((_, i) => `<div class="factory-worker-light" style="background: ${i < workerLightCount ? '#32f06a' : 'rgba(120,130,138,0.55)'}; border-right: ${i < workerLightMax - 1 ? '1px solid rgba(0,0,0,0.5)' : '0'};"></div>`).join('')}
@@ -2230,7 +2297,7 @@ export class UIManager {
                 </div>
             `;
         } else {
-            const showDismiss = !isConfirming && canAssignWorkers && !entity.isUnderConstruction;
+            const showDismiss = !isConfirming && canAssignWorkers && !entity.isUnderConstruction && !isProcessingPlant;
 
             let dismissHtml = "";
             if (showDismiss) {
@@ -2243,14 +2310,16 @@ export class UIManager {
                 }
             }
 
+            const headerNameMarginTop = isProcessingPlant ? '0' : '10px';
+            const headerColumnStyle = isProcessingPlant ? "display: flex; align-items: center; gap: 10px;" : "display: flex; align-items: center;";
             leftHeader = `
                 <div style="display: flex; flex-direction: column; justify-content: center; transform: translate(${lOffset.x}px, ${lOffset.y}px);">
-                    <div style="display: flex; align-items: center;">
+                    <div style="${headerColumnStyle}">
                         <span style="font-size: ${hCfg.levelFontSize}; font-weight: 900; color: #ffffff; line-height: 0.9; font-family: 'Arial Black', sans-serif; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);">Lv.${entity.lv || 1}</span>
+                        <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold; margin-top: ${headerNameMarginTop}; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); white-space: nowrap;">${name}</span>
                         ${dismissHtml}
                         ${compactWorkerHtml}
                     </div>
-                    <span style="font-size: ${hCfg.nameFontSize}; color: ${hCfg.nameColor}; font-weight: bold; margin-top: ${isProcessingPlant ? '6px' : '10px'}; text-shadow: 1px 1px 3px rgba(0,0,0,0.8); white-space: nowrap;">${name}</span>
                 </div>
             `;
         }
@@ -2449,97 +2518,91 @@ export class UIManager {
         if (!isConfirming && isProcessingPlant && !entity.isUnderConstruction) {
             const recipes = SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, entity) || [];
             if (recipes.length > 0) {
-                const state = GameEngine.state;
                 const inputBuffer = entity.inputBuffer || {};
-                const getRecipeConfig = (recipeType) => {
-                    const key = String(recipeType || '').toLowerCase();
-                    return state.ingredientConfigs ? (state.ingredientConfigs[key] || state.ingredientConfigs[recipeType]) : null;
-                };
-                const getRecipeNeedInfo = (recipeType) => {
-                    const ingCfg = getRecipeConfig(recipeType);
-                    const needs = ingCfg && ingCfg.need_ingredients ? ingCfg.need_ingredients : {};
-                    const needKeys = Object.keys(needs);
-                    if (needKeys.length === 0) {
-                        return { materialType: recipeType, stored: 0, required: 0, progress: 0, label: '0 / 0' };
-                    }
-                    const materialType = needKeys[0];
-                    const stored = inputBuffer[materialType] || 0;
-                    const required = needs[materialType] || 0;
-                    const progress = required > 0 ? Math.min(1, stored / required) : 0;
-                    return { materialType, stored, required, progress, label: `${stored} / ${required}` };
-                };
-                const formatRecipeName = (type) => {
-                    const ingCfg = getRecipeConfig(type);
-                    return (ingCfg && ingCfg.name) || GameEngine.RESOURCE_NAMES[type] || type;
-                };
-                const currentRecipe = entity.currentRecipe || recipes.find(r => r.isUnlocked) || recipes[0];
-                const currentNeed = currentRecipe ? getRecipeNeedInfo(currentRecipe.type) : null;
+                const outputBuffer = entity.outputBuffer || {};
+                const formatRecipeName = (type) => this.getIngredientDisplayName(type);
+                const currentRecipe = entity.currentRecipe || null;
+                const currentNeeds = currentRecipe ? this.getRecipeNeeds(currentRecipe.type, inputBuffer) : [];
                 const productionProgress = entity.currentRecipe ? Math.max(0, Math.min(1, entity.craftingProgress || 0)) : 0;
-                const currentRecipeName = entity.currentRecipe
-                    ? formatRecipeName(entity.currentRecipe.type)
-                    : '未設定';
-                const outputStockpile = this.getFactoryOutputStockpileInfo(entity);
-                const outputStockpileName = outputStockpile
-                    ? formatRecipeName(outputStockpile.type)
-                    : '成品';
-
-                gridHtml += `<div style="width: 100%; display: flex; flex-direction: column; gap: 4px; padding-top: 0;">`;
-                gridHtml += `
-                    <section style="width: 100%; border: 2px solid rgba(11,84,143,0.9); border-radius: 14px; background: rgba(24,28,25,0.82); padding: 8px 14px 10px; box-sizing: border-box;">
-                        <div style="font-size: 13px; color: rgba(255,255,255,0.5); font-weight: 800; margin-bottom: 7px;">當前生產線</div>
-                        <div style="display: grid; grid-template-columns: minmax(0, 1fr) 104px; gap: 12px; align-items: stretch;">
-                            <div style="display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 10px; align-items: end; min-width: 0;">
-                                <div title="${currentRecipeName}" style="width: 44px; height: 44px; border: 1px solid rgba(139,110,75,0.55); border-radius: 6px; background: rgba(255,255,255,0.05); color: #e8e1d4; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);">
-                                    <div style="font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.4));">${currentRecipe ? this.getIngredientIcon(currentRecipe.type) : '📦'}</div>
-                                </div>
-                                <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
-                                    <div class="factory-material-ratio" style="height: 16px; display: flex; align-items: center; color: #fff; font-size: 14px; font-weight: 900; text-shadow: 0 2px 3px rgba(0,0,0,0.85), 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;">
-                                        ${currentNeed ? currentNeed.label : '0 / 0'}
-                                    </div>
-                                    <div style="height: 34px; border: 2px solid #f4f4f4; border-radius: 7px; background: #232323; overflow: hidden; position: relative;">
-                                        <div class="factory-production-fill" style="height: 100%; width: 100%; transform: scaleX(${productionProgress}); transform-origin: left center; background: #32f06a; border-radius: 0 7px 7px 0; transition: transform 0.08s linear; will-change: transform;"></div>
-                                        <div class="factory-production-text" style="position: absolute; inset: 0; display: flex; align-items: center; padding-left: 18px; color: #ffffff; font-size: 18px; font-weight: 900; text-shadow: 0 2px 3px rgba(0,0,0,0.9), 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;">
-                                            ${this.formatProductionCountdown(entity)}
-                                        </div>
-                                    </div>
-                                </div>
+                const currentRecipeName = entity.currentRecipe ? formatRecipeName(entity.currentRecipe.type) : '選擇產品';
+                const workerMax = Math.max(1, cfg_current?.need_villagers || 5);
+                const factoryWorkers = this.getFactoryWorkers(entity);
+                const workerCount = Math.max(0, Math.min(workerMax, factoryWorkers.length));
+                const efficiency = Math.round((workerCount / workerMax) * 100);
+                const productAmount = currentRecipe ? Math.floor(outputBuffer[currentRecipe.type] || 0) : 0;
+                const productCap = 100;
+                const workerDots = Array.from({ length: workerMax }).map((_, i) => `
+                    <div class="factory-worker-dot ${i < workerCount ? 'active' : ''}"></div>
+                `).join('');
+                const currentNeedHtml = currentNeeds.length > 0
+                    ? currentNeeds.slice(0, 5).map(need => `
+                        <div class="factory-ingredient-tile" data-need-type="${need.type}" title="${this.escapeHtml(this.getIngredientDisplayName(need.type))}">
+                            <div class="factory-ingredient-frame">
+                                <div class="factory-ingredient-icon">${this.getIngredientIcon(need.type)}</div>
                             </div>
-                            <div class="factory-output-stockpile" title="${outputStockpileName}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; height: 56px; border-radius: 10px; border: 1.5px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.35); box-sizing: border-box; padding: 6px 8px;">
-                                <div style="font-size: 10px; color: rgba(255,255,255,0.38); font-weight: 900; letter-spacing: 1px;">屯積</div>
-                                <div style="display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; color: #ffffff; font-size: 18px; font-weight: 900; font-family: 'Arial Black', sans-serif; text-shadow: 0 2px 4px rgba(0,0,0,0.65);">
-                                    <span class="factory-output-stockpile-icon" style="font-size: 18px; line-height: 1;">${outputStockpile ? this.getIngredientIcon(outputStockpile.type) : '📦'}</span>
-                                    <span class="factory-output-stockpile-value" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${outputStockpile ? Math.floor(outputStockpile.amount || 0) : 0}</span>
-                                </div>
-                            </div>
+                            <div class="factory-ingredient-count">${need.required}</div>
                         </div>
-                    </section>
+                    `).join('')
+                    : `<div class="factory-empty-note">選擇產品</div>`;
+
+                gridHtml += `<div class="factory-production-panel">`;
+                gridHtml += `
+                    <div class="factory-craft-wrap">
+                        <div class="factory-section-label factory-outside-label">材料生產</div>
+                        <section class="factory-craft-section">
+                        <div class="factory-craft-row">
+                            <div class="factory-product-tile" title="${this.escapeHtml(currentRecipeName)}">
+                                <div class="factory-product-frame">
+                                    ${currentRecipe ? `<button class="factory-product-clear" type="button" onclick="window.UIManager.clearFactoryProduct(event)">×</button>` : ''}
+                                    <div class="factory-product-icon">${currentRecipe ? this.getIngredientIcon(currentRecipe.type) : ''}</div>
+                                </div>
+                                <div class="factory-product-count">${currentRecipe ? `${productAmount}` : '選擇產品'}</div>
+                            </div>
+                            <div class="factory-arrow-stack">
+                                <span></span><span></span><span></span>
+                            </div>
+                            <div class="factory-ingredient-list">${currentNeedHtml}</div>
+                        </div>
+                        </section>
+                    </div>
+                    <div class="factory-worker-wrap">
+                        <div class="factory-section-label factory-outside-label">工人派駐</div>
+                        <section class="factory-worker-panel">
+                        <div class="factory-efficiency">效率：${efficiency}%</div>
+                        <div class="factory-worker-dots">${workerDots}</div>
+                        <div class="factory-worker-footer">
+                            <strong class="factory-worker-count">${workerCount}/${workerMax}</strong>
+                            <button class="factory-dismiss-btn" onclick="window.UIManager.dismissWorkers(event)">解散</button>
+                            <button class="factory-adjust-btn" onclick="window.UIManager.adjustWorkers(event, -1)">－</button>
+                        </div>
+                        </section>
+                    </div>
                 `;
 
-                gridHtml += `<section style="width: 100%; border: 2px solid rgba(11,84,143,0.9); border-radius: 14px; background: rgba(96,96,96,0.9); padding: 10px 18px; box-sizing: border-box; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-start;">`;
+                gridHtml += `<div class="factory-section-label factory-outside-label factory-menu-label">材料選單</div>`;
+                gridHtml += `<section class="factory-recipe-section">`;
                 recipes.forEach(rec => {
                     const isUnlocked = rec.isUnlocked;
                     const isCrafting = entity.currentRecipe && (entity.currentRecipe.uid ? entity.currentRecipe.uid === rec.uid : entity.currentRecipe.type === rec.type);
-                    const opacity = isUnlocked ? "1" : "0.4";
-                    const filter = isUnlocked ? "none" : "grayscale(100%)";
-                    const activeStyle = isCrafting ? "outline: 3px solid #ffeb3b; box-shadow: 0 0 0 2px rgba(255,235,59,0.35), 0 0 10px rgba(255,235,59,0.55); border-radius: 7px;" : "";
+                    const opacity = isUnlocked ? '1' : '0.4';
+                    const filter = isUnlocked ? 'none' : 'grayscale(100%)';
                     const name = formatRecipeName(rec.type);
                     const icon = this.getIngredientIcon(rec.type);
-                    const needInfo = getRecipeNeedInfo(rec.type);
+                    const needInfo = this.getRecipeNeeds(rec.type, inputBuffer)[0] || { label: '0 / 0', progress: 0 };
+                    const pct = Math.round(needInfo.progress * 100);
 
                     gridHtml += `
-                        <button class="recipe-btn" data-uid="${rec.uid}" data-type="${rec.type}" onclick="window.UIManager.selectRecipe(event, '${rec.uid}', '${rec.type}')"
-                                style="position: relative; width: 68px; min-height: 76px; padding: 3px 4px; border: 0; border-radius: 7px; background: ${isCrafting ? 'rgba(255,235,59,0.16)' : 'transparent'}; color: #fff; cursor: ${isUnlocked ? 'pointer' : 'not-allowed'}; opacity: ${opacity}; filter: ${filter}; text-align: center; font-family: inherit; box-sizing: border-box; ${activeStyle}"
-                                ${isUnlocked ? '' : 'disabled'} title="${isUnlocked ? `${name}：${needInfo.label}` : '建築等級不足，尚未解鎖'}">
-                            <div style="font-size: 12px; line-height: 14px; font-weight: 800; margin-bottom: 2px; height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${name}</div>
-                            <div class="recipe-icon-frame" style="width: 40px; height: 40px; margin: 0 auto 3px; border: 2px solid ${isCrafting ? '#ffeb3b' : 'rgba(139,110,75,0.55)'}; border-radius: 6px; background: ${isCrafting ? 'rgba(255,235,59,0.14)' : 'rgba(255,255,255,0.05)'}; color: #e8e1d4; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);">
-                                <div style="font-size: 24px; line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.4));">${icon}</div>
-                            </div>
-                            <div class="recipe-material-ratio" data-recipe-type="${rec.type}" style="font-size: 12px; line-height: 14px; font-weight: 900; color: #fff; text-shadow: 0 2px 3px rgba(0,0,0,0.65);">${needInfo.label}</div>
+                        <button class="recipe-btn ${isCrafting ? 'is-active' : ''}" data-uid="${rec.uid}" data-type="${rec.type}" onclick="window.UIManager.selectRecipe(event, '${rec.uid}', '${rec.type}')"
+                                style="opacity:${opacity}; filter:${filter}; --recipe-progress:${pct}%;"
+                                ${isUnlocked ? '' : 'disabled'} title="${isUnlocked ? `${this.escapeHtml(name)}：${needInfo.label}` : '建築等級不足，尚未解鎖'}">
+                            <div class="recipe-icon-frame"><div>${icon}</div></div>
                         </button>
                     `;
                 });
                 gridHtml += `</section>`;
                 gridHtml += `</div>`;
+
+
             }
         }
         gridHtml += `</div>`; // 結束指令按鈕格網 (action_button_grid)
@@ -2555,9 +2618,9 @@ export class UIManager {
         if (hasActions) {
             if (isProcessingPlant) {
                 menu.style.height = "auto";
-                menu.style.width = "620px";
-                menu.style.minWidth = "620px";
-                menu.style.maxWidth = "620px";
+                menu.style.width = "680px";
+                menu.style.minWidth = "680px";
+                menu.style.maxWidth = "680px";
                 menu.style.overflow = "visible";
             } else if (cfg.height) {
                 menu.style.height = typeof cfg.height === 'number' ? `${cfg.height}px` : cfg.height;
@@ -2642,7 +2705,10 @@ export class UIManager {
         } else {
             menu.style.display = "flex";
             if (!cfg.anchor) {
-                menu.style.left = "-9999px"; menu.style.top = "-9999px";
+                if (!keepFactoryMenuPosition) {
+                    menu.style.left = "-9999px";
+                    menu.style.top = "-9999px";
+                }
             }
         }
 
@@ -2654,7 +2720,17 @@ export class UIManager {
         }
 
         this.updateValues();
-        requestAnimationFrame(() => this.updateStickyPositions());
+        requestAnimationFrame(() => {
+            if (keepFactoryMenuPosition) {
+                const currentMenu = document.getElementById("context_menu");
+                if (currentMenu) {
+                    currentMenu.style.left = previousLeft;
+                    currentMenu.style.top = previousTop;
+                }
+                return;
+            }
+            this.updateStickyPositions();
+        });
     }
 
     static confirmDestroy(event) {
@@ -2704,8 +2780,27 @@ export class UIManager {
         if (rec && rec.isUnlocked) {
             SynthesisSystem.setCraftingTarget(GameEngine.state, GameEngine, targetEntity, rec);
             this.activeMenuEntity = targetEntity;
-            this.showContextMenu(targetEntity); // 點擊後刷新選單顯示高亮狀態
+            this.showContextMenu(targetEntity, false, true); // 點擊後刷新選單顯示高亮狀態
         }
+    }
+
+    static clearFactoryProduct(event) {
+        if (event) {
+            event.stopPropagation();
+            event.preventDefault();
+        }
+        if (!this.activeMenuEntity) return;
+        const activeId = this.activeMenuEntity.id || `${this.activeMenuEntity.type1}_${this.activeMenuEntity.x}_${this.activeMenuEntity.y}`;
+        const targetEntity = GameEngine.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === activeId) || this.activeMenuEntity;
+        targetEntity.currentRecipe = null;
+        targetEntity.craftingProgress = 0;
+        targetEntity.isCraftingActive = false;
+        targetEntity.inputBuffer = {};
+        targetEntity.manualRecipeCleared = true;
+        targetEntity._autoRecipeLogKey = null;
+        targetEntity._lastMissingIngredientsLog = null;
+        this.activeMenuEntity = targetEntity;
+        this.showContextMenu(targetEntity, false, true);
     }
 
     static dismissWorkers(event) {
@@ -3174,10 +3269,13 @@ export class UIManager {
 
     static showLogisticsMenu(sourceEnt, targetId, mouseX, mouseY, lineId = null) {
         this.hideContextMenu();
-        const connForLine = sourceEnt?.outputTargets?.find(t => t.id === targetId) || null;
-        const groupId = connForLine?.lineId || null;
+        if (!sourceEnt) return;
+        const outputTargets = Array.isArray(sourceEnt?.outputTargets) ? sourceEnt.outputTargets : [];
+        const connForLine = outputTargets.find(t => t.id === targetId) || null;
+        const hintedSegment = lineId ? this.getLogisticsLineById(lineId) : null;
+        const groupId = connForLine?.lineId || hintedSegment?.groupId || null;
         const selectedSegment = lineId ? this.getLogisticsLineById(lineId) : (groupId ? this.getLogisticsLineById(groupId) : null);
-        const selectedLineId = selectedSegment?.id || null;
+        const selectedLineId = selectedSegment ? this.getLogisticsLineSelectionKey(selectedSegment) : null;
         this.activeLogisticsConnection = { source: sourceEnt, targetId: targetId, lineId: selectedLineId, groupId };
         this.activeLogisticsLine = selectedSegment;
         GameEngine.state.selectedLogisticsLineId = selectedLineId;
@@ -3219,47 +3317,86 @@ export class UIManager {
             if (sourceEnt.outputBuffer) availableItems = [...new Set([...availableItems, ...Object.keys(sourceEnt.outputBuffer)])];
         }
         availableItems = [...new Set(availableItems)];
-        const conn = sourceEnt.outputTargets.find(t => t.id === targetId);
+        const conn = outputTargets.find(t => t.id === targetId) || null;
         if (conn && conn.filter && availableItems.length > 0 && !availableItems.includes(conn.filter)) {
             conn.filter = null;
             if (conn.lineId) {
                 this.setLogisticsGroupFilter(conn.lineId, null);
             }
         }
-        const currentFilter = conn ? conn.filter : null;
+        const currentFilter = conn ? conn.filter : (selectedSegment?.filter || null);
         const helperText = isProcessingPlantSource
             ? (sourceEnt.currentRecipe
-                ? `這裡只控制這條物流線要搬什麼。目前加工廠生產線為：${GameEngine.RESOURCE_NAMES[sourceEnt.currentRecipe.type] || sourceEnt.currentRecipe.type}。`
-                : `這裡只控制這條物流線要搬什麼。此加工廠尚未設定生產線，因此不應在這裡看到可量產成品。`)
-            : '這裡只控制這條物流線要搬什麼，不會自動設定加工廠的生產線。未設定品項前，物流線不會通行。';
-        let html = `<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 5px; gap: 20px;"><span style="color: #4caf50; font-weight: bold; font-size: 15px;">設定此物流線搬運品項</span><button onclick="window.UIManager.deleteLogisticsLine(event)" style="background: #f44336; color: white; border: 1px solid #ff8a80; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-weight: bold; font-size: 12px;">刪除連線 ✖</button></div><div style="font-size: 12px; color: #c8e6c9; margin-bottom: 8px; line-height: 1.45;">${helperText}</div><div style="display: flex; flex-wrap: wrap; gap: 6px; max-width: 280px;">`;
+                ? `此物流線已實體化。選擇材料後，工人會自動運輸；目前生產線為 ${this.escapeHtml(this.getIngredientDisplayName(sourceEnt.currentRecipe.type))}。`
+                : `此物流線已實體化。請先在生產界面設定主要材料，再選擇要自動運輸的材料。`)
+            : '此物流線已實體化，可被點擊、選取與刪除。設定材料後，派駐工人會自動開始運輸。';
+        let html = `
+            <div class="logistics-node-menu">
+                <div class="logistics-node-header">
+                    <div>
+                        <div class="logistics-node-title">物流線節點</div>
+                        <div class="logistics-node-status">${currentFilter ? `自動運輸：${this.escapeHtml(this.getIngredientDisplayName(currentFilter))}` : '尚未設定運輸材料'}</div>
+                    </div>
+                    <button class="logistics-delete-btn" onclick="window.UIManager.deleteLogisticsLine(event)">刪除連線 ✖</button>
+                </div>
+                <div class="logistics-node-help">${helperText}</div>
+                <div class="logistics-filter-title">自動運輸材料</div>
+                <div class="logistics-filter-list">
+        `;
         if (!currentFilter) {
-            html += `<div style="width: 100%; color: #ffca28; font-size: 12px; font-weight: bold; margin-bottom: 2px;">尚未設定品項，物流線目前不通</div>`;
+            html += `<div class="logistics-empty-note">選擇一種材料後會立刻開始自動運輸。</div>`;
         }
         availableItems.forEach(item => {
             const cfg = GameEngine.state.ingredientConfigs ? GameEngine.state.ingredientConfigs[item] : null;
             const displayName = (cfg && cfg.name) ? cfg.name : (GameEngine.RESOURCE_NAMES[item] || item);
-            html += `<button onclick="window.UIManager.setLogisticsFilter(event, '${item}')" style="padding: 6px 12px; background: ${currentFilter === item ? '#4caf50' : '#333'}; color: white; border: 1px solid #555; border-radius: 4px; cursor: pointer;">${displayName}</button>`;
+            html += `
+                <button class="logistics-filter-btn ${currentFilter === item ? 'is-active' : ''}" onclick="window.UIManager.setLogisticsFilter(event, '${item}')">
+                    <span>${this.getIngredientIcon(item)}</span>
+                    <strong>${this.escapeHtml(displayName)}</strong>
+                </button>
+            `;
         });
-        menu.innerHTML = html + `</div>`; menu.style.display = "flex";
-        menu.style.left = `${Math.min(mouseX + 15, window.innerWidth - 300)}px`; menu.style.top = `${Math.min(mouseY - 20, window.innerHeight - 200)}px`;
+        if (availableItems.length === 0) {
+            html += `<div class="logistics-empty-note">目前沒有可運輸材料。</div>`;
+        }
+        menu.innerHTML = html + `</div></div>`;
+        menu.style.display = "flex";
+        menu.style.left = `${Math.min(mouseX + 15, window.innerWidth - 430)}px`;
+        menu.style.top = `${Math.min(mouseY - 20, window.innerHeight - 190)}px`;
+
     }
 
     static showLogisticsLineMenu(line, mouseX, mouseY) {
         if (!line) return;
+        const sourceEnt = this.getLogisticsLineSourceEntity(line);
+        if (sourceEnt) {
+            this.showLogisticsMenu(sourceEnt, line.targetId || null, mouseX, mouseY, line.id);
+            return;
+        }
         this.hideContextMenu();
         this.activeLogisticsLine = line;
         this.activeLogisticsConnection = null;
-        GameEngine.state.selectedLogisticsLineId = line.id;
+        GameEngine.state.selectedLogisticsLineId = this.getLogisticsLineSelectionKey(line);
         let menu = document.getElementById("logistics_menu");
         if (!menu) {
             menu = document.createElement("div"); menu.id = "logistics_menu"; menu.className = "panel glass-panel";
             menu.style.cssText = `position: absolute; z-index: 2000; padding: 15px; display: flex; flex-direction: column; gap: 10px; background: rgba(20,20,20,0.95); border: 2px solid #4caf50; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); pointer-events: auto;`;
             this.uiLayer.appendChild(menu);
         }
-        menu.innerHTML = `<div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 5px; gap: 20px;"><span style="color: #4caf50; font-weight: bold; font-size: 15px;">物流線節點</span><button onclick="window.UIManager.deleteLogisticsLine(event)" style="background: #f44336; color: white; border: 1px solid #ff8a80; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-weight: bold; font-size: 12px;">刪除連線 ✖</button></div><div style="font-size: 12px; color: #c8e6c9; margin-bottom: 4px; line-height: 1.45;">此物流線已實體化，可被點擊、選取與刪除。地板終點可作為後續分段建造的節點。</div>`;
+        menu.innerHTML = `
+            <div class="logistics-node-menu">
+                <div class="logistics-node-header">
+                    <div>
+                        <div class="logistics-node-title">物流線節點</div>
+                        <div class="logistics-node-status">已選取線段</div>
+                    </div>
+                    <button class="logistics-delete-btn" onclick="window.UIManager.deleteLogisticsLine(event)">刪除連線 ✖</button>
+                </div>
+                <div class="logistics-node-help">此物流線已實體化，可被點擊、選取與刪除。地板終點可作為後續分段建造的節點。</div>
+            </div>
+        `;
         menu.style.display = "flex";
-        menu.style.left = `${Math.min(mouseX + 15, window.innerWidth - 300)}px`;
+        menu.style.left = `${Math.min(mouseX + 15, window.innerWidth - 430)}px`;
         menu.style.top = `${Math.min(mouseY - 20, window.innerHeight - 160)}px`;
     }
 
@@ -3285,14 +3422,25 @@ export class UIManager {
     static setLogisticsFilter(event, filterItem) {
         if (event) event.stopPropagation();
         if (this.activeLogisticsConnection) {
-            const conn = this.activeLogisticsConnection.source.outputTargets.find(t => t.id === this.activeLogisticsConnection.targetId);
+            const outputTargets = Array.isArray(this.activeLogisticsConnection.source?.outputTargets)
+                ? this.activeLogisticsConnection.source.outputTargets
+                : [];
+            const conn = outputTargets.find(t => t.id === this.activeLogisticsConnection.targetId);
             if (conn) {
                 conn.filter = filterItem;
                 if (conn.lineId) {
                     this.setLogisticsGroupFilter(conn.lineId, filterItem);
                 }
-                const filterName = GameEngine.RESOURCE_NAMES[filterItem] || filterItem;
-                GameEngine.addLog(`[物流] 路線搬運品項已更新：${filterName}。這只影響搬運，不會改變加工廠生產線。`, 'LOGISTICS');
+            } else if (this.activeLogisticsConnection.groupId) {
+                this.setLogisticsGroupFilter(this.activeLogisticsConnection.groupId, filterItem);
+                if (this.activeLogisticsLine) this.activeLogisticsLine.filter = filterItem;
+            }
+            if (conn || this.activeLogisticsConnection.groupId) {
+                const filterName = this.getIngredientDisplayName(filterItem);
+                GameEngine.addLog(`[物流] 路線搬運品項已更新：${filterName}。`, 'LOGISTICS');
+                if (GameEngine.workerSystem && typeof GameEngine.workerSystem.updateWorkerAssignments === 'function') {
+                    GameEngine.workerSystem.updateWorkerAssignments();
+                }
             }
             const menu = document.getElementById('logistics_menu');
             if (menu) this.showLogisticsMenu(this.activeLogisticsConnection.source, this.activeLogisticsConnection.targetId, parseInt(menu.style.left) - 15, parseInt(menu.style.top) + 20);
@@ -3301,7 +3449,7 @@ export class UIManager {
 
     static deleteLogisticsLine(event) {
         if (event) event.stopPropagation();
-        if (this.activeLogisticsConnection && !this.activeLogisticsConnection.groupId && this.activeLogisticsConnection.source) {
+        if (this.activeLogisticsConnection && !this.activeLogisticsConnection.groupId && Array.isArray(this.activeLogisticsConnection.source?.outputTargets)) {
             this.activeLogisticsConnection.source.outputTargets = this.activeLogisticsConnection.source.outputTargets.filter(t => t.id !== this.activeLogisticsConnection.targetId);
             GameEngine.addLog(`[物流] 路線已刪除`, 'LOGISTICS');
         } else {
@@ -3512,7 +3660,7 @@ export class UIManager {
 
                 if (this.lastUIState.factoryPanel !== factoryPanelState || forceUpdate) {
                     this.lastUIState.factoryPanel = factoryPanelState;
-                    this.showContextMenu(factoryEnt, false);
+                    this.showContextMenu(factoryEnt, false, true);
                     return;
                 }
 
@@ -3529,34 +3677,33 @@ export class UIManager {
                     }
                 }
 
-                const productionFill = menu.querySelector(".factory-production-fill");
-                const productionText = menu.querySelector(".factory-production-text");
+                const productionFill = null;
+                const productionText = menu.querySelector(".factory-countdown-text");
                 const materialRatio = menu.querySelector(".factory-material-ratio");
                 const outputStockpileIcon = menu.querySelector(".factory-output-stockpile-icon");
                 const outputStockpileValue = menu.querySelector(".factory-output-stockpile-value");
                 const outputStockpileBox = menu.querySelector(".factory-output-stockpile");
                 const productionProgress = factoryEnt.currentRecipe ? Math.max(0, Math.min(1, factoryEnt.craftingProgress || 0)) : 0;
-                if (productionFill) {
-                    const lastProgress = parseFloat(productionFill.dataset.progress || "0");
-                    if (productionProgress + 0.02 < lastProgress) {
-                        productionFill.style.transition = "none";
-                        productionFill.style.transform = "scaleX(0)";
-                        productionFill.offsetHeight;
-                        productionFill.style.transition = "transform 0.08s linear";
-                    }
-                    productionFill.dataset.progress = String(productionProgress);
-                    productionFill.style.transform = `scaleX(${productionProgress})`;
+                const currentIcon = menu.querySelector(".factory-current-icon");
+                if (currentIcon) {
+                    currentIcon.style.setProperty("--remain-deg", `${Math.round((1 - productionProgress) * 360)}deg`);
                 }
-                if (productionText) {
-                    productionText.textContent = this.formatProductionCountdown(factoryEnt);
+                const factoryWorkers = this.getFactoryWorkers(factoryEnt);
+                const workerDots = menu.querySelectorAll(".factory-worker-dot");
+                if (workerDots.length > 0) {
+                    workerDots.forEach((dot, index) => {
+                        dot.classList.toggle("active", index < factoryWorkers.length);
+                    });
                 }
-                if (materialRatio && factoryEnt.currentRecipe) {
-                    const ingCfg = GameEngine.state.ingredientConfigs
-                        ? GameEngine.state.ingredientConfigs[String(factoryEnt.currentRecipe.type || '').toLowerCase()]
-                        : null;
-                    const needs = ingCfg && ingCfg.need_ingredients ? ingCfg.need_ingredients : {};
-                    const needKey = Object.keys(needs)[0];
-                    materialRatio.textContent = needKey ? `${(factoryEnt.inputBuffer || {})[needKey] || 0} / ${needs[needKey] || 0}` : "0 / 0";
+                const workerCount = menu.querySelector(".factory-worker-count");
+                if (workerCount) {
+                    const workerMax = Math.max(1, cfg.need_villagers || 5);
+                    workerCount.textContent = `${Math.min(workerMax, factoryWorkers.length)}/${workerMax}`;
+                }
+                const efficiency = menu.querySelector(".factory-efficiency");
+                if (efficiency) {
+                    const workerMax = Math.max(1, cfg.need_villagers || 5);
+                    efficiency.textContent = `效率：${Math.round((Math.min(workerMax, factoryWorkers.length) / workerMax) * 100)}%`;
                 }
                 if (outputStockpileIcon || outputStockpileValue || outputStockpileBox) {
                     const outputStockpile = this.getFactoryOutputStockpileInfo(factoryEnt);
@@ -3604,18 +3751,20 @@ export class UIManager {
                 // 2. 更新當前生產進度
                 if (prog) {
                     const isCrafting = factoryEnt.currentRecipe && factoryEnt.currentRecipe.type === type;
+                    const progFill = prog.querySelector("span") || prog;
                     if (isCrafting) {
                         const p = Math.min(100, (factoryEnt.craftingProgress || 0) * 100);
-                        prog.style.width = `${p}%`;
+                        progFill.style.width = `${p}%`;
                         prog.style.display = "block";
                     } else {
-                        prog.style.width = "0%";
-                        prog.style.display = "none";
+                        progFill.style.width = "0%";
+                        prog.style.display = "block";
                     }
                 }
 
                 // 3. 更新按鈕邊框高亮 (Active 狀態)
                 const isCrafting = factoryEnt.currentRecipe && factoryEnt.currentRecipe.type === type;
+                btn.classList.toggle("is-active", !!isCrafting);
                 btn.style.background = isCrafting ? "rgba(255,235,59,0.16)" : "transparent";
                 btn.style.outline = isCrafting ? "3px solid #ffeb3b" : "none";
                 btn.style.boxShadow = isCrafting
@@ -3668,6 +3817,8 @@ export class UIManager {
         if (this.activeMenuEntity) {
             const menu = document.getElementById("context_menu");
             const scene = window.PhaserScene;
+            const activeCfg = GameEngine.getBuildingConfig(this.activeMenuEntity.type1, this.activeMenuEntity.lv || 1);
+            const isProcessingPlantMenu = !!(activeCfg && activeCfg.type2 === "processing_plant");
             // Phaser 的 scrollX 表示畫面往右移，所以在螢幕空間中：螢幕座標 = 世界座標 - scrollX
             const cam = scene ? { x: scene.cameras.main.scrollX, y: scene.cameras.main.scrollY } : { x: 0, y: 0 };
             const cfg = UI_CONFIG.ActionMenu;
@@ -3700,8 +3851,9 @@ export class UIManager {
                     finalX = sx - menuWidth - (cfg.offsetX || 15);
                 }
 
-                // 2. 垂直檢查：如果底部超出虛擬邊界，改往上顯示
-                if (finalY + menuHeight > virtualHeight - 20) {
+                // 2. 垂直檢查：一般選單底部超出才翻到上方
+                // 加工廠選單固定同一側，避免清除/重選產品時因高度變化跳位
+                if (!isProcessingPlantMenu && finalY + menuHeight > virtualHeight - 20) {
                     finalY = sy - menuHeight - (cfg.offsetY || 100);
                 }
 

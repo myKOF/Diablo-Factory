@@ -150,6 +150,416 @@ html {
     box-shadow: 0 0 10px rgba(255, 87, 34, 0.5);
 }
 
+.factory-production-panel {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 188px;
+    grid-template-areas:
+        "craft workers"
+        "label label"
+        "recipes recipes";
+    gap: 8px 12px;
+    background: transparent;
+    padding: 0;
+    color: #e8e1d4;
+}
+
+.factory-craft-wrap {
+    grid-area: craft;
+}
+
+.factory-worker-wrap {
+    grid-area: workers;
+}
+
+.factory-craft-section,
+.factory-worker-panel,
+.factory-recipe-section {
+    border: 2px solid rgba(58, 91, 113, 0.95);
+    background: rgba(18, 21, 20, 0.9);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 6px 18px rgba(0, 0, 0, 0.38);
+    box-sizing: border-box;
+}
+
+.factory-craft-section {
+    min-height: 110px;
+    padding: 10px;
+    position: relative;
+}
+
+.factory-section-label {
+    color: rgba(235, 226, 204, 0.58);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.factory-outside-label {
+    margin: 0 0 5px 2px;
+}
+
+.factory-craft-row {
+    height: 86px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.factory-product-tile,
+.factory-ingredient-tile {
+    position: relative;
+    width: 58px;
+    height: 82px;
+    flex: 0 0 58px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 0;
+    color: #fff;
+    font-weight: 900;
+    box-sizing: border-box;
+    text-align: center;
+}
+
+.factory-product-frame,
+.factory-ingredient-frame {
+    width: 58px;
+    height: 58px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    box-sizing: border-box;
+}
+
+.factory-product-frame {
+    background: rgba(93, 64, 55, 0.86);
+    border: 2px solid #c59a79;
+}
+
+.factory-ingredient-frame {
+    background: rgba(38, 73, 48, 0.9);
+    border: 2px solid rgba(129, 199, 132, 0.65);
+}
+
+.factory-product-clear {
+    position: absolute;
+    top: -11px;
+    right: -11px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid #9ed6d6;
+    background: #263238;
+    color: #ff6b61;
+    font-size: 20px;
+    line-height: 17px;
+    font-weight: 900;
+    padding: 0;
+}
+
+.factory-product-icon,
+.factory-ingredient-icon {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    flex: 0 0 36px;
+    aspect-ratio: 1 / 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 27px;
+    line-height: 1;
+    overflow: hidden;
+}
+
+.factory-product-icon img,
+.factory-ingredient-icon img,
+.recipe-icon-frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+}
+
+.factory-product-count,
+.factory-ingredient-count {
+    margin-top: 4px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+    text-shadow: 0 2px 3px #000;
+    line-height: 1;
+    min-height: 12px;
+    display: block;
+}
+
+.factory-arrow-stack {
+    display: flex;
+    gap: 0;
+    flex: 0 0 58px;
+    height: 42px;
+    align-items: center;
+    justify-content: center;
+}
+
+.factory-arrow-stack span {
+    width: 0;
+    height: 0;
+    border-top: 15px solid transparent;
+    border-bottom: 15px solid transparent;
+    border-right: 18px solid #4fc3f7;
+    filter: drop-shadow(1px 0 0 #0d5b7e);
+    margin-left: -4px;
+}
+
+.factory-ingredient-list {
+    min-width: 0;
+    display: flex;
+    gap: 8px;
+    overflow: hidden;
+}
+
+.factory-worker-panel {
+    min-height: 110px;
+    padding: 11px 10px 8px;
+}
+
+.factory-efficiency {
+    margin-top: 7px;
+    color: #e0f2f1;
+    font-size: 13px;
+    font-weight: 900;
+}
+
+.factory-worker-dots {
+    display: flex;
+    gap: 7px;
+    margin: 8px 0 9px;
+}
+
+.factory-worker-dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    border: 2px solid rgba(207, 216, 220, 0.85);
+    box-sizing: border-box;
+}
+
+.factory-worker-dot.active {
+    background: #32b5e8;
+}
+
+.factory-worker-footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.factory-worker-count {
+    color: #76ff03;
+    font-size: 17px;
+    min-width: 36px;
+}
+
+.factory-dismiss-btn {
+    width: 62px;
+    height: 26px;
+    border: 2px solid #8b6e4b;
+    background: #5b2b24;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.factory-adjust-btn {
+    width: 28px;
+    height: 26px;
+    border: 2px solid #8b6e4b;
+    background: #3d2922;
+    color: #f2d6af;
+    font-size: 16px;
+    font-weight: 900;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.factory-menu-label {
+    grid-area: label;
+    margin-top: 2px;
+}
+
+.factory-recipe-section {
+    grid-area: recipes;
+    min-height: 184px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, 52px);
+    align-content: start;
+    gap: 7px;
+    padding: 11px 8px;
+    background: rgba(20, 28, 19, 0.94);
+    overflow: hidden;
+}
+
+.recipe-btn {
+    width: 52px;
+    height: 49px;
+    padding: 6px 3px;
+    border: 1px solid rgba(139, 110, 75, 0.58);
+    background: rgba(255, 255, 255, 0.05);
+    color: #fff;
+    cursor: pointer;
+    text-align: center;
+    font-family: inherit;
+    box-sizing: border-box;
+    position: relative;
+}
+
+.recipe-btn.is-active {
+    outline: 2px solid #ffeb3b;
+    background: rgba(255, 235, 59, 0.14);
+    box-shadow: 0 0 0 1px rgba(255, 235, 59, 0.35), 0 0 10px rgba(255, 235, 59, 0.42);
+}
+
+.recipe-icon-frame {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    aspect-ratio: 1 / 1;
+    margin: 0 auto;
+    border: 0;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+}
+
+.recipe-btn.is-active .recipe-icon-frame {
+    border-color: transparent;
+}
+
+.recipe-icon-frame div {
+    font-size: 27px;
+    line-height: 1;
+    filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.45));
+}
+
+.logistics-node-menu {
+    width: 372px;
+    min-width: 372px;
+    color: #d9ead7;
+}
+
+.logistics-node-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(76, 175, 80, 0.28);
+}
+
+.logistics-node-title {
+    color: #4caf50;
+    font-size: 16px;
+    font-weight: 900;
+    line-height: 1.2;
+}
+
+.logistics-node-status {
+    margin-top: 5px;
+    color: rgba(216, 238, 211, 0.74);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.logistics-delete-btn {
+    flex: 0 0 auto;
+    min-width: 82px;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid #ff8a80;
+    background: #ef4438;
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 900;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.logistics-node-help {
+    padding: 12px 0 10px;
+    color: #c8e6c9;
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.logistics-filter-title {
+    color: rgba(200, 230, 201, 0.66);
+    font-size: 12px;
+    font-weight: 900;
+    margin-bottom: 7px;
+}
+
+.logistics-filter-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    max-width: 100%;
+}
+
+.logistics-filter-btn {
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: #303634;
+    color: #f4fff1;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.logistics-filter-btn span {
+    font-size: 17px;
+    line-height: 1;
+}
+
+.logistics-filter-btn strong {
+    max-width: 116px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.logistics-filter-btn:hover,
+.logistics-filter-btn.is-active {
+    border-color: #57d166;
+    background: #255f31;
+    box-shadow: 0 0 10px rgba(76, 175, 80, 0.28);
+}
+
+.logistics-empty-note {
+    width: 100%;
+    padding: 7px 9px;
+    border: 1px solid rgba(255, 202, 40, 0.22);
+    background: rgba(255, 202, 40, 0.08);
+    color: #ffca28;
+    font-size: 12px;
+    font-weight: 800;
+    box-sizing: border-box;
+}
+
 .action-btn.upgrade-btn {
     background: linear-gradient(145deg, #1b5e20, #1b5e20);
     border-color: #2e7d32;
