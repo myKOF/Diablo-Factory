@@ -23,6 +23,7 @@ export class ConveyorSystem {
             : sourcePort;
         const resolvedStartX = currentSourcePort && Number.isFinite(currentSourcePort.x) ? currentSourcePort.x : startX;
         const resolvedStartY = currentSourcePort && Number.isFinite(currentSourcePort.y) ? currentSourcePort.y : startY;
+        const isLineExtension = currentSourcePort?.sourceType === "logistics_line" || !!sourceLine;
 
         const rows = grid.length;
         const cols = grid[0].length;
@@ -45,8 +46,9 @@ export class ConveyorSystem {
             bendMode: 'x-first',
             lastWorldPoint: null,
             // [核心修復] 使用方向偏好，確保右/下端口座標歸入建築格網
-            startGrid: this.toGrid(resolvedStartX, resolvedStartY, currentSourcePort?.dir),
+            startGrid: this.toGrid(resolvedStartX, resolvedStartY, isLineExtension ? null : currentSourcePort?.dir),
             routeWidth,
+            isLineExtension,
             directionLocked: false // [核心新增] 是否已鎖定移動方向
         };
 
@@ -72,6 +74,7 @@ export class ConveyorSystem {
 
     getPortAnchorGrid(port, portGrid) {
         if (!port || !port.dir || !portGrid) return portGrid;
+        if (port.sourceType === "logistics_line") return portGrid;
         // [核心優化] 使用 Router 的向量計算方法
         const dir = this.router.getDirectionVector(port.dir);
         const routeScale = this.getRouteScale();
@@ -261,7 +264,8 @@ export class ConveyorSystem {
 
         const widthOffsets = this.router.getWidthOffsets(this.activeDrag.routeWidth);
 
-        const routePath = this.router.findPath(sourceRouteGrid, targetRouteGrid, this.activeDrag.sourcePort?.dir, this.activeDrag.bendMode, widthOffsets);
+        const routeStartDir = this.activeDrag.isLineExtension ? null : this.activeDrag.sourcePort?.dir;
+        const routePath = this.router.findPath(sourceRouteGrid, targetRouteGrid, routeStartDir, this.activeDrag.bendMode, widthOffsets);
         const path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
 
         // [核心修復] 處理 N-1 渲染落差：如果是拖曳到空地，順著最後方向延伸一個虛擬節點，迫使渲染器畫滿游標當前格
