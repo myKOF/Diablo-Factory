@@ -775,6 +775,7 @@ export const UI_CONFIG = {
         arrowSpacing: 20,               // 箭頭之間的間距
 
         // --- 其它 ---
+        portSnapRangeTiles: 0.5,         // 物流拖曳時端口磁吸半徑（單位：格）
         depth: 150                       // 渲染深度 (位於地面之上，單位之下)
     },
 

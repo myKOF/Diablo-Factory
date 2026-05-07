@@ -35,6 +35,9 @@ export class ConveyorSystem {
         this.router = new ConveyorRouter(routeGrid, cols * routeScale, rows * routeScale, UI_CONFIG.ConveyorBuild);
         this.router.tileSize = this.getGridUnitSize();
 
+        const initialBendMode = isLineExtension
+            ? ((currentSourcePort?.dir === 'up' || currentSourcePort?.dir === 'down') ? 'y-first' : 'x-first')
+            : 'x-first';
         this.activeDrag = {
             startX: resolvedStartX,
             startY: resolvedStartY,
@@ -43,10 +46,10 @@ export class ConveyorSystem {
             sourceLine,
             targetBuilding: null,
             targetPort: null,
-            bendMode: 'x-first',
+            bendMode: initialBendMode,
             lastWorldPoint: null,
             // [核心修復] 使用方向偏好，確保右/下端口座標歸入建築格網
-            startGrid: this.toGrid(resolvedStartX, resolvedStartY, isLineExtension ? null : currentSourcePort?.dir),
+            startGrid: this.toGrid(resolvedStartX, resolvedStartY, currentSourcePort?.dir),
             routeWidth,
             isLineExtension,
             directionLocked: false // [核心新增] 是否已鎖定移動方向
@@ -311,9 +314,11 @@ export class ConveyorSystem {
             return { x: currentX, y: currentY, building: null, port: null };
         }
 
-        const preferredDir = this.activeDrag.sourcePort?.dir
-            ? window.UIManager?.getOppositeDirection?.(this.activeDrag.sourcePort.dir)
-            : null;
+        const preferredDir = this.activeDrag.isLineExtension
+            ? null
+            : (this.activeDrag.sourcePort?.dir
+                ? window.UIManager?.getOppositeDirection?.(this.activeDrag.sourcePort.dir)
+                : null);
         const targetPort = window.UIManager?.getNearestPortSlot(
             targetBuilding,
             currentX,

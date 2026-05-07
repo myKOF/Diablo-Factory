@@ -38,6 +38,7 @@ export class UIManager {
         let startEX, startEY;
 
         const handleMouseDown = (e) => {
+            if (e.button !== 0) return;
             if (e.target.tagName === "BUTTON" || e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.closest('.no-drag')) {
                 return;
             }
@@ -1907,7 +1908,7 @@ export class UIManager {
             return;
         }
 
-        if (e.target.closest("#ui_layer")) return;
+        if (e.target.closest("#ui_layer") && e.button !== 2) return;
 
         // 記錄按下的座標，用於在 MouseUp 時判斷是否為「點擊」還是「拖動畫面」
         if (e.button === 2) {
@@ -2246,6 +2247,9 @@ export class UIManager {
         const cfg_current = GameEngine.getBuildingConfig(entity.type1, entity.lv || 1);
         const canAssignWorkers = cfg_current && (cfg_current.need_villagers > 0 || (cfg_current.logistics && (cfg_current.logistics.canInput || cfg_current.logistics.canOutput)));
         const isProcessingPlant = cfg_current && cfg_current.type2 === 'processing_plant';
+        menu.classList.toggle("factory-context-menu", !!isProcessingPlant);
+        menu.style.transformOrigin = isProcessingPlant ? "50% 100%" : "top left";
+        menu.style.scale = isProcessingPlant ? "0.75" : "1";
         const keepFactoryMenuPosition = !!(
             preservePosition ||
             (isProcessingPlant &&
@@ -3365,8 +3369,23 @@ export class UIManager {
         }
         menu.innerHTML = html + `</div></div>`;
         menu.style.display = "flex";
-        menu.style.left = `${Math.min(mouseX + 15, window.innerWidth - 430)}px`;
-        menu.style.top = `${Math.min(mouseY - 20, window.innerHeight - 190)}px`;
+        const savedPos = this.uiPositions?.[menu.dataset.dragId];
+        if (savedPos) {
+            menu.style.left = savedPos.left;
+            menu.style.top = savedPos.top;
+        } else {
+            const menuWidth = menu.offsetWidth || 420;
+            const menuHeight = menu.offsetHeight || 220;
+            const rightPadding = 24;
+            const x = Math.max(16, window.innerWidth - menuWidth - rightPadding);
+            const y = Math.max(16, Math.round((window.innerHeight - menuHeight) / 2));
+            menu.style.left = `${x}px`;
+            menu.style.top = `${y}px`;
+        }
+        menu.style.right = "auto";
+        menu.style.bottom = "auto";
+        menu.style.transform = "none";
+        menu.style.margin = "0";
 
     }
 
@@ -3402,8 +3421,23 @@ export class UIManager {
             </div>
         `;
         menu.style.display = "flex";
-        menu.style.left = `${Math.min(mouseX + 15, window.innerWidth - 430)}px`;
-        menu.style.top = `${Math.min(mouseY - 20, window.innerHeight - 160)}px`;
+        const savedPos = this.uiPositions?.[menu.dataset.dragId];
+        if (savedPos) {
+            menu.style.left = savedPos.left;
+            menu.style.top = savedPos.top;
+        } else {
+            const menuWidth = menu.offsetWidth || 420;
+            const menuHeight = menu.offsetHeight || 180;
+            const rightPadding = 24;
+            const x = Math.max(16, window.innerWidth - menuWidth - rightPadding);
+            const y = Math.max(16, Math.round((window.innerHeight - menuHeight) / 2));
+            menu.style.left = `${x}px`;
+            menu.style.top = `${y}px`;
+        }
+        menu.style.right = "auto";
+        menu.style.bottom = "auto";
+        menu.style.transform = "none";
+        menu.style.margin = "0";
     }
 
     static getGatheringLogisticsItems(sourceEnt, sourceCfg) {
@@ -3836,6 +3870,9 @@ export class UIManager {
             // 取得選單寬高 (由於在縮放內部，這裡得到的 offsetWidth 也是虛擬像素)
             const menuWidth = menu.offsetWidth || cfg.width || 380;
             const menuHeight = menu.offsetHeight || cfg.height || 95;
+            const factoryScale = isProcessingPlantMenu ? 0.75 : 1;
+            const visualMenuWidth = menuWidth * factoryScale;
+            const visualMenuHeight = menuHeight * factoryScale;
 
             // 虛擬畫面的邊界
             const virtualWidth = 1920;
@@ -3853,19 +3890,19 @@ export class UIManager {
                 // --- 邊界檢查與反向邏輯 (針對 1920x1080) ---
 
                 // 1. 水平檢查：如果右側超出虛擬邊界，改往左顯示
-                if (finalX + menuWidth > virtualWidth - 20) {
-                    finalX = sx - menuWidth - (cfg.offsetX || 15);
+                if (finalX + visualMenuWidth > virtualWidth - 20) {
+                    finalX = sx - visualMenuWidth - (cfg.offsetX || 15);
                 }
 
                 // 2. 垂直檢查：一般選單底部超出才翻到上方
                 // 加工廠選單固定同一側，避免清除/重選產品時因高度變化跳位
-                if (!isProcessingPlantMenu && finalY + menuHeight > virtualHeight - 20) {
+                if (!isProcessingPlantMenu && finalY + visualMenuHeight > virtualHeight - 20) {
                     finalY = sy - menuHeight - (cfg.offsetY || 100);
                 }
 
                 // 3. 全域安全區域確保 (防止跑出 1920x1080 範圍)
-                finalX = Math.max(20, Math.min(finalX, virtualWidth - menuWidth - 20));
-                finalY = Math.max(20, Math.min(finalY, virtualHeight - menuHeight - 20));
+                finalX = Math.max(20, Math.min(finalX, virtualWidth - visualMenuWidth - 20));
+                finalY = Math.max(20, Math.min(finalY, virtualHeight - visualMenuHeight - 20));
 
                 menu.style.left = `${finalX}px`;
                 menu.style.top = `${finalY}px`;
