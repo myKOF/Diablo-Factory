@@ -11,6 +11,7 @@ export class ConveyorSystem {
         this.pendingDragPoint = null;
         this.isDragFrameQueued = false;
         this.lastRouteKey = null;
+        this.logisticsOccupiedKeys = new Set();
     }
 
     startDrag(startX, startY, sourceEntity = null, sourcePort = null, sourceLine = null) {
@@ -34,6 +35,7 @@ export class ConveyorSystem {
         // [核心重構] 傳入 UI_CONFIG 作為初始化參數，解除 Router 的外部依賴
         this.router = new ConveyorRouter(routeGrid, cols * routeScale, rows * routeScale, UI_CONFIG.ConveyorBuild);
         this.router.tileSize = this.getGridUnitSize();
+        this.logisticsOccupiedKeys = this.collectLogisticsOccupiedKeys(sourceLine);
 
         const initialBendMode = isLineExtension
             ? ((currentSourcePort?.dir === 'up' || currentSourcePort?.dir === 'down') ? 'y-first' : 'x-first')
@@ -118,6 +120,62 @@ export class ConveyorSystem {
         }
 
         return path;
+    }
+
+    dedupeExtensionStart(path) {
+        if (!this.activeDrag?.isLineExtension || !this.activeDrag?.sourceLine || !Array.isArray(path) || path.length < 2) {
+            return path;
+        }
+        const line = this.activeDrag.sourceLine;
+        const route = Array.isArray(line.routePoints) ? line.routePoints : [];
+        if (route.length < 2) return path;
+
+        const occupied = new Set();
+        for (let i = 0; i < route.length - 1; i++) {
+            const a = this.toGrid(route[i].x, route[i].y);
+            const b = this.toGrid(route[i + 1].x, route[i + 1].y);
+            const dx = Math.sign(b.x - a.x);
+            const dy = Math.sign(b.y - a.y);
+            const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y), 1);
+            for (let step = 0; step <= steps; step++) {
+                occupied.add(`${a.x + dx * step},${a.y + dy * step}`);
+            }
+        }
+
+        const startKey = `${path[0].x},${path[0].y}`;
+        if (!occupied.has(startKey)) return path;
+        return path.slice(1);
+    }
+
+    collectLogisticsOccupiedKeys(ignoreLine = null) {
+        const keys = new Set();
+        const lines = GameEngine.state.logisticsLines || [];
+        const addKey = (x, y) => keys.add(`${x},${y}`);
+        lines.forEach(line => {
+            if (ignoreLine && (line.id === ignoreLine.id || line.groupId === ignoreLine.groupId)) return;
+            const width = Math.max(1, Number(line.routeWidth) || 1);
+            const points = Array.isArray(line.routePoints) && line.routePoints.length >= 2
+                ? line.routePoints
+                : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = this.toGrid(points[i].x, points[i].y);
+                const b = this.toGrid(points[i + 1].x, points[i + 1].y);
+                const dx = Math.sign(b.x - a.x);
+                const dy = Math.sign(b.y - a.y);
+                const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y), 1);
+                const ghosts = [];
+                for (let step = 0; step <= steps; step++) {
+                    ghosts.push({
+                        x: a.x + dx * step,
+                        y: a.y + dy * step,
+                        dirOut: { x: dx, y: dy },
+                        dirIn: { x: dx, y: dy }
+                    });
+                }
+                this.router.getGhostOccupiedCells(ghosts, width).forEach(cell => addKey(cell.x, cell.y));
+            }
+        });
+        return keys;
     }
 
     markLineOnGrid(routeGrid, line) {
@@ -245,12 +303,12 @@ export class ConveyorSystem {
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
 
         this.router.onCollision = (gx, gy) => {
-            // [核心優化] Chebyshev 距離「安全氣泡」：端口周圍 3 格內免除碰撞
-            const sourceDist = Math.max(Math.abs(gx - sourcePortGrid.x), Math.abs(gy - sourcePortGrid.y));
-            if (sourceDist <= Math.max(3, scale)) return true;
-
-            const targetDist = Math.max(Math.abs(gx - targetPortGrid.x), Math.abs(gy - targetPortGrid.y));
-            if (targetDist <= Math.max(3, scale)) return true;
+            // Allow only exact anchor cells to bypass occupancy.
+            if (gx === sourcePortGrid.x && gy === sourcePortGrid.y) return true;
+            if (gx === targetPortGrid.x && gy === targetPortGrid.y) return true;
+            // In extension mode, existing logistics cells are pass-through only.
+            // They still won't be rebuilt because upsert skips occupied segments.
+            if (this.activeDrag?.isLineExtension && this.logisticsOccupiedKeys?.has(`${gx},${gy}`)) return true;
 
             const wx = (gx + offset.x * scale) * gridUnit + gridUnit / 2;
             const wy = (gy + offset.y * scale) * gridUnit + gridUnit / 2;
@@ -269,7 +327,8 @@ export class ConveyorSystem {
 
         const routeStartDir = this.activeDrag.isLineExtension ? null : this.activeDrag.sourcePort?.dir;
         const routePath = this.router.findPath(sourceRouteGrid, targetRouteGrid, routeStartDir, this.activeDrag.bendMode, widthOffsets);
-        const path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
+        let path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
+        path = this.dedupeExtensionStart(path);
 
         // [核心修復] 處理 N-1 渲染落差：如果是拖曳到空地，順著最後方向延伸一個虛擬節點，迫使渲染器畫滿游標當前格
         if (!dragTarget.port && path && path.length >= 2) {
@@ -389,6 +448,7 @@ export class ConveyorSystem {
                     if (!conn.filter && drag.sourceLine?.filter) conn.filter = drag.sourceLine.filter;
                 }
             }
+            const beforeCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : 0;
             const createdLine = window.UIManager.upsertLogisticsLine({
                 lineId: drag.sourceLine?.groupId || null,
                 sourceEnt: sourceEntity,
@@ -403,7 +463,9 @@ export class ConveyorSystem {
             if (drag.sourceLine?.filter && createdLine?.groupId) {
                 window.UIManager.setLogisticsGroupFilter(createdLine.groupId, drag.sourceLine.filter);
             }
-            GameEngine.addLog(`[物流] 傳送帶建造完成，共 ${Math.max(1, this.ghosts.length - 1)} 節。`, 'LOGISTICS');
+            const afterCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : beforeCount;
+            const builtSegments = Math.max(0, afterCount - beforeCount);
+            GameEngine.addLog(`[物流] 傳送帶建造完成，共 ${builtSegments} 節。`, 'LOGISTICS');
         }
 
         this.cancelDrag();
@@ -415,6 +477,7 @@ export class ConveyorSystem {
         this.pendingDragPoint = null;
         this.isDragFrameQueued = false;
         this.lastRouteKey = null;
+        this.logisticsOccupiedKeys = new Set();
         if (this.router) this.router.onCollision = null;
         if (GameEngine.state) {
             GameEngine.state.conveyorGhosts = [];

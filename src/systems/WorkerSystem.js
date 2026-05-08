@@ -1528,12 +1528,45 @@ export class WorkerSystem {
 
     getLogisticsLinePoints(source, target) {
         if (!source || !target) return null;
+        const sourceId = source.id || `${source.type1}_${source.x}_${source.y}`;
+        const targetId = target.id || `${target.type1}_${target.x}_${target.y}`;
+        const directConn = Array.isArray(source.outputTargets)
+            ? source.outputTargets.find(conn => conn && conn.id === targetId)
+            : null;
+
+        if (directConn) {
+            let routePoints = Array.isArray(directConn.routePoints) && directConn.routePoints.length >= 2
+                ? directConn.routePoints.map(p => ({ x: p.x, y: p.y }))
+                : null;
+            if ((!routePoints || routePoints.length < 2) && directConn.lineId && Array.isArray(this.state.logisticsLines)) {
+                const segs = this.state.logisticsLines
+                    .filter(line => line && (line.groupId === directConn.lineId || line.id === directConn.lineId))
+                    .sort((a, b) => (a.order || 0) - (b.order || 0));
+                if (segs.length > 0) {
+                    routePoints = [];
+                    segs.forEach((seg, idx) => {
+                        const segPts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
+                        if (segPts.length < 2) return;
+                        if (idx === 0) routePoints.push({ x: segPts[0].x, y: segPts[0].y });
+                        routePoints.push({ x: segPts[1].x, y: segPts[1].y });
+                    });
+                }
+            }
+            if (Array.isArray(routePoints) && routePoints.length >= 2) {
+                return {
+                    start: { ...routePoints[0] },
+                    end: { ...routePoints[routePoints.length - 1] },
+                    points: routePoints,
+                    sourceId,
+                    targetId
+                };
+            }
+        }
 
         let sx = source.x;
         let sy = source.y;
         let ex = target.x;
         let ey = target.y;
-        const sourceId = source.id || `${source.type1}_${source.x}_${source.y}`;
         const isReciprocal = target.outputTargets && target.outputTargets.find(conn => conn.id === sourceId);
 
         if (isReciprocal) {
@@ -1554,7 +1587,7 @@ export class WorkerSystem {
 
         const start = this.getBuildingLineExitPoint(source, { x: sx, y: sy }, { x: ex, y: ey });
         const end = this.getBuildingLineExitPoint(target, { x: ex, y: ey }, { x: sx, y: sy });
-        return { start, end };
+        return { start, end, points: [start, end], sourceId, targetId };
     }
 
     getBuildingLineExitPoint(building, from, to) {
@@ -1623,22 +1656,70 @@ export class WorkerSystem {
     moveAlongLogisticsLine(v, source, target, destination, speed, dt, ignoreEnts = []) {
         const line = this.getLogisticsLinePoints(source, target);
         if (!line) return null;
+        const basePoints = Array.isArray(line.points) && line.points.length >= 2
+            ? line.points.map(p => ({ x: p.x, y: p.y }))
+            : [line.start, line.end];
+        const points = destination === 'source' ? basePoints.slice().reverse() : basePoints;
+        const to = points[points.length - 1];
+        if (!to || points.length < 2) return to || null;
 
-        const from = destination === 'source' ? line.end : line.start;
-        const to = destination === 'source' ? line.start : line.end;
-        const dx = to.x - from.x;
-        const dy = to.y - from.y;
-        const lenSq = dx * dx + dy * dy;
-        if (lenSq <= 0.01) return to;
+        const segmentLengths = [];
+        let totalLength = 0;
+        for (let i = 0; i < points.length - 1; i++) {
+            const dx = points[i + 1].x - points[i].x;
+            const dy = points[i + 1].y - points[i].y;
+            const len = Math.hypot(dx, dy);
+            segmentLengths.push(len);
+            totalLength += len;
+        }
+        if (totalLength <= 0.01) return to;
 
-        const t = Math.max(0, Math.min(1, ((v.x - from.x) * dx + (v.y - from.y) * dy) / lenSq));
-        const len = Math.sqrt(lenSq);
-        const lookAhead = Math.min(120, Math.max(50, speed * 0.9));
-        const nextT = Math.min(1, t + lookAhead / len);
-        let guidePoint = {
-            x: from.x + dx * nextT,
-            y: from.y + dy * nextT
+        const nearestDistanceOnPolyline = (x, y) => {
+            let bestDistSq = Number.POSITIVE_INFINITY;
+            let bestAlong = 0;
+            let along = 0;
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                const sx = b.x - a.x;
+                const sy = b.y - a.y;
+                const lenSq = sx * sx + sy * sy;
+                if (lenSq <= 0.0001) {
+                    along += segmentLengths[i] || 0;
+                    continue;
+                }
+                const t = Math.max(0, Math.min(1, ((x - a.x) * sx + (y - a.y) * sy) / lenSq));
+                const px = a.x + sx * t;
+                const py = a.y + sy * t;
+                const dSq = (x - px) * (x - px) + (y - py) * (y - py);
+                if (dSq < bestDistSq) {
+                    bestDistSq = dSq;
+                    bestAlong = along + (segmentLengths[i] || 0) * t;
+                }
+                along += segmentLengths[i] || 0;
+            }
+            return bestAlong;
         };
+
+        const pointAtDistance = (distance) => {
+            let remain = Math.max(0, Math.min(totalLength, distance));
+            for (let i = 0; i < points.length - 1; i++) {
+                const segLen = segmentLengths[i] || 0;
+                const a = points[i];
+                const b = points[i + 1];
+                if (segLen <= 0.0001) continue;
+                if (remain <= segLen) {
+                    const t = remain / segLen;
+                    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+                }
+                remain -= segLen;
+            }
+            return { ...to };
+        };
+
+        const currentDistance = nearestDistanceOnPolyline(v.x, v.y);
+        const lookAhead = Math.min(120, Math.max(50, speed * 0.9));
+        let guidePoint = pointAtDistance(currentDistance + lookAhead);
 
         if (this.state.pathfinding) {
             const gx = Math.floor(guidePoint.x / 20);

@@ -375,6 +375,10 @@ export class MainScene extends Phaser.Scene {
             this.isMiddleDragging = false;
             this.dragStartPos = null;
         };
+        const cancelRightDrag = () => {
+            this.isRightDragging = false;
+            this.rightDragStartPos = null;
+        };
 
         // 核心設定：地圖範圍邊界
         const mapRect = this.getMapWorldRect();
@@ -405,6 +409,7 @@ export class MainScene extends Phaser.Scene {
             if (window.UIManager && window.UIManager.dragGhost) return;
 
             const isMiddleDrag = pointer.middleButtonDown();
+            const isRightDrag = pointer.rightButtonDown();
 
             if (pointer.leftButtonDown() && !isPlacement && !isMiddleDrag) {
                 this.selectionStartPos = this.screenToWorldPoint(pointer.x, pointer.y);
@@ -414,6 +419,11 @@ export class MainScene extends Phaser.Scene {
             if (isMiddleDrag) {
                 this.isMiddleDragging = true;
                 this.dragStartPos = { x: pointer.x, y: pointer.y };
+                lastPointer = { x: pointer.x, y: pointer.y };
+            }
+            if (isRightDrag && isPlacement) {
+                this.isRightDragging = true;
+                this.rightDragStartPos = { x: pointer.x, y: pointer.y };
                 lastPointer = { x: pointer.x, y: pointer.y };
             }
         });
@@ -429,6 +439,20 @@ export class MainScene extends Phaser.Scene {
             if (this.isMiddleDragging && this.dragStartPos) {
                 if (!pointer.middleButtonDown()) {
                     cancelMiddleDrag();
+                    lastPointer = { x: pointer.x, y: pointer.y };
+                    return;
+                }
+
+                const dx = pointer.x - lastPointer.x;
+                const dy = pointer.y - lastPointer.y;
+                const zoom = cam.zoom || 1;
+                cam.scrollX -= dx / zoom;
+                cam.scrollY -= dy / zoom;
+                this.lastManualDragTime = Date.now();
+            }
+            if (this.isRightDragging && this.rightDragStartPos) {
+                if (!pointer.rightButtonDown() || !GameEngine.state.placingType) {
+                    cancelRightDrag();
                     lastPointer = { x: pointer.x, y: pointer.y };
                     return;
                 }
@@ -461,6 +485,11 @@ export class MainScene extends Phaser.Scene {
                     return;
                 }
                 cancelMiddleDrag();
+            } else if (pointer.button === 2) { // Right button
+                if (pointer.event && (pointer.event.buttons & 2) !== 0) {
+                    return;
+                }
+                cancelRightDrag();
             }
         });
 
@@ -475,6 +504,11 @@ export class MainScene extends Phaser.Scene {
                     return;
                 }
                 cancelMiddleDrag();
+            } else if (e.button === 2) {
+                if ((e.buttons & 2) !== 0) {
+                    return;
+                }
+                cancelRightDrag();
             }
         };
         window.addEventListener('mousemove', globalMove);
@@ -781,23 +815,34 @@ export class MainScene extends Phaser.Scene {
                 );
             };
 
-            const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null) => {
+            const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false) => {
                 const baseThickness = logCfg.lineThickness || 3;
                 const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE * 0.8);
-                const lColor = !isConnected
-                    ? (logCfg.disconnectedLineColor || "#6b6b6b")
-                    : (isSelected ? (logCfg.selectedLineColor || "#ffff00") : logCfg.lineColor);
-                const lAlpha = !isConnected
-                    ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha)
-                    : (isSelected ? (logCfg.selectedLineAlpha || 1.0) : logCfg.lineAlpha);
+                const usePortToPortStyle = !!isPortToPort;
+                const lColor = isSelected
+                    ? (logCfg.selectedLineColor || "#ffff00")
+                    : (usePortToPortStyle
+                        ? (logCfg.portToPortLineColor || logCfg.lineColor)
+                        : (!isConnected ? (logCfg.disconnectedLineColor || "#6b6b6b") : logCfg.lineColor));
+                const lAlpha = isSelected
+                    ? (logCfg.selectedLineAlpha || 1.0)
+                    : (usePortToPortStyle
+                        ? (logCfg.portToPortLineAlpha ?? logCfg.lineAlpha)
+                        : (!isConnected ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha) : logCfg.lineAlpha));
                 this.logisticsGraphics.fillStyle(parseColor(lColor), lAlpha);
                 this.drawLogisticsCells(this.logisticsGraphics, points, widthTiles, 1);
                 const arrowRects = this.getLogisticsCellRects(points, widthTiles, true);
 
                 if (arrowRects.length > 0) {
-                    const arrowColor = isConnected ? logCfg.arrowColor : (logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
-                    const arrowAlpha = isConnected ? 0.9 : (logCfg.disconnectedArrowAlpha ?? 0.85);
-                    const arrowSize = isConnected ? (logCfg.arrowSize || 8) : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8);
+                    const arrowColor = usePortToPortStyle
+                        ? (logCfg.portToPortArrowColor || logCfg.arrowColor)
+                        : (!isConnected ? (logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a") : logCfg.arrowColor);
+                    const arrowAlpha = usePortToPortStyle
+                        ? (logCfg.portToPortArrowAlpha ?? 0.9)
+                        : (!isConnected ? (logCfg.disconnectedArrowAlpha ?? 0.85) : 0.9);
+                    const arrowSize = usePortToPortStyle
+                        ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 8)
+                        : (!isConnected ? (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8) : (logCfg.arrowSize || 8));
                     this.logisticsGraphics.fillStyle(parseColor(arrowColor), arrowAlpha);
                     arrowRects.forEach((rect) => {
                         const adx = rect.dirX !== undefined ? rect.dirX : 0;
@@ -818,6 +863,172 @@ export class MainScene extends Phaser.Scene {
                 }
             };
 
+            const groupSegments = new Map();
+            if (Array.isArray(state.logisticsLines)) {
+                state.logisticsLines.forEach((line) => {
+                    if (!line) return;
+                    const groupKey = line.groupId || line.id;
+                    if (!groupSegments.has(groupKey)) groupSegments.set(groupKey, []);
+                    groupSegments.get(groupKey).push(line);
+                });
+            }
+
+            const portToPortConnectedGroupIds = new Set();
+            const portToPortCandidateGroupIds = new Set();
+            const makeNodeKey = (p) => `${Math.round(p.x)},${Math.round(p.y)}`;
+            const getNodePoint = (key) => {
+                const [x, y] = String(key).split(",").map(Number);
+                return { x, y };
+            };
+            const getNearbyNodeKeys = (point, nodeKeys, maxSnap) => {
+                if (!point || !Array.isArray(nodeKeys) || nodeKeys.length === 0) return [];
+                const scored = [];
+                for (const key of nodeKeys) {
+                    const np = getNodePoint(key);
+                    const d = Math.hypot(np.x - point.x, np.y - point.y);
+                    if (d <= maxSnap) scored.push({ key, d });
+                }
+                scored.sort((a, b) => a.d - b.d);
+                return scored.slice(0, 8).map((s) => s.key);
+            };
+            const hasDirectedPath = (adj, startKey, endKey) => {
+                if (!startKey || !endKey) return false;
+                if (startKey === endKey) return false;
+                const q = [startKey];
+                const visited = new Set([startKey]);
+                while (q.length > 0) {
+                    const cur = q.shift();
+                    const nexts = adj.get(cur);
+                    if (!nexts) continue;
+                    for (const next of nexts) {
+                        if (next === endKey) return true;
+                        if (visited.has(next)) continue;
+                        visited.add(next);
+                        q.push(next);
+                    }
+                }
+                return false;
+            };
+
+            groupSegments.forEach((segments, groupKey) => {
+                if (!Array.isArray(segments) || segments.length === 0) return;
+
+                const adj = new Map();
+                const incoming = new Set();
+                const outDegree = new Map();
+                const inDegree = new Map();
+                const nodeKeySet = new Set();
+                segments.forEach((seg) => {
+                    const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+                    if (pts.length < 2) return;
+                    const fromKey = makeNodeKey(pts[0]);
+                    const toKey = makeNodeKey(pts[1]);
+                    nodeKeySet.add(fromKey);
+                    nodeKeySet.add(toKey);
+                    if (!adj.has(fromKey)) adj.set(fromKey, new Set());
+                    adj.get(fromKey).add(toKey);
+                    incoming.add(toKey);
+                    outDegree.set(fromKey, (outDegree.get(fromKey) || 0) + 1);
+                    inDegree.set(toKey, (inDegree.get(toKey) || 0) + 1);
+                });
+
+                const nodeKeys = Array.from(nodeKeySet);
+                if (nodeKeys.length === 0) return;
+                const representative = segments.find((seg) => seg && seg.sourceId && seg.targetId) || null;
+                const sourceEnt = representative
+                    ? (state.mapEntities?.find((ent) => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === representative.sourceId) || null)
+                    : null;
+                const targetEnt = representative
+                    ? (state.mapEntities?.find((ent) => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === representative.targetId) || null)
+                    : null;
+
+                const terminalStarts = nodeKeys.filter((k) => (outDegree.get(k) || 0) > 0 && (inDegree.get(k) || 0) === 0);
+                const terminalEnds = nodeKeys.filter((k) => (inDegree.get(k) || 0) > 0 && (outDegree.get(k) || 0) === 0);
+                const fallbackStart = nodeKeys.filter((k) => (adj.get(k)?.size || 0) > 0);
+                const fallbackEnd = nodeKeys.filter((k) => incoming.has(k));
+                const startKeys = terminalStarts.length > 0 ? terminalStarts : fallbackStart;
+                const endKeys = terminalEnds.length > 0 ? terminalEnds : fallbackEnd;
+
+                const getPortOwnersNearNode = (nodeKey, wantOutput) => {
+                    if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return [];
+                    const nodePoint = getNodePoint(nodeKey);
+                    const maxSnap = GameEngine.TILE_SIZE * 1.1;
+                    const owners = [];
+                    (state.mapEntities || []).forEach((ent) => {
+                        if (!ent || ent.isUnderConstruction) return;
+                        const cfg = GameEngine.getEntityConfig(ent.type1) || {};
+                        const logisticCfg = cfg.logistics || {};
+                        if (wantOutput && !logisticCfg.canOutput) return;
+                        if (!wantOutput && !logisticCfg.canInput) return;
+                        const ports = window.UIManager.getBuildingPortSlots(ent);
+                        if (!Array.isArray(ports) || ports.length === 0) return;
+                        let best = Number.POSITIVE_INFINITY;
+                        for (const port of ports) {
+                            const d = Math.hypot(port.x - nodePoint.x, port.y - nodePoint.y);
+                            if (d < best) best = d;
+                        }
+                        if (best <= maxSnap) {
+                            owners.push({
+                                id: ent.id || `${ent.type1}_${ent.x}_${ent.y}`,
+                                dist: best
+                            });
+                        }
+                    });
+                    owners.sort((a, b) => a.dist - b.dist);
+                    return owners;
+                };
+
+                let connected = false;
+                portToPortCandidateGroupIds.add(groupKey);
+
+                // First: explicit source/target ids if available.
+                if (representative && sourceEnt && targetEnt) {
+                    const sourcePort = representative.sourcePort || null;
+                    const targetPort = representative.targetPort || null;
+                    const sourceSnap = sourcePort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
+                    const targetSnap = targetPort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
+                    const startKeysRaw = sourcePort
+                        ? getNearbyNodeKeys(sourcePort, nodeKeys, sourceSnap)
+                        : getNearbyNodeKeys({ x: sourceEnt.x, y: sourceEnt.y }, nodeKeys, sourceSnap);
+                    const endKeysRaw = targetPort
+                        ? getNearbyNodeKeys(targetPort, nodeKeys, targetSnap)
+                        : getNearbyNodeKeys({ x: targetEnt.x, y: targetEnt.y }, nodeKeys, targetSnap);
+                    const explicitStarts = startKeysRaw.filter((k) => (adj.get(k)?.size || 0) > 0);
+                    const explicitEnds = endKeysRaw.filter((k) => incoming.has(k));
+                    for (const sk of explicitStarts) {
+                        if (connected) break;
+                        for (const ek of explicitEnds) {
+                            if (hasDirectedPath(adj, sk, ek)) {
+                                connected = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Second: infer from actual terminal-to-terminal port ownership (works for multi-step extensions).
+                if (!connected) {
+                    for (const sk of startKeys) {
+                        if (connected) break;
+                        const sourceOwners = getPortOwnersNearNode(sk, true);
+                        if (sourceOwners.length === 0) continue;
+                        for (const ek of endKeys) {
+                            if (connected) break;
+                            if (!hasDirectedPath(adj, sk, ek)) continue;
+                            const targetOwners = getPortOwnersNearNode(ek, false);
+                            if (targetOwners.length === 0) continue;
+                            const hasDifferentPair = sourceOwners.some((s) => targetOwners.some((t) => t.id !== s.id));
+                            if (hasDifferentPair) {
+                                connected = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (connected) portToPortConnectedGroupIds.add(groupKey);
+            });
+
             if (Array.isArray(state.logisticsLines)) {
                 state.logisticsLines.forEach(line => {
                     let route = (window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function')
@@ -829,8 +1040,12 @@ export class MainScene extends Phaser.Scene {
                     const isSelected = window.UIManager && typeof window.UIManager.isSelectedLogisticsLine === 'function'
                         ? window.UIManager.isSelectedLogisticsLine(line)
                         : state.selectedLogisticsLineId === line.id;
+                    const groupKey = line.groupId || line.id;
+                    const isPortToPortConnected = portToPortConnectedGroupIds.has(groupKey);
+                    const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(line.sourceId && line.targetId);
+                    const isConnected = isPortToPortCandidate ? isPortToPortConnected : !!line.filter;
 
-                    drawLogisticsRoute(route.points, route.width || 1, isSelected, !!line.filter, line);
+                    drawLogisticsRoute(route.points, route.width || 1, isSelected, isConnected, line, isPortToPortConnected);
                 });
             }
 
@@ -851,7 +1066,8 @@ export class MainScene extends Phaser.Scene {
                                 const isSelected = (window.UIManager.activeLogisticsConnection &&
                                     window.UIManager.activeLogisticsConnection.source === ent &&
                                     window.UIManager.activeLogisticsConnection.targetId === conn.id);
-                                drawLogisticsRoute(points, route && route.width ? route.width : 1, isSelected, !!conn.filter);
+                                const isPortToPort = !!conn.id;
+                                drawLogisticsRoute(points, route && route.width ? route.width : 1, isSelected, !!conn.filter, null, isPortToPort);
                             }
                         });
                     }
@@ -1121,7 +1337,7 @@ export class MainScene extends Phaser.Scene {
         this.updateEdgeCursor(ex, ey, pointer, winW, winH);
 
         // 3. 執行全向捲動 (直線射線方向)
-        const isCurrentlyDragging = this.isMiddleDragging || (this.inputSystem && this.inputSystem.didMove);
+        const isCurrentlyDragging = this.isMiddleDragging || this.isRightDragging || (this.inputSystem && this.inputSystem.didMove);
         if ((ex !== 0 || ey !== 0) && !isCurrentlyDragging) {
             // [核心需求] 以中央座標到鼠標的位置的這個直線方向移動
             const centerX = winW / 2;

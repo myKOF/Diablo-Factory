@@ -1467,9 +1467,11 @@ export class UIManager {
     static getLogisticsSegmentOccupyKey(line) {
         if (!line) return null;
         const TS = GameEngine.TILE_SIZE;
-        const align = TS;
-        const gx = line.gridX !== undefined ? line.gridX : Math.floor(line.x / align);
-        const gy = line.gridY !== undefined ? line.gridY : Math.floor(line.y / align);
+        // Logistics segments are stored on half-tile grid (alignUnit: 0.5).
+        // Occupancy keys must use the same coordinate system as buildLogisticsSegments.
+        const align = TS / 2;
+        const gx = line.gridX !== undefined ? line.gridX : Math.round(line.x / align);
+        const gy = line.gridY !== undefined ? line.gridY : Math.round(line.y / align);
         return `${gx},${gy}`;
     }
 
@@ -1596,16 +1598,47 @@ export class UIManager {
         const filter = conn ? (conn.filter || null) : (previous?.filter || null);
         const segments = this.buildLogisticsSegments(groupId, sourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter);
         const occupied = new Map();
+        const occupiedTileCenters = new Set();
+        const getSegmentTileKeys = (seg) => {
+            const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+            if (points.length < 2) return [];
+            const TS = GameEngine.TILE_SIZE;
+            const eps = 0.001;
+            const keys = new Set();
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                if (!a || !b) continue;
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist < eps) continue;
+                const dirX = dx / dist;
+                const dirY = dy / dist;
+                const steps = Math.max(1, Math.round(dist / TS));
+                const stepSize = dist / steps;
+                for (let step = 0; step < steps; step++) {
+                    const px = a.x + dirX * stepSize * step;
+                    const py = a.y + dirY * stepSize * step;
+                    const snapped = this.snapPointToGridCenter({ x: px, y: py });
+                    keys.add(`${snapped.x},${snapped.y}`);
+                }
+            }
+            return Array.from(keys);
+        };
         lines.forEach(item => {
             this.getLogisticsSegmentOccupiedKeys(item).forEach(key => {
                 if (key && !occupied.has(key)) occupied.set(key, item);
             });
+            getSegmentTileKeys(item).forEach(key => occupiedTileCenters.add(key));
         });
         const additions = [];
         segments.forEach(segment => {
             const keys = this.getLogisticsSegmentOccupiedKeys(segment);
-            if (!keys.length || keys.some(key => occupied.has(key))) return;
+            const segmentTileKeys = getSegmentTileKeys(segment);
+            if (!keys.length || keys.some(key => occupied.has(key)) || segmentTileKeys.some(key => occupiedTileCenters.has(key))) return;
             keys.forEach(key => occupied.set(key, segment));
+            segmentTileKeys.forEach(key => occupiedTileCenters.add(key));
             additions.push(segment);
         });
         GameEngine.state.logisticsLines = lines.concat(additions);
@@ -1902,12 +1935,6 @@ export class UIManager {
     }
 
     static handleWorldMouseDown(e) {
-        if (e.button === 2 && this.cancelActiveConstructionPreview()) {
-            e.preventDefault();
-            e.stopPropagation();
-            return;
-        }
-
         if (e.target.closest("#ui_layer") && e.button !== 2) return;
 
         // 記錄按下的座標，用於在 MouseUp 時判斷是否為「點擊」還是「拖動畫面」

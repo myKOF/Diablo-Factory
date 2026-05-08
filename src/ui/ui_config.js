@@ -748,6 +748,8 @@ export const UI_CONFIG = {
         // --- 物流線顏色 ---
         lineColor: "#0077ffff",           // 已建立物流線的顏色
         lineAlpha: 0.6,                   // 已建立物流線的透明度，範圍 0~1
+        portToPortLineColor: "#00bcd4ff", // 端口對端口物流線顏色（兩個建築端口成功連接時）
+        portToPortLineAlpha: 0.75,        // 端口對端口物流線透明度，範圍 0~1
         disconnectedLineColor: "#6b6b6bff", // 未設定搬運品項時的物流線顏色；此狀態物流線不通
         disconnectedLineAlpha: 0.75,      // 未設定搬運品項時的物流線透明度，範圍 0~1
         selectedLineColor: "#a5f3ffff",   // 被選取物流線的顏色
@@ -766,6 +768,9 @@ export const UI_CONFIG = {
 
         // --- 物流線箭頭 ---
         arrowColor: "#00ffeeff",        // 物流線的箭頭顏色 
+        portToPortArrowColor: "#98f8b5ff", // 端口對端口接通物流線箭頭顏色
+        portToPortArrowAlpha: 0.95,       // 端口對端口物流線箭頭透明度，範圍 0~1
+        portToPortArrowSize: 12,          // 端口對端口物流線箭頭大小
         disconnectedArrowColor: "#9a9a9aff", // 未設定搬運品項時的箭頭顏色；箭頭會顯示但不流動
         disconnectedArrowAlpha: 0.85,    // 未設定搬運品項時的箭頭透明度，範圍 0~1
         arrowSize: 12,                   // 已建立物流線上的流動箭頭大小，範圍建議 6~24；只影響線上動畫箭頭
