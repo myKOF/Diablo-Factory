@@ -1598,7 +1598,15 @@ export class UIManager {
         const filter = conn ? (conn.filter || null) : (previous?.filter || null);
         const segments = this.buildLogisticsSegments(groupId, sourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter);
         const occupied = new Map();
-        const occupiedTileCenters = new Set();
+        const occupiedTileCenters = new Map();
+        const sameGroup = (seg) => !!seg && ((seg.groupId === groupId) || (seg.id === groupId));
+        const sameRoute = (a, b) => {
+            const ap = Array.isArray(a?.routePoints) ? a.routePoints : [];
+            const bp = Array.isArray(b?.routePoints) ? b.routePoints : [];
+            if (ap.length < 2 || bp.length < 2) return false;
+            return (ap[0].x === bp[0].x && ap[0].y === bp[0].y && ap[1].x === bp[1].x && ap[1].y === bp[1].y)
+                || (ap[0].x === bp[1].x && ap[0].y === bp[1].y && ap[1].x === bp[0].x && ap[1].y === bp[0].y);
+        };
         const getSegmentTileKeys = (seg) => {
             const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
             if (points.length < 2) return [];
@@ -1630,18 +1638,54 @@ export class UIManager {
             this.getLogisticsSegmentOccupiedKeys(item).forEach(key => {
                 if (key && !occupied.has(key)) occupied.set(key, item);
             });
-            getSegmentTileKeys(item).forEach(key => occupiedTileCenters.add(key));
+            getSegmentTileKeys(item).forEach(key => {
+                if (!occupiedTileCenters.has(key)) occupiedTileCenters.set(key, []);
+                occupiedTileCenters.get(key).push(item);
+            });
         });
         const additions = [];
         segments.forEach(segment => {
             const keys = this.getLogisticsSegmentOccupiedKeys(segment);
             const segmentTileKeys = getSegmentTileKeys(segment);
-            if (!keys.length || keys.some(key => occupied.has(key)) || segmentTileKeys.some(key => occupiedTileCenters.has(key))) return;
+            if (!keys.length) return;
+            const overlapsOtherGroup = keys.some((key) => {
+                const hit = occupied.get(key);
+                return hit && !sameGroup(hit);
+            });
+            if (overlapsOtherGroup) return;
+            const centerBlockedByOtherGroup = segmentTileKeys.some((key) => {
+                const hits = occupiedTileCenters.get(key) || [];
+                return hits.some(hit => !sameGroup(hit));
+            });
+            if (centerBlockedByOtherGroup) return;
+            const alreadySameRoute = lines.some(item => sameGroup(item) && sameRoute(item, segment));
+            if (alreadySameRoute) return;
             keys.forEach(key => occupied.set(key, segment));
-            segmentTileKeys.forEach(key => occupiedTileCenters.add(key));
+            segmentTileKeys.forEach(key => {
+                if (!occupiedTileCenters.has(key)) occupiedTileCenters.set(key, []);
+                occupiedTileCenters.get(key).push(segment);
+            });
             additions.push(segment);
         });
-        GameEngine.state.logisticsLines = lines.concat(additions);
+        const mergedLines = lines.concat(additions);
+
+        // [物流延伸修正] 同一群組在多次延伸後，舊段也必須同步最新端點/連線資訊，
+        // 否則渲染端在判定 port-to-port 接通時會讀到過期 metadata，導致誤顯示為未接通。
+        mergedLines.forEach((seg) => {
+            if (!seg) return;
+            const sameGroup = (seg.groupId === groupId) || (seg.id === groupId);
+            if (!sameGroup) return;
+            seg.groupId = groupId;
+            seg.sourceId = sourceId;
+            seg.targetId = targetId;
+            seg.targetPoint = targetId ? null : cleanTargetPoint;
+            seg.routeWidth = Math.max(1, Number(routeWidth) || 1);
+            if (cleanSourcePort) seg.sourcePort = cleanSourcePort;
+            if (cleanTargetPort) seg.targetPort = cleanTargetPort;
+            seg.filter = filter || null;
+        });
+
+        GameEngine.state.logisticsLines = mergedLines;
 
         if (conn) {
             conn.lineId = groupId;

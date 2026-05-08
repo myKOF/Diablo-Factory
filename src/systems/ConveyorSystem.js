@@ -144,7 +144,12 @@ export class ConveyorSystem {
 
         const startKey = `${path[0].x},${path[0].y}`;
         if (!occupied.has(startKey)) return path;
-        return path.slice(1);
+
+        // [轉彎延伸修正] 不再刪掉第一個重疊節點。
+        // 先前直接 slice(1) 會在「末端轉向延伸」時打亂半格節點的奇偶配對，
+        // 讓後續 buildLogisticsSegments 組段出現錯位，進而造成連通判定失真。
+        // 既有重疊段會由 upsertLogisticsLine 的 occupied 檢查自動略過，不需要在這裡裁切。
+        return path;
     }
 
     collectLogisticsOccupiedKeys(ignoreLine = null) {

@@ -914,6 +914,7 @@ export class MainScene extends Phaser.Scene {
                 if (!Array.isArray(segments) || segments.length === 0) return;
 
                 const adj = new Map();
+                const undirected = new Map();
                 const incoming = new Set();
                 const outDegree = new Map();
                 const inDegree = new Map();
@@ -927,6 +928,10 @@ export class MainScene extends Phaser.Scene {
                     nodeKeySet.add(toKey);
                     if (!adj.has(fromKey)) adj.set(fromKey, new Set());
                     adj.get(fromKey).add(toKey);
+                    if (!undirected.has(fromKey)) undirected.set(fromKey, new Set());
+                    if (!undirected.has(toKey)) undirected.set(toKey, new Set());
+                    undirected.get(fromKey).add(toKey);
+                    undirected.get(toKey).add(fromKey);
                     incoming.add(toKey);
                     outDegree.set(fromKey, (outDegree.get(fromKey) || 0) + 1);
                     inDegree.set(toKey, (inDegree.get(toKey) || 0) + 1);
@@ -981,6 +986,25 @@ export class MainScene extends Phaser.Scene {
                 let connected = false;
                 portToPortCandidateGroupIds.add(groupKey);
 
+                const hasUndirectedPath = (startKey, endKey) => {
+                    if (!startKey || !endKey) return false;
+                    if (startKey === endKey) return true;
+                    const q = [startKey];
+                    const visited = new Set([startKey]);
+                    while (q.length > 0) {
+                        const cur = q.shift();
+                        const nexts = undirected.get(cur);
+                        if (!nexts) continue;
+                        for (const next of nexts) {
+                            if (next === endKey) return true;
+                            if (visited.has(next)) continue;
+                            visited.add(next);
+                            q.push(next);
+                        }
+                    }
+                    return false;
+                };
+
                 // First: explicit source/target ids if available.
                 if (representative && sourceEnt && targetEnt) {
                     const sourcePort = representative.sourcePort || null;
@@ -1026,6 +1050,55 @@ export class MainScene extends Phaser.Scene {
                     }
                 }
 
+                // Fallback: 對於多段延伸後方向資料混雜的路線，
+                // 只要 source 端與 target 端在同一連通分量，就視為已接通。
+                if (!connected && representative && sourceEnt && targetEnt) {
+                    const sourcePort = representative.sourcePort || null;
+                    const targetPort = representative.targetPort || null;
+                    const sourceSnap = sourcePort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
+                    const targetSnap = targetPort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
+                    const startKeysRaw = sourcePort
+                        ? getNearbyNodeKeys(sourcePort, nodeKeys, sourceSnap)
+                        : getNearbyNodeKeys({ x: sourceEnt.x, y: sourceEnt.y }, nodeKeys, sourceSnap);
+                    const endKeysRaw = targetPort
+                        ? getNearbyNodeKeys(targetPort, nodeKeys, targetSnap)
+                        : getNearbyNodeKeys({ x: targetEnt.x, y: targetEnt.y }, nodeKeys, targetSnap);
+                    for (const sk of startKeysRaw) {
+                        if (connected) break;
+                        for (const ek of endKeysRaw) {
+                            if (hasUndirectedPath(sk, ek)) {
+                                connected = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Final fallback: 只要群組中存在「任一輸出建築端」到「任一輸入建築端」的同分量連通，
+                // 就判定為 port-to-port 連通，避免轉彎延伸時方向資料干擾造成誤判。
+                if (!connected) {
+                    const outputStarts = [];
+                    const inputEnds = [];
+                    nodeKeys.forEach((k) => {
+                        const outs = getPortOwnersNearNode(k, true);
+                        const ins = getPortOwnersNearNode(k, false);
+                        if (outs.length > 0) outputStarts.push({ key: k, owners: outs });
+                        if (ins.length > 0) inputEnds.push({ key: k, owners: ins });
+                    });
+                    for (const s of outputStarts) {
+                        if (connected) break;
+                        for (const t of inputEnds) {
+                            if (connected) break;
+                            if (!hasUndirectedPath(s.key, t.key)) continue;
+                            const hasDifferentPair = s.owners.some((so) => t.owners.some((ti) => ti.id !== so.id));
+                            if (hasDifferentPair) {
+                                connected = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 if (connected) portToPortConnectedGroupIds.add(groupKey);
             });
 
@@ -1048,6 +1121,27 @@ export class MainScene extends Phaser.Scene {
                     drawLogisticsRoute(route.points, route.width || 1, isSelected, isConnected, line, isPortToPortConnected);
                 });
             }
+
+            // 用整個群組拓撲畫轉角箭頭，避免單段 route（通常只有兩點）看不到轉彎。
+            const drawnTurnGroups = new Set();
+            groupSegments.forEach((groupSegs, groupKey) => {
+                if (!Array.isArray(groupSegs) || groupSegs.length === 0) return;
+                if (drawnTurnGroups.has(groupKey)) return;
+                const sample = groupSegs[0] || {};
+                const widthTiles = Math.max(1, Number(sample.routeWidth) || 1);
+                const connected = portToPortConnectedGroupIds.has(groupKey);
+                const color = connected
+                    ? parseColor(logCfg.portToPortArrowColor || logCfg.arrowColor || "#00ffee")
+                    : parseColor(logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
+                const alpha = connected
+                    ? (logCfg.portToPortArrowAlpha ?? 0.95)
+                    : (logCfg.disconnectedArrowAlpha ?? 0.85);
+                const size = connected
+                    ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 10)
+                    : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 10);
+                this.drawLogisticsGroupTurnArrows(this.logisticsGraphics, groupSegs, widthTiles, color, alpha, size);
+                drawnTurnGroups.add(groupKey);
+            });
 
             // 1. 建立冗餘連線地圖 (同時支援 ID 與座標查詢)
             if (state.mapEntities) {
@@ -3468,6 +3562,165 @@ export class MainScene extends Phaser.Scene {
         g.moveTo(x + ux * size, y + uy * size); // 頂點
         g.lineTo(x - ux * size * 0.5 + px, y - uy * size * 0.5 + py); // 底角 1
         g.lineTo(x - ux * size * 0.5 - px, y - uy * size * 0.5 - py); // 底角 2
+        g.closePath();
+        g.fillPath();
+    }
+
+    getCardinalDir(from, to) {
+        if (!from || !to) return null;
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+        if (Math.abs(dx) >= Math.abs(dy)) return { x: Math.sign(dx) || 1, y: 0 };
+        return { x: 0, y: Math.sign(dy) || 1 };
+    }
+
+    drawLogisticsTurnArrows(g, points, widthTiles, color, alpha, size) {
+        if (!Array.isArray(points) || points.length < 3) return;
+        const TS = GameEngine.TILE_SIZE;
+        const shaft = Math.max(4, Math.min(TS * 0.55, size * 1.1));
+        const halfLeg = Math.max(size * 0.7, TS * 0.28);
+        const lineWidth = Math.max(2, Math.min(TS * 0.35, Math.max(3, widthTiles * TS * 0.22)));
+        g.lineStyle(lineWidth, color, alpha);
+        g.fillStyle(color, alpha);
+
+        for (let i = 1; i < points.length - 1; i++) {
+            const prev = points[i - 1];
+            const curr = points[i];
+            const next = points[i + 1];
+            const inDir = this.getCardinalDir(prev, curr);
+            const outDir = this.getCardinalDir(curr, next);
+            if (!inDir || !outDir) continue;
+            const isTurn = inDir.x !== outDir.x || inDir.y !== outDir.y;
+            if (!isTurn) continue;
+
+            const startX = curr.x - inDir.x * halfLeg;
+            const startY = curr.y - inDir.y * halfLeg;
+            const endX = curr.x + outDir.x * halfLeg;
+            const endY = curr.y + outDir.y * halfLeg;
+
+            g.beginPath();
+            g.moveTo(startX, startY);
+            g.lineTo(curr.x, curr.y);
+            g.lineTo(endX, endY);
+            g.strokePath();
+
+            this.drawArrowhead(g, endX, endY, outDir.x, outDir.y, shaft);
+        }
+    }
+
+    drawLogisticsGroupTurnArrows(g, segments, widthTiles, color, alpha, size) {
+        if (!Array.isArray(segments) || segments.length === 0) return;
+        const keyOf = (p) => `${Math.round(p.x)},${Math.round(p.y)}`;
+        const pointOfKey = (k) => {
+            const [x, y] = String(k).split(",").map(Number);
+            return { x, y };
+        };
+        const incoming = new Map();
+        const outgoing = new Map();
+        const pushDir = (map, key, dir) => {
+            if (!map.has(key)) map.set(key, []);
+            map.get(key).push(dir);
+        };
+
+        segments.forEach((seg) => {
+            const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+            if (pts.length < 2) return;
+            const a = pts[0];
+            const b = pts[1];
+            const dir = this.getCardinalDir(a, b);
+            if (!dir) return;
+            const ak = keyOf(a);
+            const bk = keyOf(b);
+            pushDir(outgoing, ak, dir);
+            pushDir(incoming, bk, dir);
+        });
+
+        const allKeys = new Set([...incoming.keys(), ...outgoing.keys()]);
+        allKeys.forEach((k) => {
+            const inList = incoming.get(k) || [];
+            const outList = outgoing.get(k) || [];
+            if (inList.length === 0 || outList.length === 0) return;
+
+            let chosenIn = null;
+            let chosenOut = null;
+            for (const iDir of inList) {
+                for (const oDir of outList) {
+                    const collinear = (iDir.x === oDir.x && iDir.y === oDir.y) || (iDir.x === -oDir.x && iDir.y === -oDir.y);
+                    if (!collinear) {
+                        chosenIn = iDir;
+                        chosenOut = oDir;
+                        break;
+                    }
+                }
+                if (chosenIn && chosenOut) break;
+            }
+            if (!chosenIn || !chosenOut) return;
+
+            const p = pointOfKey(k);
+            const glyphSize = Math.max(GameEngine.TILE_SIZE * 0.9, size * 2.6);
+            this.drawTurnArrowGlyph(g, p.x, p.y, glyphSize, chosenIn, chosenOut, color, alpha);
+        });
+    }
+
+    drawTurnArrowGlyph(g, cx, cy, size, inDir, outDir, color, alpha) {
+        if (!inDir || !outDir) return;
+        const pair = `${inDir.x},${inDir.y}->${outDir.x},${outDir.y}`;
+        const map = {
+            "-1,0->0,-1": 0,
+            "0,1->1,0": 0,
+            "1,0->0,1": 0,
+            "0,-1->-1,0": 0,
+            "0,-1->1,0": 1,
+            "-1,0->0,1": 1,
+            "0,1->-1,0": 1,
+            "1,0->0,-1": 1,
+            "1,0->0,-1": 1,
+            "0,1->-1,0": 1,
+            "-1,0->0,1": 1,
+            "0,-1->1,0": 1,
+            "-1,0->0,1": 1,
+            "0,-1->1,0": 1,
+            "1,0->0,-1": 1,
+            "0,1->-1,0": 1,
+            "-1,0->0,-1": 2,
+            "0,1->1,0": 2,
+            "1,0->0,1": 2,
+            "0,-1->-1,0": 2,
+            "0,-1->-1,0": 3,
+            "1,0->0,1": 3,
+            "0,1->1,0": 3,
+            "-1,0->0,-1": 3
+        };
+        // 轉彎模板：以「左進上出」為基礎，透過旋轉得到其餘三向。
+        const rotQuarter = map[pair];
+        if (rotQuarter === undefined) return;
+
+        const s = size / 2;
+        const pts = [
+            { x: -0.80, y: 0.30 }, { x: 0.00, y: 0.30 }, { x: 0.00, y: -0.35 },
+            { x: -0.20, y: -0.35 }, { x: 0.00, y: -0.80 }, { x: 0.20, y: -0.35 },
+            { x: 0.00, y: -0.35 }, { x: 0.00, y: 0.55 }, { x: -0.80, y: 0.55 }
+        ];
+        const rot = (p) => {
+            let x = p.x, y = p.y;
+            for (let i = 0; i < rotQuarter; i++) {
+                const nx = y;
+                const ny = -x;
+                x = nx; y = ny;
+            }
+            return { x, y };
+        };
+
+        g.fillStyle(color, alpha);
+        g.beginPath();
+        pts.forEach((p, idx) => {
+            const rp = rot(p);
+            const px = cx + rp.x * s;
+            const py = cy + rp.y * s;
+            if (idx === 0) g.moveTo(px, py);
+            else g.lineTo(px, py);
+        });
         g.closePath();
         g.fillPath();
     }
