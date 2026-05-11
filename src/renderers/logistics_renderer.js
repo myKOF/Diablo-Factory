@@ -113,8 +113,17 @@ export class LogisticsRenderer {
             }
 
             const portToPortConnectedGroupIds = new Set();
+            const portToPortConnectedSegmentIds = new Set();
             const portToPortCandidateGroupIds = new Set();
             const makeNodeKey = (p) => `${Math.round(p.x)},${Math.round(p.y)}`;
+            const getSegmentRenderKey = (seg) => {
+                if (!seg) return null;
+                if (seg.id) return seg.id;
+                const pts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
+                const a = pts[0] || { x: seg.x || 0, y: seg.y || 0 };
+                const b = pts[1] || a;
+                return `${seg.groupId || "segment"}:${makeNodeKey(a)}>${makeNodeKey(b)}`;
+            };
             const getNodePoint = (key) => {
                 const [x, y] = String(key).split(",").map(Number);
                 return { x, y };
@@ -154,13 +163,30 @@ export class LogisticsRenderer {
 
                 const adj = new Map();
                 const undirected = new Map();
+                const cellAdj = new Map();
+                const cellPointByKey = new Map();
+                const cellSegmentIds = new Map();
                 const incoming = new Set();
                 const outDegree = new Map();
                 const inDegree = new Map();
                 const nodeKeySet = new Set();
+                const cellKeySet = new Set();
+                const addCellEdge = (a, b) => {
+                    if (!a || !b || a === b) return;
+                    if (!cellAdj.has(a)) cellAdj.set(a, new Set());
+                    if (!cellAdj.has(b)) cellAdj.set(b, new Set());
+                    cellAdj.get(a).add(b);
+                    cellAdj.get(b).add(a);
+                };
+                const addCellSegment = (cellKey, segmentKey) => {
+                    if (!cellKey || !segmentKey) return;
+                    if (!cellSegmentIds.has(cellKey)) cellSegmentIds.set(cellKey, new Set());
+                    cellSegmentIds.get(cellKey).add(segmentKey);
+                };
                 segments.forEach((seg) => {
                     const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
                     if (pts.length < 2) return;
+                    const segmentKey = getSegmentRenderKey(seg);
                     const fromKey = makeNodeKey(pts[0]);
                     const toKey = makeNodeKey(pts[1]);
                     nodeKeySet.add(fromKey);
@@ -174,10 +200,48 @@ export class LogisticsRenderer {
                     incoming.add(toKey);
                     outDegree.set(fromKey, (outDegree.get(fromKey) || 0) + 1);
                     inDegree.set(toKey, (inDegree.get(toKey) || 0) + 1);
+
+                    const dx = pts[1].x - pts[0].x;
+                    const dy = pts[1].y - pts[0].y;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist > 0.001) {
+                        const dirX = dx / dist;
+                        const dirY = dy / dist;
+                        const steps = Math.max(1, Math.round(dist / GameEngine.TILE_SIZE));
+                        const stepSize = dist / steps;
+                        let prevCellKey = null;
+                        for (let step = 0; step < steps; step++) {
+                            const point = {
+                                x: pts[0].x + dirX * stepSize * step,
+                                y: pts[0].y + dirY * stepSize * step
+                            };
+                            const cellKey = makeNodeKey(point);
+                            cellKeySet.add(cellKey);
+                            cellPointByKey.set(cellKey, getNodePoint(cellKey));
+                            addCellSegment(cellKey, segmentKey);
+                            if (!cellAdj.has(cellKey)) cellAdj.set(cellKey, new Set());
+                            addCellEdge(prevCellKey, cellKey);
+                            prevCellKey = cellKey;
+                        }
+                    }
                 });
 
                 const nodeKeys = Array.from(nodeKeySet);
                 if (nodeKeys.length === 0) return;
+                const cellKeys = Array.from(cellKeySet);
+                cellKeys.forEach((key) => {
+                    const p = cellPointByKey.get(key);
+                    if (!p) return;
+                    [
+                        { x: p.x + GameEngine.TILE_SIZE, y: p.y },
+                        { x: p.x - GameEngine.TILE_SIZE, y: p.y },
+                        { x: p.x, y: p.y + GameEngine.TILE_SIZE },
+                        { x: p.x, y: p.y - GameEngine.TILE_SIZE }
+                    ].forEach((next) => {
+                        const nextKey = makeNodeKey(next);
+                        if (cellKeySet.has(nextKey)) addCellEdge(key, nextKey);
+                    });
+                });
                 const representative = segments.find((seg) => seg && seg.sourceId && seg.targetId) || null;
                 const sourceEnt = representative
                     ? (state.mapEntities?.find((ent) => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === representative.sourceId) || null)
@@ -243,6 +307,103 @@ export class LogisticsRenderer {
                     }
                     return false;
                 };
+                const hasCellPath = (startKey, endKey) => {
+                    if (!startKey || !endKey) return false;
+                    if (startKey === endKey) return true;
+                    const q = [startKey];
+                    const visited = new Set([startKey]);
+                    while (q.length > 0) {
+                        const cur = q.shift();
+                        const nexts = cellAdj.get(cur);
+                        if (!nexts) continue;
+                        for (const next of nexts) {
+                            if (next === endKey) return true;
+                            if (visited.has(next)) continue;
+                            visited.add(next);
+                            q.push(next);
+                        }
+                    }
+                    return false;
+                };
+                const findCellPath = (startKey, endKey) => {
+                    if (!startKey || !endKey) return null;
+                    if (startKey === endKey) return [startKey];
+                    const q = [startKey];
+                    const visited = new Set([startKey]);
+                    const prev = new Map();
+                    while (q.length > 0) {
+                        const cur = q.shift();
+                        const nexts = cellAdj.get(cur);
+                        if (!nexts) continue;
+                        for (const next of nexts) {
+                            if (visited.has(next)) continue;
+                            visited.add(next);
+                            prev.set(next, cur);
+                            if (next === endKey) {
+                                const path = [endKey];
+                                let step = endKey;
+                                while (prev.has(step)) {
+                                    step = prev.get(step);
+                                    path.push(step);
+                                }
+                                return path.reverse();
+                            }
+                            q.push(next);
+                        }
+                    }
+                    return null;
+                };
+                const getNearbyCellKeys = (point, maxSnap) => {
+                    if (!point || cellKeys.length === 0) return [];
+                    const scored = [];
+                    cellKeys.forEach((key) => {
+                        const cp = cellPointByKey.get(key);
+                        if (!cp) return;
+                        const d = Math.hypot(cp.x - point.x, cp.y - point.y);
+                        if (d <= maxSnap) scored.push({ key, d });
+                    });
+                    scored.sort((a, b) => a.d - b.d);
+                    return scored.slice(0, 8).map((s) => s.key);
+                };
+                const getPortOwnersNearCell = (cellKey, wantOutput) => {
+                    if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return [];
+                    const cellPoint = cellPointByKey.get(cellKey) || getNodePoint(cellKey);
+                    const maxSnap = GameEngine.TILE_SIZE * 1.5;
+                    const owners = [];
+                    (state.mapEntities || []).forEach((ent) => {
+                        if (!ent || ent.isUnderConstruction) return;
+                        const cfg = GameEngine.getEntityConfig(ent.type1) || {};
+                        const logisticCfg = cfg.logistics || {};
+                        if (wantOutput && !logisticCfg.canOutput) return;
+                        if (!wantOutput && !logisticCfg.canInput) return;
+                        const ports = window.UIManager.getBuildingPortSlots(ent);
+                        if (!Array.isArray(ports) || ports.length === 0) return;
+                        let best = Number.POSITIVE_INFINITY;
+                        for (const port of ports) {
+                            const d = Math.hypot(port.x - cellPoint.x, port.y - cellPoint.y);
+                            if (d < best) best = d;
+                        }
+                        if (best <= maxSnap) {
+                            owners.push({
+                                id: ent.id || `${ent.type1}_${ent.x}_${ent.y}`,
+                                dist: best
+                            });
+                        }
+                    });
+                    owners.sort((a, b) => a.dist - b.dist);
+                    return owners;
+                };
+                const isCellOnBuildingPort = (cellKey) => {
+                    if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return false;
+                    const cellPoint = cellPointByKey.get(cellKey) || getNodePoint(cellKey);
+                    const snap = GameEngine.TILE_SIZE * 0.6;
+                    return (state.mapEntities || []).some((ent) => {
+                        if (!ent || ent.isUnderConstruction) return false;
+                        const ports = window.UIManager.getBuildingPortSlots(ent);
+                        if (!Array.isArray(ports)) return false;
+                        return ports.some((port) => Math.hypot(port.x - cellPoint.x, port.y - cellPoint.y) <= snap);
+                    });
+                };
 
                 // First: explicit source/target ids if available.
                 if (representative && sourceEnt && targetEnt) {
@@ -270,6 +431,24 @@ export class LogisticsRenderer {
                 }
 
                 // Second: infer from actual terminal-to-terminal port ownership (works for multi-step extensions).
+                if (!connected && representative && sourceEnt && targetEnt) {
+                    const sourcePort = representative.sourcePort || null;
+                    const targetPort = representative.targetPort || null;
+                    const sourceSnap = sourcePort ? GameEngine.TILE_SIZE * 1.5 : GameEngine.TILE_SIZE * 2.5;
+                    const targetSnap = targetPort ? GameEngine.TILE_SIZE * 1.5 : GameEngine.TILE_SIZE * 2.5;
+                    const sourceCells = getNearbyCellKeys(sourcePort || { x: sourceEnt.x, y: sourceEnt.y }, sourceSnap);
+                    const targetCells = getNearbyCellKeys(targetPort || { x: targetEnt.x, y: targetEnt.y }, targetSnap);
+                    for (const sk of sourceCells) {
+                        if (connected) break;
+                        for (const ek of targetCells) {
+                            if (hasCellPath(sk, ek)) {
+                                connected = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 if (!connected) {
                     for (const sk of startKeys) {
                         if (connected) break;
@@ -338,6 +517,33 @@ export class LogisticsRenderer {
                     }
                 }
 
+                {
+                    const outputCells = [];
+                    const inputCells = [];
+                    cellKeys.forEach((k) => {
+                        const outs = getPortOwnersNearCell(k, true);
+                        const ins = getPortOwnersNearCell(k, false);
+                        if (outs.length > 0) outputCells.push({ key: k, owners: outs });
+                        if (ins.length > 0) inputCells.push({ key: k, owners: ins });
+                    });
+                    for (const s of outputCells) {
+                        for (const t of inputCells) {
+                            const path = findCellPath(s.key, t.key);
+                            if (!path) continue;
+                            const hasDifferentPair = s.owners.some((so) => t.owners.some((ti) => ti.id !== so.id));
+                            if (hasDifferentPair) {
+                                path.forEach((cellKey) => {
+                                    if (isCellOnBuildingPort(cellKey)) return;
+                                    const segmentIds = cellSegmentIds.get(cellKey);
+                                    if (!segmentIds) return;
+                                    segmentIds.forEach((segmentId) => portToPortConnectedSegmentIds.add(segmentId));
+                                });
+                                connected = true;
+                            }
+                        }
+                    }
+                }
+
                 if (connected) portToPortConnectedGroupIds.add(groupKey);
             });
 
@@ -353,7 +559,8 @@ export class LogisticsRenderer {
                         ? window.UIManager.isSelectedLogisticsLine(line)
                         : state.selectedLogisticsLineId === line.id;
                     const groupKey = line.groupId || line.id;
-                    const isPortToPortConnected = portToPortConnectedGroupIds.has(groupKey);
+                    const segmentKey = getSegmentRenderKey(line);
+                    const isPortToPortConnected = segmentKey ? portToPortConnectedSegmentIds.has(segmentKey) : false;
                     const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(line.sourceId && line.targetId);
                     const isConnected = isPortToPortCandidate ? isPortToPortConnected : !!line.filter;
 

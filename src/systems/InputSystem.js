@@ -157,6 +157,13 @@ export class InputSystem {
 
             // 3. 核心判定：判定為移動才執行動作
             if (canMove) {
+                if ((GameEngine.state.logisticsDragLine || window.UIManager?.isLogisticsDragging) && window.UIManager?.cancelLogisticsDrag?.()) {
+                    GameEngine.state.suppressRightClickMoveUntil = now + 250;
+                    GameEngine.state.rightClickStartedInPlacementMode = false;
+                    this.rightDownInfo = null;
+                    this.didMove = false;
+                    return;
+                }
                 if (GameEngine.state.suppressRightClickMoveUntil && now < GameEngine.state.suppressRightClickMoveUntil) {
                     this.rightDownInfo = null;
                     this.didMove = false;

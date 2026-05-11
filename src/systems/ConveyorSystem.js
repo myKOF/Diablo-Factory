@@ -126,30 +126,33 @@ export class ConveyorSystem {
         if (!this.activeDrag?.isLineExtension || !this.activeDrag?.sourceLine || !Array.isArray(path) || path.length < 2) {
             return path;
         }
-        const line = this.activeDrag.sourceLine;
-        const route = Array.isArray(line.routePoints) ? line.routePoints : [];
-        if (route.length < 2) return path;
+        const sourceLine = this.activeDrag.sourceLine;
+        const groupId = sourceLine.groupId || sourceLine.id;
+        const lines = (GameEngine.state.logisticsLines || []).filter(line => line && (line.groupId === groupId || line.id === groupId));
+        if (lines.length === 0) return path;
 
         const occupied = new Set();
-        for (let i = 0; i < route.length - 1; i++) {
-            const a = this.toGrid(route[i].x, route[i].y);
-            const b = this.toGrid(route[i + 1].x, route[i + 1].y);
-            const dx = Math.sign(b.x - a.x);
-            const dy = Math.sign(b.y - a.y);
-            const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y), 1);
-            for (let step = 0; step <= steps; step++) {
-                occupied.add(`${a.x + dx * step},${a.y + dy * step}`);
+        lines.forEach(line => {
+            const route = Array.isArray(line.routePoints) ? line.routePoints : [];
+            for (let i = 0; i < route.length - 1; i++) {
+                const a = this.toGrid(route[i].x, route[i].y);
+                const b = this.toGrid(route[i + 1].x, route[i + 1].y);
+                const dx = Math.sign(b.x - a.x);
+                const dy = Math.sign(b.y - a.y);
+                const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y), 1);
+                for (let step = 0; step < steps; step++) {
+                    occupied.add(`${a.x + dx * step},${a.y + dy * step}`);
+                }
             }
-        }
+        });
 
         const startKey = `${path[0].x},${path[0].y}`;
         if (!occupied.has(startKey)) return path;
-
-        // [轉彎延伸修正] 不再刪掉第一個重疊節點。
-        // 先前直接 slice(1) 會在「末端轉向延伸」時打亂半格節點的奇偶配對，
-        // 讓後續 buildLogisticsSegments 組段出現錯位，進而造成連通判定失真。
-        // 既有重疊段會由 upsertLogisticsLine 的 occupied 檢查自動略過，不需要在這裡裁切。
-        return path;
+        let firstOpenIndex = 0;
+        while (firstOpenIndex < path.length - 1 && occupied.has(`${path[firstOpenIndex].x},${path[firstOpenIndex].y}`)) {
+            firstOpenIndex++;
+        }
+        return firstOpenIndex > 0 ? path.slice(firstOpenIndex) : path;
     }
 
     collectLogisticsOccupiedKeys(ignoreLine = null) {

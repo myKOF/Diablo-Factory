@@ -1648,18 +1648,18 @@ export class UIManager {
             const keys = this.getLogisticsSegmentOccupiedKeys(segment);
             const segmentTileKeys = getSegmentTileKeys(segment);
             if (!keys.length) return;
-            const overlapsOtherGroup = keys.some((key) => {
-                const hit = occupied.get(key);
-                return hit && !sameGroup(hit);
-            });
-            if (overlapsOtherGroup) return;
-            const centerBlockedByOtherGroup = segmentTileKeys.some((key) => {
-                const hits = occupiedTileCenters.get(key) || [];
-                return hits.some(hit => !sameGroup(hit));
-            });
-            if (centerBlockedByOtherGroup) return;
             const alreadySameRoute = lines.some(item => sameGroup(item) && sameRoute(item, segment));
             if (alreadySameRoute) return;
+            const overlapsOccupiedLine = keys.some((key) => {
+                const hit = occupied.get(key);
+                return !!hit;
+            });
+            if (overlapsOccupiedLine) return;
+            const centerBlockedByOccupiedLine = segmentTileKeys.some((key) => {
+                const hits = occupiedTileCenters.get(key) || [];
+                return hits.length > 0;
+            });
+            if (centerBlockedByOccupiedLine) return;
             keys.forEach(key => occupied.set(key, segment));
             segmentTileKeys.forEach(key => {
                 if (!occupiedTileCenters.has(key)) occupiedTileCenters.set(key, []);
@@ -1739,8 +1739,28 @@ export class UIManager {
 
     static isSelectedLogisticsLine(line) {
         const selectedId = GameEngine.state.selectedLogisticsLineId;
-        if (!line || !selectedId) return false;
+        const selectedGroupId = GameEngine.state.selectedLogisticsGroupId;
+        if (!line) return false;
+        if (selectedGroupId && (line.groupId === selectedGroupId || line.id === selectedGroupId)) return true;
+        if (!selectedId) return false;
         return this.getLogisticsLineSelectionKey(line) === selectedId;
+    }
+
+    static clearLogisticsSelection() {
+        GameEngine.state.selectedLogisticsLineId = null;
+        GameEngine.state.selectedLogisticsGroupId = null;
+        this.activeLogisticsConnection = null;
+        this.activeLogisticsLine = null;
+    }
+
+    static selectLogisticsLine(line, selectGroup = false) {
+        if (!line) {
+            this.clearLogisticsSelection();
+            return;
+        }
+        GameEngine.state.selectedLogisticsLineId = this.getLogisticsLineSelectionKey(line);
+        GameEngine.state.selectedLogisticsGroupId = selectGroup ? (line.groupId || line.id) : null;
+        this.activeLogisticsLine = line;
     }
 
     static isSelectedBuilding(ent) {
@@ -1779,6 +1799,7 @@ export class UIManager {
         this.activeLogisticsLine = line;
         this.activeLogisticsConnection = null;
         GameEngine.state.selectedLogisticsLineId = this.getLogisticsLineSelectionKey(line);
+        GameEngine.state.selectedLogisticsGroupId = null;
         GameEngine.state.logisticsDragLine = { active: true };
         this.hideContextMenu();
         conveyorSystem.startDrag(line.x, line.y, null, this.getLogisticsLineDragPort(line), line);
@@ -1869,6 +1890,7 @@ export class UIManager {
             }
         }
         if (state.selectedLogisticsLineId === lineKey) state.selectedLogisticsLineId = null;
+        if (state.selectedLogisticsGroupId === line.groupId || state.selectedLogisticsGroupId === line.id) state.selectedLogisticsGroupId = null;
         if (this.activeLogisticsLine && this.getLogisticsLineSelectionKey(this.activeLogisticsLine) === lineKey) this.activeLogisticsLine = null;
         if (this.activeLogisticsConnection?.lineId === lineKey) this.activeLogisticsConnection = null;
         GameEngine.addLog(`[物流] 物流線段已刪除`, 'LOGISTICS');
@@ -1888,6 +1910,7 @@ export class UIManager {
             }
         }
         if (segments.some(line => this.isSelectedLogisticsLine(line))) state.selectedLogisticsLineId = null;
+        if (state.selectedLogisticsGroupId === groupId) state.selectedLogisticsGroupId = null;
         if (this.activeLogisticsLine && this.activeLogisticsLine.groupId === groupId) this.activeLogisticsLine = null;
         if (this.activeLogisticsConnection?.groupId === groupId) this.activeLogisticsConnection = null;
         GameEngine.addLog(`[物流] 物流線群組已刪除`, 'LOGISTICS');
@@ -1917,6 +1940,7 @@ export class UIManager {
         if (GameEngine.state.selectedLogisticsLineId === selectedLineId) {
             GameEngine.state.selectedLogisticsLineId = null;
         }
+        GameEngine.state.selectedLogisticsGroupId = null;
         return true;
     }
 
@@ -2017,7 +2041,8 @@ export class UIManager {
         }
 
         const clickedLine = this.getLogisticsLineAt(worldX, worldY);
-        if (clickedLine && this.isSelectedLogisticsLine(clickedLine) && GameEngine.state.buildingMode === 'NONE') {
+        const isDoubleClick = (e.detail || 0) >= 2;
+        if (clickedLine && !isDoubleClick && this.isSelectedLogisticsLine(clickedLine) && GameEngine.state.buildingMode === 'NONE') {
             this.beginLogisticsDragFromLine(clickedLine);
             return;
         }
@@ -2083,6 +2108,14 @@ export class UIManager {
     static handleWorldMouseUp(e) {
         // [右鍵邏輯專區]
         if (e.button === 2) {
+            if (this.cancelLogisticsDrag()) {
+                GameEngine.state.rightClickStartedInPlacementMode = false;
+                GameEngine.state.suppressRightClickMoveUntil = Date.now() + 250;
+                if (typeof e.preventDefault === "function") e.preventDefault();
+                if (typeof e.stopPropagation === "function") e.stopPropagation();
+                this.rightMouseDownPos = null;
+                return;
+            }
             // 所有右鍵行為（取消建築、設定集結點）已全數整合至 InputSystem.js 處理
             this.rightMouseDownPos = null;
             return;
@@ -2225,6 +2258,7 @@ export class UIManager {
             const now = Date.now();
             const buildingId = clicked.id || `${clicked.type1}_${clicked.x}_${clicked.y}`;
             GameEngine.state.selectedLogisticsLineId = null;
+            GameEngine.state.selectedLogisticsGroupId = null;
             this.activeLogisticsLine = null;
 
             // 雙擊全選邏輯
@@ -2267,11 +2301,21 @@ export class UIManager {
         // [物流線實體] 點擊優先級低於建築，高於地板。
         const clickedLine = this.getLogisticsLineAt(worldX, worldY);
         if (clickedLine) {
+            const now = Date.now();
+            const groupId = clickedLine.groupId || clickedLine.id;
+            const isDoubleClick = (e.detail || 0) >= 2
+                || (GameEngine.state.lastSelectedLogisticsGroupId === groupId && (now - GameEngine.state.lastSelectionTime < 500));
             GameEngine.state.selectedUnitIds = [];
             GameEngine.state.selectedBuildingIds = [];
             GameEngine.state.selectedBuildingId = null;
             GameEngine.state.selectedResourceId = null;
-            GameEngine.state.selectedLogisticsLineId = this.getLogisticsLineSelectionKey(clickedLine);
+            this.selectLogisticsLine(clickedLine, isDoubleClick);
+            GameEngine.state.lastSelectionTime = now;
+            GameEngine.state.lastSelectedLogisticsGroupId = groupId;
+            if (isDoubleClick) {
+                const groupCount = this.getLogisticsSegmentsByGroupId(groupId).length;
+                GameEngine.addLog(`[物流] 已選取同群組物流線 ${groupCount} 段。`, 'LOGISTICS');
+            }
             const source = GameEngine.state.mapEntities.find(ent => this.getEntityId(ent) === clickedLine.sourceId);
             if (source && clickedLine.targetId) {
                 this.showLogisticsMenu(source, clickedLine.targetId, e.clientX, e.clientY, this.getLogisticsLineSelectionKey(clickedLine));
@@ -2285,6 +2329,7 @@ export class UIManager {
         GameEngine.state.selectedBuildingIds = [];
         GameEngine.state.selectedBuildingId = null;
         GameEngine.state.selectedLogisticsLineId = null;
+        GameEngine.state.selectedLogisticsGroupId = null;
         this.activeLogisticsConnection = null;
         this.activeLogisticsLine = null;
     }

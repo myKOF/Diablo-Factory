@@ -2579,6 +2579,7 @@ export class MainScene extends Phaser.Scene {
                 this.logUnitDetail(clickedUnit);
                 GameEngine.state.selectedResourceId = null;
                 GameEngine.state.selectedLogisticsLineId = null;
+                GameEngine.state.selectedLogisticsGroupId = null;
             } else {
                 this._performClassicClickSelection(endX, endY, isShift);
             }
@@ -2597,6 +2598,7 @@ export class MainScene extends Phaser.Scene {
                 GameEngine.state.selectedBuildingId = null;
                 GameEngine.state.selectedBuildingIds = [];
                 GameEngine.state.selectedLogisticsLineId = null;
+                GameEngine.state.selectedLogisticsGroupId = null;
                 if (window.UIManager) window.UIManager.hideContextMenu();
             }
             if (boxUnits.length > 0) GameEngine.addLog(`[選取] 框選操作選中了 ${boxUnits.length} 個我方單位。`);
@@ -2638,6 +2640,7 @@ export class MainScene extends Phaser.Scene {
             GameEngine.state.selectedUnitIds = []; GameEngine.state.selectedBuildingId = null;
             GameEngine.state.selectedBuildingIds = [];
             GameEngine.state.selectedLogisticsLineId = null;
+            GameEngine.state.selectedLogisticsGroupId = null;
             if (window.UIManager) window.UIManager.hideContextMenu();
             GameEngine.addLog(`[選取] 資源：${foundRes.res.type} (Lv.${foundRes.res.level})`);
         } else {
@@ -2676,8 +2679,10 @@ export class MainScene extends Phaser.Scene {
                     GameEngine.state.selectedBuildingId = null;
                     GameEngine.state.selectedBuildingIds = [];
                     GameEngine.state.selectedLogisticsLineId = null;
+                    GameEngine.state.selectedLogisticsGroupId = null;
                 } else if (window.UIManager) {
                     GameEngine.state.selectedLogisticsLineId = null;
+                    GameEngine.state.selectedLogisticsGroupId = null;
                     window.UIManager.showContextMenu(clickedB);
                 }
                 GameEngine.addLog(`[選取] ${clickedB.type1 === 'corpse' ? '資源' : '建築'}：${clickedB.name || clickedB.type1}`);
@@ -2687,6 +2692,7 @@ export class MainScene extends Phaser.Scene {
                 GameEngine.state.selectedBuildingId = null;
                 GameEngine.state.selectedBuildingIds = [];
                 GameEngine.state.selectedLogisticsLineId = null;
+                GameEngine.state.selectedLogisticsGroupId = null;
                 if (window.UIManager) window.UIManager.hideContextMenu();
             }
         }

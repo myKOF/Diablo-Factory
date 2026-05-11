@@ -574,6 +574,12 @@ export class BuildingSystem {
             const selectedExists = Array.isArray(state.logisticsLines) && state.logisticsLines.some(line => line.id === state.selectedLogisticsLineId);
             if (!selectedExists) state.selectedLogisticsLineId = null;
         }
+        if (state.selectedLogisticsGroupId) {
+            const selectedGroupExists = Array.isArray(state.logisticsLines) && state.logisticsLines.some(line =>
+                line.groupId === state.selectedLogisticsGroupId || line.id === state.selectedLogisticsGroupId
+            );
+            if (!selectedGroupExists) state.selectedLogisticsGroupId = null;
+        }
 
         state.renderVersion++; // 通知渲染器刷新
 
