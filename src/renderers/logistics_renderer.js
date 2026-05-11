@@ -102,6 +102,54 @@ export class LogisticsRenderer {
                 }
             };
 
+            const drawConnectedCellOverlay = (points, widthTiles, connectedCellKeys, isPortToPort = true) => {
+                if (!connectedCellKeys || connectedCellKeys.size === 0) return;
+                const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true)
+                    .filter(rect => rect.cellKey && connectedCellKeys.has(rect.cellKey));
+                const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
+                if (
+                    endpointRect &&
+                    endpointRect.cellKey &&
+                    connectedCellKeys.has(endpointRect.cellKey) &&
+                    !rects.some(rect => rect.cellKey === endpointRect.cellKey)
+                ) {
+                    rects.push(endpointRect);
+                }
+                if (rects.length === 0) return;
+                const lineColor = isPortToPort
+                    ? (logCfg.portToPortLineColor || logCfg.lineColor)
+                    : logCfg.lineColor;
+                const lineAlpha = isPortToPort
+                    ? (logCfg.portToPortLineAlpha ?? logCfg.lineAlpha)
+                    : logCfg.lineAlpha;
+                graphics.fillStyle(parseColor(lineColor), lineAlpha);
+                rects.forEach(rect => graphics.fillRect(rect.x, rect.y, rect.w, rect.h));
+
+                const arrowColor = isPortToPort
+                    ? (logCfg.portToPortArrowColor || logCfg.arrowColor)
+                    : logCfg.arrowColor;
+                const arrowAlpha = isPortToPort
+                    ? (logCfg.portToPortArrowAlpha ?? 0.9)
+                    : 0.9;
+                const arrowSize = isPortToPort
+                    ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 8)
+                    : (logCfg.arrowSize || 8);
+                graphics.fillStyle(parseColor(arrowColor), arrowAlpha);
+                rects.forEach((rect) => {
+                    const adx = rect.dirX !== undefined ? rect.dirX : 0;
+                    const ady = rect.dirY !== undefined ? rect.dirY : 0;
+                    const len = Math.hypot(adx, ady) || 1;
+                    LogisticsRenderer.drawArrowhead(
+                        graphics,
+                        rect.x + rect.w / 2,
+                        rect.y + rect.h / 2,
+                        adx / len,
+                        ady / len,
+                        arrowSize
+                    );
+                });
+            };
+
             const groupSegments = new Map();
             if (Array.isArray(state.logisticsLines)) {
                 state.logisticsLines.forEach((line) => {
@@ -114,6 +162,7 @@ export class LogisticsRenderer {
 
             const portToPortConnectedGroupIds = new Set();
             const portToPortConnectedSegmentIds = new Set();
+            const portToPortConnectedCellKeys = new Set();
             const portToPortCandidateGroupIds = new Set();
             const makeNodeKey = (p) => `${Math.round(p.x)},${Math.round(p.y)}`;
             const getSegmentRenderKey = (seg) => {
@@ -223,6 +272,12 @@ export class LogisticsRenderer {
                             addCellEdge(prevCellKey, cellKey);
                             prevCellKey = cellKey;
                         }
+                        const endCellKey = makeNodeKey(pts[1]);
+                        cellKeySet.add(endCellKey);
+                        cellPointByKey.set(endCellKey, getNodePoint(endCellKey));
+                        addCellSegment(endCellKey, segmentKey);
+                        if (!cellAdj.has(endCellKey)) cellAdj.set(endCellKey, new Set());
+                        addCellEdge(prevCellKey, endCellKey);
                     }
                 });
 
@@ -533,7 +588,7 @@ export class LogisticsRenderer {
                             const hasDifferentPair = s.owners.some((so) => t.owners.some((ti) => ti.id !== so.id));
                             if (hasDifferentPair) {
                                 path.forEach((cellKey) => {
-                                    if (isCellOnBuildingPort(cellKey)) return;
+                                    portToPortConnectedCellKeys.add(cellKey);
                                     const segmentIds = cellSegmentIds.get(cellKey);
                                     if (!segmentIds) return;
                                     segmentIds.forEach((segmentId) => portToPortConnectedSegmentIds.add(segmentId));
@@ -562,9 +617,12 @@ export class LogisticsRenderer {
                     const segmentKey = getSegmentRenderKey(line);
                     const isPortToPortConnected = segmentKey ? portToPortConnectedSegmentIds.has(segmentKey) : false;
                     const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(line.sourceId && line.targetId);
-                    const isConnected = isPortToPortCandidate ? isPortToPortConnected : !!line.filter;
+                    const isConnected = isPortToPortCandidate ? false : !!line.filter;
 
-                    drawLogisticsRoute(route.points, route.width || 1, isSelected, isConnected, line, isPortToPortConnected);
+                    drawLogisticsRoute(route.points, route.width || 1, isSelected, isConnected, line, false);
+                    if (isPortToPortCandidate) {
+                        drawConnectedCellOverlay(route.points, route.width || 1, portToPortConnectedCellKeys, true);
+                    }
                 });
             }
 
@@ -932,6 +990,30 @@ export class LogisticsRenderer {
         rects.forEach(rect => g.fillRect(rect.x, rect.y, rect.w, rect.h));
     }
 
+    static getLogisticsEndpointCellRect(points, widthTiles = 1) {
+        if (!Array.isArray(points) || points.length < 2) return null;
+        const TS = GameEngine.TILE_SIZE;
+        const width = Math.max(1, Math.round(Number(widthTiles) || 1));
+        const end = points[points.length - 1];
+        const prev = points[points.length - 2];
+        if (!end || !prev) return null;
+        const dx = end.x - prev.x;
+        const dy = end.y - prev.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 0.001) return null;
+        const dir = { x: dx / dist, y: dy / dist };
+        const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
+        return {
+            x: end.x - (isHorizontal ? TS / 2 : (width * TS) / 2),
+            y: end.y - (isHorizontal ? (width * TS) / 2 : TS / 2),
+            w: (isHorizontal ? TS : width * TS),
+            h: (isHorizontal ? width * TS : TS),
+            cellKey: `${Math.round(end.x)},${Math.round(end.y)}`,
+            dirX: dir.x,
+            dirY: dir.y
+        };
+    }
+
     static getLogisticsCellRects(points, widthTiles = 1, perStep = false) {
         if (!Array.isArray(points) || points.length < 2) return [];
         const TS = GameEngine.TILE_SIZE;
@@ -979,6 +1061,7 @@ export class LogisticsRenderer {
                     y: py - (isHorizontal ? (width * TS) / 2 : TS / 2),
                     w: (isHorizontal ? TS : width * TS),
                     h: (isHorizontal ? width * TS : TS),
+                    cellKey: `${Math.round(px)},${Math.round(py)}`,
                     dirX: dir.x,
                     dirY: dir.y
                 };
