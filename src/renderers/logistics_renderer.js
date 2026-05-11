@@ -54,7 +54,7 @@ export class LogisticsRenderer {
                 );
             };
 
-            const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false) => {
+            const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null) => {
                 const baseThickness = logCfg.lineThickness || 3;
                 const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE * 0.8);
                 const usePortToPortStyle = !!isPortToPort;
@@ -84,13 +84,40 @@ export class LogisticsRenderer {
                         : (!isConnected ? (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8) : (logCfg.arrowSize || 8));
                     graphics.fillStyle(parseColor(arrowColor), arrowAlpha);
                     arrowRects.forEach((rect) => {
-                        const adx = rect.dirX !== undefined ? rect.dirX : 0;
-                        const ady = rect.dirY !== undefined ? rect.dirY : 0;
+                        const groupKey = line?.groupId || line?.id || null;
+                        const rectCenterX = rect.x + rect.w / 2;
+                        const rectCenterY = rect.y + rect.h / 2;
+                        const stateOverride = (GameEngine.state.logisticsTurnArrowOverrides || []).find(item =>
+                            item &&
+                            (!item.groupId || !groupKey || item.groupId === groupKey) &&
+                            (
+                                item.cellKey === rect.cellKey ||
+                                (
+                                    Number.isFinite(item.anchorX) &&
+                                    Number.isFinite(item.anchorY) &&
+                                    Math.hypot(rectCenterX - item.anchorX, rectCenterY - item.anchorY) <= GameEngine.TILE_SIZE * 0.75
+                                )
+                            )
+                        ) || null;
+                        const lineOverride = line?.turnArrowOverride || stateOverride;
+                        const override = lineOverride && (
+                            lineOverride.cellKey === rect.cellKey ||
+                            (
+                                Number.isFinite(lineOverride.anchorX) &&
+                                Number.isFinite(lineOverride.anchorY) &&
+                                Math.hypot(rectCenterX - lineOverride.anchorX, rectCenterY - lineOverride.anchorY) <= GameEngine.TILE_SIZE * 0.75
+                            )
+                        )
+                            ? lineOverride
+                            : null;
+                        if (!override && skipArrowCellKeys?.has(rect.cellKey)) return;
+                        const adx = override ? override.dirX : (rect.dirX !== undefined ? rect.dirX : 0);
+                        const ady = override ? override.dirY : (rect.dirY !== undefined ? rect.dirY : 0);
                         const len = Math.hypot(adx, ady) || 1;
                         LogisticsRenderer.drawArrowhead(
                             graphics,
-                            rect.x + rect.w / 2,
-                            rect.y + rect.h / 2,
+                            rectCenterX,
+                            rectCenterY,
                             adx / len,
                             ady / len,
                             arrowSize
@@ -102,7 +129,7 @@ export class LogisticsRenderer {
                 }
             };
 
-            const drawConnectedCellOverlay = (points, widthTiles, connectedCellKeys, isPortToPort = true) => {
+            const drawConnectedCellOverlay = (points, widthTiles, connectedCellKeys, isPortToPort = true, skipArrowCellKeys = null) => {
                 if (!connectedCellKeys || connectedCellKeys.size === 0) return;
                 const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true)
                     .filter(rect => rect.cellKey && connectedCellKeys.has(rect.cellKey));
@@ -136,6 +163,7 @@ export class LogisticsRenderer {
                     : (logCfg.arrowSize || 8);
                 graphics.fillStyle(parseColor(arrowColor), arrowAlpha);
                 rects.forEach((rect) => {
+                    if (skipArrowCellKeys?.has(rect.cellKey)) return;
                     const adx = rect.dirX !== undefined ? rect.dirX : 0;
                     const ady = rect.dirY !== undefined ? rect.dirY : 0;
                     const len = Math.hypot(adx, ady) || 1;
@@ -602,6 +630,11 @@ export class LogisticsRenderer {
                 if (connected) portToPortConnectedGroupIds.add(groupKey);
             });
 
+            const groupTurnCellKeys = new Map();
+            groupSegments.forEach((groupSegs, groupKey) => {
+                groupTurnCellKeys.set(groupKey, LogisticsRenderer.getLogisticsGroupTurnCellKeys(groupSegs));
+            });
+
             if (Array.isArray(state.logisticsLines)) {
                 state.logisticsLines.forEach(line => {
                     let route = (window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function')
@@ -619,9 +652,10 @@ export class LogisticsRenderer {
                     const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(line.sourceId && line.targetId);
                     const isConnected = isPortToPortCandidate ? false : !!line.filter;
 
-                    drawLogisticsRoute(route.points, route.width || 1, isSelected, isConnected, line, false);
+                    const turnCellKeys = groupTurnCellKeys.get(groupKey) || null;
+                    drawLogisticsRoute(route.points, route.width || 1, isSelected, isConnected, line, false, turnCellKeys);
                     if (isPortToPortCandidate) {
-                        drawConnectedCellOverlay(route.points, route.width || 1, portToPortConnectedCellKeys, true);
+                        drawConnectedCellOverlay(route.points, route.width || 1, portToPortConnectedCellKeys, true, turnCellKeys);
                     }
                 });
             }
@@ -861,6 +895,22 @@ export class LogisticsRenderer {
 
     static drawLogisticsGroupTurnArrows(g, segments, widthTiles, color, alpha, size) {
         if (!Array.isArray(segments) || segments.length === 0) return;
+        const turns = LogisticsRenderer.getLogisticsGroupTurnCells(segments);
+        turns.forEach(({ x, y, inDir, outDir }) => {
+            const turnDir = LogisticsRenderer.getTurnArrowDirection(inDir, outDir);
+            if (!turnDir) return;
+            const arrowSize = Math.max(size * 1.05, GameEngine.TILE_SIZE * 0.32);
+            LogisticsRenderer.drawArrowhead(g, x, y, turnDir.x, turnDir.y, arrowSize);
+        });
+    }
+
+    static getLogisticsGroupTurnCellKeys(segments) {
+        return new Set(LogisticsRenderer.getLogisticsGroupTurnCells(segments).map(turn => turn.key));
+    }
+
+    static getLogisticsGroupTurnCells(segments) {
+        if (!Array.isArray(segments) || segments.length === 0) return [];
+        const TS = GameEngine.TILE_SIZE;
         const keyOf = (p) => `${Math.round(p.x)},${Math.round(p.y)}`;
         const pointOfKey = (k) => {
             const [x, y] = String(k).split(",").map(Number);
@@ -869,6 +919,7 @@ export class LogisticsRenderer {
         const incoming = new Map();
         const outgoing = new Map();
         const pushDir = (map, key, dir) => {
+            if (!key || !dir) return;
             if (!map.has(key)) map.set(key, []);
             map.get(key).push(dir);
         };
@@ -876,41 +927,102 @@ export class LogisticsRenderer {
         segments.forEach((seg) => {
             const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
             if (pts.length < 2) return;
-            const a = pts[0];
-            const b = pts[1];
-            const dir = LogisticsRenderer.getCardinalDir(a, b);
-            if (!dir) return;
-            const ak = keyOf(a);
-            const bk = keyOf(b);
-            pushDir(outgoing, ak, dir);
-            pushDir(incoming, bk, dir);
+            for (let i = 0; i < pts.length - 1; i++) {
+                const a = pts[i];
+                const b = pts[i + 1];
+                const dir = LogisticsRenderer.getCardinalDir(a, b);
+                if (!dir) continue;
+                const dist = Math.hypot(b.x - a.x, b.y - a.y);
+                const steps = Math.max(1, Math.round(dist / TS));
+                let prevKey = null;
+                for (let step = 0; step <= steps; step++) {
+                    const p = {
+                        x: a.x + dir.x * TS * step,
+                        y: a.y + dir.y * TS * step
+                    };
+                    const key = keyOf(p);
+                    if (prevKey && prevKey !== key) {
+                        pushDir(outgoing, prevKey, dir);
+                        pushDir(incoming, key, dir);
+                    }
+                    prevKey = key;
+                }
+            }
         });
 
+        const turns = [];
         const allKeys = new Set([...incoming.keys(), ...outgoing.keys()]);
-        allKeys.forEach((k) => {
-            const inList = incoming.get(k) || [];
-            const outList = outgoing.get(k) || [];
+        const hasTurnAtKey = (key) => turns.some(turn => turn.key === key);
+        allKeys.forEach((key) => {
+            const inList = incoming.get(key) || [];
+            const outList = outgoing.get(key) || [];
             if (inList.length === 0 || outList.length === 0) return;
 
-            let chosenIn = null;
-            let chosenOut = null;
-            for (const iDir of inList) {
-                for (const oDir of outList) {
-                    const collinear = (iDir.x === oDir.x && iDir.y === oDir.y) || (iDir.x === -oDir.x && iDir.y === -oDir.y);
-                    if (!collinear) {
-                        chosenIn = iDir;
-                        chosenOut = oDir;
-                        break;
+            for (const inDir of inList) {
+                for (const outDir of outList) {
+                    if (!LogisticsRenderer.getTurnArrowDirection(inDir, outDir)) continue;
+                    const point = pointOfKey(key);
+                    turns.push({ key, x: point.x, y: point.y, inDir, outDir });
+                    return;
+                }
+            }
+        });
+
+        allKeys.forEach((key) => {
+            if (hasTurnAtKey(key)) return;
+            const outList = outgoing.get(key) || [];
+            if (outList.length < 2) return;
+            for (let i = 0; i < outList.length - 1; i++) {
+                for (let j = i + 1; j < outList.length; j++) {
+                    const firstDir = outList[i];
+                    const secondDir = outList[j];
+                    if (!LogisticsRenderer.getTurnArrowDirection(firstDir, secondDir)) continue;
+                    const point = pointOfKey(key);
+                    turns.push({ key, x: point.x, y: point.y, inDir: firstDir, outDir: secondDir });
+                    return;
+                }
+            }
+        });
+
+        allKeys.forEach((key) => {
+            if (hasTurnAtKey(key)) return;
+            if ((incoming.get(key) || []).length > 0) return;
+            const outList = outgoing.get(key) || [];
+            if (outList.length === 0) return;
+            const point = pointOfKey(key);
+            for (const outDir of outList) {
+                const candidates = [
+                    { x: point.x - TS, y: point.y },
+                    { x: point.x + TS, y: point.y },
+                    { x: point.x, y: point.y - TS },
+                    { x: point.x, y: point.y + TS }
+                ];
+                for (const candidate of candidates) {
+                    const neighborKey = keyOf(candidate);
+                    if ((outgoing.get(neighborKey) || []).length > 0) continue;
+                    const neighborIncoming = incoming.get(neighborKey) || [];
+                    for (const inDir of neighborIncoming) {
+                        if (!LogisticsRenderer.getTurnArrowDirection(inDir, outDir)) continue;
+                        turns.push({ key, x: point.x, y: point.y, inDir, outDir });
+                        return;
                     }
                 }
-                if (chosenIn && chosenOut) break;
             }
-            if (!chosenIn || !chosenOut) return;
-
-            const p = pointOfKey(k);
-            const glyphSize = Math.max(GameEngine.TILE_SIZE * 0.9, size * 2.6);
-            LogisticsRenderer.drawTurnArrowGlyph(g, p.x, p.y, glyphSize, chosenIn, chosenOut, color, alpha);
         });
+        return turns;
+    }
+
+    static getTurnArrowDirection(inDir, outDir) {
+        if (!inDir || !outDir) return null;
+        const isTurn = inDir.x !== outDir.x || inDir.y !== outDir.y;
+        if (!isTurn) return null;
+        const collinear = (inDir.x === outDir.x && inDir.y === outDir.y) || (inDir.x === -outDir.x && inDir.y === -outDir.y);
+        if (collinear) return null;
+        const dx = inDir.x + outDir.x;
+        const dy = inDir.y + outDir.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 0.001) return null;
+        return { x: dx / len, y: dy / len };
     }
 
     static drawTurnArrowGlyph(g, cx, cy, size, inDir, outDir, color, alpha) {
@@ -1037,6 +1149,15 @@ export class LogisticsRenderer {
         };
         const firstDir = getDir(points[0], points[1]);
         if (!firstDir) return [];
+        const turnDirsByCellKey = new Map();
+        for (let i = 1; i < points.length - 1; i++) {
+            const inDir = getDir(points[i - 1], points[i]);
+            const outDir = getDir(points[i], points[i + 1]);
+            const turnDir = LogisticsRenderer.getTurnArrowDirection(inDir, outDir);
+            if (turnDir) {
+                turnDirsByCellKey.set(`${Math.round(points[i].x)},${Math.round(points[i].y)}`, turnDir);
+            }
+        }
         for (let i = 0; i < points.length - 1; i++) {
             const a = points[i];
             const b = points[i + 1];
@@ -1065,6 +1186,12 @@ export class LogisticsRenderer {
                     dirX: dir.x,
                     dirY: dir.y
                 };
+                const turnDir = turnDirsByCellKey.get(rect.cellKey);
+                if (turnDir) {
+                    rect.dirX = turnDir.x;
+                    rect.dirY = turnDir.y;
+                    rect.isTurn = true;
+                }
 
                 stepRects.push(rect);
             }

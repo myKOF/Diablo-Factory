@@ -431,6 +431,7 @@ export class ConveyorSystem {
             x: (g.x + offset.x * scale) * gridUnit,
             y: (g.y + offset.y * scale) * gridUnit
         }));
+        this.applyExtensionTurnArrowOverride(drag, points);
 
         const lastPoint = points[points.length - 1];
         const dragTarget = this.resolveDragTarget(lastPoint.x, lastPoint.y);
@@ -477,6 +478,89 @@ export class ConveyorSystem {
         }
 
         this.cancelDrag();
+    }
+
+    applyExtensionTurnArrowOverride(drag, points) {
+        if (!drag?.isLineExtension || !drag.sourceLine || !Array.isArray(points) || points.length < 2) return;
+        const sourceLine = drag.sourceLine;
+        const route = Array.isArray(sourceLine.routePoints) ? sourceLine.routePoints : [];
+        if (route.length < 2) return;
+
+        const getDir = (a, b) => {
+            if (!a || !b) return null;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+            return Math.abs(dx) >= Math.abs(dy)
+                ? { x: Math.sign(dx) || 1, y: 0 }
+                : { x: 0, y: Math.sign(dy) || 1 };
+        };
+        const originalDir = getDir(route[0], route[1]);
+        const extensionDir = getDir(points[0], points[1]);
+        if (!originalDir || !extensionDir) return;
+        const groupId = sourceLine.groupId || sourceLine.id || null;
+        const cellKey = `${Math.round(sourceLine.x)},${Math.round(sourceLine.y)}`;
+        const clearStateOverride = () => {
+            if (!Array.isArray(GameEngine.state.logisticsTurnArrowOverrides)) return;
+            GameEngine.state.logisticsTurnArrowOverrides = GameEngine.state.logisticsTurnArrowOverrides.filter(item =>
+                item?.overrideKey !== `${groupId || "line"}:${cellKey}`
+            );
+        };
+
+        const isSame = originalDir.x === extensionDir.x && originalDir.y === extensionDir.y;
+        const isOpposite = originalDir.x === -extensionDir.x && originalDir.y === -extensionDir.y;
+        if (isSame || isOpposite) {
+            delete sourceLine.turnArrowOverride;
+            clearStateOverride();
+            return;
+        }
+
+        const dx = originalDir.x + extensionDir.x;
+        const dy = originalDir.y + extensionDir.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 0.001) {
+            delete sourceLine.turnArrowOverride;
+            clearStateOverride();
+            return;
+        }
+
+        const turnArrowOverride = {
+            groupId,
+            cellKey,
+            anchorX: sourceLine.x,
+            anchorY: sourceLine.y,
+            dirX: dx / len,
+            dirY: dy / len,
+            sourceDirX: originalDir.x,
+            sourceDirY: originalDir.y,
+            extensionDirX: extensionDir.x,
+            extensionDirY: extensionDir.y
+        };
+        sourceLine.turnArrowOverride = turnArrowOverride;
+
+        if (!Array.isArray(GameEngine.state.logisticsTurnArrowOverrides)) {
+            GameEngine.state.logisticsTurnArrowOverrides = [];
+        }
+        const overrideKey = `${turnArrowOverride.groupId || "line"}:${turnArrowOverride.cellKey}`;
+        const stateOverride = { ...turnArrowOverride, overrideKey };
+        const existingIndex = GameEngine.state.logisticsTurnArrowOverrides.findIndex(item => item?.overrideKey === overrideKey);
+        if (existingIndex >= 0) {
+            GameEngine.state.logisticsTurnArrowOverrides[existingIndex] = stateOverride;
+        } else {
+            GameEngine.state.logisticsTurnArrowOverrides.push(stateOverride);
+        }
+
+        (GameEngine.state.logisticsLines || []).forEach((line) => {
+            if (!line) return;
+            const sameId = sourceLine.id && line.id === sourceLine.id;
+            const sameGroupPosition = (sourceLine.groupId || sourceLine.id) &&
+                (line.groupId === sourceLine.groupId || line.id === sourceLine.groupId || line.groupId === sourceLine.id) &&
+                Math.abs((line.x || 0) - (sourceLine.x || 0)) < 0.001 &&
+                Math.abs((line.y || 0) - (sourceLine.y || 0)) < 0.001;
+            if (sameId || sameGroupPosition) {
+                line.turnArrowOverride = { ...turnArrowOverride };
+            }
+        });
     }
 
     cancelDrag() {
