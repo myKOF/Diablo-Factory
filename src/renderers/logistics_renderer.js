@@ -189,18 +189,10 @@ export class LogisticsRenderer {
             }
 
             const portToPortConnectedGroupIds = new Set();
-            const portToPortConnectedSegmentIds = new Set();
-            const portToPortConnectedCellKeys = new Set();
+            const portToPortConnectedCellKeysByGroup = new Map();
+            const portToPortConnectedCellPathsByGroup = new Map();
             const portToPortCandidateGroupIds = new Set();
             const makeNodeKey = (p) => `${Math.round(p.x)},${Math.round(p.y)}`;
-            const getSegmentRenderKey = (seg) => {
-                if (!seg) return null;
-                if (seg.id) return seg.id;
-                const pts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
-                const a = pts[0] || { x: seg.x || 0, y: seg.y || 0 };
-                const b = pts[1] || a;
-                return `${seg.groupId || "segment"}:${makeNodeKey(a)}>${makeNodeKey(b)}`;
-            };
             const getNodePoint = (key) => {
                 const [x, y] = String(key).split(",").map(Number);
                 return { x, y };
@@ -234,6 +226,21 @@ export class LogisticsRenderer {
                 }
                 return false;
             };
+            const addConnectedCellKey = (groupKey, cellKey) => {
+                if (!cellKey) return;
+                if (!portToPortConnectedCellKeysByGroup.has(groupKey)) {
+                    portToPortConnectedCellKeysByGroup.set(groupKey, new Set());
+                }
+                portToPortConnectedCellKeysByGroup.get(groupKey).add(cellKey);
+            };
+            const addConnectedCellPath = (groupKey, path) => {
+                if (!Array.isArray(path) || path.length === 0) return;
+                if (!portToPortConnectedCellPathsByGroup.has(groupKey)) {
+                    portToPortConnectedCellPathsByGroup.set(groupKey, []);
+                }
+                portToPortConnectedCellPathsByGroup.get(groupKey).push(path.slice());
+                path.forEach((cellKey) => addConnectedCellKey(groupKey, cellKey));
+            };
 
             groupSegments.forEach((segments, groupKey) => {
                 if (!Array.isArray(segments) || segments.length === 0) return;
@@ -242,7 +249,6 @@ export class LogisticsRenderer {
                 const undirected = new Map();
                 const cellAdj = new Map();
                 const cellPointByKey = new Map();
-                const cellSegmentIds = new Map();
                 const incoming = new Set();
                 const outDegree = new Map();
                 const inDegree = new Map();
@@ -255,15 +261,9 @@ export class LogisticsRenderer {
                     cellAdj.get(a).add(b);
                     cellAdj.get(b).add(a);
                 };
-                const addCellSegment = (cellKey, segmentKey) => {
-                    if (!cellKey || !segmentKey) return;
-                    if (!cellSegmentIds.has(cellKey)) cellSegmentIds.set(cellKey, new Set());
-                    cellSegmentIds.get(cellKey).add(segmentKey);
-                };
                 segments.forEach((seg) => {
                     const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
                     if (pts.length < 2) return;
-                    const segmentKey = getSegmentRenderKey(seg);
                     const fromKey = makeNodeKey(pts[0]);
                     const toKey = makeNodeKey(pts[1]);
                     nodeKeySet.add(fromKey);
@@ -295,7 +295,6 @@ export class LogisticsRenderer {
                             const cellKey = makeNodeKey(point);
                             cellKeySet.add(cellKey);
                             cellPointByKey.set(cellKey, getNodePoint(cellKey));
-                            addCellSegment(cellKey, segmentKey);
                             if (!cellAdj.has(cellKey)) cellAdj.set(cellKey, new Set());
                             addCellEdge(prevCellKey, cellKey);
                             prevCellKey = cellKey;
@@ -303,7 +302,6 @@ export class LogisticsRenderer {
                         const endCellKey = makeNodeKey(pts[1]);
                         cellKeySet.add(endCellKey);
                         cellPointByKey.set(endCellKey, getNodePoint(endCellKey));
-                        addCellSegment(endCellKey, segmentKey);
                         if (!cellAdj.has(endCellKey)) cellAdj.set(endCellKey, new Set());
                         addCellEdge(prevCellKey, endCellKey);
                     }
@@ -603,24 +601,74 @@ export class LogisticsRenderer {
                 {
                     const outputCells = [];
                     const inputCells = [];
-                    cellKeys.forEach((k) => {
-                        const outs = getPortOwnersNearCell(k, true);
-                        const ins = getPortOwnersNearCell(k, false);
-                        if (outs.length > 0) outputCells.push({ key: k, owners: outs });
-                        if (ins.length > 0) inputCells.push({ key: k, owners: ins });
-                    });
+                    if (representative && sourceEnt && targetEnt) {
+                        const sourceId = window.UIManager?.getEntityId
+                            ? window.UIManager.getEntityId(sourceEnt)
+                            : (sourceEnt.id || `${sourceEnt.type1}_${sourceEnt.x}_${sourceEnt.y}`);
+                        const targetId = window.UIManager?.getEntityId
+                            ? window.UIManager.getEntityId(targetEnt)
+                            : (targetEnt.id || `${targetEnt.type1}_${targetEnt.x}_${targetEnt.y}`);
+                        const sourcePort = representative.sourcePort || null;
+                        const targetPort = representative.targetPort || null;
+                        const groupEndpoints = [];
+                        segments.forEach((seg) => {
+                            const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+                            if (pts[0]) groupEndpoints.push(pts[0]);
+                            if (pts[pts.length - 1]) groupEndpoints.push(pts[pts.length - 1]);
+                        });
+                        const sourceCandidates = [
+                            sourcePort,
+                            ...(window.UIManager?.getBuildingPortSlots?.(sourceEnt) || []),
+                            ...groupEndpoints,
+                            { x: sourceEnt.x, y: sourceEnt.y }
+                        ].filter(Boolean);
+                        const targetCandidates = [
+                            targetPort,
+                            ...(window.UIManager?.getBuildingPortSlots?.(targetEnt) || []),
+                            ...groupEndpoints,
+                            { x: targetEnt.x, y: targetEnt.y }
+                        ].filter(Boolean);
+                        const collectOwnerCells = (candidates, wantOutput, ownerId, bucket) => {
+                            const seen = new Set();
+                            candidates.forEach((candidate) => {
+                                getNearbyCellKeys(candidate, GameEngine.TILE_SIZE * 2.25).forEach((k) => {
+                                    if (seen.has(k)) return;
+                                    const owners = getPortOwnersNearCell(k, wantOutput).filter((owner) => owner.id === ownerId);
+                                    if (owners.length === 0) return;
+                                    seen.add(k);
+                                    bucket.push({ key: k, owners });
+                                });
+                            });
+                        };
+                        collectOwnerCells(sourceCandidates, true, sourceId, outputCells);
+                        collectOwnerCells(targetCandidates, false, targetId, inputCells);
+                        if (outputCells.length === 0) {
+                            getNearbyCellKeys(sourcePort || { x: sourceEnt.x, y: sourceEnt.y }, GameEngine.TILE_SIZE * 3).forEach((k) => {
+                                const owners = getPortOwnersNearCell(k, true).filter((owner) => owner.id === sourceId);
+                                if (owners.length > 0) outputCells.push({ key: k, owners });
+                            });
+                        }
+                        if (inputCells.length === 0) {
+                            getNearbyCellKeys(targetPort || { x: targetEnt.x, y: targetEnt.y }, GameEngine.TILE_SIZE * 3).forEach((k) => {
+                                const owners = getPortOwnersNearCell(k, false).filter((owner) => owner.id === targetId);
+                                if (owners.length > 0) inputCells.push({ key: k, owners });
+                            });
+                        }
+                    } else {
+                        cellKeys.forEach((k) => {
+                            const outs = getPortOwnersNearCell(k, true);
+                            const ins = getPortOwnersNearCell(k, false);
+                            if (outs.length > 0) outputCells.push({ key: k, owners: outs });
+                            if (ins.length > 0) inputCells.push({ key: k, owners: ins });
+                        });
+                    }
                     for (const s of outputCells) {
                         for (const t of inputCells) {
                             const path = findCellPath(s.key, t.key);
                             if (!path) continue;
                             const hasDifferentPair = s.owners.some((so) => t.owners.some((ti) => ti.id !== so.id));
                             if (hasDifferentPair) {
-                                path.forEach((cellKey) => {
-                                    portToPortConnectedCellKeys.add(cellKey);
-                                    const segmentIds = cellSegmentIds.get(cellKey);
-                                    if (!segmentIds) return;
-                                    segmentIds.forEach((segmentId) => portToPortConnectedSegmentIds.add(segmentId));
-                                });
+                                addConnectedCellPath(groupKey, path);
                                 connected = true;
                             }
                         }
@@ -647,15 +695,14 @@ export class LogisticsRenderer {
                         ? window.UIManager.isSelectedLogisticsLine(line)
                         : state.selectedLogisticsLineId === line.id;
                     const groupKey = line.groupId || line.id;
-                    const segmentKey = getSegmentRenderKey(line);
-                    const isPortToPortConnected = segmentKey ? portToPortConnectedSegmentIds.has(segmentKey) : false;
                     const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(line.sourceId && line.targetId);
                     const isConnected = isPortToPortCandidate ? false : !!line.filter;
+                    const connectedCellKeys = portToPortConnectedCellKeysByGroup.get(groupKey) || new Set();
 
                     const turnCellKeys = groupTurnCellKeys.get(groupKey) || null;
                     drawLogisticsRoute(route.points, route.width || 1, isSelected, isConnected, line, false, turnCellKeys);
                     if (isPortToPortCandidate) {
-                        drawConnectedCellOverlay(route.points, route.width || 1, portToPortConnectedCellKeys, true, turnCellKeys);
+                        drawConnectedCellOverlay(route.points, route.width || 1, connectedCellKeys, true, turnCellKeys);
                     }
                 });
             }
@@ -668,6 +715,7 @@ export class LogisticsRenderer {
                 const sample = groupSegs[0] || {};
                 const widthTiles = Math.max(1, Number(sample.routeWidth) || 1);
                 const connected = portToPortConnectedGroupIds.has(groupKey);
+                const connectedCellPaths = portToPortConnectedCellPathsByGroup.get(groupKey) || [];
                 const color = connected
                     ? parseColor(logCfg.portToPortArrowColor || logCfg.arrowColor || "#00ffee")
                     : parseColor(logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
@@ -677,7 +725,17 @@ export class LogisticsRenderer {
                 const size = connected
                     ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 10)
                     : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 10);
-                LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, color, alpha, size);
+                if (connected) {
+                    const disconnectedColor = parseColor(logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
+                    const disconnectedAlpha = logCfg.disconnectedArrowAlpha ?? 0.85;
+                    const disconnectedSize = logCfg.disconnectedArrowSize || logCfg.arrowSize || 10;
+                    LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, disconnectedColor, disconnectedAlpha, disconnectedSize);
+                    connectedCellPaths.forEach((path) => {
+                        LogisticsRenderer.drawLogisticsPathTurnArrows(graphics, path, color, alpha, size);
+                    });
+                } else {
+                    LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, color, alpha, size);
+                }
                 drawnTurnGroups.add(groupKey);
             });
 
@@ -893,15 +951,43 @@ export class LogisticsRenderer {
         }
     }
 
-    static drawLogisticsGroupTurnArrows(g, segments, widthTiles, color, alpha, size) {
+    static drawLogisticsGroupTurnArrows(g, segments, widthTiles, color, alpha, size, onlyCellKeys = null) {
         if (!Array.isArray(segments) || segments.length === 0) return;
+        const TS = GameEngine.TILE_SIZE;
+        const keyOf = (x, y) => `${Math.round(x)},${Math.round(y)}`;
         const turns = LogisticsRenderer.getLogisticsGroupTurnCells(segments);
         turns.forEach(({ x, y, inDir, outDir }) => {
+            if (onlyCellKeys) {
+                const centerKey = keyOf(x, y);
+                const inKey = keyOf(x - inDir.x * TS, y - inDir.y * TS);
+                const outKey = keyOf(x + outDir.x * TS, y + outDir.y * TS);
+                if (!onlyCellKeys.has(centerKey) || !onlyCellKeys.has(inKey) || !onlyCellKeys.has(outKey)) return;
+            }
             const turnDir = LogisticsRenderer.getTurnArrowDirection(inDir, outDir);
             if (!turnDir) return;
             const arrowSize = Math.max(size * 1.05, GameEngine.TILE_SIZE * 0.32);
             LogisticsRenderer.drawArrowhead(g, x, y, turnDir.x, turnDir.y, arrowSize);
         });
+    }
+
+    static drawLogisticsPathTurnArrows(g, cellPath, color, alpha, size) {
+        if (!Array.isArray(cellPath) || cellPath.length < 3) return;
+        const pointOfKey = (key) => {
+            const [x, y] = String(key).split(",").map(Number);
+            return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+        };
+        g.fillStyle(color, alpha);
+        for (let i = 1; i < cellPath.length - 1; i++) {
+            const prev = pointOfKey(cellPath[i - 1]);
+            const curr = pointOfKey(cellPath[i]);
+            const next = pointOfKey(cellPath[i + 1]);
+            const inDir = LogisticsRenderer.getCardinalDir(prev, curr);
+            const outDir = LogisticsRenderer.getCardinalDir(curr, next);
+            const turnDir = LogisticsRenderer.getTurnArrowDirection(inDir, outDir);
+            if (!turnDir || !curr) continue;
+            const arrowSize = Math.max(size * 1.05, GameEngine.TILE_SIZE * 0.32);
+            LogisticsRenderer.drawArrowhead(g, curr.x, curr.y, turnDir.x, turnDir.y, arrowSize);
+        }
     }
 
     static getLogisticsGroupTurnCellKeys(segments) {
