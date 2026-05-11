@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Logistics Group Probe</title>
+<pre id="out">running</pre>
+<script type="module">
+import { GameEngine } from "../src/systems/game_systems.js";
+import { UIManager } from "../src/ui/ui.js";
+
+const out = document.getElementById("out");
+const source = { id: "warehouse_1", type1: "warehouse", x: 520, y: 180 };
+const target = { id: "factory_1", type1: "lumber_mill", x: 180, y: 280 };
+
+GameEngine.state.mapEntities = [
+  {
+    ...source,
+    outputTargets: [{ id: target.id, lineId: "gA", filter: "wood" }]
+  },
+  target
+];
+GameEngine.state.logisticsLines = [
+  { id: "a1", groupId: "gA", sourceId: source.id, x: 520, y: 220, routePoints: [{ x: 520, y: 180 }, { x: 520, y: 220 }], routeWidth: 1 },
+  { id: "a2", groupId: "gA", sourceId: source.id, x: 440, y: 220, routePoints: [{ x: 520, y: 220 }, { x: 360, y: 220 }], routeWidth: 1 },
+  { id: "b1", groupId: "gB", sourceId: target.id, x: 360, y: 250, routePoints: [{ x: 360, y: 220 }, { x: 360, y: 280 }], routeWidth: 1 },
+  { id: "b2", groupId: "gB", sourceId: target.id, x: 270, y: 280, routePoints: [{ x: 360, y: 280 }, { x: 180, y: 280 }], routeWidth: 1 }
+];
+
+const before = UIManager.getLogisticsGroupRoutePoints("gA", { x: 520, y: 180 }, { x: 180, y: 280 });
+UIManager.mergeLogisticsLineGroups("gA", "gB");
+const after = UIManager.getLogisticsGroupRoutePoints("gA", { x: 520, y: 180 }, { x: 180, y: 280 });
+const transfer = UIManager.getConnectionTransferRoute(GameEngine.state.mapEntities[0], target, GameEngine.state.mapEntities[0].outputTargets[0]);
+const maxJump = (points) => Math.max(...points.slice(1).map((p, i) => Math.hypot(p.x - points[i].x, p.y - points[i].y)));
+const result = {
+  beforePointCount: before?.length || 0,
+  afterPointCount: after?.length || 0,
+  afterGroupIds: [...new Set(GameEngine.state.logisticsLines.map(line => line.groupId))],
+  transferPointCount: transfer?.points?.length || 0,
+  transferMaxJump: transfer?.points ? maxJump(transfer.points) : null,
+  transferPoints: transfer?.points || []
+};
+const ok = result.beforePointCount < 4 &&
+  result.afterPointCount >= 4 &&
+  result.afterGroupIds.length === 1 &&
+  result.transferPointCount >= 4 &&
+  result.transferMaxJump <= 180;
+out.textContent = JSON.stringify({ ok, ...result }, null, 2);
+if (!ok) throw new Error("Logistics group probe failed");
+</script>

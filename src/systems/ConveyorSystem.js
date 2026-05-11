@@ -437,6 +437,14 @@ export class ConveyorSystem {
         const dragTarget = this.resolveDragTarget(lastPoint.x, lastPoint.y);
         const targetBuilding = dragTarget.building || drag.targetBuilding;
         const targetPort = dragTarget.port || drag.targetPort || (targetBuilding ? window.UIManager?.getNearestPortSlot(targetBuilding, points[points.length - 2]?.x || points[0].x, points[points.length - 2]?.y || points[0].y) : null);
+        const sourceGroupId = drag.sourceLine?.groupId || drag.sourceLine?.id || null;
+        const touchedTargetLine = sourceGroupId && window.UIManager?.getLogisticsLinesAt
+            ? window.UIManager.getLogisticsLinesAt(lastPoint.x, lastPoint.y).find(line => {
+                const groupId = line?.groupId || line?.id || null;
+                return groupId && groupId !== sourceGroupId;
+            })
+            : null;
+        const touchedTargetGroupId = touchedTargetLine ? (touchedTargetLine.groupId || touchedTargetLine.id) : null;
 
         if (window.UIManager) {
             const sourceEntity = drag.sourceEntity || (
@@ -469,6 +477,9 @@ export class ConveyorSystem {
                 targetPort: targetPort,
                 conn
             });
+            if (createdLine?.groupId && touchedTargetGroupId && window.UIManager.mergeLogisticsLineGroups) {
+                window.UIManager.mergeLogisticsLineGroups(createdLine.groupId, touchedTargetGroupId);
+            }
             if (drag.sourceLine?.filter && createdLine?.groupId) {
                 window.UIManager.setLogisticsGroupFilter(createdLine.groupId, drag.sourceLine.filter);
             }

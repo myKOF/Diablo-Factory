@@ -1422,6 +1422,15 @@ export class UIManager {
 
     static getConnectionRoute(sourceEnt, targetEnt, conn = null) {
         if (!sourceEnt || !targetEnt) return null;
+        if (conn?.lineId && Array.isArray(GameEngine.state?.logisticsLines)) {
+            const linePoints = this.getLogisticsGroupRoutePoints(conn.lineId, sourceEnt, targetEnt);
+            if (Array.isArray(linePoints) && linePoints.length >= 2) {
+                return {
+                    points: linePoints,
+                    width: Math.max(1, Number(conn.routeWidth) || 1)
+                };
+            }
+        }
         if (conn && Array.isArray(conn.routePoints) && conn.routePoints.length >= 2) {
             return {
                 points: conn.routePoints.map(p => ({ x: p.x, y: p.y })),
@@ -1441,6 +1450,205 @@ export class UIManager {
                 { x: (sourceEnt.x + targetEnt.x) / 2, y: (sourceEnt.y + targetEnt.y) / 2 }
             )),
             width: Math.max(1, Math.min(sourcePort.width || 1, targetPort.width || 1))
+        };
+    }
+
+    static getLogisticsGroupRoutePoints(lineId, startRef = null, endRef = null) {
+        const segments = this.getLogisticsSegmentsByGroupId(lineId);
+        if (!Array.isArray(segments) || segments.length === 0) return null;
+        const segmentPoints = segments
+            .map(seg => Array.isArray(seg.routePoints) ? seg.routePoints.map(p => ({ x: p.x, y: p.y })) : [])
+            .filter(points => points.length >= 2);
+        if (segmentPoints.length === 0) return null;
+
+        const makeKey = (point) => `${Math.round(point.x)},${Math.round(point.y)}`;
+        const nodes = new Map();
+        const edges = new Map();
+        const addNode = (point) => {
+            const key = makeKey(point);
+            if (!nodes.has(key)) nodes.set(key, { x: Math.round(point.x), y: Math.round(point.y) });
+            if (!edges.has(key)) edges.set(key, []);
+            return key;
+        };
+        const addEdge = (a, b) => {
+            const ak = addNode(a);
+            const bk = addNode(b);
+            const weight = Math.max(0.001, Math.hypot(b.x - a.x, b.y - a.y));
+            edges.get(ak).push({ key: bk, weight });
+            edges.get(bk).push({ key: ak, weight });
+        };
+
+        segments.forEach((seg, index) => {
+            const points = segmentPoints[index];
+            if (!points) return;
+            for (let i = 0; i < points.length - 1; i++) {
+                addEdge(points[i], points[i + 1]);
+            }
+            if (Number.isFinite(seg.x) && Number.isFinite(seg.y)) {
+                const center = { x: seg.x, y: seg.y };
+                addNode(center);
+                addEdge(points[0], center);
+                addEdge(center, points[points.length - 1]);
+            }
+        });
+
+        const nearestKey = (ref) => {
+            if (!ref || !nodes.size) return null;
+            let bestKey = null;
+            let bestDist = Infinity;
+            nodes.forEach((point, key) => {
+                const dist = Math.hypot(point.x - ref.x, point.y - ref.y);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestKey = key;
+                }
+            });
+            return bestKey;
+        };
+
+        const findPath = (startKey, endKey) => {
+            if (!startKey || !endKey) return null;
+            if (startKey === endKey) return [nodes.get(startKey)];
+            const distances = new Map([[startKey, 0]]);
+            const previous = new Map();
+            const unvisited = new Set(nodes.keys());
+
+            while (unvisited.size > 0) {
+                let current = null;
+                let bestDistance = Infinity;
+                unvisited.forEach(key => {
+                    const dist = distances.get(key) ?? Infinity;
+                    if (dist < bestDistance) {
+                        bestDistance = dist;
+                        current = key;
+                    }
+                });
+
+                if (!current || bestDistance === Infinity) break;
+                unvisited.delete(current);
+                if (current === endKey) break;
+
+                (edges.get(current) || []).forEach(edge => {
+                    if (!unvisited.has(edge.key)) return;
+                    const nextDistance = bestDistance + edge.weight;
+                    if (nextDistance < (distances.get(edge.key) ?? Infinity)) {
+                        distances.set(edge.key, nextDistance);
+                        previous.set(edge.key, current);
+                    }
+                });
+            }
+
+            if (!distances.has(endKey)) return null;
+            const keys = [];
+            let current = endKey;
+            while (current) {
+                keys.unshift(current);
+                if (current === startKey) break;
+                current = previous.get(current);
+            }
+            return keys[0] === startKey ? keys.map(key => ({ ...nodes.get(key) })) : null;
+        };
+
+        if (startRef && endRef) {
+            const routed = findPath(nearestKey(startRef), nearestKey(endRef));
+            if (Array.isArray(routed) && routed.length >= 2) return routed;
+        }
+
+        const remaining = segmentPoints.map(points => points.slice());
+        const points = remaining.shift();
+        const samePoint = (a, b) => a && b && Math.hypot(a.x - b.x, a.y - b.y) < 1;
+
+        while (remaining.length > 0) {
+            const first = points[0];
+            const last = points[points.length - 1];
+            let foundIndex = -1;
+            let prepend = false;
+            let reverse = false;
+
+            for (let i = 0; i < remaining.length; i++) {
+                const candidate = remaining[i];
+                if (samePoint(candidate[0], last)) {
+                    foundIndex = i;
+                    break;
+                }
+                if (samePoint(candidate[candidate.length - 1], last)) {
+                    foundIndex = i;
+                    reverse = true;
+                    break;
+                }
+                if (samePoint(candidate[candidate.length - 1], first)) {
+                    foundIndex = i;
+                    prepend = true;
+                    break;
+                }
+                if (samePoint(candidate[0], first)) {
+                    foundIndex = i;
+                    prepend = true;
+                    reverse = true;
+                    break;
+                }
+            }
+
+            if (foundIndex === -1) break;
+            const next = remaining.splice(foundIndex, 1)[0];
+            if (reverse) next.reverse();
+            if (prepend) points.unshift(...next.slice(0, -1));
+            else points.push(...next.slice(1));
+        }
+
+        if (startRef && points.length >= 2) {
+            const firstDist = Math.hypot(points[0].x - startRef.x, points[0].y - startRef.y);
+            const lastDist = Math.hypot(points[points.length - 1].x - startRef.x, points[points.length - 1].y - startRef.y);
+            if (lastDist < firstDist) points.reverse();
+        }
+        return points;
+    }
+
+    static getConnectionTransferRoute(sourceEnt, targetEnt, conn = null) {
+        if (!sourceEnt || !targetEnt) return null;
+        const route = this.getConnectionRoute(sourceEnt, targetEnt, conn);
+        const rawPoints = route && Array.isArray(route.points) && route.points.length >= 2
+            ? route.points.map(p => ({ x: p.x, y: p.y }))
+            : [{ x: sourceEnt.x, y: sourceEnt.y }, { x: targetEnt.x, y: targetEnt.y }];
+
+        const first = rawPoints[0];
+        const last = rawPoints[rawPoints.length - 1];
+        const sourcePort = conn?.sourcePort
+            ? this.resolveCurrentPortSlot(sourceEnt, conn.sourcePort, first?.x, first?.y)
+            : this.getNearestPortSlot(sourceEnt, first?.x ?? targetEnt.x, first?.y ?? targetEnt.y);
+        const targetPort = conn?.targetPort
+            ? this.resolveCurrentPortSlot(targetEnt, conn.targetPort, last?.x, last?.y)
+            : this.getNearestPortSlot(targetEnt, last?.x ?? sourceEnt.x, last?.y ?? sourceEnt.y);
+
+        const sourceAnchor = sourcePort || { x: sourceEnt.x, y: sourceEnt.y };
+        const targetAnchor = targetPort || { x: targetEnt.x, y: targetEnt.y };
+        const linePoints = conn?.lineId
+            ? this.getLogisticsGroupRoutePoints(conn.lineId, sourceAnchor, targetAnchor)
+            : null;
+        const points = Array.isArray(linePoints) && linePoints.length >= 2 ? linePoints : rawPoints.slice();
+        const firstToSource = Math.hypot(points[0].x - sourceAnchor.x, points[0].y - sourceAnchor.y);
+        const lastToSource = Math.hypot(points[points.length - 1].x - sourceAnchor.x, points[points.length - 1].y - sourceAnchor.y);
+        if (lastToSource < firstToSource) points.reverse();
+
+        const transferPoints = [];
+        const pushPoint = (point) => {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+            const lastPoint = transferPoints[transferPoints.length - 1];
+            if (!lastPoint || Math.hypot(lastPoint.x - point.x, lastPoint.y - point.y) > 0.5) {
+                transferPoints.push({ x: point.x, y: point.y });
+            }
+        };
+
+        pushPoint(sourceAnchor);
+        points.forEach(pushPoint);
+        pushPoint(targetAnchor);
+
+        if (transferPoints.length < 2) return null;
+        return {
+            points: transferPoints,
+            width: Math.max(1, Number(route?.width) || Number(conn?.routeWidth) || 1),
+            sourcePort,
+            targetPort
         };
     }
 
@@ -1694,7 +1902,12 @@ export class UIManager {
             conn.sourcePort = cleanSourcePort;
             conn.targetPort = cleanTargetPort;
         }
-        return additions[additions.length - 1] || segments.map(segment => occupied.get(this.getLogisticsSegmentOccupyKey(segment))).filter(Boolean).pop() || null;
+
+        const mergedGroupId = this.mergeConnectedLogisticsGroups(groupId) || groupId;
+        if (conn && mergedGroupId !== groupId) {
+            conn.lineId = mergedGroupId;
+        }
+        return additions[additions.length - 1] || segments.map(segment => occupied.get(this.getLogisticsSegmentOccupyKey(segment))).filter(Boolean).pop() || this.getLogisticsLineById(mergedGroupId) || null;
     }
 
     static getLogisticsLineRoute(line) {
@@ -1723,6 +1936,126 @@ export class UIManager {
         this.getLogisticsSegmentsByGroupId(groupId).forEach(line => {
             line.filter = filterItem || null;
         });
+    }
+
+    static getLogisticsLineNodePoints(line) {
+        const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+        const nodes = [];
+        const push = (point) => {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+            if (!nodes.some(node => Math.hypot(node.x - point.x, node.y - point.y) < 1)) {
+                nodes.push({ x: point.x, y: point.y });
+            }
+        };
+
+        points.forEach(push);
+        if (Number.isFinite(line?.x) && Number.isFinite(line?.y)) push({ x: line.x, y: line.y });
+        return nodes;
+    }
+
+    static isPointOnLogisticsLine(point, line) {
+        if (!point || !line) return false;
+        const points = Array.isArray(line.routePoints) ? line.routePoints : [];
+        if (points.some(p => p && Math.hypot(p.x - point.x, p.y - point.y) < 1)) return true;
+        if (Number.isFinite(line.x) && Number.isFinite(line.y) && Math.hypot(line.x - point.x, line.y - point.y) < 1) return true;
+
+        const eps = 1;
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            if (!a || !b) continue;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const lengthSq = dx * dx + dy * dy;
+            if (lengthSq < 0.001) continue;
+            const t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq;
+            if (t < -0.001 || t > 1.001) continue;
+            const projX = a.x + dx * t;
+            const projY = a.y + dy * t;
+            if (Math.hypot(point.x - projX, point.y - projY) <= eps) return true;
+        }
+        return false;
+    }
+
+    static areLogisticsGroupsTouching(primaryGroupId, secondaryGroupId) {
+        if (!primaryGroupId || !secondaryGroupId || primaryGroupId === secondaryGroupId) return false;
+        const primaryLines = this.getLogisticsSegmentsByGroupId(primaryGroupId);
+        const secondaryLines = this.getLogisticsSegmentsByGroupId(secondaryGroupId);
+        if (!primaryLines.length || !secondaryLines.length) return false;
+
+        for (const a of primaryLines) {
+            const aNodes = this.getLogisticsLineNodePoints(a);
+            for (const b of secondaryLines) {
+                const bNodes = this.getLogisticsLineNodePoints(b);
+                if (aNodes.some(point => this.isPointOnLogisticsLine(point, b))) return true;
+                if (bNodes.some(point => this.isPointOnLogisticsLine(point, a))) return true;
+            }
+        }
+        return false;
+    }
+
+    static mergeConnectedLogisticsGroups(groupId) {
+        let activeGroupId = groupId;
+        if (!activeGroupId) return null;
+
+        let merged = true;
+        while (merged) {
+            merged = false;
+            const otherGroupIds = [...new Set(this.ensureLogisticsLineStore()
+                .map(line => line?.groupId || line?.id)
+                .filter(id => id && id !== activeGroupId))];
+
+            for (const otherGroupId of otherGroupIds) {
+                if (!this.areLogisticsGroupsTouching(activeGroupId, otherGroupId)) continue;
+                activeGroupId = this.mergeLogisticsLineGroups(activeGroupId, otherGroupId);
+                merged = true;
+                break;
+            }
+        }
+        return activeGroupId;
+    }
+
+    static mergeLogisticsLineGroups(primaryGroupId, secondaryGroupId) {
+        if (!primaryGroupId || !secondaryGroupId || primaryGroupId === secondaryGroupId) return primaryGroupId || secondaryGroupId || null;
+        const lines = this.ensureLogisticsLineStore();
+        const primaryLines = lines.filter(line => line && (line.groupId === primaryGroupId || line.id === primaryGroupId));
+        const secondaryLines = lines.filter(line => line && (line.groupId === secondaryGroupId || line.id === secondaryGroupId));
+        if (primaryLines.length === 0 || secondaryLines.length === 0) return primaryGroupId;
+
+        const primaryMeta = primaryLines.find(line => line && (line.sourceId || line.targetId || line.sourcePort || line.targetPort)) || primaryLines[0];
+        const secondaryMeta = secondaryLines.find(line => line && (line.sourceId || line.targetId || line.sourcePort || line.targetPort)) || secondaryLines[0];
+        let canonicalSourceId = primaryMeta?.sourceId || secondaryMeta?.sourceId || null;
+        let canonicalTargetId = primaryMeta?.targetId || secondaryMeta?.targetId || null;
+        let canonicalSourcePort = primaryMeta?.sourcePort || secondaryMeta?.sourcePort || null;
+        let canonicalTargetPort = primaryMeta?.targetPort || secondaryMeta?.targetPort || null;
+        let filter = primaryMeta?.filter || secondaryMeta?.filter || null;
+
+        (GameEngine.state.mapEntities || []).forEach(ent => {
+            if (!Array.isArray(ent.outputTargets)) return;
+            const sourceId = this.getEntityId(ent);
+            ent.outputTargets.forEach(conn => {
+                if (!conn) return;
+                if (conn.lineId !== primaryGroupId && conn.lineId !== secondaryGroupId) return;
+                conn.lineId = primaryGroupId;
+                canonicalSourceId = sourceId || canonicalSourceId;
+                canonicalTargetId = conn.id || canonicalTargetId;
+                canonicalSourcePort = conn.sourcePort || canonicalSourcePort;
+                canonicalTargetPort = conn.targetPort || canonicalTargetPort;
+                filter = conn.filter || filter;
+            });
+        });
+
+        [...primaryLines, ...secondaryLines].forEach(line => {
+            line.groupId = primaryGroupId;
+            if (canonicalSourceId) line.sourceId = canonicalSourceId;
+            if (canonicalTargetId) line.targetId = canonicalTargetId;
+            if (canonicalSourcePort) line.sourcePort = canonicalSourcePort;
+            if (canonicalTargetPort) line.targetPort = canonicalTargetPort;
+            if (filter) line.filter = filter;
+        });
+
+        if (GameEngine.state.selectedLogisticsGroupId === secondaryGroupId) GameEngine.state.selectedLogisticsGroupId = primaryGroupId;
+        return primaryGroupId;
     }
 
     static getLogisticsLineSourceEntity(line) {
@@ -1945,6 +2278,10 @@ export class UIManager {
     }
 
     static getLogisticsLineAt(worldX, worldY) {
+        return this.getLogisticsLinesAt(worldX, worldY)[0] || null;
+    }
+
+    static getLogisticsLinesAt(worldX, worldY) {
         const TS = GameEngine.TILE_SIZE;
         const getVisibleRects = (line) => {
             const points = Array.isArray(line.routePoints)
@@ -1999,7 +2336,7 @@ export class UIManager {
             });
         });
         hits.sort((a, b) => a.distance - b.distance || (b.line.createdAt || 0) - (a.line.createdAt || 0));
-        return hits[0]?.line || null;
+        return hits.map(hit => hit.line);
     }
 
     static handleWorldMouseDown(e) {

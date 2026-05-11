@@ -178,6 +178,38 @@ export class LogisticsRenderer {
                 });
             };
 
+            const getPointOnPathByDistance = (points, progress) => {
+                if (!Array.isArray(points) || points.length < 2) return null;
+                const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+                const lengths = [];
+                let totalLength = 0;
+                for (let i = 0; i < points.length - 1; i++) {
+                    const a = points[i];
+                    const b = points[i + 1];
+                    const length = Math.hypot(b.x - a.x, b.y - a.y);
+                    lengths.push(length);
+                    totalLength += length;
+                }
+                if (totalLength <= 0) return { x: points[0].x, y: points[0].y };
+
+                let targetDistance = clampedProgress * totalLength;
+                for (let i = 0; i < lengths.length; i++) {
+                    const length = lengths[i];
+                    if (targetDistance <= length || i === lengths.length - 1) {
+                        const a = points[i];
+                        const b = points[i + 1];
+                        const localProgress = length > 0 ? targetDistance / length : 0;
+                        return {
+                            x: a.x + (b.x - a.x) * localProgress,
+                            y: a.y + (b.y - a.y) * localProgress
+                        };
+                    }
+                    targetDistance -= length;
+                }
+                const last = points[points.length - 1];
+                return { x: last.x, y: last.y };
+            };
+
             const groupSegments = new Map();
             if (Array.isArray(state.logisticsLines)) {
                 state.logisticsLines.forEach((line) => {
@@ -683,27 +715,59 @@ export class LogisticsRenderer {
                 groupTurnCellKeys.set(groupKey, LogisticsRenderer.getLogisticsGroupTurnCellKeys(groupSegs));
             });
 
+            const drawnCanonicalGroups = new Set();
             if (Array.isArray(state.logisticsLines)) {
-                state.logisticsLines.forEach(line => {
-                    let route = (window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function')
-                        ? window.UIManager.getLogisticsLineRoute(line)
+                groupSegments.forEach((groupSegs, groupKey) => {
+                    if (!Array.isArray(groupSegs) || groupSegs.length === 0) return;
+
+                    const representative = groupSegs.find(line => line && (line.sourceId || line.targetId)) || groupSegs[0];
+                    const widthTiles = Math.max(1, Number(representative?.routeWidth) || 1);
+                    const sourceEnt = representative?.sourceId
+                        ? state.mapEntities?.find(ent => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === representative.sourceId)
                         : null;
+                    const targetEnt = representative?.targetId
+                        ? state.mapEntities?.find(ent => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === representative.targetId)
+                        : null;
+                    const conn = sourceEnt && Array.isArray(sourceEnt.outputTargets)
+                        ? sourceEnt.outputTargets.find(item => item && (item.lineId === groupKey || item.id === representative?.targetId))
+                        : null;
+                    const transferRoute = sourceEnt && targetEnt && window.UIManager && typeof window.UIManager.getConnectionTransferRoute === 'function'
+                        ? window.UIManager.getConnectionTransferRoute(sourceEnt, targetEnt, conn || { lineId: groupKey, routeWidth: widthTiles })
+                        : null;
+                    const groupPoints = transferRoute && Array.isArray(transferRoute.points) && transferRoute.points.length >= 2
+                        ? transferRoute.points
+                        : (window.UIManager && typeof window.UIManager.getLogisticsGroupRoutePoints === 'function'
+                            ? window.UIManager.getLogisticsGroupRoutePoints(groupKey, sourceEnt || null, targetEnt || null)
+                            : null);
+                    const fallbackRoute = (!groupPoints || groupPoints.length < 2) && window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function'
+                        ? window.UIManager.getLogisticsLineRoute(representative)
+                        : null;
+                    const points = Array.isArray(groupPoints) && groupPoints.length >= 2
+                        ? groupPoints
+                        : (fallbackRoute?.points || null);
+                    if (!Array.isArray(points) || points.length < 2) return;
 
-                    if (!route || !Array.isArray(route.points) || route.points.length < 2) return;
-
-                    const isSelected = window.UIManager && typeof window.UIManager.isSelectedLogisticsLine === 'function'
+                    const isSelected = groupSegs.some(line => window.UIManager && typeof window.UIManager.isSelectedLogisticsLine === 'function'
                         ? window.UIManager.isSelectedLogisticsLine(line)
-                        : state.selectedLogisticsLineId === line.id;
-                    const groupKey = line.groupId || line.id;
-                    const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(line.sourceId && line.targetId);
-                    const isConnected = isPortToPortCandidate ? false : !!line.filter;
+                        : state.selectedLogisticsLineId === line.id);
+                    const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(representative?.sourceId && representative?.targetId);
+                    const isConnected = isPortToPortCandidate ? false : groupSegs.some(line => !!line?.filter);
                     const connectedCellKeys = portToPortConnectedCellKeysByGroup.get(groupKey) || new Set();
 
-                    const turnCellKeys = groupTurnCellKeys.get(groupKey) || null;
-                    drawLogisticsRoute(route.points, route.width || 1, isSelected, isConnected, line, false, turnCellKeys);
+                    drawLogisticsRoute(points, widthTiles, isSelected, isConnected, representative, false, null);
                     if (isPortToPortCandidate) {
-                        drawConnectedCellOverlay(route.points, route.width || 1, connectedCellKeys, true, turnCellKeys);
+                        drawConnectedCellOverlay(points, widthTiles, connectedCellKeys, true, null);
                     }
+                    if (isSelected) {
+                        groupSegs.forEach(line => {
+                            if (!line) return;
+                            const route = window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function'
+                                ? window.UIManager.getLogisticsLineRoute(line)
+                                : null;
+                            if (route?.points?.length >= 2) drawSelectedLogisticsSegmentOutlineOnRoute(route.points, route.width || widthTiles, line);
+                        });
+                    }
+                    drawnCanonicalGroups.add(groupKey);
                 });
             }
 
@@ -712,6 +776,7 @@ export class LogisticsRenderer {
             groupSegments.forEach((groupSegs, groupKey) => {
                 if (!Array.isArray(groupSegs) || groupSegs.length === 0) return;
                 if (drawnTurnGroups.has(groupKey)) return;
+                if (drawnCanonicalGroups.has(groupKey)) return;
                 const sample = groupSegs[0] || {};
                 const widthTiles = Math.max(1, Number(sample.routeWidth) || 1);
                 const connected = portToPortConnectedGroupIds.has(groupKey);
@@ -893,7 +958,125 @@ export class LogisticsRenderer {
                         graphics.lineStyle(2, ghostColor, 0.8);
                     }
                 });
-            }    }
+            }
+
+        // 繪製自動傳輸線上的動態物品
+        if (state.activeTransfers && state.activeTransfers.length > 0) {
+            state.activeTransfers.forEach(t => {
+                const source = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.sourceId);
+                const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
+                
+                if (source && target) {
+                    const directConn = Array.isArray(source.outputTargets)
+                        ? source.outputTargets.find(conn => conn && conn.id === t.targetId)
+                        : null;
+                    let routePoints = null;
+                    if (directConn) {
+                        const transferRoute = (window.UIManager && typeof window.UIManager.getConnectionTransferRoute === 'function')
+                            ? window.UIManager.getConnectionTransferRoute(source, target, directConn)
+                            : null;
+                        routePoints = transferRoute && Array.isArray(transferRoute.points) && transferRoute.points.length >= 2
+                            ? transferRoute.points.map(p => ({ x: p.x, y: p.y }))
+                            : (Array.isArray(directConn.routePoints) && directConn.routePoints.length >= 2
+                                ? directConn.routePoints.map(p => ({ x: p.x, y: p.y }))
+                                : null);
+                        if ((!routePoints || routePoints.length < 2) && directConn.lineId && Array.isArray(state.logisticsLines)) {
+                            const segs = state.logisticsLines
+                                .filter(line => line && (line.groupId === directConn.lineId || line.id === directConn.lineId));
+                            
+                            if (segs.length > 0) {
+                                let points = [];
+                                let remaining = [...segs];
+                                let currentSeg = remaining.shift();
+                                if (currentSeg && Array.isArray(currentSeg.routePoints)) {
+                                    points = [...currentSeg.routePoints];
+                                }
+                                
+                                while (remaining.length > 0) {
+                                    const lastPt = points[points.length - 1];
+                                    const firstPt = points[0];
+                                    let found = false;
+                                    
+                                    for (let i = 0; i < remaining.length; i++) {
+                                        const s = remaining[i];
+                                        const sPts = s.routePoints;
+                                        if (!Array.isArray(sPts) || sPts.length < 2) continue;
+                                        
+                                        // 檢查是否接在尾端
+                                        if (Math.abs(sPts[0].x - lastPt.x) < 1 && Math.abs(sPts[0].y - lastPt.y) < 1) {
+                                            points.push(sPts[1]);
+                                            remaining.splice(i, 1);
+                                            found = true;
+                                            break;
+                                        }
+                                        if (Math.abs(sPts[1].x - lastPt.x) < 1 && Math.abs(sPts[1].y - lastPt.y) < 1) {
+                                            points.push(sPts[0]);
+                                            remaining.splice(i, 1);
+                                            found = true;
+                                            break;
+                                        }
+                                        // 檢查是否接在前端
+                                        if (Math.abs(sPts[1].x - firstPt.x) < 1 && Math.abs(sPts[1].y - firstPt.y) < 1) {
+                                            points.unshift(sPts[0]);
+                                            remaining.splice(i, 1);
+                                            found = true;
+                                            break;
+                                        }
+                                        if (Math.abs(sPts[0].x - firstPt.x) < 1 && Math.abs(sPts[0].y - firstPt.y) < 1) {
+                                            points.unshift(sPts[1]);
+                                            remaining.splice(i, 1);
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    if (!found) break;
+                                }
+                                
+                                // 確保起點靠近 source 建築
+                                if (points.length >= 2) {
+                                    const startPt = points[0];
+                                    const endPt = points[points.length - 1];
+                                    const distStart = Math.hypot(startPt.x - source.x, startPt.y - source.y);
+                                    const distEnd = Math.hypot(endPt.x - source.x, endPt.y - source.y);
+                                    if (distEnd < distStart) {
+                                        points.reverse();
+                                    }
+                                }
+                                routePoints = points;
+                            }
+                        }
+                    }
+
+                    let px, py;
+                    if (Array.isArray(routePoints) && routePoints.length >= 2) {
+                        const pathPoint = getPointOnPathByDistance(routePoints, t.progress);
+                        px = pathPoint.x;
+                        py = pathPoint.y;
+                    } else {
+                        // Fallback to straight line
+                        px = source.x + (target.x - source.x) * t.progress;
+                        py = source.y + (target.y - source.y) * t.progress;
+                    }
+
+                    // 獲取資源對應顏色
+                    const color = (scene && typeof scene.getResourceIconColor === 'function') 
+                        ? scene.getResourceIconColor(t.itemType) 
+                        : 0xffffff;
+
+                    // 畫出帶有資源顏色的物流小箱子 (稍微大一點，並且有旋轉效果)
+                    graphics.fillStyle(0x222222, 1);
+                    graphics.fillRect(px - 10, py - 10, 20, 20);
+                    graphics.lineStyle(3, color, 1);
+                    graphics.strokeRect(px - 10, py - 10, 20, 20);
+                    
+                    // 畫個內核
+                    graphics.fillStyle(color, 0.8);
+                    graphics.fillRect(px - 4, py - 4, 8, 8);
+                }
+            });
+        }
+    }
 
     static drawArrowhead(g, x, y, ux, uy, size) {
         // ux, uy 是單位方向向量
