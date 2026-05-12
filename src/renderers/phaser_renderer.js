@@ -16,8 +16,7 @@ export class PhaserRenderer {
             disableContextMenu: true,
             scene: [MainScene],
             fps: {
-                target: 60,
-                forceSetTimeOut: true
+                target: 60
             },
             scale: {
                 mode: Phaser.Scale.FIT,

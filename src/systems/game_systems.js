@@ -83,6 +83,7 @@ export class GameEngine {
 
     static lastTickTime = 0;
     static isStarted = false;
+    static logicIntervalId = null;
 
     static async start() {
         if (this.isStarted) return;
@@ -119,12 +120,11 @@ export class GameEngine {
 
 
     static initBackgroundWorker() {
-        const blob = new Blob([`
-            setInterval(() => { self.postMessage('tick'); }, 20); // 提高頻率至 50Hz (20ms) 以確保動畫平滑
-        `], { type: "text/javascript" });
-        const worker = new Worker(URL.createObjectURL(blob));
-        worker.onmessage = () => { this.logicTick(); };
-        console.log("背景執行 Worker 已啟動");
+        if (this.logicIntervalId !== null) return;
+
+        const LOGIC_STEP_MS = 50;
+        this.logicIntervalId = window.setInterval(() => this.logicTick(), LOGIC_STEP_MS);
+        console.log(`[Logic] fixed update loop started (${1000 / LOGIC_STEP_MS}Hz)`);
     }
 
     static logicTick() {

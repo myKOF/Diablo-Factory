@@ -132,7 +132,13 @@ export class BattleRenderer {
         const pointer = scene.input.activePointer;
 
         // 從全域狀態獲取目前選取 ID 列表
-        const selectedIds = window.GAME_STATE ? (window.GAME_STATE.selectedUnitIds || []) : [];
+        const selectedIds = new Set(window.GAME_STATE ? (window.GAME_STATE.selectedUnitIds || []) : []);
+        const targetedByPlayerIds = new Set();
+        const playerUnits = window.GAME_STATE?.units?.villagers || [];
+        for (let i = 0; i < playerUnits.length; i++) {
+            const targetId = playerUnits[i]?.targetId;
+            if (typeof targetId === "string") targetedByPlayerIds.add(targetId);
+        }
 
         units.forEach(unit => {
             if (unit.visible === false) return; // [核心新增] 如果單位被標記為不可見（如派駐工廠中），則不渲染血條
@@ -147,8 +153,8 @@ export class BattleRenderer {
 
             // 1. 判斷顯示條件：受擊中 OR 滑鼠懸停 OR 目前選中
             const isHovered = window.GAME_STATE?.hoveredId === unit.id;
-            const isSelected = selectedIds.includes(unit.id);
-            const isTargetedByPlayerArmy = window.GAME_STATE?.units?.villagers?.some(u => u.targetId === unit.id) || false;
+            const isSelected = selectedIds.has(unit.id);
+            const isTargetedByPlayerArmy = targetedByPlayerIds.has(unit.id);
 
             // 如果符合任一條件（受擊、懸停、選中、正在戰鬥、或是我方單位集火目標），渲染血條
             const isInCombat = (unit.state === 'CHASE' || unit.state === 'ATTACK');

@@ -117,11 +117,9 @@ export class MapGenerator {
         markOccupiedG(cgx, cgy, campfireFP.uw, campfireFP.uh);
 
         // 2. 初始化可用位點池 (母空間)
-        const pool = [];
-        for (let gx = minGX; gx < minGX + cols; gx++) {
-            for (let gy = minGY; gy < minGY + rows; gy++) {
-                pool.push({ gx, gy });
-            }
+        const pool = new Uint32Array(cols * rows);
+        for (let i = 0; i < pool.length; i++) {
+            pool[i] = i;
         }
 
         // 3. 隨機洗牌位點池 (Fisher-Yates Shuffle)
@@ -157,7 +155,9 @@ export class MapGenerator {
                 else if (upperType === 'SCENE_MITHRIL_MINE' || upperType === 'SCENE_MITHRIL_ORE') typeNum = 13;
 
                 for (let i = 0; i < pool.length && count < cfg.density; i++) {
-                    const { gx, gy } = pool[i];
+                    const tileIndex = pool[i];
+                    const gx = minGX + (tileIndex % cols);
+                    const gy = minGY + Math.floor(tileIndex / cols);
                     if (checkOccupiedG(gx, gy, fp.uw, fp.uh)) continue;
 
                     const w = fp.uw * TS, h = fp.uh * TS;
@@ -227,7 +227,9 @@ export class MapGenerator {
                 const proximityGrid = new Uint8Array(cols * rows);
 
                 for (i = 0; i < pool.length && count < density; i++) {
-                    const { gx, gy } = pool[i];
+                    const tileIndex = pool[i];
+                    const gx = minGX + (tileIndex % cols);
+                    const gy = minGY + Math.floor(tileIndex / cols);
 
                     // 1. 基本佔用檢查 (建築/資源)
                     if (checkOccupiedG(gx, gy, 1, 1)) continue;

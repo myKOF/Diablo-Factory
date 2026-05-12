@@ -760,18 +760,74 @@ export class MainScene extends Phaser.Scene {
         }
     }
 
+    getLogisticsRenderSignature(state) {
+        const lines = Array.isArray(state.logisticsLines) ? state.logisticsLines : [];
+        const transferCount = Array.isArray(state.activeTransfers) ? state.activeTransfers.length : 0;
+        const ghostCount = Array.isArray(state.conveyorGhosts) ? state.conveyorGhosts.length : 0;
+        let outputTargetCount = 0;
+        let outputTargetState = "";
+        if (Array.isArray(state.mapEntities)) {
+            for (let i = 0; i < state.mapEntities.length; i++) {
+                const ent = state.mapEntities[i];
+                const targets = ent?.outputTargets || [];
+                outputTargetCount += targets.length;
+                for (let j = 0; j < targets.length; j++) {
+                    const conn = targets[j];
+                    outputTargetState += `${conn.id || ""}:${conn.lineId || ""}:${conn.filter || ""};`;
+                }
+            }
+        }
+        const lineState = lines.map(line => `${line.id || ""}:${line.groupId || ""}:${line.filter || ""}:${line.routeWidth || ""}:${line.routePoints?.length || 0}`).join(";");
+        return [
+            lines.length,
+            lineState,
+            outputTargetCount,
+            outputTargetState,
+            transferCount,
+            ghostCount,
+            state.logisticsDragLine ? 1 : 0,
+            state.selectedLogisticsLineId || "",
+            state.selectedLogisticsGroupId || ""
+        ].join("|");
+    }
+
+    updateLogisticsLayer(state) {
+        if (!this.logisticsGraphics) return;
+
+        const hasStaticContent =
+            (Array.isArray(state.logisticsLines) && state.logisticsLines.length > 0) ||
+            (Array.isArray(state.mapEntities) && state.mapEntities.some(ent => ent?.outputTargets?.length > 0));
+        const hasDynamicContent =
+            !!state.logisticsDragLine ||
+            (Array.isArray(state.conveyorGhosts) && state.conveyorGhosts.length > 0) ||
+            (Array.isArray(state.activeTransfers) && state.activeTransfers.length > 0);
+
+        if (!hasStaticContent && !hasDynamicContent) {
+            if (this._logisticsLayerWasDrawn) {
+                this.logisticsGraphics.clear();
+                this._logisticsLayerWasDrawn = false;
+            }
+            this._lastLogisticsRenderSignature = "";
+            return;
+        }
+
+        const signature = this.getLogisticsRenderSignature(state);
+        if (hasDynamicContent || this._lastLogisticsRenderSignature !== signature) {
+            LogisticsRenderer.render(this.logisticsGraphics, state, this);
+            this._lastLogisticsRenderSignature = signature;
+            this._logisticsLayerWasDrawn = true;
+        }
+    }
+
     update(time, delta) {
         const deltaTime = delta / 1000;
         const state = window.GAME_STATE;
         if (!state) return;
 
-        if (this.logisticsGraphics && window.GAME_STATE) { LogisticsRenderer.render(this.logisticsGraphics, window.GAME_STATE, this); }
+        this.updateLogisticsLayer(state);
         // RTS 邊緣捲動實作
         this.updateEdgeScrolling(deltaTime);
         this.updateKeyboardCameraScrolling(deltaTime);
-
-        // [核心新增] 偵測滑鼠懸停優先權 (Requirement 1 & 2)
-        this.updateHoverTarget();
 
         // 如果正在框選且相機在捲動，即時更新框選 UI
         if (this.selectionStartPos) {
@@ -792,27 +848,43 @@ export class MainScene extends Phaser.Scene {
         const renderVersionChanged = (this.lastRenderVersion !== state.renderVersion);
         this.lastRenderVersion = state.renderVersion;
 
+        const pointer = this.input.activePointer;
+        const pointerMoved = pointer && (pointer.x !== this._lastHoverPointerX || pointer.y !== this._lastHoverPointerY);
+        if (pointerMoved || time - (this._lastHoverUpdateTime || 0) >= 80 || camMoved) {
+            this.updateHoverTarget();
+            this._lastHoverPointerX = pointer ? pointer.x : 0;
+            this._lastHoverPointerY = pointer ? pointer.y : 0;
+            this._lastHoverUpdateTime = time;
+        }
+
         // 即時更新建造預覽 - 必須在跳過邏輯之前，否則無法即時追隨滑鼠
         this.updatePlacementPreview(state);
 
         if (window.UIManager) {
-            window.UIManager.updateValues(); // [修復] 同步 UI 數值更新至 60FPS
-            window.UIManager.updateStickyPositions();
+            const shouldRefreshUI = time - (this._lastUIUpdateTime || 0) >= 250;
+            if (shouldRefreshUI) {
+                window.UIManager.updateValues();
 
-            const coordsEl = document.getElementById("coords_display");
-            if (coordsEl) {
-                const view = this.getCameraWorldView();
-                const centerX = Math.round(view.centerX);
-                const centerY = Math.round(view.centerY);
-                coordsEl.innerText = `X: ${centerX}, Y: ${centerY}`;
+                const coordsEl = document.getElementById("coords_display");
+                if (coordsEl) {
+                    const view = this.getCameraWorldView();
+                    const centerX = Math.round(view.centerX);
+                    const centerY = Math.round(view.centerY);
+                    coordsEl.innerText = `X: ${centerX}, Y: ${centerY}`;
+                }
+
+                const fpsEl = document.getElementById("fps_display");
+                if (fpsEl) {
+                    fpsEl.innerText = `FPS: ${Math.round(this.game.loop.actualFps)}`;
+                }
+
+                this.updateTownCenterLocator(cam);
+                this._lastUIUpdateTime = time;
             }
 
-            const fpsEl = document.getElementById("fps_display");
-            if (fpsEl) {
-                fpsEl.innerText = `FPS: ${Math.round(this.game.loop.actualFps)}`;
+            if (window.UIManager.activeMenuEntity && (camMoved || shouldRefreshUI)) {
+                window.UIManager.updateStickyPositions();
             }
-
-            this.updateTownCenterLocator(cam);
         }
 
         // 繪製選取高亮 (建築選取箱)
@@ -1723,6 +1795,8 @@ export class MainScene extends Phaser.Scene {
         const visibleKeys = new Set();
         const lodMode = this.isLodMode;
         const lodCfg = this.getCameraZoomConfig();
+        const maxResourceLabels = UI_CONFIG.MapResourceLabels?.maxVisibleLabels ?? 80;
+        const showBulkResourceLabels = GameEngine.state.settings.showResourceInfo && resources.length <= maxResourceLabels;
 
         // 核心映射
         const typeMap = {
@@ -1830,7 +1904,12 @@ export class MainScene extends Phaser.Scene {
                 amount: res.amount,
                 level: res.level
             };
-            this.updateEntityLabel(key, dummyEnt);
+            const isFocusedResource = GameEngine.state.selectedResourceId === key || GameEngine.state.hoveredId === key;
+            if (showBulkResourceLabels || isFocusedResource) {
+                this.updateEntityLabel(key, dummyEnt);
+            } else {
+                this.hideEntityLabel(key);
+            }
         }
 
         // 2. 回收離開畫面的 物件 與標籤
@@ -2308,6 +2387,10 @@ export class MainScene extends Phaser.Scene {
             this.hideLodIcon(this.lodIcons, `unit_${v.id}`);
 
             let sprite = this.units.get(v.id);
+            if (!sprite && !isVisible) {
+                this.hideUnitLabel(v.id);
+                return;
+            }
             if (!sprite) {
                 sprite = this.add.graphics();
                 this.units.set(v.id, sprite);

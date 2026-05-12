@@ -22,7 +22,9 @@ export class BattleSystem {
 
         try {
             // 0. 重置渲染旗標 (集結點高亮)
-            const allUnits = [...(state.units.villagers || []), ...(state.units.npcs || [])];
+            const villagers = state.units.villagers || [];
+            const npcs = state.units.npcs || [];
+            const allUnits = [...villagers, ...npcs];
             allUnits.forEach(u => u.isRallyTarget = false);
 
             this.scanTimer += dt;
@@ -30,12 +32,11 @@ export class BattleSystem {
             if (shouldScan) this.scanTimer = 0;
 
             // 1. 處理所有活著的單位 (村民與 NPC 並列處理)
-            const villagers = state.units.villagers || [];
-            const npcs = state.units.npcs || [];
-            const allAliveUnits = [...villagers, ...npcs].filter(u => u && u.hp > 0 && u.visible !== false);
+            const allAliveUnits = allUnits.filter(u => u && u.hp > 0 && u.visible !== false);
+            const scanTargets = shouldScan ? this.buildScanTargets(allAliveUnits, state) : null;
 
             allAliveUnits.forEach(unit => {
-                this.processCombat(unit, dt, state, TILE_SIZE, shouldScan);
+                this.processCombat(unit, dt, state, TILE_SIZE, shouldScan, scanTargets);
             });
 
             // 2. 遠程子彈更新已遷移至 EffectSystem.updateProjectiles (由 GameEngine.logicTick 呼叫)
@@ -49,15 +50,15 @@ export class BattleSystem {
         }
     }
 
-    static processCombat(unit, dt, state, TILE_SIZE, shouldScan) {
+    static processCombat(unit, dt, state, TILE_SIZE, shouldScan, scanTargets = null) {
         // [核心修正] 如果單位處於採集或前往資源狀態，完全跳過戰鬥邏輯，防止其攻擊屍體
         if (unit.state === 'GATHERING' || unit.state === 'MOVING_TO_RESOURCE') {
             return;
         }
 
         // 1. 自動索敵 (如果是手動強制集火，除非目標死亡否則不換目標)
-        if (!unit.isPlayerLocked && (shouldScan || !unit.targetId)) {
-            this.autoSeeking(unit, state, TILE_SIZE);
+        if (!unit.isPlayerLocked && shouldScan) {
+            this.autoSeeking(unit, state, TILE_SIZE, scanTargets);
         }
 
         if (!unit.targetId || typeof unit.targetId === 'object') {
@@ -145,7 +146,31 @@ export class BattleSystem {
         }
     }
 
-    static autoSeeking(unit, state, TILE_SIZE) {
+    static buildScanTargets(allAliveUnits, state) {
+        const byCamp = { player: [], enemy: [] };
+
+        for (let i = 0; i < allAliveUnits.length; i++) {
+            const unit = allAliveUnits[i];
+            const camp = (unit.config && unit.config.camp) || unit.camp || 'neutral';
+            if (camp === 'player') byCamp.player.push(unit);
+            else if (camp === 'enemy') byCamp.enemy.push(unit);
+        }
+
+        if (state.mapEntities) {
+            for (let i = 0; i < state.mapEntities.length; i++) {
+                const ent = state.mapEntities[i];
+                if (ent && ent.hp > 0 && !ent.isCorpse && ent.visible !== false) {
+                    const camp = ent.camp || (ent.config && ent.config.camp) || 'neutral';
+                    if (camp === 'player') byCamp.player.push(ent);
+                    else if (camp === 'enemy') byCamp.enemy.push(ent);
+                }
+            }
+        }
+
+        return byCamp;
+    }
+
+    static autoSeeking(unit, state, TILE_SIZE, scanTargets = null) {
         if (!unit.config) return;
 
         const isInitiative = unit.initiative_attack !== undefined ?
@@ -156,13 +181,12 @@ export class BattleSystem {
 
         const camp = unit.config.camp || 'player';
         let nearestEnemy = null;
-        let minDist = (unit.field_vision || 15) * TILE_SIZE;
+        const vision = (unit.field_vision || 15) * TILE_SIZE;
+        let minDistSq = vision * vision;
 
-        const allPotentialTargets = [
-            ...(state.units.villagers || []),
-            ...(state.units.npcs || []),
-            ...(state.mapEntities ? state.mapEntities.filter(e => e.hp !== undefined) : [])
-        ];
+        const allPotentialTargets = scanTargets
+            ? (camp === 'player' ? scanTargets.enemy : scanTargets.player)
+            : [];
 
         allPotentialTargets.forEach(target => {
             // [修正] 確保索敵目標有 HP 且不是屍體
@@ -170,9 +194,11 @@ export class BattleSystem {
             const targetCamp = (target.config && target.config.camp) || target.camp || 'neutral';
             if (targetCamp === camp || targetCamp === 'neutral') return;
 
-            const d = this.getDist(unit, target);
-            if (d < minDist) {
-                minDist = d;
+            const dx = (unit.x || 0) - (target.x || 0);
+            const dy = (unit.y || 0) - (target.y || 0);
+            const d = dx * dx + dy * dy;
+            if (d < minDistSq) {
+                minDistSq = d;
                 nearestEnemy = target;
             }
         });
