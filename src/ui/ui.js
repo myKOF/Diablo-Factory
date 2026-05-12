@@ -1473,22 +1473,43 @@ export class UIManager {
         const addEdge = (a, b) => {
             const ak = addNode(a);
             const bk = addNode(b);
-            const weight = Math.max(0.001, Math.hypot(b.x - a.x, b.y - a.y));
-            edges.get(ak).push({ key: bk, weight });
-            edges.get(bk).push({ key: ak, weight });
+            if (ak === bk) return;
+            edges.get(ak).push({ key: bk });
+            edges.get(bk).push({ key: ak });
+        };
+        const getCardinalDir = (from, to) => {
+            if (!from || !to) return null;
+            const dx = to.x - from.x;
+            const dy = to.y - from.y;
+            if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+            if (Math.abs(dx) > 0.001 && Math.abs(dy) > 0.001) return null;
+            return Math.abs(dx) >= Math.abs(dy)
+                ? { x: Math.sign(dx) || 1, y: 0 }
+                : { x: 0, y: Math.sign(dy) || 1 };
         };
 
         segments.forEach((seg, index) => {
             const points = segmentPoints[index];
             if (!points) return;
             for (let i = 0; i < points.length - 1; i++) {
-                addEdge(points[i], points[i + 1]);
-            }
-            if (Number.isFinite(seg.x) && Number.isFinite(seg.y)) {
-                const center = { x: seg.x, y: seg.y };
-                addNode(center);
-                addEdge(points[0], center);
-                addEdge(center, points[points.length - 1]);
+                const a = points[i];
+                const b = points[i + 1];
+                const dir = getCardinalDir(a, b);
+                if (!dir) continue;
+                const dist = Math.hypot(b.x - a.x, b.y - a.y);
+                const steps = Math.max(1, Math.round(dist / GameEngine.TILE_SIZE));
+                let prev = null;
+                for (let step = 0; step <= steps; step++) {
+                    const point = {
+                        x: a.x + dir.x * GameEngine.TILE_SIZE * step,
+                        y: a.y + dir.y * GameEngine.TILE_SIZE * step
+                    };
+                    const normalized = step === steps ? b : point;
+                    const key = makeKey(normalized);
+                    addNode(normalized);
+                    if (prev) addEdge(nodes.get(prev), normalized);
+                    prev = key;
+                }
             }
         });
 
@@ -1509,36 +1530,22 @@ export class UIManager {
         const findPath = (startKey, endKey) => {
             if (!startKey || !endKey) return null;
             if (startKey === endKey) return [nodes.get(startKey)];
-            const distances = new Map([[startKey, 0]]);
+            const queue = [startKey];
+            const visited = new Set([startKey]);
             const previous = new Map();
-            const unvisited = new Set(nodes.keys());
 
-            while (unvisited.size > 0) {
-                let current = null;
-                let bestDistance = Infinity;
-                unvisited.forEach(key => {
-                    const dist = distances.get(key) ?? Infinity;
-                    if (dist < bestDistance) {
-                        bestDistance = dist;
-                        current = key;
-                    }
-                });
-
-                if (!current || bestDistance === Infinity) break;
-                unvisited.delete(current);
+            while (queue.length > 0) {
+                const current = queue.shift();
                 if (current === endKey) break;
-
                 (edges.get(current) || []).forEach(edge => {
-                    if (!unvisited.has(edge.key)) return;
-                    const nextDistance = bestDistance + edge.weight;
-                    if (nextDistance < (distances.get(edge.key) ?? Infinity)) {
-                        distances.set(edge.key, nextDistance);
-                        previous.set(edge.key, current);
-                    }
+                    if (visited.has(edge.key)) return;
+                    visited.add(edge.key);
+                    previous.set(edge.key, current);
+                    queue.push(edge.key);
                 });
             }
 
-            if (!distances.has(endKey)) return null;
+            if (!visited.has(endKey)) return null;
             const keys = [];
             let current = endKey;
             while (current) {
@@ -1613,19 +1620,78 @@ export class UIManager {
 
         const first = rawPoints[0];
         const last = rawPoints[rawPoints.length - 1];
-        const sourcePort = conn?.sourcePort
-            ? this.resolveCurrentPortSlot(sourceEnt, conn.sourcePort, first?.x, first?.y)
-            : this.getNearestPortSlot(sourceEnt, first?.x ?? targetEnt.x, first?.y ?? targetEnt.y);
-        const targetPort = conn?.targetPort
-            ? this.resolveCurrentPortSlot(targetEnt, conn.targetPort, last?.x, last?.y)
-            : this.getNearestPortSlot(targetEnt, last?.x ?? sourceEnt.x, last?.y ?? sourceEnt.y);
+        const lineAnchorPoints = conn?.lineId
+            ? this.getLogisticsSegmentsByGroupId(conn.lineId)
+                .flatMap(seg => Array.isArray(seg.routePoints) ? seg.routePoints : [])
+                .filter(point => point && Number.isFinite(point.x) && Number.isFinite(point.y))
+            : [];
+        const isStoredBuildingPort = (port) => !!port &&
+            port.sourceType !== "logistics_line" &&
+            (
+                Number.isFinite(port.x) ||
+                Number.isFinite(port.y) ||
+                Number.isFinite(port.defIndex) ||
+                Number.isFinite(port.slotIndex)
+            );
+        const getDistanceToLine = (point) => {
+            if (!point || !conn?.lineId) return Infinity;
+            let bestDist = Infinity;
+            this.getLogisticsSegmentsByGroupId(conn.lineId).forEach(seg => {
+                const points = Array.isArray(seg.routePoints) ? seg.routePoints : [];
+                for (let i = 0; i < points.length - 1; i++) {
+                    const a = points[i];
+                    const b = points[i + 1];
+                    if (!a || !b) continue;
+                    const dx = b.x - a.x;
+                    const dy = b.y - a.y;
+                    const lenSq = dx * dx + dy * dy;
+                    if (lenSq < 0.001) continue;
+                    const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
+                    const px = a.x + dx * t;
+                    const py = a.y + dy * t;
+                    bestDist = Math.min(bestDist, Math.hypot(point.x - px, point.y - py));
+                }
+            });
+            return bestDist;
+        };
+        const getLineTouchingPort = (ent) => {
+            if (!ent || lineAnchorPoints.length === 0) return null;
+            const slots = this.getBuildingPortSlots(ent);
+            if (!Array.isArray(slots) || slots.length === 0) return null;
+            let best = null;
+            let bestDist = Infinity;
+            slots.forEach(slot => {
+                const dist = getDistanceToLine(slot);
+                if (dist <= GameEngine.TILE_SIZE * 0.75 && dist < bestDist) {
+                    bestDist = dist;
+                    best = slot;
+                }
+            });
+            return best;
+        };
+        const resolveTransferPort = (ent, storedPort, fallbackX, fallbackY) => {
+            const stored = isStoredBuildingPort(storedPort)
+                ? this.resolveCurrentPortSlot(ent, storedPort, fallbackX, fallbackY)
+                : null;
+            if (stored && getDistanceToLine(stored) <= GameEngine.TILE_SIZE * 0.75) return stored;
+            const linePort = getLineTouchingPort(ent);
+            if (linePort) return linePort;
+            return stored || this.getNearestPortSlot(ent, fallbackX, fallbackY);
+        };
+        const sourcePort = resolveTransferPort(sourceEnt, conn?.sourcePort, first?.x ?? targetEnt.x, first?.y ?? targetEnt.y);
+        const targetPort = resolveTransferPort(targetEnt, conn?.targetPort, last?.x ?? sourceEnt.x, last?.y ?? sourceEnt.y);
 
         const sourceAnchor = sourcePort || { x: sourceEnt.x, y: sourceEnt.y };
         const targetAnchor = targetPort || { x: targetEnt.x, y: targetEnt.y };
         const linePoints = conn?.lineId
             ? this.getLogisticsGroupRoutePoints(conn.lineId, sourceAnchor, targetAnchor)
             : null;
-        const points = Array.isArray(linePoints) && linePoints.length >= 2 ? linePoints : rawPoints.slice();
+        const lineTouchesSource = Array.isArray(linePoints) && linePoints.length >= 2 &&
+            linePoints.some(point => Math.hypot(point.x - sourceAnchor.x, point.y - sourceAnchor.y) <= GameEngine.TILE_SIZE * 0.75);
+        const lineTouchesTarget = Array.isArray(linePoints) && linePoints.length >= 2 &&
+            linePoints.some(point => Math.hypot(point.x - targetAnchor.x, point.y - targetAnchor.y) <= GameEngine.TILE_SIZE * 0.75);
+        if (conn?.lineId && (!lineTouchesSource || !lineTouchesTarget)) return null;
+        const points = lineTouchesSource && lineTouchesTarget ? linePoints : rawPoints.slice();
         const firstToSource = Math.hypot(points[0].x - sourceAnchor.x, points[0].y - sourceAnchor.y);
         const lastToSource = Math.hypot(points[points.length - 1].x - sourceAnchor.x, points[points.length - 1].y - sourceAnchor.y);
         if (lastToSource < firstToSource) points.reverse();
@@ -1799,7 +1865,10 @@ export class UIManager {
         const targetId = targetEnt ? this.getEntityId(targetEnt) : null;
         const groupId = lineId || conn?.lineId || this.makeLogisticsLineId(sourceId, targetId, targetPoint);
         const cleanTargetPoint = targetId ? null : this.snapPointToGridCenter(targetPoint);
-        const cleanSourcePort = sourcePort ? { dir: sourcePort.dir, slotIndex: sourcePort.slotIndex, defIndex: sourcePort.defIndex, width: sourcePort.width, x: sourcePort.x, y: sourcePort.y } : null;
+        const sourcePortIsLineExtension = sourcePort?.sourceType === "logistics_line";
+        const cleanSourcePort = !sourcePortIsLineExtension && sourcePort
+            ? { dir: sourcePort.dir, slotIndex: sourcePort.slotIndex, defIndex: sourcePort.defIndex, width: sourcePort.width, x: sourcePort.x, y: sourcePort.y }
+            : (conn?.sourcePort || null);
         const cleanTargetPort = targetPort ? { dir: targetPort.dir, slotIndex: targetPort.slotIndex, defIndex: targetPort.defIndex, width: targetPort.width, x: targetPort.x, y: targetPort.y } : null;
         const gridPoints = this.buildGridRoutePoints(points);
         const previous = lines.find(item => item.groupId === groupId || item.id === groupId);
@@ -1896,10 +1965,15 @@ export class UIManager {
         GameEngine.state.logisticsLines = mergedLines;
 
         if (conn) {
+            const previousRoutePoints = Array.isArray(conn.routePoints)
+                ? conn.routePoints.map(p => ({ x: p.x, y: p.y }))
+                : null;
             conn.lineId = groupId;
-            conn.routePoints = gridPoints.map(p => ({ x: p.x, y: p.y }));
+            conn.routePoints = lineId && previousRoutePoints?.length >= 2
+                ? previousRoutePoints
+                : gridPoints.map(p => ({ x: p.x, y: p.y }));
             conn.routeWidth = Math.max(1, Number(routeWidth) || 1);
-            conn.sourcePort = cleanSourcePort;
+            if (cleanSourcePort) conn.sourcePort = cleanSourcePort;
             conn.targetPort = cleanTargetPort;
         }
 

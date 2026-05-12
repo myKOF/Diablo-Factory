@@ -746,12 +746,12 @@ export const UI_CONFIG = {
     // -- 物流線相關設置 (LogisticsSystem) --------------------------
     LogisticsSystem: {
         // --- 物流線顏色 ---
-        lineColor: "#0077ffff",           // 已建立物流線的顏色
-        lineAlpha: 0.6,                   // 已建立物流線的透明度，範圍 0~1
-        portToPortLineColor: "#00bcd4ff", // 端口對端口物流線顏色（兩個建築端口成功連接時）
-        portToPortLineAlpha: 0.75,        // 端口對端口物流線透明度，範圍 0~1
-        disconnectedLineColor: "#6b6b6bff", // 未設定搬運品項時的物流線顏色；此狀態物流線不通
-        disconnectedLineAlpha: 0.75,      // 未設定搬運品項時的物流線透明度，範圍 0~1
+        lineColor: "#0077ffff",           // 運作中物流線顏色：已接通且已設定輸送物品時使用
+        lineAlpha: 0.6,                   // 運作中物流線透明度，範圍 0~1
+        portToPortLineColor: "#00bcd4ff", // 已接通物流線顏色：起點端口連到任一終點端口、但尚未設定輸送物品時使用
+        portToPortLineAlpha: 0.75,        // 已接通物流線透明度，範圍 0~1
+        disconnectedLineColor: "#6b6b6bff", // 未接通物流線顏色：從建築端口拉出但尚未連到任何終點端口時使用
+        disconnectedLineAlpha: 0.75,      // 未接通物流線透明度，範圍 0~1
         selectedLineColor: "#a5f3ffff",   // 被選取物流線的顏色
         selectedLineAlpha: 1.0,           // 被選取物流線的透明度，範圍 0~1
         selectedSegmentOutlineColor: "#ff3d00ff", // 被點擊的單格物流線外框顏色，使用高對比橘紅色標示目前選中的網格

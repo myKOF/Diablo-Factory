@@ -1299,23 +1299,9 @@ export class WorkerSystem {
                 : null;
             let routePoints = transferRoute && Array.isArray(transferRoute.points) && transferRoute.points.length >= 2
                 ? transferRoute.points.map(p => ({ x: p.x, y: p.y }))
-                : (Array.isArray(directConn.routePoints) && directConn.routePoints.length >= 2
+                : (!directConn.lineId && Array.isArray(directConn.routePoints) && directConn.routePoints.length >= 2
                     ? directConn.routePoints.map(p => ({ x: p.x, y: p.y }))
                     : null);
-            if ((!routePoints || routePoints.length < 2) && directConn.lineId && Array.isArray(this.state.logisticsLines)) {
-                const segs = this.state.logisticsLines
-                    .filter(line => line && (line.groupId === directConn.lineId || line.id === directConn.lineId))
-                    .sort((a, b) => (a.order || 0) - (b.order || 0));
-                if (segs.length > 0) {
-                    routePoints = [];
-                    segs.forEach((seg, idx) => {
-                        const segPts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
-                        if (segPts.length < 2) return;
-                        if (idx === 0) routePoints.push({ x: segPts[0].x, y: segPts[0].y });
-                        routePoints.push({ x: segPts[1].x, y: segPts[1].y });
-                    });
-                }
-            }
             if (Array.isArray(routePoints) && routePoints.length >= 2) {
                 return {
                     start: { ...routePoints[0] },
@@ -1325,6 +1311,7 @@ export class WorkerSystem {
                     targetId
                 };
             }
+            if (directConn.lineId) return null;
         }
 
         let sx = source.x;
@@ -1352,6 +1339,23 @@ export class WorkerSystem {
         const start = this.getBuildingLineExitPoint(source, { x: sx, y: sy }, { x: ex, y: ey });
         const end = this.getBuildingLineExitPoint(target, { x: ex, y: ey }, { x: sx, y: sy });
         return { start, end, points: [start, end], sourceId, targetId };
+    }
+
+    createActiveTransfer(state, source, conn, itemType) {
+        if (!source || !conn || !itemType) return null;
+        const sourceId = source.id || `${source.type1}_${source.x}_${source.y}`;
+        const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
+        const route = target ? this.getLogisticsLinePoints(source, target) : null;
+        return {
+            sourceId,
+            targetId: conn.id,
+            itemType,
+            progress: 0,
+            lineId: conn.lineId || null,
+            routePoints: Array.isArray(route?.points) && route.points.length >= 2
+                ? route.points.map(point => ({ x: point.x, y: point.y }))
+                : null
+        };
     }
 
     getBuildingLineExitPoint(building, from, to) {
@@ -1945,8 +1949,10 @@ export class WorkerSystem {
                                 ent._debugLogged = true;
                             }
                             if (state.resources[conn.filter] >= 1) {
+                                const transfer = this.createActiveTransfer(state, ent, conn, conn.filter);
+                                if (!transfer || !Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) continue;
                                 state.resources[conn.filter] -= 1;
-                                state.activeTransfers.push({ sourceId: ent.id || `${ent.type1}_${ent.x}_${ent.y}`, targetId: conn.id, itemType: conn.filter, progress: 0 });
+                                state.activeTransfers.push(transfer);
                                 itemSpawned = true;
                                 if (this.engine && typeof this.engine.addLog === 'function') {
                                     this.engine.addLog(`[物流] 從 ${ent.type1} 運出 ${conn.filter}。`, 'LOGISTICS');
@@ -1956,8 +1962,10 @@ export class WorkerSystem {
                     } else if (ent.outputBuffer) {
                         for (let resType in ent.outputBuffer) {
                             if (ent.outputBuffer[resType] >= 1 && (!conn.filter || conn.filter === resType)) {
+                                const transfer = this.createActiveTransfer(state, ent, conn, resType);
+                                if (!transfer || !Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) continue;
                                 ent.outputBuffer[resType] -= 1;
-                                state.activeTransfers.push({ sourceId: ent.id || `${ent.type1}_${ent.x}_${ent.y}`, targetId: conn.id, itemType: resType, progress: 0 });
+                                state.activeTransfers.push(transfer);
                                 itemSpawned = true;
                                 if (this.engine && typeof this.engine.addLog === 'function') {
                                     this.engine.addLog(`[物流] 從 ${ent.type1} 運出 ${resType}。`, 'LOGISTICS');
