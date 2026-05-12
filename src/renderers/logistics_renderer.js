@@ -57,7 +57,7 @@ export class LogisticsRenderer {
             const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null) => {
                 const baseThickness = logCfg.lineThickness || 3;
                 const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE * 0.8);
-                const usePortToPortStyle = !!isPortToPort;
+                const usePortToPortStyle = !!isPortToPort && !!isConnected;
                 const lColor = isSelected
                     ? (logCfg.selectedLineColor || "#ffff00")
                     : (usePortToPortStyle
@@ -714,6 +714,13 @@ export class LogisticsRenderer {
             groupSegments.forEach((groupSegs, groupKey) => {
                 groupTurnCellKeys.set(groupKey, LogisticsRenderer.getLogisticsGroupTurnCellKeys(groupSegs));
             });
+            const hasLogisticsTransportFilter = (groupKey, groupSegs) => {
+                if (Array.isArray(groupSegs) && groupSegs.some(line => !!line?.filter)) return true;
+                return (state.mapEntities || []).some(ent =>
+                    Array.isArray(ent?.outputTargets) &&
+                    ent.outputTargets.some(conn => !!conn?.filter && conn.lineId === groupKey)
+                );
+            };
 
             const drawnCanonicalGroups = new Set();
             if (Array.isArray(state.logisticsLines)) {
@@ -751,11 +758,14 @@ export class LogisticsRenderer {
                         ? window.UIManager.isSelectedLogisticsLine(line)
                         : state.selectedLogisticsLineId === line.id);
                     const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(representative?.sourceId && representative?.targetId);
-                    const isConnected = isPortToPortCandidate ? false : groupSegs.some(line => !!line?.filter);
+                    const hasTransportFilter = hasLogisticsTransportFilter(groupKey, groupSegs);
+                    const isConnected = isPortToPortCandidate
+                        ? (portToPortConnectedGroupIds.has(groupKey) && hasTransportFilter)
+                        : hasTransportFilter;
                     const connectedCellKeys = portToPortConnectedCellKeysByGroup.get(groupKey) || new Set();
 
                     drawLogisticsRoute(points, widthTiles, isSelected, isConnected, representative, false, null);
-                    if (isPortToPortCandidate) {
+                    if (isPortToPortCandidate && isConnected) {
                         drawConnectedCellOverlay(points, widthTiles, connectedCellKeys, true, null);
                     }
                     if (isSelected) {
@@ -779,7 +789,7 @@ export class LogisticsRenderer {
                 if (drawnCanonicalGroups.has(groupKey)) return;
                 const sample = groupSegs[0] || {};
                 const widthTiles = Math.max(1, Number(sample.routeWidth) || 1);
-                const connected = portToPortConnectedGroupIds.has(groupKey);
+                const connected = portToPortConnectedGroupIds.has(groupKey) && hasLogisticsTransportFilter(groupKey, groupSegs);
                 const connectedCellPaths = portToPortConnectedCellPathsByGroup.get(groupKey) || [];
                 const color = connected
                     ? parseColor(logCfg.portToPortArrowColor || logCfg.arrowColor || "#00ffee")
