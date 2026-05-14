@@ -19,7 +19,7 @@ function searchDir(dir) {
         } catch (e) {
             continue; // Skip files with permission issues
         }
-        
+
         if (stat.isDirectory()) {
             if (ignoreDirs.includes(file)) continue;
             searchDir(fullPath);

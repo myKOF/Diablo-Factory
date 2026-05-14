@@ -140,6 +140,11 @@ export class MainScene extends Phaser.Scene {
             const logCfg = UI_CONFIG.LogisticsSystem || { depth: 150 };
             this.logisticsGraphics.setDepth(logCfg.depth);
         }
+        if (!this.logisticsTransferGraphics) {
+            this.logisticsTransferGraphics = this.add.graphics();
+            const logCfg = UI_CONFIG.LogisticsSystem || { transferItemDepth: 900000 };
+            this.logisticsTransferGraphics.setDepth(logCfg.transferItemDepth || 900000);
+        }
 
         // 相機控制
         this.lastCamX = -9999;
@@ -792,7 +797,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     updateLogisticsLayer(state) {
-        if (!this.logisticsGraphics) return;
+        if (!this.logisticsGraphics || !this.logisticsTransferGraphics) return;
 
         const hasStaticContent =
             (Array.isArray(state.logisticsLines) && state.logisticsLines.length > 0) ||
@@ -805,6 +810,7 @@ export class MainScene extends Phaser.Scene {
         if (!hasStaticContent && !hasDynamicContent) {
             if (this._logisticsLayerWasDrawn) {
                 this.logisticsGraphics.clear();
+                this.logisticsTransferGraphics.clear();
                 this._logisticsLayerWasDrawn = false;
             }
             this._lastLogisticsRenderSignature = "";
@@ -813,7 +819,8 @@ export class MainScene extends Phaser.Scene {
 
         const signature = this.getLogisticsRenderSignature(state);
         if (hasDynamicContent || this._lastLogisticsRenderSignature !== signature) {
-            LogisticsRenderer.render(this.logisticsGraphics, state, this);
+            LogisticsRenderer.render(this.logisticsGraphics, state, this, { drawTransfers: false });
+            LogisticsRenderer.renderTransfers(this.logisticsTransferGraphics, state, this);
             this._lastLogisticsRenderSignature = signature;
             this._logisticsLayerWasDrawn = true;
         }

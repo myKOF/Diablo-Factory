@@ -1350,7 +1350,8 @@ export class UIManager {
 
         const matched = slots.find(slot =>
             slot.defIndex === port.defIndex &&
-            slot.slotIndex === port.slotIndex
+            slot.slotIndex === port.slotIndex &&
+            (!port.dir || slot.dir === port.dir)
         );
         if (matched) return matched;
 
@@ -1450,6 +1451,133 @@ export class UIManager {
                 { x: (sourceEnt.x + targetEnt.x) / 2, y: (sourceEnt.y + targetEnt.y) / 2 }
             )),
             width: Math.max(1, Math.min(sourcePort.width || 1, targetPort.width || 1))
+        };
+    }
+
+    static getConnectionTransferRoute(sourceEnt, targetEnt, conn = null) {
+        if (!sourceEnt || !targetEnt) return null;
+
+        let rawPoints = [];
+        
+        // 1. 強健的圖形搜尋：直接從群組內的所有線段碎片重建路徑
+        if (conn && conn.lineId) {
+            const segments = this.getLogisticsSegmentsByGroupId(conn.lineId);
+            if (segments && segments.length > 0) {
+                const nodes = [];
+                // 提取所有節點並建立無向圖 (容差 2px 內視為同一節點)
+                segments.forEach(seg => {
+                    if (Array.isArray(seg.routePoints) && seg.routePoints.length >= 2) {
+                        for (let i = 0; i < seg.routePoints.length - 1; i++) {
+                            const p1 = seg.routePoints[i];
+                            const p2 = seg.routePoints[i+1];
+                            let n1 = nodes.find(n => Math.hypot(n.x - p1.x, n.y - p1.y) < 2);
+                            if (!n1) { n1 = { x: p1.x, y: p1.y, edges: [] }; nodes.push(n1); }
+                            let n2 = nodes.find(n => Math.hypot(n.x - p2.x, n.y - p2.y) < 2);
+                            if (!n2) { n2 = { x: p2.x, y: p2.y, edges: [] }; nodes.push(n2); }
+                            
+                            if (!n1.edges.includes(n2)) n1.edges.push(n2);
+                            if (!n2.edges.includes(n1)) n2.edges.push(n1);
+                        }
+                    }
+                });
+
+                let startNode = null; let startDist = Infinity;
+                let endNode = null; let endDist = Infinity;
+                
+                const sRef = conn.sourcePort || sourceEnt;
+                const tRef = conn.targetPort || targetEnt;
+
+                // 尋找最靠近起點與終點的網格節點
+                nodes.forEach(n => {
+                    const ds = Math.hypot(n.x - sRef.x, n.y - sRef.y);
+                    if (ds < startDist) { startDist = ds; startNode = n; }
+                    const dt = Math.hypot(n.x - tRef.x, n.y - tRef.y);
+                    if (dt < endDist) { endDist = dt; endNode = n; }
+                });
+
+                // 執行 BFS 最短路徑搜尋
+                if (startNode && endNode) {
+                    const queue = [[startNode]];
+                    const visited = new Set([startNode]);
+                    let pathFound = null;
+
+                    while (queue.length > 0) {
+                        const path = queue.shift();
+                        const curr = path[path.length - 1];
+
+                        if (curr === endNode) {
+                            pathFound = path;
+                            break;
+                        }
+
+                        curr.edges.forEach(neighbor => {
+                            if (!visited.has(neighbor)) {
+                                visited.add(neighbor);
+                                queue.push([...path, neighbor]);
+                            }
+                        });
+                    }
+
+                    if (pathFound) {
+                        rawPoints = pathFound.map(n => ({ x: n.x, y: n.y }));
+                    }
+                }
+            }
+        }
+
+        // 2. 防呆退回：如果圖形搜尋失敗，退回單段路徑
+        if (rawPoints.length < 2) {
+            const route = this.getConnectionRoute(sourceEnt, targetEnt, conn);
+            if (route && Array.isArray(route.points)) {
+                rawPoints = route.points.map(p => ({ x: p.x, y: p.y }));
+            } else {
+                rawPoints = [{ x: sourceEnt.x, y: sourceEnt.y }, { x: targetEnt.x, y: targetEnt.y }];
+            }
+        }
+
+        // 3. 決定真實物理接口 (Port)
+        const first = rawPoints[0];
+        const last = rawPoints[rawPoints.length - 1];
+
+        const sourcePort = conn?.sourcePort
+            ? this.resolveCurrentPortSlot(sourceEnt, conn.sourcePort, first?.x, first?.y)
+            : this.getNearestPortSlot(sourceEnt, first?.x ?? targetEnt.x, first?.y ?? targetEnt.y);
+
+        const targetPort = conn?.targetPort
+            ? this.resolveCurrentPortSlot(targetEnt, conn.targetPort, last?.x, last?.y)
+            : this.getNearestPortSlot(targetEnt, last?.x ?? sourceEnt.x, last?.y ?? sourceEnt.y);
+
+        const sourceAnchor = sourcePort ? { x: sourcePort.x, y: sourcePort.y } : { x: sourceEnt.x, y: sourceEnt.y };
+        const targetAnchor = targetPort ? { x: targetPort.x, y: targetPort.y } : { x: targetEnt.x, y: targetEnt.y };
+
+        // 4. 確保陣列方向性
+        const distFirstToSource = Math.hypot(first.x - sourceAnchor.x, first.y - sourceAnchor.y);
+        const distLastToSource = Math.hypot(last.x - sourceAnchor.x, last.y - sourceAnchor.y);
+        
+        if (distLastToSource < distFirstToSource) {
+            rawPoints.reverse();
+        }
+
+        // 5. 組裝最終幾何軌跡
+        const transferPoints = [];
+        const pushPoint = (point) => {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+            const lastPoint = transferPoints[transferPoints.length - 1];
+            // 過濾重複點避免卡頓
+            if (!lastPoint || Math.hypot(lastPoint.x - point.x, lastPoint.y - point.y) > 1) {
+                transferPoints.push({ x: point.x, y: point.y });
+            }
+        };
+
+        pushPoint(sourceAnchor);
+        rawPoints.forEach(pushPoint);
+        pushPoint(targetAnchor);
+
+        if (transferPoints.length < 2) return null;
+        
+        return {
+            points: transferPoints,
+            width: Math.max(1, Number(conn?.routeWidth) || 1)
         };
     }
 
@@ -1611,113 +1739,6 @@ export class UIManager {
         return points;
     }
 
-    static getConnectionTransferRoute(sourceEnt, targetEnt, conn = null) {
-        if (!sourceEnt || !targetEnt) return null;
-        const route = this.getConnectionRoute(sourceEnt, targetEnt, conn);
-        const rawPoints = route && Array.isArray(route.points) && route.points.length >= 2
-            ? route.points.map(p => ({ x: p.x, y: p.y }))
-            : [{ x: sourceEnt.x, y: sourceEnt.y }, { x: targetEnt.x, y: targetEnt.y }];
-
-        const first = rawPoints[0];
-        const last = rawPoints[rawPoints.length - 1];
-        const lineAnchorPoints = conn?.lineId
-            ? this.getLogisticsSegmentsByGroupId(conn.lineId)
-                .flatMap(seg => Array.isArray(seg.routePoints) ? seg.routePoints : [])
-                .filter(point => point && Number.isFinite(point.x) && Number.isFinite(point.y))
-            : [];
-        const isStoredBuildingPort = (port) => !!port &&
-            port.sourceType !== "logistics_line" &&
-            (
-                Number.isFinite(port.x) ||
-                Number.isFinite(port.y) ||
-                Number.isFinite(port.defIndex) ||
-                Number.isFinite(port.slotIndex)
-            );
-        const getDistanceToLine = (point) => {
-            if (!point || !conn?.lineId) return Infinity;
-            let bestDist = Infinity;
-            this.getLogisticsSegmentsByGroupId(conn.lineId).forEach(seg => {
-                const points = Array.isArray(seg.routePoints) ? seg.routePoints : [];
-                for (let i = 0; i < points.length - 1; i++) {
-                    const a = points[i];
-                    const b = points[i + 1];
-                    if (!a || !b) continue;
-                    const dx = b.x - a.x;
-                    const dy = b.y - a.y;
-                    const lenSq = dx * dx + dy * dy;
-                    if (lenSq < 0.001) continue;
-                    const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
-                    const px = a.x + dx * t;
-                    const py = a.y + dy * t;
-                    bestDist = Math.min(bestDist, Math.hypot(point.x - px, point.y - py));
-                }
-            });
-            return bestDist;
-        };
-        const getLineTouchingPort = (ent) => {
-            if (!ent || lineAnchorPoints.length === 0) return null;
-            const slots = this.getBuildingPortSlots(ent);
-            if (!Array.isArray(slots) || slots.length === 0) return null;
-            let best = null;
-            let bestDist = Infinity;
-            slots.forEach(slot => {
-                const dist = getDistanceToLine(slot);
-                if (dist <= GameEngine.TILE_SIZE * 0.75 && dist < bestDist) {
-                    bestDist = dist;
-                    best = slot;
-                }
-            });
-            return best;
-        };
-        const resolveTransferPort = (ent, storedPort, fallbackX, fallbackY) => {
-            const stored = isStoredBuildingPort(storedPort)
-                ? this.resolveCurrentPortSlot(ent, storedPort, fallbackX, fallbackY)
-                : null;
-            if (stored && getDistanceToLine(stored) <= GameEngine.TILE_SIZE * 0.75) return stored;
-            const linePort = getLineTouchingPort(ent);
-            if (linePort) return linePort;
-            return stored || this.getNearestPortSlot(ent, fallbackX, fallbackY);
-        };
-        const sourcePort = resolveTransferPort(sourceEnt, conn?.sourcePort, first?.x ?? targetEnt.x, first?.y ?? targetEnt.y);
-        const targetPort = resolveTransferPort(targetEnt, conn?.targetPort, last?.x ?? sourceEnt.x, last?.y ?? sourceEnt.y);
-
-        const sourceAnchor = sourcePort || { x: sourceEnt.x, y: sourceEnt.y };
-        const targetAnchor = targetPort || { x: targetEnt.x, y: targetEnt.y };
-        const linePoints = conn?.lineId
-            ? this.getLogisticsGroupRoutePoints(conn.lineId, sourceAnchor, targetAnchor)
-            : null;
-        const lineTouchesSource = Array.isArray(linePoints) && linePoints.length >= 2 &&
-            linePoints.some(point => Math.hypot(point.x - sourceAnchor.x, point.y - sourceAnchor.y) <= GameEngine.TILE_SIZE * 0.75);
-        const lineTouchesTarget = Array.isArray(linePoints) && linePoints.length >= 2 &&
-            linePoints.some(point => Math.hypot(point.x - targetAnchor.x, point.y - targetAnchor.y) <= GameEngine.TILE_SIZE * 0.75);
-        if (conn?.lineId && (!lineTouchesSource || !lineTouchesTarget)) return null;
-        const points = lineTouchesSource && lineTouchesTarget ? linePoints : rawPoints.slice();
-        const firstToSource = Math.hypot(points[0].x - sourceAnchor.x, points[0].y - sourceAnchor.y);
-        const lastToSource = Math.hypot(points[points.length - 1].x - sourceAnchor.x, points[points.length - 1].y - sourceAnchor.y);
-        if (lastToSource < firstToSource) points.reverse();
-
-        const transferPoints = [];
-        const pushPoint = (point) => {
-            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-            const lastPoint = transferPoints[transferPoints.length - 1];
-            if (!lastPoint || Math.hypot(lastPoint.x - point.x, lastPoint.y - point.y) > 0.5) {
-                transferPoints.push({ x: point.x, y: point.y });
-            }
-        };
-
-        pushPoint(sourceAnchor);
-        points.forEach(pushPoint);
-        pushPoint(targetAnchor);
-
-        if (transferPoints.length < 2) return null;
-        return {
-            points: transferPoints,
-            width: Math.max(1, Number(route?.width) || Number(conn?.routeWidth) || 1),
-            sourcePort,
-            targetPort
-        };
-    }
-
     static ensureLogisticsLineStore() {
         const state = GameEngine.state;
         if (!Array.isArray(state.logisticsLines)) state.logisticsLines = [];
@@ -1865,13 +1886,67 @@ export class UIManager {
         const targetId = targetEnt ? this.getEntityId(targetEnt) : null;
         const groupId = lineId || conn?.lineId || this.makeLogisticsLineId(sourceId, targetId, targetPoint);
         const cleanTargetPoint = targetId ? null : this.snapPointToGridCenter(targetPoint);
-        const sourcePortIsLineExtension = sourcePort?.sourceType === "logistics_line";
-        const cleanSourcePort = !sourcePortIsLineExtension && sourcePort
-            ? { dir: sourcePort.dir, slotIndex: sourcePort.slotIndex, defIndex: sourcePort.defIndex, width: sourcePort.width, x: sourcePort.x, y: sourcePort.y }
-            : (conn?.sourcePort || null);
-        const cleanTargetPort = targetPort ? { dir: targetPort.dir, slotIndex: targetPort.slotIndex, defIndex: targetPort.defIndex, width: targetPort.width, x: targetPort.x, y: targetPort.y } : null;
         const gridPoints = this.buildGridRoutePoints(points);
         const previous = lines.find(item => item.groupId === groupId || item.id === groupId);
+        const clonePort = (port) => {
+            if (!port) return null;
+            const cloned = {
+                dir: port.dir,
+                slotIndex: port.slotIndex,
+                defIndex: port.defIndex,
+                width: Math.max(1, Number(port.width) || 1)
+            };
+            if (Number.isFinite(port.x)) cloned.x = port.x;
+            if (Number.isFinite(port.y)) cloned.y = port.y;
+            return cloned;
+        };
+        const hasPortPosition = (port) => port && Number.isFinite(port.x) && Number.isFinite(port.y);
+        const findNearestSourceEntityPort = () => {
+            if (!sourceEnt || typeof this.getBuildingPortSlots !== 'function') return null;
+            const slots = this.getBuildingPortSlots(sourceEnt);
+            if (!Array.isArray(slots) || slots.length === 0) return null;
+
+            const refs = [];
+            lines.forEach(line => {
+                if (!line || (line.groupId !== groupId && line.id !== groupId)) return;
+                (line.routePoints || []).forEach(point => {
+                    if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) refs.push(point);
+                });
+            });
+            gridPoints.forEach(point => {
+                if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) refs.push(point);
+            });
+            if (targetEnt) refs.push({ x: targetEnt.x, y: targetEnt.y });
+            if (targetPoint) refs.push(targetPoint);
+            if (refs.length === 0) return null;
+
+            let best = null;
+            let bestScore = Infinity;
+            slots.forEach(slot => {
+                refs.forEach(ref => {
+                    const score = Math.hypot(slot.x - ref.x, slot.y - ref.y);
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = slot;
+                    }
+                });
+            });
+            return clonePort(best);
+        };
+        const fallbackSourcePort = () => {
+            const candidates = [
+                conn?.sourcePort,
+                previous?.sourcePort,
+                ...lines
+                    .filter(line => line && (line.groupId === groupId || line.id === groupId))
+                    .map(line => line.sourcePort)
+            ];
+            const stored = candidates.find(hasPortPosition);
+            return stored ? clonePort(stored) : findNearestSourceEntityPort();
+        };
+        let cleanSourcePort = sourcePort?.sourceType === "logistics_line" ? null : clonePort(sourcePort);
+        if (!hasPortPosition(cleanSourcePort)) cleanSourcePort = fallbackSourcePort();
+        const cleanTargetPort = clonePort(targetPort);
         const filter = conn ? (conn.filter || null) : (previous?.filter || null);
         const segments = this.buildLogisticsSegments(groupId, sourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter);
         const occupied = new Map();
@@ -1965,15 +2040,10 @@ export class UIManager {
         GameEngine.state.logisticsLines = mergedLines;
 
         if (conn) {
-            const previousRoutePoints = Array.isArray(conn.routePoints)
-                ? conn.routePoints.map(p => ({ x: p.x, y: p.y }))
-                : null;
             conn.lineId = groupId;
-            conn.routePoints = lineId && previousRoutePoints?.length >= 2
-                ? previousRoutePoints
-                : gridPoints.map(p => ({ x: p.x, y: p.y }));
+            conn.routePoints = gridPoints.map(p => ({ x: p.x, y: p.y }));
             conn.routeWidth = Math.max(1, Number(routeWidth) || 1);
-            if (cleanSourcePort) conn.sourcePort = cleanSourcePort;
+            conn.sourcePort = cleanSourcePort;
             conn.targetPort = cleanTargetPort;
         }
 
@@ -2096,12 +2166,13 @@ export class UIManager {
         const secondaryLines = lines.filter(line => line && (line.groupId === secondaryGroupId || line.id === secondaryGroupId));
         if (primaryLines.length === 0 || secondaryLines.length === 0) return primaryGroupId;
 
+        const hasPortPosition = (port) => port && Number.isFinite(port.x) && Number.isFinite(port.y);
         const primaryMeta = primaryLines.find(line => line && (line.sourceId || line.targetId || line.sourcePort || line.targetPort)) || primaryLines[0];
         const secondaryMeta = secondaryLines.find(line => line && (line.sourceId || line.targetId || line.sourcePort || line.targetPort)) || secondaryLines[0];
         let canonicalSourceId = primaryMeta?.sourceId || secondaryMeta?.sourceId || null;
         let canonicalTargetId = primaryMeta?.targetId || secondaryMeta?.targetId || null;
-        let canonicalSourcePort = primaryMeta?.sourcePort || secondaryMeta?.sourcePort || null;
-        let canonicalTargetPort = primaryMeta?.targetPort || secondaryMeta?.targetPort || null;
+        let canonicalSourcePort = [primaryMeta?.sourcePort, secondaryMeta?.sourcePort].find(hasPortPosition) || null;
+        let canonicalTargetPort = [primaryMeta?.targetPort, secondaryMeta?.targetPort].find(hasPortPosition) || null;
         let filter = primaryMeta?.filter || secondaryMeta?.filter || null;
 
         (GameEngine.state.mapEntities || []).forEach(ent => {
@@ -2113,8 +2184,8 @@ export class UIManager {
                 conn.lineId = primaryGroupId;
                 canonicalSourceId = sourceId || canonicalSourceId;
                 canonicalTargetId = conn.id || canonicalTargetId;
-                canonicalSourcePort = conn.sourcePort || canonicalSourcePort;
-                canonicalTargetPort = conn.targetPort || canonicalTargetPort;
+                canonicalSourcePort = hasPortPosition(conn.sourcePort) ? conn.sourcePort : canonicalSourcePort;
+                canonicalTargetPort = hasPortPosition(conn.targetPort) ? conn.targetPort : canonicalTargetPort;
                 filter = conn.filter || filter;
             });
         });
@@ -2123,8 +2194,8 @@ export class UIManager {
             line.groupId = primaryGroupId;
             if (canonicalSourceId) line.sourceId = canonicalSourceId;
             if (canonicalTargetId) line.targetId = canonicalTargetId;
-            if (canonicalSourcePort) line.sourcePort = canonicalSourcePort;
-            if (canonicalTargetPort) line.targetPort = canonicalTargetPort;
+            if (hasPortPosition(canonicalSourcePort)) line.sourcePort = canonicalSourcePort;
+            if (hasPortPosition(canonicalTargetPort)) line.targetPort = canonicalTargetPort;
             if (filter) line.filter = filter;
         });
 
@@ -2168,6 +2239,8 @@ export class UIManager {
         GameEngine.state.selectedLogisticsLineId = this.getLogisticsLineSelectionKey(line);
         GameEngine.state.selectedLogisticsGroupId = selectGroup ? (line.groupId || line.id) : null;
         this.activeLogisticsLine = line;
+
+
     }
 
     static isSelectedBuilding(ent) {
@@ -2193,6 +2266,8 @@ export class UIManager {
         return {
             dir,
             width: Math.max(1, Number(line?.routeWidth) || 1),
+            x: line?.x,
+            y: line?.y,
             sourceType: "logistics_line"
         };
     }

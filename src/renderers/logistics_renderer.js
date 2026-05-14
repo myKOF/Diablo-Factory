@@ -2,254 +2,447 @@ import { GameEngine } from "../systems/game_systems.js";
 import { UI_CONFIG } from "../ui/ui_config.js";
 
 export class LogisticsRenderer {
-    static render(graphics, state, scene) {
-            graphics.clear();
-            const logCfg = UI_CONFIG.LogisticsSystem || {
-                lineThickness: 3, lineColor: "#4caf50", lineAlpha: 0.6,
-                dragLineColor: "#8bc34a", dragLineAlpha: 0.8,
-                arrowColor: "#ff8800ff", arrowSize: 8, arrowSpeed: 60, arrowSpacing: 40, lineOffset: 8
-            };
-            const parseColor = (c) => scene.hexOrRgba(c).color;
-            const currentTime = scene.time.now / 1000;
+    static render(graphics, state, scene, options = {}) {
+        graphics.clear();
+        const logCfg = UI_CONFIG.LogisticsSystem || {
+            lineThickness: 3, lineColor: "#4caf50", lineAlpha: 0.6,
+            dragLineColor: "#8bc34a", dragLineAlpha: 0.8,
+            arrowColor: "#ff8800ff", arrowSize: 8, arrowSpeed: 60, arrowSpacing: 40, lineOffset: 8
+        };
+        const parseColor = (c) => scene.hexOrRgba(c).color;
+        const currentTime = scene.time.now / 1000;
 
-            const getCoordId = (e) => `${e.type1}_${e.x}_${e.y}`;
-            const drawSelectedLogisticsSegmentOutline = (line) => {
-                if (!line || line.x === undefined || line.y === undefined) return;
-                const TS = GameEngine.TILE_SIZE;
-                const padding = Math.max(0, Number(logCfg.selectedSegmentOutlinePadding) || 0);
-                const outlineColor = parseColor(logCfg.selectedSegmentOutlineColor || "#ff3d00ff");
-                const outlineAlpha = logCfg.selectedSegmentOutlineAlpha ?? 1;
-                const outlineWidth = Math.max(1, Number(logCfg.selectedSegmentOutlineWidth) || 2);
-                graphics.lineStyle(outlineWidth, outlineColor, outlineAlpha);
-                graphics.strokeRect(
-                    line.x - TS / 2 - padding,
-                    line.y - TS / 2 - padding,
-                    TS + padding * 2,
-                    TS + padding * 2
-                );
-            };
-            const drawSelectedLogisticsSegmentOutlineOnRoute = (points, widthTiles, line) => {
-                if (!line || !Array.isArray(points) || points.length < 2) {
-                    drawSelectedLogisticsSegmentOutline(line);
-                    return;
-                }
-                const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
-                // [核心修正] 由於傳入的是單一 segment 的路徑點，故不應再用 order 進行二次索引。
-                // 這裡永遠取第一格 rect 即可完美對齊實體。
-                const rect = rects[0];
-                if (!rect) {
-                    drawSelectedLogisticsSegmentOutline(line);
-                    return;
-                }
-                const padding = Math.max(0, Number(logCfg.selectedSegmentOutlinePadding) || 0);
-                const outlineColor = parseColor(logCfg.selectedSegmentOutlineColor || "#ff3d00ff");
-                const outlineAlpha = logCfg.selectedSegmentOutlineAlpha ?? 1;
-                const outlineWidth = Math.max(1, Number(logCfg.selectedSegmentOutlineWidth) || 2);
-                graphics.lineStyle(outlineWidth, outlineColor, outlineAlpha);
-                graphics.strokeRect(
-                    rect.x - padding,
-                    rect.y - padding,
-                    rect.w + padding * 2,
-                    rect.h + padding * 2
-                );
-            };
+        const getCoordId = (e) => `${e.type1}_${e.x}_${e.y}`;
+        const drawSelectedLogisticsSegmentOutline = (line) => {
+            if (!line || line.x === undefined || line.y === undefined) return;
+            const TS = GameEngine.TILE_SIZE;
+            const padding = Math.max(0, Number(logCfg.selectedSegmentOutlinePadding) || 0);
+            const outlineColor = parseColor(logCfg.selectedSegmentOutlineColor || "#ff3d00ff");
+            const outlineAlpha = logCfg.selectedSegmentOutlineAlpha ?? 1;
+            const outlineWidth = Math.max(1, Number(logCfg.selectedSegmentOutlineWidth) || 2);
+            graphics.lineStyle(outlineWidth, outlineColor, outlineAlpha);
+            graphics.strokeRect(
+                line.x - TS / 2 - padding,
+                line.y - TS / 2 - padding,
+                TS + padding * 2,
+                TS + padding * 2
+            );
+        };
+        const drawSelectedLogisticsSegmentOutlineOnRoute = (points, widthTiles, line) => {
+            if (!line || !Array.isArray(points) || points.length < 2) {
+                drawSelectedLogisticsSegmentOutline(line);
+                return;
+            }
+            const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
+            // [核心修正] 由於傳入的是單一 segment 的路徑點，故不應再用 order 進行二次索引。
+            // 這裡永遠取第一格 rect 即可完美對齊實體。
+            const rect = rects[0];
+            if (!rect) {
+                drawSelectedLogisticsSegmentOutline(line);
+                return;
+            }
+            const padding = Math.max(0, Number(logCfg.selectedSegmentOutlinePadding) || 0);
+            const outlineColor = parseColor(logCfg.selectedSegmentOutlineColor || "#ff3d00ff");
+            const outlineAlpha = logCfg.selectedSegmentOutlineAlpha ?? 1;
+            const outlineWidth = Math.max(1, Number(logCfg.selectedSegmentOutlineWidth) || 2);
+            graphics.lineStyle(outlineWidth, outlineColor, outlineAlpha);
+            graphics.strokeRect(
+                rect.x - padding,
+                rect.y - padding,
+                rect.w + padding * 2,
+                rect.h + padding * 2
+            );
+        };
 
-            const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null) => {
-                const baseThickness = logCfg.lineThickness || 3;
-                const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE * 0.8);
-                const usePortToPortStyle = !!isPortToPort && !!isConnected;
-                const lColor = isSelected
-                    ? (logCfg.selectedLineColor || "#ffff00")
-                    : (usePortToPortStyle
-                        ? (logCfg.portToPortLineColor || logCfg.lineColor)
-                        : (!isConnected ? (logCfg.disconnectedLineColor || "#6b6b6b") : logCfg.lineColor));
-                const lAlpha = isSelected
-                    ? (logCfg.selectedLineAlpha || 1.0)
-                    : (usePortToPortStyle
-                        ? (logCfg.portToPortLineAlpha ?? logCfg.lineAlpha)
-                        : (!isConnected ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha) : logCfg.lineAlpha));
-                graphics.fillStyle(parseColor(lColor), lAlpha);
-                LogisticsRenderer.drawLogisticsCells(graphics, points, widthTiles, 1);
-                const arrowRects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
+        const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null) => {
+            const baseThickness = logCfg.lineThickness || 3;
+            const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE * 0.8);
+            const usePortToPortStyle = !!isPortToPort && !!isConnected;
+            const lColor = isSelected
+                ? (logCfg.selectedLineColor || "#ffff00")
+                : (usePortToPortStyle
+                    ? (logCfg.portToPortLineColor || logCfg.lineColor)
+                    : (!isConnected ? (logCfg.disconnectedLineColor || "#6b6b6b") : logCfg.lineColor));
+            const lAlpha = isSelected
+                ? (logCfg.selectedLineAlpha || 1.0)
+                : (usePortToPortStyle
+                    ? (logCfg.portToPortLineAlpha ?? logCfg.lineAlpha)
+                    : (!isConnected ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha) : logCfg.lineAlpha));
+            graphics.fillStyle(parseColor(lColor), lAlpha);
+            LogisticsRenderer.drawLogisticsCells(graphics, points, widthTiles, 1);
+            const arrowRects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
 
-                if (arrowRects.length > 0) {
-                    const arrowColor = usePortToPortStyle
-                        ? (logCfg.portToPortArrowColor || logCfg.arrowColor)
-                        : (!isConnected ? (logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a") : logCfg.arrowColor);
-                    const arrowAlpha = usePortToPortStyle
-                        ? (logCfg.portToPortArrowAlpha ?? 0.9)
-                        : (!isConnected ? (logCfg.disconnectedArrowAlpha ?? 0.85) : 0.9);
-                    const arrowSize = usePortToPortStyle
-                        ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 8)
-                        : (!isConnected ? (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8) : (logCfg.arrowSize || 8));
-                    graphics.fillStyle(parseColor(arrowColor), arrowAlpha);
-                    arrowRects.forEach((rect) => {
-                        const groupKey = line?.groupId || line?.id || null;
-                        const rectCenterX = rect.x + rect.w / 2;
-                        const rectCenterY = rect.y + rect.h / 2;
-                        const stateOverride = (GameEngine.state.logisticsTurnArrowOverrides || []).find(item =>
-                            item &&
-                            (!item.groupId || !groupKey || item.groupId === groupKey) &&
+            if (arrowRects.length > 0) {
+                const arrowColor = usePortToPortStyle
+                    ? (logCfg.portToPortArrowColor || logCfg.arrowColor)
+                    : (!isConnected ? (logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a") : logCfg.arrowColor);
+                const arrowAlpha = usePortToPortStyle
+                    ? (logCfg.portToPortArrowAlpha ?? 0.9)
+                    : (!isConnected ? (logCfg.disconnectedArrowAlpha ?? 0.85) : 0.9);
+                const arrowSize = usePortToPortStyle
+                    ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 8)
+                    : (!isConnected ? (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8) : (logCfg.arrowSize || 8));
+                graphics.fillStyle(parseColor(arrowColor), arrowAlpha);
+                arrowRects.forEach((rect) => {
+                    const groupKey = line?.groupId || line?.id || null;
+                    const rectCenterX = rect.x + rect.w / 2;
+                    const rectCenterY = rect.y + rect.h / 2;
+                    const stateOverride = (GameEngine.state.logisticsTurnArrowOverrides || []).find(item =>
+                        item &&
+                        (!item.groupId || !groupKey || item.groupId === groupKey) &&
+                        (
+                            item.cellKey === rect.cellKey ||
                             (
-                                item.cellKey === rect.cellKey ||
-                                (
-                                    Number.isFinite(item.anchorX) &&
-                                    Number.isFinite(item.anchorY) &&
-                                    Math.hypot(rectCenterX - item.anchorX, rectCenterY - item.anchorY) <= GameEngine.TILE_SIZE * 0.75
-                                )
-                            )
-                        ) || null;
-                        const lineOverride = line?.turnArrowOverride || stateOverride;
-                        const override = lineOverride && (
-                            lineOverride.cellKey === rect.cellKey ||
-                            (
-                                Number.isFinite(lineOverride.anchorX) &&
-                                Number.isFinite(lineOverride.anchorY) &&
-                                Math.hypot(rectCenterX - lineOverride.anchorX, rectCenterY - lineOverride.anchorY) <= GameEngine.TILE_SIZE * 0.75
+                                Number.isFinite(item.anchorX) &&
+                                Number.isFinite(item.anchorY) &&
+                                Math.hypot(rectCenterX - item.anchorX, rectCenterY - item.anchorY) <= GameEngine.TILE_SIZE * 0.75
                             )
                         )
-                            ? lineOverride
-                            : null;
-                        if (!override && skipArrowCellKeys?.has(rect.cellKey)) return;
-                        const adx = override ? override.dirX : (rect.dirX !== undefined ? rect.dirX : 0);
-                        const ady = override ? override.dirY : (rect.dirY !== undefined ? rect.dirY : 0);
-                        const len = Math.hypot(adx, ady) || 1;
-                        LogisticsRenderer.drawArrowhead(
-                            graphics,
-                            rectCenterX,
-                            rectCenterY,
-                            adx / len,
-                            ady / len,
-                            arrowSize
-                        );
-                    });
-                }
-                if (isSelected && line) {
-                    drawSelectedLogisticsSegmentOutlineOnRoute(points, widthTiles, line);
-                }
-            };
-
-            const drawConnectedCellOverlay = (points, widthTiles, connectedCellKeys, isPortToPort = true, skipArrowCellKeys = null) => {
-                if (!connectedCellKeys || connectedCellKeys.size === 0) return;
-                const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true)
-                    .filter(rect => rect.cellKey && connectedCellKeys.has(rect.cellKey));
-                const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
-                if (
-                    endpointRect &&
-                    endpointRect.cellKey &&
-                    connectedCellKeys.has(endpointRect.cellKey) &&
-                    !rects.some(rect => rect.cellKey === endpointRect.cellKey)
-                ) {
-                    rects.push(endpointRect);
-                }
-                if (rects.length === 0) return;
-                const lineColor = isPortToPort
-                    ? (logCfg.portToPortLineColor || logCfg.lineColor)
-                    : logCfg.lineColor;
-                const lineAlpha = isPortToPort
-                    ? (logCfg.portToPortLineAlpha ?? logCfg.lineAlpha)
-                    : logCfg.lineAlpha;
-                graphics.fillStyle(parseColor(lineColor), lineAlpha);
-                rects.forEach(rect => graphics.fillRect(rect.x, rect.y, rect.w, rect.h));
-
-                const arrowColor = isPortToPort
-                    ? (logCfg.portToPortArrowColor || logCfg.arrowColor)
-                    : logCfg.arrowColor;
-                const arrowAlpha = isPortToPort
-                    ? (logCfg.portToPortArrowAlpha ?? 0.9)
-                    : 0.9;
-                const arrowSize = isPortToPort
-                    ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 8)
-                    : (logCfg.arrowSize || 8);
-                graphics.fillStyle(parseColor(arrowColor), arrowAlpha);
-                rects.forEach((rect) => {
-                    if (skipArrowCellKeys?.has(rect.cellKey)) return;
-                    const adx = rect.dirX !== undefined ? rect.dirX : 0;
-                    const ady = rect.dirY !== undefined ? rect.dirY : 0;
+                    ) || null;
+                    const lineOverride = line?.turnArrowOverride || stateOverride;
+                    const override = lineOverride && (
+                        lineOverride.cellKey === rect.cellKey ||
+                        (
+                            Number.isFinite(lineOverride.anchorX) &&
+                            Number.isFinite(lineOverride.anchorY) &&
+                            Math.hypot(rectCenterX - lineOverride.anchorX, rectCenterY - lineOverride.anchorY) <= GameEngine.TILE_SIZE * 0.75
+                        )
+                    )
+                        ? lineOverride
+                        : null;
+                    if (!override && skipArrowCellKeys?.has(rect.cellKey)) return;
+                    const adx = override ? override.dirX : (rect.dirX !== undefined ? rect.dirX : 0);
+                    const ady = override ? override.dirY : (rect.dirY !== undefined ? rect.dirY : 0);
                     const len = Math.hypot(adx, ady) || 1;
                     LogisticsRenderer.drawArrowhead(
                         graphics,
-                        rect.x + rect.w / 2,
-                        rect.y + rect.h / 2,
+                        rectCenterX,
+                        rectCenterY,
                         adx / len,
                         ady / len,
                         arrowSize
                     );
                 });
-            };
+            }
+            if (isSelected && line) {
+                drawSelectedLogisticsSegmentOutlineOnRoute(points, widthTiles, line);
+            }
+        };
 
-            const getPointOnPathByDistance = (points, progress, startOffset = 0) => {
-                if (!Array.isArray(points) || points.length < 2) return null;
-                const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
-                const lengths = [];
-                let totalLength = 0;
-                for (let i = 0; i < points.length - 1; i++) {
+        const drawConnectedCellOverlay = (points, widthTiles, connectedCellKeys, isPortToPort = true, skipArrowCellKeys = null) => {
+            if (!connectedCellKeys || connectedCellKeys.size === 0) return;
+            const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true)
+                .filter(rect => rect.cellKey && connectedCellKeys.has(rect.cellKey));
+            const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
+            if (
+                endpointRect &&
+                endpointRect.cellKey &&
+                connectedCellKeys.has(endpointRect.cellKey) &&
+                !rects.some(rect => rect.cellKey === endpointRect.cellKey)
+            ) {
+                rects.push(endpointRect);
+            }
+            if (rects.length === 0) return;
+            const lineColor = isPortToPort
+                ? (logCfg.portToPortLineColor || logCfg.lineColor)
+                : logCfg.lineColor;
+            const lineAlpha = isPortToPort
+                ? (logCfg.portToPortLineAlpha ?? logCfg.lineAlpha)
+                : logCfg.lineAlpha;
+            graphics.fillStyle(parseColor(lineColor), lineAlpha);
+            rects.forEach(rect => graphics.fillRect(rect.x, rect.y, rect.w, rect.h));
+
+            const arrowColor = isPortToPort
+                ? (logCfg.portToPortArrowColor || logCfg.arrowColor)
+                : logCfg.arrowColor;
+            const arrowAlpha = isPortToPort
+                ? (logCfg.portToPortArrowAlpha ?? 0.9)
+                : 0.9;
+            const arrowSize = isPortToPort
+                ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 8)
+                : (logCfg.arrowSize || 8);
+            graphics.fillStyle(parseColor(arrowColor), arrowAlpha);
+            rects.forEach((rect) => {
+                if (skipArrowCellKeys?.has(rect.cellKey)) return;
+                const adx = rect.dirX !== undefined ? rect.dirX : 0;
+                const ady = rect.dirY !== undefined ? rect.dirY : 0;
+                const len = Math.hypot(adx, ady) || 1;
+                LogisticsRenderer.drawArrowhead(
+                    graphics,
+                    rect.x + rect.w / 2,
+                    rect.y + rect.h / 2,
+                    adx / len,
+                    ady / len,
+                    arrowSize
+                );
+            });
+        };
+
+        const getPointOnPathByDistance = (points, progress, startOffset = 0) => {
+            if (!Array.isArray(points) || points.length < 2) return null;
+            const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+            const lengths = [];
+            let totalLength = 0;
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                const length = Math.hypot(b.x - a.x, b.y - a.y);
+                lengths.push(length);
+                totalLength += length;
+            }
+            if (totalLength <= 0) return { x: points[0].x, y: points[0].y };
+
+            const safeStartOffset = Math.max(0, Math.min(Number(startOffset) || 0, totalLength * 0.45));
+            let targetDistance = safeStartOffset + clampedProgress * (totalLength - safeStartOffset);
+            for (let i = 0; i < lengths.length; i++) {
+                const length = lengths[i];
+                if (targetDistance <= length || i === lengths.length - 1) {
                     const a = points[i];
                     const b = points[i + 1];
-                    const length = Math.hypot(b.x - a.x, b.y - a.y);
-                    lengths.push(length);
-                    totalLength += length;
+                    const localProgress = length > 0 ? targetDistance / length : 0;
+                    return {
+                        x: a.x + (b.x - a.x) * localProgress,
+                        y: a.y + (b.y - a.y) * localProgress
+                    };
                 }
-                if (totalLength <= 0) return { x: points[0].x, y: points[0].y };
-
-                const safeStartOffset = Math.max(0, Math.min(Number(startOffset) || 0, totalLength * 0.45));
-                let targetDistance = safeStartOffset + clampedProgress * (totalLength - safeStartOffset);
-                for (let i = 0; i < lengths.length; i++) {
-                    const length = lengths[i];
-                    if (targetDistance <= length || i === lengths.length - 1) {
-                        const a = points[i];
-                        const b = points[i + 1];
-                        const localProgress = length > 0 ? targetDistance / length : 0;
-                        return {
-                            x: a.x + (b.x - a.x) * localProgress,
-                            y: a.y + (b.y - a.y) * localProgress
-                        };
-                    }
-                    targetDistance -= length;
-                }
-                const last = points[points.length - 1];
-                return { x: last.x, y: last.y };
-            };
-
-            const groupSegments = new Map();
-            if (Array.isArray(state.logisticsLines)) {
-                state.logisticsLines.forEach((line) => {
-                    if (!line) return;
-                    const groupKey = line.groupId || line.id;
-                    if (!groupSegments.has(groupKey)) groupSegments.set(groupKey, []);
-                    groupSegments.get(groupKey).push(line);
-                });
+                targetDistance -= length;
             }
+            const last = points[points.length - 1];
+            return { x: last.x, y: last.y };
+        };
 
-            const portToPortConnectedGroupIds = new Set();
-            const portToPortConnectedCellKeysByGroup = new Map();
-            const portToPortConnectedCellPathsByGroup = new Map();
-            const portToPortConnectedCellPathKeysByGroup = new Map();
-            const portToPortCandidateGroupIds = new Set();
-            const makeNodeKey = (p) => `${Math.round(p.x)},${Math.round(p.y)}`;
-            const getNodePoint = (key) => {
-                const [x, y] = String(key).split(",").map(Number);
-                return { x, y };
-            };
-            const getNearbyNodeKeys = (point, nodeKeys, maxSnap) => {
-                if (!point || !Array.isArray(nodeKeys) || nodeKeys.length === 0) return [];
-                const scored = [];
-                for (const key of nodeKeys) {
-                    const np = getNodePoint(key);
-                    const d = Math.hypot(np.x - point.x, np.y - point.y);
-                    if (d <= maxSnap) scored.push({ key, d });
+        const groupSegments = new Map();
+        if (Array.isArray(state.logisticsLines)) {
+            state.logisticsLines.forEach((line) => {
+                if (!line) return;
+                const groupKey = line.groupId || line.id;
+                if (!groupSegments.has(groupKey)) groupSegments.set(groupKey, []);
+                groupSegments.get(groupKey).push(line);
+            });
+        }
+
+        const portToPortConnectedGroupIds = new Set();
+        const portToPortConnectedCellKeysByGroup = new Map();
+        const portToPortConnectedCellPathsByGroup = new Map();
+        const portToPortConnectedCellPathKeysByGroup = new Map();
+        const portToPortCandidateGroupIds = new Set();
+        const makeNodeKey = (p) => `${Math.round(p.x)},${Math.round(p.y)}`;
+        const getNodePoint = (key) => {
+            const [x, y] = String(key).split(",").map(Number);
+            return { x, y };
+        };
+        const getNearbyNodeKeys = (point, nodeKeys, maxSnap) => {
+            if (!point || !Array.isArray(nodeKeys) || nodeKeys.length === 0) return [];
+            const scored = [];
+            for (const key of nodeKeys) {
+                const np = getNodePoint(key);
+                const d = Math.hypot(np.x - point.x, np.y - point.y);
+                if (d <= maxSnap) scored.push({ key, d });
+            }
+            scored.sort((a, b) => a.d - b.d);
+            return scored.slice(0, 8).map((s) => s.key);
+        };
+        const hasDirectedPath = (adj, startKey, endKey) => {
+            if (!startKey || !endKey) return false;
+            if (startKey === endKey) return false;
+            const q = [startKey];
+            const visited = new Set([startKey]);
+            while (q.length > 0) {
+                const cur = q.shift();
+                const nexts = adj.get(cur);
+                if (!nexts) continue;
+                for (const next of nexts) {
+                    if (next === endKey) return true;
+                    if (visited.has(next)) continue;
+                    visited.add(next);
+                    q.push(next);
                 }
-                scored.sort((a, b) => a.d - b.d);
-                return scored.slice(0, 8).map((s) => s.key);
+            }
+            return false;
+        };
+        const addConnectedCellKey = (groupKey, cellKey) => {
+            if (!cellKey) return;
+            if (!portToPortConnectedCellKeysByGroup.has(groupKey)) {
+                portToPortConnectedCellKeysByGroup.set(groupKey, new Set());
+            }
+            portToPortConnectedCellKeysByGroup.get(groupKey).add(cellKey);
+        };
+        const addConnectedCellPath = (groupKey, path) => {
+            if (!Array.isArray(path) || path.length === 0) return;
+            if (!portToPortConnectedCellPathsByGroup.has(groupKey)) {
+                portToPortConnectedCellPathsByGroup.set(groupKey, []);
+            }
+            if (!portToPortConnectedCellPathKeysByGroup.has(groupKey)) {
+                portToPortConnectedCellPathKeysByGroup.set(groupKey, new Set());
+            }
+            const pathKey = path.join("|");
+            if (portToPortConnectedCellPathKeysByGroup.get(groupKey).has(pathKey)) return;
+            portToPortConnectedCellPathKeysByGroup.get(groupKey).add(pathKey);
+            portToPortConnectedCellPathsByGroup.get(groupKey).push(path.slice());
+            path.forEach((cellKey) => addConnectedCellKey(groupKey, cellKey));
+        };
+        const makePortKey = (port, index) => port
+            ? `${port.dir || "port"}:${port.slotIndex ?? port.defIndex ?? index ?? 0}`
+            : null;
+        const canConnectPortOwners = (sourceOwners, targetOwners) => {
+            return sourceOwners.some((sourceOwner) => targetOwners.some((targetOwner) =>
+                sourceOwner.id !== targetOwner.id ||
+                (!!sourceOwner.portKey && !!targetOwner.portKey && sourceOwner.portKey !== targetOwner.portKey)
+            ));
+        };
+
+        groupSegments.forEach((segments, groupKey) => {
+            if (!Array.isArray(segments) || segments.length === 0) return;
+
+            const adj = new Map();
+            const undirected = new Map();
+            const cellAdj = new Map();
+            const cellPointByKey = new Map();
+            const incoming = new Set();
+            const outDegree = new Map();
+            const inDegree = new Map();
+            const nodeKeySet = new Set();
+            const cellKeySet = new Set();
+            const addCellEdge = (a, b) => {
+                if (!a || !b || a === b) return;
+                if (!cellAdj.has(a)) cellAdj.set(a, new Set());
+                if (!cellAdj.has(b)) cellAdj.set(b, new Set());
+                cellAdj.get(a).add(b);
+                cellAdj.get(b).add(a);
             };
-            const hasDirectedPath = (adj, startKey, endKey) => {
+            segments.forEach((seg) => {
+                const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+                if (pts.length < 2) return;
+                const fromKey = makeNodeKey(pts[0]);
+                const toKey = makeNodeKey(pts[1]);
+                nodeKeySet.add(fromKey);
+                nodeKeySet.add(toKey);
+                if (!adj.has(fromKey)) adj.set(fromKey, new Set());
+                adj.get(fromKey).add(toKey);
+                if (!undirected.has(fromKey)) undirected.set(fromKey, new Set());
+                if (!undirected.has(toKey)) undirected.set(toKey, new Set());
+                undirected.get(fromKey).add(toKey);
+                undirected.get(toKey).add(fromKey);
+                incoming.add(toKey);
+                outDegree.set(fromKey, (outDegree.get(fromKey) || 0) + 1);
+                inDegree.set(toKey, (inDegree.get(toKey) || 0) + 1);
+
+                const dx = pts[1].x - pts[0].x;
+                const dy = pts[1].y - pts[0].y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 0.001) {
+                    const dirX = dx / dist;
+                    const dirY = dy / dist;
+                    const steps = Math.max(1, Math.round(dist / GameEngine.TILE_SIZE));
+                    const stepSize = dist / steps;
+                    let prevCellKey = null;
+                    for (let step = 0; step < steps; step++) {
+                        const point = {
+                            x: pts[0].x + dirX * stepSize * step,
+                            y: pts[0].y + dirY * stepSize * step
+                        };
+                        const cellKey = makeNodeKey(point);
+                        cellKeySet.add(cellKey);
+                        cellPointByKey.set(cellKey, getNodePoint(cellKey));
+                        if (!cellAdj.has(cellKey)) cellAdj.set(cellKey, new Set());
+                        addCellEdge(prevCellKey, cellKey);
+                        prevCellKey = cellKey;
+                    }
+                    const endCellKey = makeNodeKey(pts[1]);
+                    cellKeySet.add(endCellKey);
+                    cellPointByKey.set(endCellKey, getNodePoint(endCellKey));
+                    if (!cellAdj.has(endCellKey)) cellAdj.set(endCellKey, new Set());
+                    addCellEdge(prevCellKey, endCellKey);
+                }
+            });
+
+            const nodeKeys = Array.from(nodeKeySet);
+            if (nodeKeys.length === 0) return;
+            const cellKeys = Array.from(cellKeySet);
+            cellKeys.forEach((key) => {
+                const p = cellPointByKey.get(key);
+                if (!p) return;
+                [
+                    { x: p.x + GameEngine.TILE_SIZE, y: p.y },
+                    { x: p.x - GameEngine.TILE_SIZE, y: p.y },
+                    { x: p.x, y: p.y + GameEngine.TILE_SIZE },
+                    { x: p.x, y: p.y - GameEngine.TILE_SIZE }
+                ].forEach((next) => {
+                    const nextKey = makeNodeKey(next);
+                    if (cellKeySet.has(nextKey)) addCellEdge(key, nextKey);
+                });
+            });
+            const representative = segments.find((seg) => seg && seg.sourceId && seg.targetId) || null;
+            const sourceEnt = representative
+                ? (state.mapEntities?.find((ent) => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === representative.sourceId) || null)
+                : null;
+            const targetEnt = representative
+                ? (state.mapEntities?.find((ent) => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === representative.targetId) || null)
+                : null;
+            const representativePortsCanConnect = () => {
+                if (!representative || !sourceEnt || !targetEnt) return true;
+                const sourceId = sourceEnt.id || `${sourceEnt.type1}_${sourceEnt.x}_${sourceEnt.y}`;
+                const targetId = targetEnt.id || `${targetEnt.type1}_${targetEnt.x}_${targetEnt.y}`;
+                if (sourceId !== targetId) return true;
+                const sourceKey = makePortKey(representative.sourcePort, representative.sourcePort?.slotIndex ?? representative.sourcePort?.defIndex ?? 0);
+                const targetKey = makePortKey(representative.targetPort, representative.targetPort?.slotIndex ?? representative.targetPort?.defIndex ?? 0);
+                return !!sourceKey && !!targetKey && sourceKey !== targetKey;
+            };
+
+            const terminalStarts = nodeKeys.filter((k) => (outDegree.get(k) || 0) > 0 && (inDegree.get(k) || 0) === 0);
+            const terminalEnds = nodeKeys.filter((k) => (inDegree.get(k) || 0) > 0 && (outDegree.get(k) || 0) === 0);
+            const fallbackStart = nodeKeys.filter((k) => (adj.get(k)?.size || 0) > 0);
+            const fallbackEnd = nodeKeys.filter((k) => incoming.has(k));
+            const startKeys = terminalStarts.length > 0 ? terminalStarts : fallbackStart;
+            const endKeys = terminalEnds.length > 0 ? terminalEnds : fallbackEnd;
+
+            const getPortOwnersNearNode = (nodeKey, wantOutput) => {
+                if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return [];
+                const nodePoint = getNodePoint(nodeKey);
+                const maxSnap = GameEngine.TILE_SIZE * 1.1;
+                const owners = [];
+                (state.mapEntities || []).forEach((ent) => {
+                    if (!ent || ent.isUnderConstruction) return;
+                    const cfg = GameEngine.getEntityConfig(ent.type1) || {};
+                    const logisticCfg = cfg.logistics || {};
+                    if (wantOutput && !logisticCfg.canOutput) return;
+                    if (!wantOutput && !logisticCfg.canInput) return;
+                    const ports = window.UIManager.getBuildingPortSlots(ent);
+                    if (!Array.isArray(ports) || ports.length === 0) return;
+                    let best = Number.POSITIVE_INFINITY;
+                    let bestPort = null;
+                    let bestIndex = 0;
+                    ports.forEach((port, index) => {
+                        const d = Math.hypot(port.x - nodePoint.x, port.y - nodePoint.y);
+                        if (d < best) {
+                            best = d;
+                            bestPort = port;
+                            bestIndex = index;
+                        }
+                    });
+                    if (best <= maxSnap) {
+                        owners.push({
+                            id: ent.id || `${ent.type1}_${ent.x}_${ent.y}`,
+                            portKey: makePortKey(bestPort, bestIndex),
+                            dist: best
+                        });
+                    }
+                });
+                owners.sort((a, b) => a.dist - b.dist);
+                return owners;
+            };
+
+            let connected = false;
+            portToPortCandidateGroupIds.add(groupKey);
+
+            const hasUndirectedPath = (startKey, endKey) => {
                 if (!startKey || !endKey) return false;
-                if (startKey === endKey) return false;
+                if (startKey === endKey) return true;
                 const q = [startKey];
                 const visited = new Set([startKey]);
                 while (q.length > 0) {
                     const cur = q.shift();
-                    const nexts = adj.get(cur);
+                    const nexts = undirected.get(cur);
                     if (!nexts) continue;
                     for (const next of nexts) {
                         if (next === endKey) return true;
@@ -260,908 +453,729 @@ export class LogisticsRenderer {
                 }
                 return false;
             };
-            const addConnectedCellKey = (groupKey, cellKey) => {
-                if (!cellKey) return;
-                if (!portToPortConnectedCellKeysByGroup.has(groupKey)) {
-                    portToPortConnectedCellKeysByGroup.set(groupKey, new Set());
-                }
-                portToPortConnectedCellKeysByGroup.get(groupKey).add(cellKey);
-            };
-            const addConnectedCellPath = (groupKey, path) => {
-                if (!Array.isArray(path) || path.length === 0) return;
-                if (!portToPortConnectedCellPathsByGroup.has(groupKey)) {
-                    portToPortConnectedCellPathsByGroup.set(groupKey, []);
-                }
-                if (!portToPortConnectedCellPathKeysByGroup.has(groupKey)) {
-                    portToPortConnectedCellPathKeysByGroup.set(groupKey, new Set());
-                }
-                const pathKey = path.join("|");
-                if (portToPortConnectedCellPathKeysByGroup.get(groupKey).has(pathKey)) return;
-                portToPortConnectedCellPathKeysByGroup.get(groupKey).add(pathKey);
-                portToPortConnectedCellPathsByGroup.get(groupKey).push(path.slice());
-                path.forEach((cellKey) => addConnectedCellKey(groupKey, cellKey));
-            };
-            const makePortKey = (port, index) => port
-                ? `${port.dir || "port"}:${port.slotIndex ?? port.defIndex ?? index ?? 0}`
-                : null;
-            const canConnectPortOwners = (sourceOwners, targetOwners) => {
-                return sourceOwners.some((sourceOwner) => targetOwners.some((targetOwner) =>
-                    sourceOwner.id !== targetOwner.id ||
-                    (!!sourceOwner.portKey && !!targetOwner.portKey && sourceOwner.portKey !== targetOwner.portKey)
-                ));
-            };
-
-            groupSegments.forEach((segments, groupKey) => {
-                if (!Array.isArray(segments) || segments.length === 0) return;
-
-                const adj = new Map();
-                const undirected = new Map();
-                const cellAdj = new Map();
-                const cellPointByKey = new Map();
-                const incoming = new Set();
-                const outDegree = new Map();
-                const inDegree = new Map();
-                const nodeKeySet = new Set();
-                const cellKeySet = new Set();
-                const addCellEdge = (a, b) => {
-                    if (!a || !b || a === b) return;
-                    if (!cellAdj.has(a)) cellAdj.set(a, new Set());
-                    if (!cellAdj.has(b)) cellAdj.set(b, new Set());
-                    cellAdj.get(a).add(b);
-                    cellAdj.get(b).add(a);
-                };
-                segments.forEach((seg) => {
-                    const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
-                    if (pts.length < 2) return;
-                    const fromKey = makeNodeKey(pts[0]);
-                    const toKey = makeNodeKey(pts[1]);
-                    nodeKeySet.add(fromKey);
-                    nodeKeySet.add(toKey);
-                    if (!adj.has(fromKey)) adj.set(fromKey, new Set());
-                    adj.get(fromKey).add(toKey);
-                    if (!undirected.has(fromKey)) undirected.set(fromKey, new Set());
-                    if (!undirected.has(toKey)) undirected.set(toKey, new Set());
-                    undirected.get(fromKey).add(toKey);
-                    undirected.get(toKey).add(fromKey);
-                    incoming.add(toKey);
-                    outDegree.set(fromKey, (outDegree.get(fromKey) || 0) + 1);
-                    inDegree.set(toKey, (inDegree.get(toKey) || 0) + 1);
-
-                    const dx = pts[1].x - pts[0].x;
-                    const dy = pts[1].y - pts[0].y;
-                    const dist = Math.hypot(dx, dy);
-                    if (dist > 0.001) {
-                        const dirX = dx / dist;
-                        const dirY = dy / dist;
-                        const steps = Math.max(1, Math.round(dist / GameEngine.TILE_SIZE));
-                        const stepSize = dist / steps;
-                        let prevCellKey = null;
-                        for (let step = 0; step < steps; step++) {
-                            const point = {
-                                x: pts[0].x + dirX * stepSize * step,
-                                y: pts[0].y + dirY * stepSize * step
-                            };
-                            const cellKey = makeNodeKey(point);
-                            cellKeySet.add(cellKey);
-                            cellPointByKey.set(cellKey, getNodePoint(cellKey));
-                            if (!cellAdj.has(cellKey)) cellAdj.set(cellKey, new Set());
-                            addCellEdge(prevCellKey, cellKey);
-                            prevCellKey = cellKey;
-                        }
-                        const endCellKey = makeNodeKey(pts[1]);
-                        cellKeySet.add(endCellKey);
-                        cellPointByKey.set(endCellKey, getNodePoint(endCellKey));
-                        if (!cellAdj.has(endCellKey)) cellAdj.set(endCellKey, new Set());
-                        addCellEdge(prevCellKey, endCellKey);
+            const hasCellPath = (startKey, endKey) => {
+                if (!startKey || !endKey) return false;
+                if (startKey === endKey) return true;
+                const q = [startKey];
+                const visited = new Set([startKey]);
+                while (q.length > 0) {
+                    const cur = q.shift();
+                    const nexts = cellAdj.get(cur);
+                    if (!nexts) continue;
+                    for (const next of nexts) {
+                        if (next === endKey) return true;
+                        if (visited.has(next)) continue;
+                        visited.add(next);
+                        q.push(next);
                     }
-                });
-
-                const nodeKeys = Array.from(nodeKeySet);
-                if (nodeKeys.length === 0) return;
-                const cellKeys = Array.from(cellKeySet);
+                }
+                return false;
+            };
+            const findCellPath = (startKey, endKey) => {
+                if (!startKey || !endKey) return null;
+                if (startKey === endKey) return [startKey];
+                const q = [startKey];
+                const visited = new Set([startKey]);
+                const prev = new Map();
+                while (q.length > 0) {
+                    const cur = q.shift();
+                    const nexts = cellAdj.get(cur);
+                    if (!nexts) continue;
+                    for (const next of nexts) {
+                        if (visited.has(next)) continue;
+                        visited.add(next);
+                        prev.set(next, cur);
+                        if (next === endKey) {
+                            const path = [endKey];
+                            let step = endKey;
+                            while (prev.has(step)) {
+                                step = prev.get(step);
+                                path.push(step);
+                            }
+                            return path.reverse();
+                        }
+                        q.push(next);
+                    }
+                }
+                return null;
+            };
+            const getNearbyCellKeys = (point, maxSnap) => {
+                if (!point || cellKeys.length === 0) return [];
+                const scored = [];
                 cellKeys.forEach((key) => {
-                    const p = cellPointByKey.get(key);
-                    if (!p) return;
-                    [
-                        { x: p.x + GameEngine.TILE_SIZE, y: p.y },
-                        { x: p.x - GameEngine.TILE_SIZE, y: p.y },
-                        { x: p.x, y: p.y + GameEngine.TILE_SIZE },
-                        { x: p.x, y: p.y - GameEngine.TILE_SIZE }
-                    ].forEach((next) => {
-                        const nextKey = makeNodeKey(next);
-                        if (cellKeySet.has(nextKey)) addCellEdge(key, nextKey);
-                    });
+                    const cp = cellPointByKey.get(key);
+                    if (!cp) return;
+                    const d = Math.hypot(cp.x - point.x, cp.y - point.y);
+                    if (d <= maxSnap) scored.push({ key, d });
                 });
-                const representative = segments.find((seg) => seg && seg.sourceId && seg.targetId) || null;
-                const sourceEnt = representative
-                    ? (state.mapEntities?.find((ent) => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === representative.sourceId) || null)
-                    : null;
-                const targetEnt = representative
-                    ? (state.mapEntities?.find((ent) => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === representative.targetId) || null)
-                    : null;
-                const representativePortsCanConnect = () => {
-                    if (!representative || !sourceEnt || !targetEnt) return true;
-                    const sourceId = sourceEnt.id || `${sourceEnt.type1}_${sourceEnt.x}_${sourceEnt.y}`;
-                    const targetId = targetEnt.id || `${targetEnt.type1}_${targetEnt.x}_${targetEnt.y}`;
-                    if (sourceId !== targetId) return true;
-                    const sourceKey = makePortKey(representative.sourcePort, representative.sourcePort?.slotIndex ?? representative.sourcePort?.defIndex ?? 0);
-                    const targetKey = makePortKey(representative.targetPort, representative.targetPort?.slotIndex ?? representative.targetPort?.defIndex ?? 0);
-                    return !!sourceKey && !!targetKey && sourceKey !== targetKey;
-                };
-
-                const terminalStarts = nodeKeys.filter((k) => (outDegree.get(k) || 0) > 0 && (inDegree.get(k) || 0) === 0);
-                const terminalEnds = nodeKeys.filter((k) => (inDegree.get(k) || 0) > 0 && (outDegree.get(k) || 0) === 0);
-                const fallbackStart = nodeKeys.filter((k) => (adj.get(k)?.size || 0) > 0);
-                const fallbackEnd = nodeKeys.filter((k) => incoming.has(k));
-                const startKeys = terminalStarts.length > 0 ? terminalStarts : fallbackStart;
-                const endKeys = terminalEnds.length > 0 ? terminalEnds : fallbackEnd;
-
-                const getPortOwnersNearNode = (nodeKey, wantOutput) => {
-                    if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return [];
-                    const nodePoint = getNodePoint(nodeKey);
-                    const maxSnap = GameEngine.TILE_SIZE * 1.1;
-                    const owners = [];
-                    (state.mapEntities || []).forEach((ent) => {
-                        if (!ent || ent.isUnderConstruction) return;
-                        const cfg = GameEngine.getEntityConfig(ent.type1) || {};
-                        const logisticCfg = cfg.logistics || {};
-                        if (wantOutput && !logisticCfg.canOutput) return;
-                        if (!wantOutput && !logisticCfg.canInput) return;
-                        const ports = window.UIManager.getBuildingPortSlots(ent);
-                        if (!Array.isArray(ports) || ports.length === 0) return;
-                        let best = Number.POSITIVE_INFINITY;
-                        let bestPort = null;
-                        let bestIndex = 0;
-                        ports.forEach((port, index) => {
-                            const d = Math.hypot(port.x - nodePoint.x, port.y - nodePoint.y);
-                            if (d < best) {
-                                best = d;
-                                bestPort = port;
-                                bestIndex = index;
-                            }
-                        });
-                        if (best <= maxSnap) {
-                            owners.push({
-                                id: ent.id || `${ent.type1}_${ent.x}_${ent.y}`,
-                                portKey: makePortKey(bestPort, bestIndex),
-                                dist: best
-                            });
-                        }
-                    });
-                    owners.sort((a, b) => a.dist - b.dist);
-                    return owners;
-                };
-
-                let connected = false;
-                portToPortCandidateGroupIds.add(groupKey);
-
-                const hasUndirectedPath = (startKey, endKey) => {
-                    if (!startKey || !endKey) return false;
-                    if (startKey === endKey) return true;
-                    const q = [startKey];
-                    const visited = new Set([startKey]);
-                    while (q.length > 0) {
-                        const cur = q.shift();
-                        const nexts = undirected.get(cur);
-                        if (!nexts) continue;
-                        for (const next of nexts) {
-                            if (next === endKey) return true;
-                            if (visited.has(next)) continue;
-                            visited.add(next);
-                            q.push(next);
-                        }
-                    }
-                    return false;
-                };
-                const hasCellPath = (startKey, endKey) => {
-                    if (!startKey || !endKey) return false;
-                    if (startKey === endKey) return true;
-                    const q = [startKey];
-                    const visited = new Set([startKey]);
-                    while (q.length > 0) {
-                        const cur = q.shift();
-                        const nexts = cellAdj.get(cur);
-                        if (!nexts) continue;
-                        for (const next of nexts) {
-                            if (next === endKey) return true;
-                            if (visited.has(next)) continue;
-                            visited.add(next);
-                            q.push(next);
-                        }
-                    }
-                    return false;
-                };
-                const findCellPath = (startKey, endKey) => {
-                    if (!startKey || !endKey) return null;
-                    if (startKey === endKey) return [startKey];
-                    const q = [startKey];
-                    const visited = new Set([startKey]);
-                    const prev = new Map();
-                    while (q.length > 0) {
-                        const cur = q.shift();
-                        const nexts = cellAdj.get(cur);
-                        if (!nexts) continue;
-                        for (const next of nexts) {
-                            if (visited.has(next)) continue;
-                            visited.add(next);
-                            prev.set(next, cur);
-                            if (next === endKey) {
-                                const path = [endKey];
-                                let step = endKey;
-                                while (prev.has(step)) {
-                                    step = prev.get(step);
-                                    path.push(step);
-                                }
-                                return path.reverse();
-                            }
-                            q.push(next);
-                        }
-                    }
-                    return null;
-                };
-                const getNearbyCellKeys = (point, maxSnap) => {
-                    if (!point || cellKeys.length === 0) return [];
-                    const scored = [];
-                    cellKeys.forEach((key) => {
-                        const cp = cellPointByKey.get(key);
-                        if (!cp) return;
-                        const d = Math.hypot(cp.x - point.x, cp.y - point.y);
-                        if (d <= maxSnap) scored.push({ key, d });
-                    });
-                    scored.sort((a, b) => a.d - b.d);
-                    return scored.slice(0, 8).map((s) => s.key);
-                };
-                const getPortOwnersNearCell = (cellKey, wantOutput) => {
-                    if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return [];
-                    const cellPoint = cellPointByKey.get(cellKey) || getNodePoint(cellKey);
-                    const maxSnap = GameEngine.TILE_SIZE * 1.5;
-                    const owners = [];
-                    (state.mapEntities || []).forEach((ent) => {
-                        if (!ent || ent.isUnderConstruction) return;
-                        const cfg = GameEngine.getEntityConfig(ent.type1) || {};
-                        const logisticCfg = cfg.logistics || {};
-                        if (wantOutput && !logisticCfg.canOutput) return;
-                        if (!wantOutput && !logisticCfg.canInput) return;
-                        const ports = window.UIManager.getBuildingPortSlots(ent);
-                        if (!Array.isArray(ports) || ports.length === 0) return;
-                        let best = Number.POSITIVE_INFINITY;
-                        let bestPort = null;
-                        let bestIndex = 0;
-                        ports.forEach((port, index) => {
-                            const d = Math.hypot(port.x - cellPoint.x, port.y - cellPoint.y);
-                            if (d < best) {
-                                best = d;
-                                bestPort = port;
-                                bestIndex = index;
-                            }
-                        });
-                        if (best <= maxSnap) {
-                            owners.push({
-                                id: ent.id || `${ent.type1}_${ent.x}_${ent.y}`,
-                                portKey: makePortKey(bestPort, bestIndex),
-                                dist: best
-                            });
-                        }
-                    });
-                    owners.sort((a, b) => a.dist - b.dist);
-                    return owners;
-                };
-                const isCellOnBuildingPort = (cellKey) => {
-                    if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return false;
-                    const cellPoint = cellPointByKey.get(cellKey) || getNodePoint(cellKey);
-                    const snap = GameEngine.TILE_SIZE * 0.6;
-                    return (state.mapEntities || []).some((ent) => {
-                        if (!ent || ent.isUnderConstruction) return false;
-                        const ports = window.UIManager.getBuildingPortSlots(ent);
-                        if (!Array.isArray(ports)) return false;
-                        return ports.some((port) => Math.hypot(port.x - cellPoint.x, port.y - cellPoint.y) <= snap);
-                    });
-                };
-
-                // First: explicit source/target ids if available.
-                if (representative && sourceEnt && targetEnt && representativePortsCanConnect()) {
-                    const sourcePort = representative.sourcePort || null;
-                    const targetPort = representative.targetPort || null;
-                    const sourceSnap = sourcePort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
-                    const targetSnap = targetPort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
-                    const startKeysRaw = sourcePort
-                        ? getNearbyNodeKeys(sourcePort, nodeKeys, sourceSnap)
-                        : getNearbyNodeKeys({ x: sourceEnt.x, y: sourceEnt.y }, nodeKeys, sourceSnap);
-                    const endKeysRaw = targetPort
-                        ? getNearbyNodeKeys(targetPort, nodeKeys, targetSnap)
-                        : getNearbyNodeKeys({ x: targetEnt.x, y: targetEnt.y }, nodeKeys, targetSnap);
-                    const explicitStarts = startKeysRaw.filter((k) => (adj.get(k)?.size || 0) > 0);
-                    const explicitEnds = endKeysRaw.filter((k) => incoming.has(k));
-                    for (const sk of explicitStarts) {
-                        if (connected) break;
-                        for (const ek of explicitEnds) {
-                            if (hasDirectedPath(adj, sk, ek)) {
-                                connected = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // Second: infer from actual terminal-to-terminal port ownership (works for multi-step extensions).
-                if (!connected && representative && sourceEnt && targetEnt && representativePortsCanConnect()) {
-                    const sourcePort = representative.sourcePort || null;
-                    const targetPort = representative.targetPort || null;
-                    const sourceSnap = sourcePort ? GameEngine.TILE_SIZE * 1.5 : GameEngine.TILE_SIZE * 2.5;
-                    const targetSnap = targetPort ? GameEngine.TILE_SIZE * 1.5 : GameEngine.TILE_SIZE * 2.5;
-                    const sourceCells = getNearbyCellKeys(sourcePort || { x: sourceEnt.x, y: sourceEnt.y }, sourceSnap);
-                    const targetCells = getNearbyCellKeys(targetPort || { x: targetEnt.x, y: targetEnt.y }, targetSnap);
-                    for (const sk of sourceCells) {
-                        if (connected) break;
-                        for (const ek of targetCells) {
-                            if (hasCellPath(sk, ek)) {
-                                connected = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (!connected) {
-                    for (const sk of startKeys) {
-                        if (connected) break;
-                        const sourceOwners = getPortOwnersNearNode(sk, true);
-                        if (sourceOwners.length === 0) continue;
-                        for (const ek of endKeys) {
-                            if (connected) break;
-                            if (!hasDirectedPath(adj, sk, ek)) continue;
-                            const targetOwners = getPortOwnersNearNode(ek, false);
-                            if (targetOwners.length === 0) continue;
-                            if (canConnectPortOwners(sourceOwners, targetOwners)) {
-                                connected = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // Fallback: 對於多段延伸後方向資料混雜的路線，
-                // 只要 source 端與 target 端在同一連通分量，就視為已接通。
-                if (!connected && representative && sourceEnt && targetEnt && representativePortsCanConnect()) {
-                    const sourcePort = representative.sourcePort || null;
-                    const targetPort = representative.targetPort || null;
-                    const sourceSnap = sourcePort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
-                    const targetSnap = targetPort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
-                    const startKeysRaw = sourcePort
-                        ? getNearbyNodeKeys(sourcePort, nodeKeys, sourceSnap)
-                        : getNearbyNodeKeys({ x: sourceEnt.x, y: sourceEnt.y }, nodeKeys, sourceSnap);
-                    const endKeysRaw = targetPort
-                        ? getNearbyNodeKeys(targetPort, nodeKeys, targetSnap)
-                        : getNearbyNodeKeys({ x: targetEnt.x, y: targetEnt.y }, nodeKeys, targetSnap);
-                    for (const sk of startKeysRaw) {
-                        if (connected) break;
-                        for (const ek of endKeysRaw) {
-                            if (hasUndirectedPath(sk, ek)) {
-                                connected = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // Final fallback: 只要群組中存在「任一輸出建築端」到「任一輸入建築端」的同分量連通，
-                // 就判定為 port-to-port 連通，避免轉彎延伸時方向資料干擾造成誤判。
-                if (!connected) {
-                    const outputStarts = [];
-                    const inputEnds = [];
-                    nodeKeys.forEach((k) => {
-                        const outs = getPortOwnersNearNode(k, true);
-                        const ins = getPortOwnersNearNode(k, false);
-                        if (outs.length > 0) outputStarts.push({ key: k, owners: outs });
-                        if (ins.length > 0) inputEnds.push({ key: k, owners: ins });
-                    });
-                    for (const s of outputStarts) {
-                        if (connected) break;
-                        for (const t of inputEnds) {
-                            if (connected) break;
-                            if (!hasUndirectedPath(s.key, t.key)) continue;
-                            if (canConnectPortOwners(s.owners, t.owners)) {
-                                connected = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                {
-                    const outputCells = [];
-                    const inputCells = [];
-                    if (representative && sourceEnt && targetEnt) {
-                        const sourceId = window.UIManager?.getEntityId
-                            ? window.UIManager.getEntityId(sourceEnt)
-                            : (sourceEnt.id || `${sourceEnt.type1}_${sourceEnt.x}_${sourceEnt.y}`);
-                        const targetId = window.UIManager?.getEntityId
-                            ? window.UIManager.getEntityId(targetEnt)
-                            : (targetEnt.id || `${targetEnt.type1}_${targetEnt.x}_${targetEnt.y}`);
-                        const sourcePort = representative.sourcePort || null;
-                        const targetPort = representative.targetPort || null;
-                        const groupEndpoints = [];
-                        segments.forEach((seg) => {
-                            const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
-                            if (pts[0]) groupEndpoints.push(pts[0]);
-                            if (pts[pts.length - 1]) groupEndpoints.push(pts[pts.length - 1]);
-                        });
-                        const sourceCandidates = [
-                            sourcePort,
-                            ...(window.UIManager?.getBuildingPortSlots?.(sourceEnt) || []),
-                            ...groupEndpoints,
-                            { x: sourceEnt.x, y: sourceEnt.y }
-                        ].filter(Boolean);
-                        const targetCandidates = [
-                            targetPort,
-                            ...(window.UIManager?.getBuildingPortSlots?.(targetEnt) || []),
-                            ...groupEndpoints,
-                            { x: targetEnt.x, y: targetEnt.y }
-                        ].filter(Boolean);
-                        const collectOwnerCells = (candidates, wantOutput, ownerId, bucket) => {
-                            const seen = new Set();
-                            candidates.forEach((candidate) => {
-                                getNearbyCellKeys(candidate, GameEngine.TILE_SIZE * 2.25).forEach((k) => {
-                                    if (seen.has(k)) return;
-                                    const owners = getPortOwnersNearCell(k, wantOutput).filter((owner) => owner.id === ownerId);
-                                    if (owners.length === 0) return;
-                                    seen.add(k);
-                                    bucket.push({ key: k, owners });
-                                });
-                            });
-                        };
-                        collectOwnerCells(sourceCandidates, true, sourceId, outputCells);
-                        collectOwnerCells(targetCandidates, false, targetId, inputCells);
-                        if (outputCells.length === 0) {
-                            getNearbyCellKeys(sourcePort || { x: sourceEnt.x, y: sourceEnt.y }, GameEngine.TILE_SIZE * 3).forEach((k) => {
-                                const owners = getPortOwnersNearCell(k, true).filter((owner) => owner.id === sourceId);
-                                if (owners.length > 0) outputCells.push({ key: k, owners });
-                            });
-                        }
-                        if (inputCells.length === 0) {
-                            getNearbyCellKeys(targetPort || { x: targetEnt.x, y: targetEnt.y }, GameEngine.TILE_SIZE * 3).forEach((k) => {
-                                const owners = getPortOwnersNearCell(k, false).filter((owner) => owner.id === targetId);
-                                if (owners.length > 0) inputCells.push({ key: k, owners });
-                            });
-                        }
-                    } else {
-                        cellKeys.forEach((k) => {
-                            const outs = getPortOwnersNearCell(k, true);
-                            const ins = getPortOwnersNearCell(k, false);
-                            if (outs.length > 0) outputCells.push({ key: k, owners: outs });
-                            if (ins.length > 0) inputCells.push({ key: k, owners: ins });
-                        });
-                    }
-                    for (const s of outputCells) {
-                        for (const t of inputCells) {
-                            const path = findCellPath(s.key, t.key);
-                            if (!path) continue;
-                            if (canConnectPortOwners(s.owners, t.owners)) {
-                                addConnectedCellPath(groupKey, path);
-                                connected = true;
-                            }
-                        }
-                    }
-                }
-
-                if (connected) portToPortConnectedGroupIds.add(groupKey);
-            });
-
-            const groupTurnCellKeys = new Map();
-            groupSegments.forEach((groupSegs, groupKey) => {
-                groupTurnCellKeys.set(groupKey, LogisticsRenderer.getLogisticsGroupTurnCellKeys(groupSegs));
-            });
-            const hasLogisticsTransportFilter = (groupKey, groupSegs) => {
-                if (Array.isArray(groupSegs) && groupSegs.some(line => !!line?.filter)) return true;
-                return (state.mapEntities || []).some(ent =>
-                    Array.isArray(ent?.outputTargets) &&
-                    ent.outputTargets.some(conn => !!conn?.filter && conn.lineId === groupKey)
-                );
+                scored.sort((a, b) => a.d - b.d);
+                return scored.slice(0, 8).map((s) => s.key);
             };
-            const getPathTurnCellKeys = (paths) => {
-                const keys = new Set();
-                const pointOfKey = (key) => {
-                    const [x, y] = String(key).split(",").map(Number);
-                    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
-                };
-                (paths || []).forEach((path) => {
-                    if (!Array.isArray(path) || path.length < 3) return;
-                    for (let i = 1; i < path.length - 1; i++) {
-                        const prev = pointOfKey(path[i - 1]);
-                        const curr = pointOfKey(path[i]);
-                        const next = pointOfKey(path[i + 1]);
-                        const inDir = LogisticsRenderer.getCardinalDir(prev, curr);
-                        const outDir = LogisticsRenderer.getCardinalDir(curr, next);
-                        if (LogisticsRenderer.getTurnArrowDirection(inDir, outDir)) keys.add(path[i]);
+            const getPortOwnersNearCell = (cellKey, wantOutput) => {
+                if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return [];
+                const cellPoint = cellPointByKey.get(cellKey) || getNodePoint(cellKey);
+                const maxSnap = GameEngine.TILE_SIZE * 1.5;
+                const owners = [];
+                (state.mapEntities || []).forEach((ent) => {
+                    if (!ent || ent.isUnderConstruction) return;
+                    const cfg = GameEngine.getEntityConfig(ent.type1) || {};
+                    const logisticCfg = cfg.logistics || {};
+                    if (wantOutput && !logisticCfg.canOutput) return;
+                    if (!wantOutput && !logisticCfg.canInput) return;
+                    const ports = window.UIManager.getBuildingPortSlots(ent);
+                    if (!Array.isArray(ports) || ports.length === 0) return;
+                    let best = Number.POSITIVE_INFINITY;
+                    let bestPort = null;
+                    let bestIndex = 0;
+                    ports.forEach((port, index) => {
+                        const d = Math.hypot(port.x - cellPoint.x, port.y - cellPoint.y);
+                        if (d < best) {
+                            best = d;
+                            bestPort = port;
+                            bestIndex = index;
+                        }
+                    });
+                    if (best <= maxSnap) {
+                        owners.push({
+                            id: ent.id || `${ent.type1}_${ent.x}_${ent.y}`,
+                            portKey: makePortKey(bestPort, bestIndex),
+                            dist: best
+                        });
                     }
                 });
-                return keys;
+                owners.sort((a, b) => a.dist - b.dist);
+                return owners;
+            };
+            const isCellOnBuildingPort = (cellKey) => {
+                if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return false;
+                const cellPoint = cellPointByKey.get(cellKey) || getNodePoint(cellKey);
+                const snap = GameEngine.TILE_SIZE * 0.6;
+                return (state.mapEntities || []).some((ent) => {
+                    if (!ent || ent.isUnderConstruction) return false;
+                    const ports = window.UIManager.getBuildingPortSlots(ent);
+                    if (!Array.isArray(ports)) return false;
+                    return ports.some((port) => Math.hypot(port.x - cellPoint.x, port.y - cellPoint.y) <= snap);
+                });
             };
 
-            const drawnCanonicalGroups = new Set();
-            if (Array.isArray(state.logisticsLines)) {
-                groupSegments.forEach((groupSegs, groupKey) => {
-                    if (!Array.isArray(groupSegs) || groupSegs.length === 0) return;
-
-                    const representative = groupSegs.find(line => line && (line.sourceId || line.targetId)) || groupSegs[0];
-                    const widthTiles = Math.max(1, Number(representative?.routeWidth) || 1);
-                    const segmentRoutes = groupSegs
-                        .map(line => ({
-                            line,
-                            route: window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function'
-                                ? window.UIManager.getLogisticsLineRoute(line)
-                                : null
-                        }))
-                        .filter(item => item.route?.points?.length >= 2);
-                    if (segmentRoutes.length === 0) return;
-
-                    const isSelected = groupSegs.some(line => window.UIManager && typeof window.UIManager.isSelectedLogisticsLine === 'function'
-                        ? window.UIManager.isSelectedLogisticsLine(line)
-                        : state.selectedLogisticsLineId === line.id);
-                    const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(representative?.sourceId && representative?.targetId);
-                    const hasTransportFilter = hasLogisticsTransportFilter(groupKey, groupSegs);
-                    const isPhysicallyConnected = isPortToPortCandidate
-                        ? portToPortConnectedGroupIds.has(groupKey)
-                        : hasTransportFilter;
-                    const isOperating = isPhysicallyConnected && hasTransportFilter;
-                    const isConnected = isPortToPortCandidate
-                        ? (isPhysicallyConnected || isOperating)
-                        : hasTransportFilter;
-                    const connectedCellKeys = portToPortConnectedCellKeysByGroup.get(groupKey) || new Set();
-                    const connectedCellPaths = portToPortConnectedCellPathsByGroup.get(groupKey) || [];
-                    const pathTurnCellKeys = getPathTurnCellKeys(connectedCellPaths);
-                    const turnCellKeys = pathTurnCellKeys.size > 0
-                        ? pathTurnCellKeys
-                        : (groupTurnCellKeys.get(groupKey) || null);
-                    const useConnectedIdleStyle = isPhysicallyConnected && !isOperating;
-
-                    segmentRoutes.forEach(({ line, route }) => {
-                        drawLogisticsRoute(route.points, route.width || widthTiles, isSelected, isConnected, line, useConnectedIdleStyle, turnCellKeys);
-                    });
-                    if (isPortToPortCandidate && isPhysicallyConnected) {
-                        segmentRoutes.forEach(({ route }) => {
-                            drawConnectedCellOverlay(route.points, route.width || widthTiles, connectedCellKeys, useConnectedIdleStyle, turnCellKeys);
-                        });
-                    }
-                    {
-                        const arrowColor = isOperating
-                            ? parseColor(logCfg.arrowColor || "#00ffee")
-                            : (isPhysicallyConnected
-                                ? parseColor(logCfg.portToPortArrowColor || logCfg.arrowColor || "#98f8b5")
-                                : parseColor(logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a"));
-                        const arrowAlpha = isOperating
-                            ? 0.9
-                            : (isPhysicallyConnected
-                                ? (logCfg.portToPortArrowAlpha ?? 0.95)
-                                : (logCfg.disconnectedArrowAlpha ?? 0.85));
-                        const arrowSize = isOperating
-                            ? (logCfg.arrowSize || 10)
-                            : (isPhysicallyConnected
-                                ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 10)
-                                : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 10));
-                        if (isPhysicallyConnected && connectedCellPaths.length > 0) {
-                            connectedCellPaths.forEach((path) => {
-                                LogisticsRenderer.drawLogisticsPathTurnArrows(graphics, path, arrowColor, arrowAlpha, arrowSize);
-                            });
-                        } else {
-                            LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, arrowColor, arrowAlpha, arrowSize);
+            // First: explicit source/target ids if available.
+            if (representative && sourceEnt && targetEnt && representativePortsCanConnect()) {
+                const sourcePort = representative.sourcePort || null;
+                const targetPort = representative.targetPort || null;
+                const sourceSnap = sourcePort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
+                const targetSnap = targetPort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
+                const startKeysRaw = sourcePort
+                    ? getNearbyNodeKeys(sourcePort, nodeKeys, sourceSnap)
+                    : getNearbyNodeKeys({ x: sourceEnt.x, y: sourceEnt.y }, nodeKeys, sourceSnap);
+                const endKeysRaw = targetPort
+                    ? getNearbyNodeKeys(targetPort, nodeKeys, targetSnap)
+                    : getNearbyNodeKeys({ x: targetEnt.x, y: targetEnt.y }, nodeKeys, targetSnap);
+                const explicitStarts = startKeysRaw.filter((k) => (adj.get(k)?.size || 0) > 0);
+                const explicitEnds = endKeysRaw.filter((k) => incoming.has(k));
+                for (const sk of explicitStarts) {
+                    if (connected) break;
+                    for (const ek of explicitEnds) {
+                        if (hasDirectedPath(adj, sk, ek)) {
+                            connected = true;
+                            break;
                         }
                     }
-                    if (isSelected) {
-                        segmentRoutes.forEach(({ line, route }) => {
-                            drawSelectedLogisticsSegmentOutlineOnRoute(route.points, route.width || widthTiles, line);
-                        });
-                    }
-                    drawnCanonicalGroups.add(groupKey);
-                });
+                }
             }
 
-            // 用整個群組拓撲畫轉角箭頭，避免單段 route（通常只有兩點）看不到轉彎。
-            const drawnTurnGroups = new Set();
+            // Second: infer from actual terminal-to-terminal port ownership (works for multi-step extensions).
+            if (!connected && representative && sourceEnt && targetEnt && representativePortsCanConnect()) {
+                const sourcePort = representative.sourcePort || null;
+                const targetPort = representative.targetPort || null;
+                const sourceSnap = sourcePort ? GameEngine.TILE_SIZE * 1.5 : GameEngine.TILE_SIZE * 2.5;
+                const targetSnap = targetPort ? GameEngine.TILE_SIZE * 1.5 : GameEngine.TILE_SIZE * 2.5;
+                const sourceCells = getNearbyCellKeys(sourcePort || { x: sourceEnt.x, y: sourceEnt.y }, sourceSnap);
+                const targetCells = getNearbyCellKeys(targetPort || { x: targetEnt.x, y: targetEnt.y }, targetSnap);
+                for (const sk of sourceCells) {
+                    if (connected) break;
+                    for (const ek of targetCells) {
+                        if (hasCellPath(sk, ek)) {
+                            connected = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!connected) {
+                for (const sk of startKeys) {
+                    if (connected) break;
+                    const sourceOwners = getPortOwnersNearNode(sk, true);
+                    if (sourceOwners.length === 0) continue;
+                    for (const ek of endKeys) {
+                        if (connected) break;
+                        if (!hasDirectedPath(adj, sk, ek)) continue;
+                        const targetOwners = getPortOwnersNearNode(ek, false);
+                        if (targetOwners.length === 0) continue;
+                        if (canConnectPortOwners(sourceOwners, targetOwners)) {
+                            connected = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Fallback: 對於多段延伸後方向資料混雜的路線，
+            // 只要 source 端與 target 端在同一連通分量，就視為已接通。
+            if (!connected && representative && sourceEnt && targetEnt && representativePortsCanConnect()) {
+                const sourcePort = representative.sourcePort || null;
+                const targetPort = representative.targetPort || null;
+                const sourceSnap = sourcePort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
+                const targetSnap = targetPort ? GameEngine.TILE_SIZE * 1.1 : GameEngine.TILE_SIZE * 2.5;
+                const startKeysRaw = sourcePort
+                    ? getNearbyNodeKeys(sourcePort, nodeKeys, sourceSnap)
+                    : getNearbyNodeKeys({ x: sourceEnt.x, y: sourceEnt.y }, nodeKeys, sourceSnap);
+                const endKeysRaw = targetPort
+                    ? getNearbyNodeKeys(targetPort, nodeKeys, targetSnap)
+                    : getNearbyNodeKeys({ x: targetEnt.x, y: targetEnt.y }, nodeKeys, targetSnap);
+                for (const sk of startKeysRaw) {
+                    if (connected) break;
+                    for (const ek of endKeysRaw) {
+                        if (hasUndirectedPath(sk, ek)) {
+                            connected = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Final fallback: 只要群組中存在「任一輸出建築端」到「任一輸入建築端」的同分量連通，
+            // 就判定為 port-to-port 連通，避免轉彎延伸時方向資料干擾造成誤判。
+            if (!connected) {
+                const outputStarts = [];
+                const inputEnds = [];
+                nodeKeys.forEach((k) => {
+                    const outs = getPortOwnersNearNode(k, true);
+                    const ins = getPortOwnersNearNode(k, false);
+                    if (outs.length > 0) outputStarts.push({ key: k, owners: outs });
+                    if (ins.length > 0) inputEnds.push({ key: k, owners: ins });
+                });
+                for (const s of outputStarts) {
+                    if (connected) break;
+                    for (const t of inputEnds) {
+                        if (connected) break;
+                        if (!hasUndirectedPath(s.key, t.key)) continue;
+                        if (canConnectPortOwners(s.owners, t.owners)) {
+                            connected = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            {
+                const outputCells = [];
+                const inputCells = [];
+                if (representative && sourceEnt && targetEnt) {
+                    const sourceId = window.UIManager?.getEntityId
+                        ? window.UIManager.getEntityId(sourceEnt)
+                        : (sourceEnt.id || `${sourceEnt.type1}_${sourceEnt.x}_${sourceEnt.y}`);
+                    const targetId = window.UIManager?.getEntityId
+                        ? window.UIManager.getEntityId(targetEnt)
+                        : (targetEnt.id || `${targetEnt.type1}_${targetEnt.x}_${targetEnt.y}`);
+                    const sourcePort = representative.sourcePort || null;
+                    const targetPort = representative.targetPort || null;
+                    const groupEndpoints = [];
+                    segments.forEach((seg) => {
+                        const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+                        if (pts[0]) groupEndpoints.push(pts[0]);
+                        if (pts[pts.length - 1]) groupEndpoints.push(pts[pts.length - 1]);
+                    });
+                    const sourceCandidates = [
+                        sourcePort,
+                        ...(window.UIManager?.getBuildingPortSlots?.(sourceEnt) || []),
+                        ...groupEndpoints,
+                        { x: sourceEnt.x, y: sourceEnt.y }
+                    ].filter(Boolean);
+                    const targetCandidates = [
+                        targetPort,
+                        ...(window.UIManager?.getBuildingPortSlots?.(targetEnt) || []),
+                        ...groupEndpoints,
+                        { x: targetEnt.x, y: targetEnt.y }
+                    ].filter(Boolean);
+                    const collectOwnerCells = (candidates, wantOutput, ownerId, bucket) => {
+                        const seen = new Set();
+                        candidates.forEach((candidate) => {
+                            getNearbyCellKeys(candidate, GameEngine.TILE_SIZE * 2.25).forEach((k) => {
+                                if (seen.has(k)) return;
+                                const owners = getPortOwnersNearCell(k, wantOutput).filter((owner) => owner.id === ownerId);
+                                if (owners.length === 0) return;
+                                seen.add(k);
+                                bucket.push({ key: k, owners });
+                            });
+                        });
+                    };
+                    collectOwnerCells(sourceCandidates, true, sourceId, outputCells);
+                    collectOwnerCells(targetCandidates, false, targetId, inputCells);
+                    if (outputCells.length === 0) {
+                        getNearbyCellKeys(sourcePort || { x: sourceEnt.x, y: sourceEnt.y }, GameEngine.TILE_SIZE * 3).forEach((k) => {
+                            const owners = getPortOwnersNearCell(k, true).filter((owner) => owner.id === sourceId);
+                            if (owners.length > 0) outputCells.push({ key: k, owners });
+                        });
+                    }
+                    if (inputCells.length === 0) {
+                        getNearbyCellKeys(targetPort || { x: targetEnt.x, y: targetEnt.y }, GameEngine.TILE_SIZE * 3).forEach((k) => {
+                            const owners = getPortOwnersNearCell(k, false).filter((owner) => owner.id === targetId);
+                            if (owners.length > 0) inputCells.push({ key: k, owners });
+                        });
+                    }
+                } else {
+                    cellKeys.forEach((k) => {
+                        const outs = getPortOwnersNearCell(k, true);
+                        const ins = getPortOwnersNearCell(k, false);
+                        if (outs.length > 0) outputCells.push({ key: k, owners: outs });
+                        if (ins.length > 0) inputCells.push({ key: k, owners: ins });
+                    });
+                }
+                for (const s of outputCells) {
+                    for (const t of inputCells) {
+                        const path = findCellPath(s.key, t.key);
+                        if (!path) continue;
+                        if (canConnectPortOwners(s.owners, t.owners)) {
+                            addConnectedCellPath(groupKey, path);
+                            connected = true;
+                        }
+                    }
+                }
+            }
+
+            if (connected) portToPortConnectedGroupIds.add(groupKey);
+        });
+
+        const groupTurnCellKeys = new Map();
+        groupSegments.forEach((groupSegs, groupKey) => {
+            groupTurnCellKeys.set(groupKey, LogisticsRenderer.getLogisticsGroupTurnCellKeys(groupSegs));
+        });
+        const hasLogisticsTransportFilter = (groupKey, groupSegs) => {
+            if (Array.isArray(groupSegs) && groupSegs.some(line => !!line?.filter)) return true;
+            return (state.mapEntities || []).some(ent =>
+                Array.isArray(ent?.outputTargets) &&
+                ent.outputTargets.some(conn => !!conn?.filter && conn.lineId === groupKey)
+            );
+        };
+        const getPathTurnCellKeys = (paths) => {
+            const keys = new Set();
+            const pointOfKey = (key) => {
+                const [x, y] = String(key).split(",").map(Number);
+                return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+            };
+            (paths || []).forEach((path) => {
+                if (!Array.isArray(path) || path.length < 3) return;
+                for (let i = 1; i < path.length - 1; i++) {
+                    const prev = pointOfKey(path[i - 1]);
+                    const curr = pointOfKey(path[i]);
+                    const next = pointOfKey(path[i + 1]);
+                    const inDir = LogisticsRenderer.getCardinalDir(prev, curr);
+                    const outDir = LogisticsRenderer.getCardinalDir(curr, next);
+                    if (LogisticsRenderer.getTurnArrowDirection(inDir, outDir)) keys.add(path[i]);
+                }
+            });
+            return keys;
+        };
+
+        const drawnCanonicalGroups = new Set();
+        if (Array.isArray(state.logisticsLines)) {
             groupSegments.forEach((groupSegs, groupKey) => {
                 if (!Array.isArray(groupSegs) || groupSegs.length === 0) return;
-                if (drawnTurnGroups.has(groupKey)) return;
-                if (drawnCanonicalGroups.has(groupKey)) return;
-                const sample = groupSegs[0] || {};
-                const widthTiles = Math.max(1, Number(sample.routeWidth) || 1);
-                const connected = portToPortConnectedGroupIds.has(groupKey) && hasLogisticsTransportFilter(groupKey, groupSegs);
+
+                const representative = groupSegs.find(line => line && (line.sourceId || line.targetId)) || groupSegs[0];
+                const widthTiles = Math.max(1, Number(representative?.routeWidth) || 1);
+                const segmentRoutes = groupSegs
+                    .map(line => ({
+                        line,
+                        route: window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function'
+                            ? window.UIManager.getLogisticsLineRoute(line)
+                            : null
+                    }))
+                    .filter(item => item.route?.points?.length >= 2);
+                if (segmentRoutes.length === 0) return;
+
+                const isSelected = groupSegs.some(line => window.UIManager && typeof window.UIManager.isSelectedLogisticsLine === 'function'
+                    ? window.UIManager.isSelectedLogisticsLine(line)
+                    : state.selectedLogisticsLineId === line.id);
+                const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(representative?.sourceId && representative?.targetId);
+                const hasTransportFilter = hasLogisticsTransportFilter(groupKey, groupSegs);
+                const isPhysicallyConnected = isPortToPortCandidate
+                    ? portToPortConnectedGroupIds.has(groupKey)
+                    : hasTransportFilter;
+                const isOperating = isPhysicallyConnected && hasTransportFilter;
+                const isConnected = isPortToPortCandidate
+                    ? (isPhysicallyConnected || isOperating)
+                    : hasTransportFilter;
+                const connectedCellKeys = portToPortConnectedCellKeysByGroup.get(groupKey) || new Set();
                 const connectedCellPaths = portToPortConnectedCellPathsByGroup.get(groupKey) || [];
-                const color = connected
-                    ? parseColor(logCfg.portToPortArrowColor || logCfg.arrowColor || "#00ffee")
-                    : parseColor(logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
-                const alpha = connected
-                    ? (logCfg.portToPortArrowAlpha ?? 0.95)
-                    : (logCfg.disconnectedArrowAlpha ?? 0.85);
-                const size = connected
-                    ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 10)
-                    : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 10);
-                if (connected) {
-                    const disconnectedColor = parseColor(logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
-                    const disconnectedAlpha = logCfg.disconnectedArrowAlpha ?? 0.85;
-                    const disconnectedSize = logCfg.disconnectedArrowSize || logCfg.arrowSize || 10;
-                    LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, disconnectedColor, disconnectedAlpha, disconnectedSize);
-                    connectedCellPaths.forEach((path) => {
-                        LogisticsRenderer.drawLogisticsPathTurnArrows(graphics, path, color, alpha, size);
+                const pathTurnCellKeys = getPathTurnCellKeys(connectedCellPaths);
+                const turnCellKeys = pathTurnCellKeys.size > 0
+                    ? pathTurnCellKeys
+                    : (groupTurnCellKeys.get(groupKey) || null);
+                const useConnectedIdleStyle = isPhysicallyConnected && !isOperating;
+
+                segmentRoutes.forEach(({ line, route }) => {
+                    drawLogisticsRoute(route.points, route.width || widthTiles, isSelected, isConnected, line, useConnectedIdleStyle, turnCellKeys);
+                });
+                if (isPortToPortCandidate && isPhysicallyConnected) {
+                    segmentRoutes.forEach(({ route }) => {
+                        drawConnectedCellOverlay(route.points, route.width || widthTiles, connectedCellKeys, useConnectedIdleStyle, turnCellKeys);
                     });
-                } else {
-                    LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, color, alpha, size);
                 }
-                drawnTurnGroups.add(groupKey);
+                {
+                    const arrowColor = isOperating
+                        ? parseColor(logCfg.arrowColor || "#00ffee")
+                        : (isPhysicallyConnected
+                            ? parseColor(logCfg.portToPortArrowColor || logCfg.arrowColor || "#98f8b5")
+                            : parseColor(logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a"));
+                    const arrowAlpha = isOperating
+                        ? 0.9
+                        : (isPhysicallyConnected
+                            ? (logCfg.portToPortArrowAlpha ?? 0.95)
+                            : (logCfg.disconnectedArrowAlpha ?? 0.85));
+                    const arrowSize = isOperating
+                        ? (logCfg.arrowSize || 10)
+                        : (isPhysicallyConnected
+                            ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 10)
+                            : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 10));
+                    if (isPhysicallyConnected && connectedCellPaths.length > 0) {
+                        connectedCellPaths.forEach((path) => {
+                            LogisticsRenderer.drawLogisticsPathTurnArrows(graphics, path, arrowColor, arrowAlpha, arrowSize);
+                        });
+                    } else {
+                        LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, arrowColor, arrowAlpha, arrowSize);
+                    }
+                }
+                if (isSelected) {
+                    segmentRoutes.forEach(({ line, route }) => {
+                        drawSelectedLogisticsSegmentOutlineOnRoute(route.points, route.width || widthTiles, line);
+                    });
+
+                    // 新增：顯示格子順序數字
+                    if (!scene.logisticsNumberTexts) scene.logisticsNumberTexts = new Map();
+                    if (!scene.logisticsVisibleTextIds) scene.logisticsVisibleTextIds = new Set();
+                    
+                    // 依據物理連接性（端點鄰近性）進行排序，以實現 0~15 的順序顯示
+                    const sortedSegs = [];
+                    const remaining = [...groupSegs];
+                    
+                    // 找出起點（這裡先以 order 最小的作為起點）
+                    let current = remaining.sort((a, b) => (a.order || 0) - (b.order || 0))[0];
+                    
+                    if (current) {
+                        sortedSegs.push(current);
+                        remaining.splice(remaining.indexOf(current), 1);
+                        
+                        while (remaining.length > 0) {
+                            const lastSeg = sortedSegs[sortedSegs.length - 1];
+                            const lastEp = lastSeg.routePoints?.[lastSeg.routePoints.length - 1] || { x: lastSeg.x, y: lastSeg.y };
+                            
+                            // 尋找起點與上一個節段終點最接近的節段
+                            let nextIndex = -1;
+                            let minEdgeDist = 15; // 容許 15 像素內的偏差
+                            
+                            for (let i = 0; i < remaining.length; i++) {
+                                const rSeg = remaining[i];
+                                const rSp = rSeg.routePoints?.[0] || { x: rSeg.x, y: rSeg.y };
+                                const dist = Math.hypot(lastEp.x - rSp.x, lastEp.y - rSp.y);
+                                if (dist < minEdgeDist) {
+                                    minEdgeDist = dist;
+                                    nextIndex = i;
+                                }
+                            }
+                            
+                            if (nextIndex !== -1) {
+                                sortedSegs.push(remaining[nextIndex]);
+                                remaining.splice(nextIndex, 1);
+                            } else {
+                                // 如果找不到相連的，取剩餘中 order 最小的（處理斷線情況）
+                                remaining.sort((a, b) => (a.order || 0) - (b.order || 0));
+                                sortedSegs.push(remaining[0]);
+                                remaining.splice(0, 1);
+                            }
+                        }
+                    }
+
+                    sortedSegs.forEach((seg, index) => {
+                        const sp = seg.routePoints?.[0] || { x: seg.x, y: seg.y };
+                        const cx = sp.x;
+                        const cy = sp.y;
+
+                        const textKey = seg.id || `${seg.x},${seg.y}`;
+                        let txt = scene.logisticsNumberTexts.get(textKey);
+                        if (!txt) {
+                            txt = scene.add.text(cx, cy, String(index), {
+                                fontSize: '16px',
+                                color: '#ffff00',
+                                stroke: '#000000',
+                                strokeThickness: 3
+                            }).setOrigin(0.5).setDepth(600000);
+                            scene.logisticsNumberTexts.set(textKey, txt);
+                        } else {
+                            txt.setText(String(index));
+                            txt.setPosition(cx, cy);
+                            txt.setVisible(true);
+                        }
+                        scene.logisticsVisibleTextIds.add(textKey);
+                    });
+                }
+                drawnCanonicalGroups.add(groupKey);
             });
 
-            // 1. 建立冗餘連線地圖 (同時支援 ID 與座標查詢)
-            if (state.mapEntities) {
-                state.mapEntities.forEach(ent => {
-                    if (ent.outputTargets && ent.outputTargets.length > 0) {
-                        ent.outputTargets.forEach(conn => {
-                            if (conn.lineId) return;
-                            const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
-                            if (target) {
-                                const route = (window.UIManager && typeof window.UIManager.getConnectionRoute === 'function')
-                                    ? window.UIManager.getConnectionRoute(ent, target, conn)
-                                    : null;
-                                const points = route && Array.isArray(route.points) && route.points.length >= 2
-                                    ? route.points
-                                    : [{ x: ent.x, y: ent.y }, { x: target.x, y: target.y }];
-                                const isSelected = (window.UIManager.activeLogisticsConnection &&
-                                    window.UIManager.activeLogisticsConnection.source === ent &&
-                                    window.UIManager.activeLogisticsConnection.targetId === conn.id);
-                                const isPortToPort = !!conn.id;
-                                drawLogisticsRoute(points, route && route.width ? route.width : 1, isSelected, !!conn.filter, null, isPortToPort);
-                            }
-                        });
+            // 隱藏未使用的文字
+            if (scene.logisticsNumberTexts) {
+                scene.logisticsNumberTexts.forEach((txt, key) => {
+                    if (!scene.logisticsVisibleTextIds || !scene.logisticsVisibleTextIds.has(key)) {
+                        txt.setVisible(false);
                     }
                 });
+                if (scene.logisticsVisibleTextIds) scene.logisticsVisibleTextIds.clear();
             }
-            if (state.logisticsDragLine) {
-                const dragPoints = Array.isArray(state.logisticsDragLine.points) && state.logisticsDragLine.points.length >= 2
-                    ? state.logisticsDragLine.points
-                    : [
-                        { x: state.logisticsDragLine.startX, y: state.logisticsDragLine.startY },
-                        { x: state.logisticsDragLine.endX, y: state.logisticsDragLine.endY }
-                    ];
-                const dragColor = parseColor(logCfg.dragLineColor);
-                const dragWidthTiles = Math.max(1, Number(state.logisticsDragLine.lineWidth) || 1);
-                const dragThickness = Math.max(
-                    logCfg.dragLineThickness || logCfg.lineThickness || 3,
-                    dragWidthTiles * GameEngine.TILE_SIZE * 0.8
+        }
+
+        // 用整個群組拓撲畫轉角箭頭，避免單段 route（通常只有兩點）看不到轉彎。
+        const drawnTurnGroups = new Set();
+        groupSegments.forEach((groupSegs, groupKey) => {
+            if (!Array.isArray(groupSegs) || groupSegs.length === 0) return;
+            if (drawnTurnGroups.has(groupKey)) return;
+            if (drawnCanonicalGroups.has(groupKey)) return;
+            const sample = groupSegs[0] || {};
+            const widthTiles = Math.max(1, Number(sample.routeWidth) || 1);
+            const connected = portToPortConnectedGroupIds.has(groupKey) && hasLogisticsTransportFilter(groupKey, groupSegs);
+            const connectedCellPaths = portToPortConnectedCellPathsByGroup.get(groupKey) || [];
+            const color = connected
+                ? parseColor(logCfg.portToPortArrowColor || logCfg.arrowColor || "#00ffee")
+                : parseColor(logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
+            const alpha = connected
+                ? (logCfg.portToPortArrowAlpha ?? 0.95)
+                : (logCfg.disconnectedArrowAlpha ?? 0.85);
+            const size = connected
+                ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 10)
+                : (logCfg.disconnectedArrowSize || logCfg.arrowSize || 10);
+            if (connected) {
+                const disconnectedColor = parseColor(logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
+                const disconnectedAlpha = logCfg.disconnectedArrowAlpha ?? 0.85;
+                const disconnectedSize = logCfg.disconnectedArrowSize || logCfg.arrowSize || 10;
+                LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, disconnectedColor, disconnectedAlpha, disconnectedSize);
+                connectedCellPaths.forEach((path) => {
+                    LogisticsRenderer.drawLogisticsPathTurnArrows(graphics, path, color, alpha, size);
+                });
+            } else {
+                LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, color, alpha, size);
+            }
+            drawnTurnGroups.add(groupKey);
+        });
+
+        // 1. 建立冗餘連線地圖 (同時支援 ID 與座標查詢)
+        if (state.mapEntities) {
+            state.mapEntities.forEach(ent => {
+                if (ent.outputTargets && ent.outputTargets.length > 0) {
+                    ent.outputTargets.forEach(conn => {
+                        if (conn.lineId) return;
+                        const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
+                        if (target) {
+                            const route = (window.UIManager && typeof window.UIManager.getConnectionRoute === 'function')
+                                ? window.UIManager.getConnectionRoute(ent, target, conn)
+                                : null;
+                            const points = route && Array.isArray(route.points) && route.points.length >= 2
+                                ? route.points
+                                : [{ x: ent.x, y: ent.y }, { x: target.x, y: target.y }];
+                            const isSelected = (window.UIManager.activeLogisticsConnection &&
+                                window.UIManager.activeLogisticsConnection.source === ent &&
+                                window.UIManager.activeLogisticsConnection.targetId === conn.id);
+                            const isPortToPort = !!conn.id;
+                            drawLogisticsRoute(points, route && route.width ? route.width : 1, isSelected, !!conn.filter, null, isPortToPort);
+                        }
+                    });
+                }
+            });
+        }
+        if (state.logisticsDragLine) {
+            const dragPoints = Array.isArray(state.logisticsDragLine.points) && state.logisticsDragLine.points.length >= 2
+                ? state.logisticsDragLine.points
+                : [
+                    { x: state.logisticsDragLine.startX, y: state.logisticsDragLine.startY },
+                    { x: state.logisticsDragLine.endX, y: state.logisticsDragLine.endY }
+                ];
+            const dragColor = parseColor(logCfg.dragLineColor);
+            const dragWidthTiles = Math.max(1, Number(state.logisticsDragLine.lineWidth) || 1);
+            const dragThickness = Math.max(
+                logCfg.dragLineThickness || logCfg.lineThickness || 3,
+                dragWidthTiles * GameEngine.TILE_SIZE * 0.8
+            );
+
+            graphics.lineStyle(dragThickness, dragColor, logCfg.dragLineAlpha);
+            LogisticsRenderer.strokePolyline(graphics, dragPoints);
+        }
+
+        // [New] Conveyor Ghost Rendering
+        if (Array.isArray(state.conveyorGhosts) && state.conveyorGhosts.length > 0) {
+            const TS = GameEngine.TILE_SIZE;
+            const offset = state.mapOffset || { x: 0, y: 0 };
+            const isValid = state.conveyorValid;
+
+            const buildCfg = UI_CONFIG.ConveyorBuild || {};
+            const ghostColor = isValid ? (buildCfg.ghostValidColor ?? 0x00ff00) : (buildCfg.ghostInvalidColor ?? 0xff0000);
+            const ghostAlpha = buildCfg.ghostAlpha ?? 0.5;
+
+            graphics.fillStyle(ghostColor, ghostAlpha);
+            graphics.lineStyle(2, ghostColor, 0.8);
+
+            const alignUnit = Math.max(0.5, Math.min(1, Number(buildCfg.alignmentUnit) || 0.5));
+            const gridUnit = TS * alignUnit;
+            const offsetScale = TS / gridUnit;
+            const routeWidth = Math.max(1, Math.round(Number(state.conveyorRouteWidth) || 1));
+            const previewSegments = [];
+            const pushPreviewSegment = (start, next, targetEnd) => {
+                if (!start || !next) return;
+                const dirX = Math.sign(next.x - start.x);
+                const dirY = Math.sign(next.y - start.y);
+                const canUseTargetEnd = targetEnd &&
+                    Math.sign(targetEnd.x - next.x) === dirX &&
+                    Math.sign(targetEnd.y - next.y) === dirY;
+                let end = canUseTargetEnd ? targetEnd : next;
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
+                if (Math.hypot(dx, dy) < offsetScale - 0.001) {
+                    end = {
+                        x: start.x + dirX * offsetScale,
+                        y: start.y + dirY * offsetScale
+                    };
+                }
+                if (start.x === end.x && start.y === end.y) return;
+                previewSegments.push({
+                    x: (start.x + end.x) / 2,
+                    y: (start.y + end.y) / 2,
+                    dirOut: {
+                        x: Math.sign(end.x - start.x),
+                        y: Math.sign(end.y - start.y)
+                    },
+                    isMerger: !!(targetEnd && targetEnd.isMerger)
+                });
+            };
+
+            for (let i = 0; i < state.conveyorGhosts.length - 1; i += offsetScale) {
+                pushPreviewSegment(
+                    state.conveyorGhosts[i],
+                    state.conveyorGhosts[Math.min(i + 1, state.conveyorGhosts.length - 1)],
+                    state.conveyorGhosts[Math.min(i + offsetScale, state.conveyorGhosts.length - 1)]
                 );
-
-                graphics.lineStyle(dragThickness, dragColor, logCfg.dragLineAlpha);
-                LogisticsRenderer.strokePolyline(graphics, dragPoints);
             }
 
-            // [New] Conveyor Ghost Rendering
-            if (Array.isArray(state.conveyorGhosts) && state.conveyorGhosts.length > 0) {
-                const TS = GameEngine.TILE_SIZE;
-                const offset = state.mapOffset || { x: 0, y: 0 };
-                const isValid = state.conveyorValid;
-
-                const buildCfg = UI_CONFIG.ConveyorBuild || {};
-                const ghostColor = isValid ? (buildCfg.ghostValidColor ?? 0x00ff00) : (buildCfg.ghostInvalidColor ?? 0xff0000);
-                const ghostAlpha = buildCfg.ghostAlpha ?? 0.5;
-
-                graphics.fillStyle(ghostColor, ghostAlpha);
-                graphics.lineStyle(2, ghostColor, 0.8);
-
-                const alignUnit = Math.max(0.5, Math.min(1, Number(buildCfg.alignmentUnit) || 0.5));
-                const gridUnit = TS * alignUnit;
-                const offsetScale = TS / gridUnit;
-                const routeWidth = Math.max(1, Math.round(Number(state.conveyorRouteWidth) || 1));
-                const previewSegments = [];
-                const pushPreviewSegment = (start, next, targetEnd) => {
-                    if (!start || !next) return;
-                    const dirX = Math.sign(next.x - start.x);
-                    const dirY = Math.sign(next.y - start.y);
-                    const canUseTargetEnd = targetEnd &&
-                        Math.sign(targetEnd.x - next.x) === dirX &&
-                        Math.sign(targetEnd.y - next.y) === dirY;
-                    let end = canUseTargetEnd ? targetEnd : next;
-                    const dx = end.x - start.x;
-                    const dy = end.y - start.y;
-                    if (Math.hypot(dx, dy) < offsetScale - 0.001) {
-                        end = {
-                            x: start.x + dirX * offsetScale,
-                            y: start.y + dirY * offsetScale
-                        };
-                    }
-                    if (start.x === end.x && start.y === end.y) return;
-                    previewSegments.push({
-                        x: (start.x + end.x) / 2,
-                        y: (start.y + end.y) / 2,
-                        dirOut: {
-                            x: Math.sign(end.x - start.x),
-                            y: Math.sign(end.y - start.y)
-                        },
-                        isMerger: !!(targetEnd && targetEnd.isMerger)
-                    });
-                };
-
-                for (let i = 0; i < state.conveyorGhosts.length - 1; i += offsetScale) {
-                    pushPreviewSegment(
-                        state.conveyorGhosts[i],
-                        state.conveyorGhosts[Math.min(i + 1, state.conveyorGhosts.length - 1)],
-                        state.conveyorGhosts[Math.min(i + offsetScale, state.conveyorGhosts.length - 1)]
+            const rawGhostPoints = state.conveyorGhosts.map(point => ({
+                x: (point.x + offset.x * offsetScale) * gridUnit,
+                y: (point.y + offset.y * offsetScale) * gridUnit,
+                isPortConnector: point.isPortConnector
+            }));
+            let ghostPoints = rawGhostPoints;
+            if (window.UIManager && typeof window.UIManager.buildGridRoutePoints === 'function' && typeof window.UIManager.buildLogisticsSegments === 'function') {
+                const gridPoints = window.UIManager.buildGridRoutePoints(rawGhostPoints);
+                const segments = window.UIManager.buildLogisticsSegments(
+                    '__preview__',
+                    null,
+                    null,
+                    null,
+                    gridPoints,
+                    routeWidth,
+                    null,
+                    null,
+                    null
+                );
+                const routePoints = [];
+                segments.forEach((segment, index) => {
+                    const segPoints = Array.isArray(segment.routePoints) ? segment.routePoints : [];
+                    if (segPoints.length < 2) return;
+                    if (index === 0) routePoints.push({ x: segPoints[0].x, y: segPoints[0].y });
+                    routePoints.push({ x: segPoints[1].x, y: segPoints[1].y });
+                });
+                if (routePoints.length >= 2) ghostPoints = routePoints;
+            }
+            LogisticsRenderer.drawLogisticsCells(graphics, ghostPoints, routeWidth, 1);
+            const ghostArrowRects = LogisticsRenderer.getLogisticsCellRects(ghostPoints, routeWidth, true);
+            if (ghostArrowRects.length > 0) {
+                graphics.fillStyle(ghostColor, 0.85);
+                ghostArrowRects.forEach((rect) => {
+                    const adx = rect.dirX !== undefined ? rect.dirX : 0;
+                    const ady = rect.dirY !== undefined ? rect.dirY : 0;
+                    const len = Math.hypot(adx, ady) || 1;
+                    LogisticsRenderer.drawArrowhead(
+                        graphics,
+                        rect.x + rect.w / 2,
+                        rect.y + rect.h / 2,
+                        adx / len,
+                        ady / len,
+                        5
                     );
-                }
-
-                const rawGhostPoints = state.conveyorGhosts.map(point => ({
-                    x: (point.x + offset.x * offsetScale) * gridUnit,
-                    y: (point.y + offset.y * offsetScale) * gridUnit,
-                    isPortConnector: point.isPortConnector
-                }));
-                let ghostPoints = rawGhostPoints;
-                if (window.UIManager && typeof window.UIManager.buildGridRoutePoints === 'function' && typeof window.UIManager.buildLogisticsSegments === 'function') {
-                    const gridPoints = window.UIManager.buildGridRoutePoints(rawGhostPoints);
-                    const segments = window.UIManager.buildLogisticsSegments(
-                        '__preview__',
-                        null,
-                        null,
-                        null,
-                        gridPoints,
-                        routeWidth,
-                        null,
-                        null,
-                        null
-                    );
-                    const routePoints = [];
-                    segments.forEach((segment, index) => {
-                        const segPoints = Array.isArray(segment.routePoints) ? segment.routePoints : [];
-                        if (segPoints.length < 2) return;
-                        if (index === 0) routePoints.push({ x: segPoints[0].x, y: segPoints[0].y });
-                        routePoints.push({ x: segPoints[1].x, y: segPoints[1].y });
-                    });
-                    if (routePoints.length >= 2) ghostPoints = routePoints;
-                }
-                LogisticsRenderer.drawLogisticsCells(graphics, ghostPoints, routeWidth, 1);
-                const ghostArrowRects = LogisticsRenderer.getLogisticsCellRects(ghostPoints, routeWidth, true);
-                if (ghostArrowRects.length > 0) {
-                    graphics.fillStyle(ghostColor, 0.85);
-                    ghostArrowRects.forEach((rect) => {
-                        const adx = rect.dirX !== undefined ? rect.dirX : 0;
-                        const ady = rect.dirY !== undefined ? rect.dirY : 0;
-                        const len = Math.hypot(adx, ady) || 1;
-                        LogisticsRenderer.drawArrowhead(
-                            graphics,
-                            rect.x + rect.w / 2,
-                            rect.y + rect.h / 2,
-                            adx / len,
-                            ady / len,
-                            5
-                        );
-                    });
-                }
-
-                previewSegments.forEach((ghost, ghostIndex) => {
-                    const wx = (ghost.x + offset.x * offsetScale) * gridUnit;
-                    const wy = (ghost.y + offset.y * offsetScale) * gridUnit;
-
-                    // Special marker for mergers
-                    if (ghost.isMerger) {
-                        graphics.lineStyle(3, 0xffff00, 1);
-                        graphics.strokeCircle(wx, wy, TS / 3);
-                        graphics.lineStyle(2, ghostColor, 0.8);
-                    }
                 });
             }
+
+            previewSegments.forEach((ghost, ghostIndex) => {
+                const wx = (ghost.x + offset.x * offsetScale) * gridUnit;
+                const wy = (ghost.y + offset.y * offsetScale) * gridUnit;
+
+                // Special marker for mergers
+                if (ghost.isMerger) {
+                    graphics.lineStyle(3, 0xffff00, 1);
+                    graphics.strokeCircle(wx, wy, TS / 3);
+                    graphics.lineStyle(2, ghostColor, 0.8);
+                }
+            });
+        }
 
         // 繪製自動傳輸線上的動態物品
-        if (state.activeTransfers && state.activeTransfers.length > 0) {
+        if (options.drawTransfers !== false && state.activeTransfers && state.activeTransfers.length > 0) {
             state.activeTransfers.forEach(t => {
                 const source = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.sourceId);
                 const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
-                
+
                 if (source && target) {
-                    const directConn = Array.isArray(source.outputTargets)
-                        ? source.outputTargets.find(conn => conn && conn.id === t.targetId)
-                        : null;
-                    let routePoints = Array.isArray(t.routePoints) && t.routePoints.length >= 2
-                        ? t.routePoints.map(p => ({ x: p.x, y: p.y }))
-                        : null;
-                    if (directConn) {
-                        const transferRoute = (window.UIManager && typeof window.UIManager.getConnectionTransferRoute === 'function')
-                            ? window.UIManager.getConnectionTransferRoute(source, target, directConn)
-                            : null;
-                        routePoints = routePoints || (transferRoute && Array.isArray(transferRoute.points) && transferRoute.points.length >= 2
-                            ? transferRoute.points.map(p => ({ x: p.x, y: p.y }))
-                            : (!directConn.lineId && Array.isArray(directConn.routePoints) && directConn.routePoints.length >= 2
-                                ? directConn.routePoints.map(p => ({ x: p.x, y: p.y }))
-                                : null));
-                        if (false && (!routePoints || routePoints.length < 2) && directConn.lineId && Array.isArray(state.logisticsLines)) {
-                            const segs = state.logisticsLines
-                                .filter(line => line && (line.groupId === directConn.lineId || line.id === directConn.lineId));
-                            
-                            if (segs.length > 0) {
-                                let points = [];
-                                let remaining = [...segs];
-                                let currentSeg = remaining.shift();
-                                if (currentSeg && Array.isArray(currentSeg.routePoints)) {
-                                    points = [...currentSeg.routePoints];
-                                }
-                                
-                                while (remaining.length > 0) {
-                                    const lastPt = points[points.length - 1];
-                                    const firstPt = points[0];
-                                    let found = false;
-                                    
-                                    for (let i = 0; i < remaining.length; i++) {
-                                        const s = remaining[i];
-                                        const sPts = s.routePoints;
-                                        if (!Array.isArray(sPts) || sPts.length < 2) continue;
-                                        
-                                        // 檢查是否接在尾端
-                                        if (Math.abs(sPts[0].x - lastPt.x) < 1 && Math.abs(sPts[0].y - lastPt.y) < 1) {
-                                            points.push(sPts[1]);
-                                            remaining.splice(i, 1);
-                                            found = true;
-                                            break;
-                                        }
-                                        if (Math.abs(sPts[1].x - lastPt.x) < 1 && Math.abs(sPts[1].y - lastPt.y) < 1) {
-                                            points.push(sPts[0]);
-                                            remaining.splice(i, 1);
-                                            found = true;
-                                            break;
-                                        }
-                                        // 檢查是否接在前端
-                                        if (Math.abs(sPts[1].x - firstPt.x) < 1 && Math.abs(sPts[1].y - firstPt.y) < 1) {
-                                            points.unshift(sPts[0]);
-                                            remaining.splice(i, 1);
-                                            found = true;
-                                            break;
-                                        }
-                                        if (Math.abs(sPts[0].x - firstPt.x) < 1 && Math.abs(sPts[0].y - firstPt.y) < 1) {
-                                            points.unshift(sPts[1]);
-                                            remaining.splice(i, 1);
-                                            found = true;
-                                            break;
-                                        }
-                                    }
-                                    
-                                    if (!found) break;
-                                }
-                                
-                                // 確保起點靠近 source 建築
-                                if (points.length >= 2) {
-                                    const startPt = points[0];
-                                    const endPt = points[points.length - 1];
-                                    const distStart = Math.hypot(startPt.x - source.x, startPt.y - source.y);
-                                    const distEnd = Math.hypot(endPt.x - source.x, endPt.y - source.y);
-                                    if (distEnd < distStart) {
-                                        points.reverse();
-                                    }
-                                }
-                                routePoints = points;
-                            }
+                    // 1. 取得完整且連續的幾何路由路徑
+                    const outputTargets = Array.isArray(source.outputTargets) ? source.outputTargets : [];
+                    const conn = outputTargets.find(c => c.id === t.targetId);
+                    const routeInfo = (window.UIManager && typeof window.UIManager.getConnectionTransferRoute === 'function')
+                        ? window.UIManager.getConnectionTransferRoute(source, target, conn)
+                        : { points: [{ x: source.x, y: source.y }, { x: target.x, y: target.y }] };
+
+                    const points = routeInfo.points;
+
+                    // 2. 計算多邊形總長度
+                    let totalLength = 0;
+                    const segments = [];
+                    for (let i = 0; i < points.length - 1; i++) {
+                        const d = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+                        segments.push({ start: points[i], end: points[i + 1], dist: d });
+                        totalLength += d;
+                    }
+
+                    // 3. 根據 progress 尋找目前所在的線段與座標
+                    let targetDist = totalLength * t.progress;
+                    let currentX = source.x;
+                    let currentY = source.y;
+
+                    for (const seg of segments) {
+                        if (targetDist <= seg.dist) {
+                            const ratio = seg.dist === 0 ? 0 : (targetDist / seg.dist);
+                            currentX = seg.start.x + (seg.end.x - seg.start.x) * ratio;
+                            currentY = seg.start.y + (seg.end.y - seg.start.y) * ratio;
+                            break;
                         }
+                        targetDist -= seg.dist;
                     }
 
-                    if (directConn?.lineId && (!Array.isArray(routePoints) || routePoints.length < 2)) return;
-
-                    let px, py;
-                    if (Array.isArray(routePoints) && routePoints.length >= 2) {
-                        const pathPoint = getPointOnPathByDistance(routePoints, t.progress, GameEngine.TILE_SIZE * 0.5);
-                        px = pathPoint.x;
-                        py = pathPoint.y;
-                    } else {
-                        // Fallback to straight line
-                        px = source.x + (target.x - source.x) * t.progress;
-                        py = source.y + (target.y - source.y) * t.progress;
+                    // 防止超出邊界
+                    if (t.progress >= 1) {
+                        currentX = target.x; currentY = target.y;
                     }
 
-                    // 獲取資源對應顏色
-                    const color = (scene && typeof scene.getResourceIconColor === 'function') 
-                        ? scene.getResourceIconColor(t.itemType) 
-                        : 0xffffff;
+                    // 4. 繪製小箱子
+                    const color = (scene && typeof scene.getResourceIconColor === 'function')
+                        ? scene.getResourceIconColor(t.itemType) : 0xffffff;
 
-                    // 畫出帶有資源顏色的物流小箱子 (稍微大一點，並且有旋轉效果)
-                    graphics.fillStyle(0x222222, 1);
-                    graphics.fillRect(px - 10, py - 10, 20, 20);
-                    graphics.lineStyle(3, color, 1);
-                    graphics.strokeRect(px - 10, py - 10, 20, 20);
-                    
-                    // 畫個內核
-                    graphics.fillStyle(color, 0.8);
-                    graphics.fillRect(px - 4, py - 4, 8, 8);
+                    graphics.fillStyle(0x1a1a1a, 0.95);
+                    graphics.fillRect(currentX - 8, currentY - 8, 16, 16);
+                    graphics.lineStyle(2, color, 1);
+                    graphics.strokeRect(currentX - 8, currentY - 8, 16, 16);
                 }
             });
         }
@@ -1221,6 +1235,149 @@ export class LogisticsRenderer {
 
             LogisticsRenderer.drawArrowhead(g, endX, endY, outDir.x, outDir.y, shaft);
         }
+    }
+
+    static renderTransfers(graphics, state, scene) {
+        graphics.clear();
+        if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
+
+        state.activeTransfers.forEach(t => {
+            const source = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.sourceId);
+            const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
+            if (!source || !target) return;
+
+            const directConn = Array.isArray(source.outputTargets)
+                ? source.outputTargets.find(conn => conn && conn.id === t.targetId)
+                : null;
+            const routePoints = LogisticsRenderer.normalizeTransferRoutePoints(
+                source,
+                target,
+                LogisticsRenderer.resolveTransferRoutePoints(source, target, directConn, t)
+            );
+
+            if (directConn?.lineId && (!Array.isArray(routePoints) || routePoints.length < 2)) return;
+
+            let px, py;
+            if (Array.isArray(routePoints) && routePoints.length >= 2) {
+                const pathPoint = LogisticsRenderer.getPointOnTransferPath(routePoints, t.progress, GameEngine.TILE_SIZE * 0.5);
+                if (!pathPoint) return;
+                px = pathPoint.x;
+                py = pathPoint.y;
+            } else {
+                px = source.x + (target.x - source.x) * t.progress;
+                py = source.y + (target.y - source.y) * t.progress;
+            }
+            LogisticsRenderer.logTransferRenderDebug(graphics, state, scene, source, target, routePoints, t, px, py);
+
+            const color = (scene && typeof scene.getResourceIconColor === 'function')
+                ? scene.getResourceIconColor(t.itemType)
+                : 0xffffff;
+
+            graphics.fillStyle(0x222222, 1);
+            graphics.fillRect(px - 10, py - 10, 20, 20);
+            graphics.lineStyle(3, color, 1);
+            graphics.strokeRect(px - 10, py - 10, 20, 20);
+            graphics.fillStyle(color, 0.8);
+            graphics.fillRect(px - 4, py - 4, 8, 8);
+        });
+    }
+
+    static resolveTransferRoutePoints(source, target, directConn, transfer) {
+        let routePoints = Array.isArray(transfer.routePoints) && transfer.routePoints.length >= 2
+            ? transfer.routePoints.map(p => ({ x: p.x, y: p.y }))
+            : null;
+        if (!directConn) return routePoints;
+
+        const transferRoute = (window.UIManager && typeof window.UIManager.getConnectionTransferRoute === 'function')
+            ? window.UIManager.getConnectionTransferRoute(source, target, directConn)
+            : null;
+        return routePoints || (transferRoute && Array.isArray(transferRoute.points) && transferRoute.points.length >= 2
+            ? transferRoute.points.map(p => ({ x: p.x, y: p.y }))
+            : (!directConn.lineId && Array.isArray(directConn.routePoints) && directConn.routePoints.length >= 2
+                ? directConn.routePoints.map(p => ({ x: p.x, y: p.y }))
+                : null));
+    }
+
+    static normalizeTransferRoutePoints(source, target, routePoints) {
+        if (!Array.isArray(routePoints) || routePoints.length < 2) return routePoints;
+        const points = [];
+        routePoints.forEach(point => {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+            const last = points[points.length - 1];
+            if (!last || Math.hypot(last.x - point.x, last.y - point.y) > 0.5) {
+                points.push({ x: point.x, y: point.y });
+            }
+        });
+        if (points.length < 2 || !source || !target) return points;
+
+        const distance = (entity, point) => Math.hypot((entity.x || 0) - point.x, (entity.y || 0) - point.y);
+        const first = points[0];
+        const last = points[points.length - 1];
+        const directScore = distance(source, first) + distance(target, last);
+        const reverseScore = distance(source, last) + distance(target, first);
+        return reverseScore < directScore ? points.reverse() : points;
+    }
+
+    static formatPoint(point) {
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return "null";
+        return `(${Math.round(point.x)},${Math.round(point.y)})`;
+    }
+
+    static logTransferRenderDebug(graphics, state, scene, source, target, routePoints, transfer, px, py) {
+        if (!GameEngine || typeof GameEngine.addLog !== 'function') return;
+        const now = Date.now();
+        const key = transfer.id || `${transfer.lineId || transfer.sourceId || 'line'}:${transfer.targetId || 'target'}:${transfer.itemType || 'item'}`;
+        state._transferRenderDebugAt = state._transferRenderDebugAt || {};
+        if (state._transferRenderDebugAt[key]) return;
+        state._transferRenderDebugAt[key] = now;
+
+        const first = Array.isArray(routePoints) ? routePoints[0] : null;
+        const last = Array.isArray(routePoints) ? routePoints[routePoints.length - 1] : null;
+        const lineDepth = scene?.logisticsGraphics?.depth ?? "n/a";
+        const itemDepth = scene?.logisticsTransferGraphics?.depth ?? graphics?.depth ?? "n/a";
+        const aboveLine = Number.isFinite(itemDepth) && Number.isFinite(lineDepth) ? itemDepth > lineDepth : "n/a";
+        GameEngine.addLog(
+            `[DEBUG] Transfer render ${String(transfer.itemType || '').toUpperCase()} ` +
+            `id=${transfer.id || 'none'} ` +
+            `draw=${LogisticsRenderer.formatPoint({ x: px, y: py })} progress=${Number(transfer.progress || 0).toFixed(2)} ` +
+            `first=${LogisticsRenderer.formatPoint(first)} last=${LogisticsRenderer.formatPoint(last)} ` +
+            `source=${LogisticsRenderer.formatPoint(source)} target=${LogisticsRenderer.formatPoint(target)} ` +
+            `lineDepth=${lineDepth} itemDepth=${itemDepth} itemAboveLine=${aboveLine}`,
+            'LOGISTICS'
+        );
+    }
+
+    static getPointOnTransferPath(points, progress, startOffset = 0) {
+        if (!Array.isArray(points) || points.length < 2) return null;
+        const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+        const lengths = [];
+        let totalLength = 0;
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            const length = Math.hypot(b.x - a.x, b.y - a.y);
+            lengths.push(length);
+            totalLength += length;
+        }
+        if (totalLength <= 0) return { x: points[0].x, y: points[0].y };
+
+        const safeStartOffset = Math.max(0, Math.min(Number(startOffset) || 0, totalLength * 0.45));
+        let targetDistance = safeStartOffset + clampedProgress * (totalLength - safeStartOffset);
+        for (let i = 0; i < lengths.length; i++) {
+            const length = lengths[i];
+            if (targetDistance <= length || i === lengths.length - 1) {
+                const a = points[i];
+                const b = points[i + 1];
+                const localProgress = length > 0 ? targetDistance / length : 0;
+                return {
+                    x: a.x + (b.x - a.x) * localProgress,
+                    y: a.y + (b.y - a.y) * localProgress
+                };
+            }
+            targetDistance -= length;
+        }
+        const last = points[points.length - 1];
+        return { x: last.x, y: last.y };
     }
 
     static drawLogisticsGroupTurnArrows(g, segments, widthTiles, color, alpha, size, onlyCellKeys = null) {

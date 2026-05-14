@@ -511,7 +511,7 @@ export class WorkerSystem {
                         ? ResourceSystem.depositResourceToBuilding(this.state, this.engine, v.manualDepositTarget, depositType, depositAmount, this.engine.addLog.bind(this.engine))
                         : assignedDepositTarget
                             ? ResourceSystem.depositResourceToBuilding(this.state, this.engine, assignedDepositTarget, depositType, depositAmount, this.engine.addLog.bind(this.engine))
-                        : (ResourceSystem.depositResource(this.state, depositType, depositAmount, this.engine.addLog.bind(this.engine)) !== false);
+                            : (ResourceSystem.depositResource(this.state, depositType, depositAmount, this.engine.addLog.bind(this.engine)) !== false);
                     if (!didDeposit) {
                         this.engine.addLog(`[存放失敗] ${v.manualDepositTarget?.name || '目標建築'} 無法存放 ${String(depositType || '').toUpperCase()}。`, 'TASK');
                     }
@@ -1341,20 +1341,334 @@ export class WorkerSystem {
         return { start, end, points: [start, end], sourceId, targetId };
     }
 
+    normalizeTransferRoutePoints(source, target, routePoints) {
+        if (!Array.isArray(routePoints) || routePoints.length < 2) return routePoints;
+        const points = [];
+        routePoints.forEach(point => {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+            const last = points[points.length - 1];
+            if (!last || Math.hypot(last.x - point.x, last.y - point.y) > 0.5) {
+                points.push({ x: point.x, y: point.y });
+            }
+        });
+        if (points.length < 2 || !source || !target) return points;
+
+        const distance = (entity, point) => Math.hypot((entity.x || 0) - point.x, (entity.y || 0) - point.y);
+        const first = points[0];
+        const last = points[points.length - 1];
+        const directScore = distance(source, first) + distance(target, last);
+        const reverseScore = distance(source, last) + distance(target, first);
+        return reverseScore < directScore ? points.reverse() : points;
+    }
+
+    formatTransferPoint(point) {
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return "null";
+        return `(${Math.round(point.x)},${Math.round(point.y)})`;
+    }
+
+    logTransferRouteDebug(source, target, conn, itemType, rawRoutePoints, routePoints) {
+        if (!this.engine || typeof this.engine.addLog !== 'function' || !conn) return;
+        const now = Date.now();
+        const key = `${conn.lineId || conn.id || 'no-line'}:${itemType || 'item'}`;
+        conn._transferRouteDebugAt = conn._transferRouteDebugAt || {};
+        if (conn._transferRouteDebugAt[key] && now - conn._transferRouteDebugAt[key] < 2500) return;
+        conn._transferRouteDebugAt[key] = now;
+
+        const first = Array.isArray(routePoints) ? routePoints[0] : null;
+        const last = Array.isArray(routePoints) ? routePoints[routePoints.length - 1] : null;
+        const rawFirst = Array.isArray(rawRoutePoints) ? rawRoutePoints[0] : null;
+        const rawLast = Array.isArray(rawRoutePoints) ? rawRoutePoints[rawRoutePoints.length - 1] : null;
+        const routeHead = Array.isArray(routePoints)
+            ? routePoints.slice(0, 4).map(point => this.formatTransferPoint(point)).join(">")
+            : "null";
+        const dist = (entity, point) => entity && point
+            ? Math.round(Math.hypot((entity.x || 0) - point.x, (entity.y || 0) - point.y))
+            : "n/a";
+        this.engine.addLog(
+            `[DEBUG] Transfer route ${String(itemType || '').toUpperCase()} ` +
+            `source=${this.formatTransferPoint(source)} target=${this.formatTransferPoint(target)} ` +
+            `first=${this.formatTransferPoint(first)} last=${this.formatTransferPoint(last)} ` +
+            `rawFirst=${this.formatTransferPoint(rawFirst)} rawLast=${this.formatTransferPoint(rawLast)} ` +
+            `sourcePort=${this.formatTransferPoint(conn.sourcePort)} targetPort=${this.formatTransferPoint(conn.targetPort)} ` +
+            `distSF=${dist(source, first)} distSL=${dist(source, last)} points=${Array.isArray(routePoints) ? routePoints.length : 0} ` +
+            `head=${routeHead}`,
+            'LOGISTICS'
+        );
+    }
+
+    getItemTransferRoutePoints(source, target, conn) {
+        if (!source || !target || !conn?.lineId || !Array.isArray(this.state.logisticsLines)) return null;
+        const TS = 20;
+        const segments = this.state.logisticsLines.filter(line =>
+            line && (line.groupId === conn.lineId || line.id === conn.lineId) &&
+            Array.isArray(line.routePoints) && line.routePoints.length >= 2
+        );
+        if (segments.length === 0) return null;
+
+        const nodeKey = (point) => `${Math.round(point.x)},${Math.round(point.y)}`;
+        const nodes = new Map();
+        const edges = new Map();
+        const addNode = (point) => {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+            const key = nodeKey(point);
+            if (!nodes.has(key)) nodes.set(key, { x: Math.round(point.x), y: Math.round(point.y) });
+            if (!edges.has(key)) edges.set(key, []);
+            return key;
+        };
+        const addEdge = (a, b) => {
+            const ak = addNode(a);
+            const bk = addNode(b);
+            if (!ak || !bk || ak === bk) return;
+            const weight = Math.hypot(nodes.get(bk).x - nodes.get(ak).x, nodes.get(bk).y - nodes.get(ak).y) || 0.001;
+            edges.get(ak).push({ key: bk, weight });
+            edges.get(bk).push({ key: ak, weight });
+        };
+
+        segments.forEach(seg => {
+            const points = seg.routePoints;
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                if (!a || !b) continue;
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist < 0.001) continue;
+                const steps = Math.max(1, Math.round(dist / TS));
+                let prev = null;
+                for (let step = 0; step <= steps; step++) {
+                    const point = step === steps
+                        ? b
+                        : { x: a.x + (dx / steps) * step, y: a.y + (dy / steps) * step };
+                    const key = addNode(point);
+                    if (prev && key) addEdge(nodes.get(prev), nodes.get(key));
+                    prev = key;
+                }
+            }
+        });
+        if (nodes.size < 2) return null;
+
+        const getEntityPorts = (entity) => {
+            if (window.UIManager && typeof window.UIManager.getBuildingPortSlots === 'function') {
+                const ports = window.UIManager.getBuildingPortSlots(entity);
+                if (Array.isArray(ports) && ports.length > 0) return ports;
+            }
+            const fp = this.engine.getFootprint(entity.type1 || entity.type) || { uw: 3, uh: 3 };
+            const halfW = ((fp.uw || 3) * TS) / 2;
+            const halfH = ((fp.uh || 3) * TS) / 2;
+            return [
+                { x: entity.x, y: entity.y - halfH, dir: 'up' },
+                { x: entity.x, y: entity.y + halfH, dir: 'down' },
+                { x: entity.x - halfW, y: entity.y, dir: 'left' },
+                { x: entity.x + halfW, y: entity.y, dir: 'right' }
+            ];
+        };
+        const isPortNearEntity = (entity, port) => {
+            if (!entity || !port || !Number.isFinite(port.x) || !Number.isFinite(port.y)) return false;
+            const ports = getEntityPorts(entity);
+            if (ports.some(entityPort => Math.hypot(entityPort.x - port.x, entityPort.y - port.y) <= TS * 0.75)) return true;
+
+            const fp = this.engine.getFootprint(entity.type1 || entity.type) || { uw: 3, uh: 3 };
+            const halfW = ((fp.uw || 3) * TS) / 2;
+            const halfH = ((fp.uh || 3) * TS) / 2;
+            const dx = Math.max(Math.abs(port.x - entity.x) - halfW, 0);
+            const dy = Math.max(Math.abs(port.y - entity.y) - halfH, 0);
+            return Math.hypot(dx, dy) <= TS * 0.75;
+        };
+        const nearestNode = (point) => {
+            let best = null;
+            let bestDist = Infinity;
+            nodes.forEach((node, key) => {
+                const dist = Math.hypot(node.x - point.x, node.y - point.y);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = { key, point: node, dist };
+                }
+            });
+            return best;
+        };
+        const getCandidates = (entity, storedPort = null) => {
+            const ports = [];
+            if (storedPort && storedPort.sourceType !== 'logistics_line' &&
+                Number.isFinite(storedPort.x) && Number.isFinite(storedPort.y) &&
+                isPortNearEntity(entity, storedPort)) {
+                ports.push(storedPort);
+            }
+            ports.push(...getEntityPorts(entity));
+
+            const byKey = new Map();
+            ports.forEach(port => {
+                const nearest = nearestNode(port);
+                if (!nearest || nearest.dist > TS * 1.25) return;
+                const existing = byKey.get(nearest.key);
+                if (!existing || nearest.dist < existing.dist) {
+                    byKey.set(nearest.key, {
+                        key: nearest.key,
+                        anchor: { x: port.x, y: port.y },
+                        dist: nearest.dist
+                    });
+                }
+            });
+            return [...byKey.values()].sort((a, b) => a.dist - b.dist);
+        };
+
+        const sourceCandidates = getCandidates(source, conn.sourcePort);
+        const targetCandidates = getCandidates(target, conn.targetPort);
+        if (sourceCandidates.length === 0 || targetCandidates.length === 0) return null;
+
+        const findPath = (startKey, endKey) => {
+            const distances = new Map([[startKey, 0]]);
+            const previous = new Map();
+            const open = new Set(nodes.keys());
+
+            while (open.size > 0) {
+                let current = null;
+                let bestDistance = Infinity;
+                open.forEach(key => {
+                    const dist = distances.get(key) ?? Infinity;
+                    if (dist < bestDistance) {
+                        bestDistance = dist;
+                        current = key;
+                    }
+                });
+                if (!current || bestDistance === Infinity) break;
+                open.delete(current);
+                if (current === endKey) break;
+                (edges.get(current) || []).forEach(edge => {
+                    if (!open.has(edge.key)) return;
+                    const nextDistance = bestDistance + edge.weight;
+                    if (nextDistance < (distances.get(edge.key) ?? Infinity)) {
+                        distances.set(edge.key, nextDistance);
+                        previous.set(edge.key, current);
+                    }
+                });
+            }
+
+            if (!distances.has(endKey)) return null;
+            const keys = [];
+            let current = endKey;
+            while (current) {
+                keys.unshift(current);
+                if (current === startKey) break;
+                current = previous.get(current);
+            }
+            return keys[0] === startKey ? { keys, distance: distances.get(endKey) } : null;
+        };
+
+        let bestPath = null;
+        sourceCandidates.forEach(sourceCandidate => {
+            targetCandidates.forEach(targetCandidate => {
+                const path = findPath(sourceCandidate.key, targetCandidate.key);
+                if (!path) return;
+                const score = path.distance + sourceCandidate.dist + targetCandidate.dist;
+                if (!bestPath || score < bestPath.score) {
+                    bestPath = { ...path, score, sourceAnchor: sourceCandidate.anchor, targetAnchor: targetCandidate.anchor };
+                }
+            });
+        });
+        if (!bestPath || !Array.isArray(bestPath.keys) || bestPath.keys.length < 2) {
+            // 降級方案：使用端點追蹤法（與渲染器一致）
+            const sortedSegs = [];
+            const remaining = [...segments];
+            let current = remaining.sort((a, b) => (a.order || 0) - (b.order || 0))[0];
+            
+            if (current) {
+                sortedSegs.push(current);
+                remaining.splice(remaining.indexOf(current), 1);
+                
+                while (remaining.length > 0) {
+                    const lastSeg = sortedSegs[sortedSegs.length - 1];
+                    const lastEp = lastSeg.routePoints?.[lastSeg.routePoints.length - 1] || { x: lastSeg.x, y: lastSeg.y };
+                    
+                    let nextIndex = -1;
+                    let minEdgeDist = 15; // 容許 15 像素內的偏差
+                    
+                    for (let i = 0; i < remaining.length; i++) {
+                        const rSeg = remaining[i];
+                        const rSp = rSeg.routePoints?.[0] || { x: rSeg.x, y: rSeg.y };
+                        const dist = Math.hypot(lastEp.x - rSp.x, lastEp.y - rSp.y);
+                        if (dist < minEdgeDist) {
+                            minEdgeDist = dist;
+                            nextIndex = i;
+                        }
+                    }
+                    
+                    if (nextIndex !== -1) {
+                        sortedSegs.push(remaining[nextIndex]);
+                        remaining.splice(nextIndex, 1);
+                    } else {
+                        remaining.sort((a, b) => (a.order || 0) - (b.order || 0));
+                        sortedSegs.push(remaining[0]);
+                        remaining.splice(0, 1);
+                    }
+                }
+            }
+            
+            const points = [];
+            const pushPoint = (point) => {
+                if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+                const last = points[points.length - 1];
+                if (!last || Math.hypot(last.x - point.x, last.y - point.y) > 0.5) {
+                    points.push({ x: point.x, y: point.y });
+                }
+            };
+            
+            sortedSegs.forEach(seg => {
+                if (Array.isArray(seg.routePoints)) {
+                    seg.routePoints.forEach(p => pushPoint(p));
+                }
+            });
+            
+            if (points.length >= 2) {
+                const normalizedPoints = this.normalizeTransferRoutePoints(source, target, points);
+                return normalizedPoints.length >= 2 ? normalizedPoints : null;
+            }
+            return null;
+        }
+
+        const points = [];
+        const pushPoint = (point) => {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+            const last = points[points.length - 1];
+            if (!last || Math.hypot(last.x - point.x, last.y - point.y) > 0.5) {
+                points.push({ x: point.x, y: point.y });
+            }
+        };
+        pushPoint(bestPath.sourceAnchor);
+        bestPath.keys.forEach(key => pushPoint(nodes.get(key)));
+        pushPoint(bestPath.targetAnchor);
+        const normalizedPoints = this.normalizeTransferRoutePoints(source, target, points);
+        return normalizedPoints.length >= 2 ? normalizedPoints : null;
+    }
+
     createActiveTransfer(state, source, conn, itemType) {
         if (!source || !conn || !itemType) return null;
         const sourceId = source.id || `${source.type1}_${source.x}_${source.y}`;
         const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
-        const route = target ? this.getLogisticsLinePoints(source, target) : null;
+        const transferVisualRoute = target && conn.lineId
+            ? this.getItemTransferRoutePoints(source, target, conn)
+            : null;
+        const route = (!Array.isArray(transferVisualRoute) || transferVisualRoute.length < 2) && target
+            ? this.getLogisticsLinePoints(source, target)
+            : null;
+        const rawRoutePoints = Array.isArray(transferVisualRoute) && transferVisualRoute.length >= 2
+            ? transferVisualRoute.map(point => ({ x: point.x, y: point.y }))
+            : (Array.isArray(route?.points) && route.points.length >= 2
+                ? route.points.map(point => ({ x: point.x, y: point.y }))
+                : (Array.isArray(conn.routePoints) && conn.routePoints.length >= 2
+                    ? conn.routePoints.map(point => ({ x: point.x, y: point.y }))
+                    : null));
+        const routePoints = this.normalizeTransferRoutePoints(source, target, rawRoutePoints);
+        this.logTransferRouteDebug(source, target, conn, itemType, rawRoutePoints, routePoints);
+        const transferId = `transfer_${Date.now().toString(36)}_${Math.floor(Math.random() * 10000).toString(36)}`;
         return {
+            id: transferId,
             sourceId,
             targetId: conn.id,
             itemType,
             progress: 0,
             lineId: conn.lineId || null,
-            routePoints: Array.isArray(route?.points) && route.points.length >= 2
-                ? route.points.map(point => ({ x: point.x, y: point.y }))
-                : null
+            routePoints
         };
     }
 
@@ -1899,11 +2213,21 @@ export class WorkerSystem {
 
     processAutomatedLogistics(state, deltaTime) {
         if (!state.activeTransfers) state.activeTransfers = [];
+        const addTransportLog = (message) => {
+            if (this.engine && typeof this.engine.addLog === 'function') {
+                this.engine.addLog(message, 'LOGISTICS');
+            }
+        };
+        const getEntityLabel = (ent) => ent ? (ent.name || ent.type1 || ent.type || '未知建築') : '未知目標';
+        const getTransferRouteText = (transfer) => {
+            const count = Array.isArray(transfer?.routePoints) ? transfer.routePoints.length : 0;
+            return count >= 2 ? `路徑 ${count} 點` : '未取得繪製路徑點';
+        };
 
         // 1. 推進正在運輸中的物品
         for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
             let t = state.activeTransfers[i];
-            t.progress += deltaTime * 0.8; // 運輸速度 (數值越大越快)
+            t.progress += deltaTime * 0.4; // 運輸速度 (數值越大越快)
             if (t.progress >= 1) {
                 let target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
                 if (target) {
@@ -1914,6 +2238,7 @@ export class WorkerSystem {
                         if (!target.inputBuffer) target.inputBuffer = {};
                         target.inputBuffer[t.itemType] = (target.inputBuffer[t.itemType] || 0) + 1;
                     }
+                    // addTransportLog(`[物流] ${String(t.itemType).toUpperCase()} 已送達 ${getEntityLabel(target)}。`);
                 }
                 state.activeTransfers.splice(i, 1);
             }
@@ -1933,7 +2258,7 @@ export class WorkerSystem {
             // 修正規則：不再因為工人不足而停擺。
             // 1 名工人是 1 倍效率，N 名工人是 N 倍效率。
             const efficiency = Math.max(0, currentWorkers);
-            
+
             ent.logisticsTimer = (ent.logisticsTimer || 0) + deltaTime * efficiency;
             if (ent.logisticsTimer >= 0.5) { // 基準：1 名工人每 0.5 秒發送一個物品
                 ent.logisticsTimer = 0;
@@ -1950,26 +2275,24 @@ export class WorkerSystem {
                             }
                             if (state.resources[conn.filter] >= 1) {
                                 const transfer = this.createActiveTransfer(state, ent, conn, conn.filter);
-                                if (!transfer || !Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) continue;
+                                if (!transfer) continue;
                                 state.resources[conn.filter] -= 1;
                                 state.activeTransfers.push(transfer);
                                 itemSpawned = true;
-                                if (this.engine && typeof this.engine.addLog === 'function') {
-                                    this.engine.addLog(`[物流] 從 ${ent.type1} 運出 ${conn.filter}。`, 'LOGISTICS');
-                                }
+                                const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
+                                // addTransportLog(`[物流] ${getEntityLabel(ent)} -> ${getEntityLabel(target)} 開始輸送 ${String(conn.filter).toUpperCase()}（${getTransferRouteText(transfer)}）。`);
                             }
                         }
                     } else if (ent.outputBuffer) {
                         for (let resType in ent.outputBuffer) {
                             if (ent.outputBuffer[resType] >= 1 && (!conn.filter || conn.filter === resType)) {
                                 const transfer = this.createActiveTransfer(state, ent, conn, resType);
-                                if (!transfer || !Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) continue;
+                                if (!transfer) continue;
                                 ent.outputBuffer[resType] -= 1;
                                 state.activeTransfers.push(transfer);
                                 itemSpawned = true;
-                                if (this.engine && typeof this.engine.addLog === 'function') {
-                                    this.engine.addLog(`[物流] 從 ${ent.type1} 運出 ${resType}。`, 'LOGISTICS');
-                                }
+                                const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
+                                // addTransportLog(`[物流] ${getEntityLabel(ent)} -> ${getEntityLabel(target)} 開始輸送 ${String(resType).toUpperCase()}（${getTransferRouteText(transfer)}）。`);
                                 break;
                             }
                         }
