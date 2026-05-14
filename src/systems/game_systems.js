@@ -128,6 +128,7 @@ export class GameEngine {
     }
 
     static logicTick() {
+        if (this.state && this.state.isPaused) return;
         try {
             if (this.state.pathfinding) this.state.pathfinding.update();
             const now = Date.now();

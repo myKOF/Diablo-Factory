@@ -178,10 +178,10 @@ export class SynthesisSystem {
                 const debugKey = `${ent.currentRecipe.type}|${missingIds.join(',')}|${bufferIds.join(',')}`;
                 if (ent._lastMissingIngredientsLog !== debugKey) {
                     ent._lastMissingIngredientsLog = debugKey;
-                    engine.addLog(
-                        `[加工廠] ${ent.name || ent.type1} 材料不足：currentRecipeType=${ent.currentRecipe.type}, needIngredientTypes=[${needIds.join(', ') || 'none'}], missing=[${missingIds.join(', ') || 'none'}], inputBufferTypes=[${bufferIds.join(', ') || 'empty'}]`,
-                        'LOGISTICS'
-                    );
+                    // engine.addLog(
+//                         `[加工廠] ${ent.name || ent.type1} 材料不足：currentRecipeType=${ent.currentRecipe.type}, needIngredientTypes=[${needIds.join(', ') || 'none'}], missing=[${missingIds.join(', ') || 'none'}], inputBufferTypes=[${bufferIds.join(', ') || 'empty'}]`,
+//                         'LOGISTICS'
+//                     );
                 }
                 return;
             }

@@ -571,6 +571,40 @@ export class UIManager {
         clearBtn.onmouseout = () => clearBtn.style.background = this.hexToRgba(logCfg.bgColor, 0.95);
         logPanel.appendChild(clearBtn);
 
+        // [新增] 暫停按鈕
+        const pauseBtn = document.createElement("div");
+        pauseBtn.id = "log_pause_btn";
+        pauseBtn.innerHTML = "⏸️";
+        pauseBtn.title = "暫停遊戲以查看日誌";
+        pauseBtn.style.cssText = `
+            position: absolute; top: 12px; right: 108px; width: 24px; height: 24px;
+            background: ${this.hexToRgba(logCfg.bgColor, 0.95)}; border: 1.5px solid ${logCfg.borderColor};
+            color: #fff; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; font-size: 13px; border-radius: 4px; transition: all 0.2s;
+            z-index: 300; pointer-events: auto;
+        `;
+        pauseBtn.onclick = (e) => {
+            e.stopPropagation();
+            const scene = window.PhaserScene;
+            if (!scene) return;
+            if (GameEngine.state && GameEngine.state.isPaused) {
+                scene.scene.resume();
+                GameEngine.state.isPaused = false;
+                pauseBtn.innerHTML = "⏸️";
+                pauseBtn.title = "暫停遊戲以查看日誌";
+                GameEngine.addLog("遊戲已恢復運行。");
+            } else {
+                scene.scene.pause();
+                if (GameEngine.state) GameEngine.state.isPaused = true;
+                pauseBtn.innerHTML = "▶️";
+                pauseBtn.title = "恢復遊戲運行";
+                GameEngine.addLog("遊戲已暫停。");
+            }
+        };
+        pauseBtn.onmouseover = () => pauseBtn.style.background = logCfg.borderColor;
+        pauseBtn.onmouseout = () => pauseBtn.style.background = this.hexToRgba(logCfg.bgColor, 0.95);
+        logPanel.appendChild(pauseBtn);
+
         // 加入篩選按鈕 (漏斗)
         const filterBtn = document.createElement("div");
         filterBtn.id = "log_filter_btn";
@@ -1202,7 +1236,7 @@ export class UIManager {
         if (!ent) return false;
         const fp = this.getEntityFootprint(ent);
         // [核心修復] 增加 1.5 倍網格以上的緩衝 (30px)，確保緊貼建築拉線時，相鄰的所有網格中心點都能被視為「內部」而免除碰撞
-        const buffer = GameEngine.TILE_SIZE * 1.5; 
+        const buffer = GameEngine.TILE_SIZE * 1.5;
         return worldX >= ent.x - fp.w / 2 - buffer && worldX <= ent.x + fp.w / 2 + buffer &&
             worldY >= ent.y - fp.h / 2 - buffer && worldY <= ent.y + fp.h / 2 + buffer;
     }
@@ -1458,7 +1492,7 @@ export class UIManager {
         if (!sourceEnt || !targetEnt) return null;
 
         let rawPoints = [];
-        
+
         // 1. 強健的圖形搜尋：直接從群組內的所有線段碎片重建路徑
         if (conn && conn.lineId) {
             const segments = this.getLogisticsSegmentsByGroupId(conn.lineId);
@@ -1469,12 +1503,12 @@ export class UIManager {
                     if (Array.isArray(seg.routePoints) && seg.routePoints.length >= 2) {
                         for (let i = 0; i < seg.routePoints.length - 1; i++) {
                             const p1 = seg.routePoints[i];
-                            const p2 = seg.routePoints[i+1];
+                            const p2 = seg.routePoints[i + 1];
                             let n1 = nodes.find(n => Math.hypot(n.x - p1.x, n.y - p1.y) < 2);
                             if (!n1) { n1 = { x: p1.x, y: p1.y, edges: [] }; nodes.push(n1); }
                             let n2 = nodes.find(n => Math.hypot(n.x - p2.x, n.y - p2.y) < 2);
                             if (!n2) { n2 = { x: p2.x, y: p2.y, edges: [] }; nodes.push(n2); }
-                            
+
                             if (!n1.edges.includes(n2)) n1.edges.push(n2);
                             if (!n2.edges.includes(n1)) n2.edges.push(n1);
                         }
@@ -1483,7 +1517,7 @@ export class UIManager {
 
                 let startNode = null; let startDist = Infinity;
                 let endNode = null; let endDist = Infinity;
-                
+
                 const sRef = conn.sourcePort || sourceEnt;
                 const tRef = conn.targetPort || targetEnt;
 
@@ -1553,7 +1587,7 @@ export class UIManager {
         // 4. 確保陣列方向性
         const distFirstToSource = Math.hypot(first.x - sourceAnchor.x, first.y - sourceAnchor.y);
         const distLastToSource = Math.hypot(last.x - sourceAnchor.x, last.y - sourceAnchor.y);
-        
+
         if (distLastToSource < distFirstToSource) {
             rawPoints.reverse();
         }
@@ -1574,7 +1608,7 @@ export class UIManager {
         pushPoint(targetAnchor);
 
         if (transferPoints.length < 2) return null;
-        
+
         return {
             points: transferPoints,
             width: Math.max(1, Number(conn?.routeWidth) || 1)
@@ -3854,6 +3888,42 @@ export class UIManager {
 
     static hideItemTooltip() {
         const tip = document.getElementById("item_tooltip");
+        if (tip) tip.style.display = "none";
+    }
+
+    static getLogisticsTooltipEl() {
+        let tip = document.getElementById("logistics_tooltip");
+        if (!tip) {
+            tip = document.createElement("div");
+            tip.id = "logistics_tooltip";
+            tip.style.cssText = "position:absolute; z-index:3000; display:none; pointer-events:none; background:rgba(12,12,12,0.96); color:#f5f5f5; border:2px solid #f5f5f5; padding:6px 9px; font-size:16px; line-height:1.35; white-space:nowrap; box-shadow:0 3px 8px rgba(0,0,0,0.55);";
+            document.body.appendChild(tip);
+        }
+        return tip;
+    }
+
+    static showLogisticsTooltip(event, text) {
+        const tip = this.getLogisticsTooltipEl();
+        tip.innerHTML = `<div>${text}</div>`;
+        tip.style.display = "block";
+        this.moveLogisticsTooltip(event);
+    }
+
+    static moveLogisticsTooltip(event) {
+        const tip = document.getElementById("logistics_tooltip");
+        if (!tip || tip.style.display === "none") return;
+        const margin = 12;
+        const rect = tip.getBoundingClientRect();
+        let left = event.clientX + margin;
+        let top = event.clientY + margin;
+        if (left + rect.width > window.innerWidth - 6) left = event.clientX - rect.width - margin;
+        if (top + rect.height > window.innerHeight - 6) top = event.clientY - rect.height - margin;
+        tip.style.left = `${Math.max(6, left)}px`;
+        tip.style.top = `${Math.max(6, top)}px`;
+    }
+
+    static hideLogisticsTooltip() {
+        const tip = document.getElementById("logistics_tooltip");
         if (tip) tip.style.display = "none";
     }
 

@@ -868,6 +868,13 @@ export class MainScene extends Phaser.Scene {
         this.updatePlacementPreview(state);
 
         if (window.UIManager) {
+            const ev = pointer.event || { clientX: pointer.x, clientY: pointer.y };
+            if (this.hoveredLogisticsCoord) {
+                window.UIManager.showLogisticsTooltip(ev, `座標: (${this.hoveredLogisticsCoord.x}, ${this.hoveredLogisticsCoord.y})`);
+            } else {
+                window.UIManager.hideLogisticsTooltip();
+            }
+
             const shouldRefreshUI = time - (this._lastUIUpdateTime || 0) >= 250;
             if (shouldRefreshUI) {
                 window.UIManager.updateValues();
@@ -2522,7 +2529,8 @@ export class MainScene extends Phaser.Scene {
     }
 
 
-
+
+
 
     /**
      * [核心修補] 全域框選移動處理：支援 UI 穿透並實施邊界限制 (Clamping)
@@ -2883,6 +2891,24 @@ export class MainScene extends Phaser.Scene {
                 }
             }
         }
+
+        // 4. 檢查物流線
+        let hoveredLogisticsCoord = null;
+        if (state.logisticsLines) {
+            state.logisticsLines.forEach(line => {
+                if (!line || !line.routePoints) return;
+                const rects = LogisticsRenderer.getLogisticsCellRects(line.routePoints, line.routeWidth || 1);
+                rects.forEach(rect => {
+                    if (pointer.worldX >= rect.x && pointer.worldX <= rect.x + rect.w &&
+                        pointer.worldY >= rect.y && pointer.worldY <= rect.y + rect.h) {
+                        const worldX = Math.round(rect.x + rect.w / 2);
+                        const worldY = Math.round(rect.y + rect.h / 2);
+                        hoveredLogisticsCoord = { x: worldX, y: worldY };
+                    }
+                });
+            });
+        }
+        this.hoveredLogisticsCoord = hoveredLogisticsCoord;
 
         state.hoveredId = bestId;
     }

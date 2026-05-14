@@ -1336,15 +1336,15 @@ export class LogisticsRenderer {
         const lineDepth = scene?.logisticsGraphics?.depth ?? "n/a";
         const itemDepth = scene?.logisticsTransferGraphics?.depth ?? graphics?.depth ?? "n/a";
         const aboveLine = Number.isFinite(itemDepth) && Number.isFinite(lineDepth) ? itemDepth > lineDepth : "n/a";
-        GameEngine.addLog(
-            `[DEBUG] Transfer render ${String(transfer.itemType || '').toUpperCase()} ` +
-            `id=${transfer.id || 'none'} ` +
-            `draw=${LogisticsRenderer.formatPoint({ x: px, y: py })} progress=${Number(transfer.progress || 0).toFixed(2)} ` +
-            `first=${LogisticsRenderer.formatPoint(first)} last=${LogisticsRenderer.formatPoint(last)} ` +
-            `source=${LogisticsRenderer.formatPoint(source)} target=${LogisticsRenderer.formatPoint(target)} ` +
-            `lineDepth=${lineDepth} itemDepth=${itemDepth} itemAboveLine=${aboveLine}`,
-            'LOGISTICS'
-        );
+                // GameEngine.addLog(
+        //     `[DEBUG] Transfer render ${String(transfer.itemType || '').toUpperCase()} ` +
+        //     `id=${transfer.id || 'none'} ` +
+        //     `draw=${LogisticsRenderer.formatPoint({ x: px, y: py })} progress=${Number(transfer.progress || 0).toFixed(2)} ` +
+        //     `first=${LogisticsRenderer.formatPoint(first)} last=${LogisticsRenderer.formatPoint(last)} ` +
+        //     `source=${LogisticsRenderer.formatPoint(source)} target=${LogisticsRenderer.formatPoint(target)} ` +
+        //     `lineDepth=${lineDepth} itemDepth=${itemDepth} itemAboveLine=${aboveLine}`,
+        //     'LOGISTICS'
+        // );
     }
 
     static getPointOnTransferPath(points, progress, startOffset = 0) {

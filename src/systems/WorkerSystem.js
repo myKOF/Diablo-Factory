@@ -1659,10 +1659,20 @@ export class WorkerSystem {
                     ? conn.routePoints.map(point => ({ x: point.x, y: point.y }))
                     : null));
         const routePoints = this.normalizeTransferRoutePoints(source, target, rawRoutePoints);
-        this.logTransferRouteDebug(source, target, conn, itemType, rawRoutePoints, routePoints);
+        // this.logTransferRouteDebug(source, target, conn, itemType, rawRoutePoints, routePoints);
         const transferId = `transfer_${Date.now().toString(36)}_${Math.floor(Math.random() * 10000).toString(36)}`;
+        
+        // [新增] 自動設定追蹤目標
+        if (state && !state.trackedTransferId) {
+            state.trackedTransferId = transferId;
+            if (this.engine && typeof this.engine.addLog === 'function') {
+                this.engine.addLog(`[追蹤] 開始追蹤物品 ${itemType}`, 'LOGISTICS');
+            }
+        }
+
         return {
             id: transferId,
+            lastSegment: -1, // 初始化區段紀錄
             sourceId,
             targetId: conn.id,
             itemType,
@@ -2228,6 +2238,48 @@ export class WorkerSystem {
         for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
             let t = state.activeTransfers[i];
             t.progress += deltaTime * 0.4; // 運輸速度 (數值越大越快)
+            
+            // [新增] 追蹤邏輯
+            if (state && state.trackedTransferId === t.id) {
+                const points = t.routePoints;
+                if (Array.isArray(points) && points.length >= 2) {
+                    let totalLength = 0;
+                    const segmentLengths = [];
+                    for (let j = 0; j < points.length - 1; j++) {
+                        const dx = points[j + 1].x - points[j].x;
+                        const dy = points[j + 1].y - points[j].y;
+                        const len = Math.hypot(dx, dy);
+                        segmentLengths.push(len);
+                        totalLength += len;
+                    }
+                    
+                    let remain = t.progress * totalLength;
+                    let currentSegment = 0;
+                    for (let j = 0; j < segmentLengths.length; j++) {
+                        if (remain <= segmentLengths[j]) {
+                            currentSegment = j;
+                            break;
+                        }
+                        remain -= segmentLengths[j];
+                        currentSegment = j; // fallback
+                    }
+                    
+                    if (t.lastSegment !== currentSegment) {
+                        for (let seg = t.lastSegment + 1; seg <= currentSegment; seg++) {
+                            const p1 = points[seg];
+                            const p2 = points[seg + 1] || p1;
+                            const g1 = { x: Math.floor(p1.x / 20), y: Math.floor(p1.y / 20) };
+                            const g2 = { x: Math.floor(p2.x / 20), y: Math.floor(p2.y / 20) };
+                            
+                            if (this.engine && typeof this.engine.addLog === 'function') {
+                                this.engine.addLog(`${t.itemType} 由位置${seg + 1}(${g1.x},${g1.y})移動至位置${seg + 2}(${g2.x},${g2.y})`, 'LOGISTICS');
+                            }
+                        }
+                        t.lastSegment = currentSegment;
+                    }
+                }
+            }
+
             if (t.progress >= 1) {
                 let target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
                 if (target) {
@@ -2239,6 +2291,12 @@ export class WorkerSystem {
                         target.inputBuffer[t.itemType] = (target.inputBuffer[t.itemType] || 0) + 1;
                     }
                     // addTransportLog(`[物流] ${String(t.itemType).toUpperCase()} 已送達 ${getEntityLabel(target)}。`);
+                }
+                if (state && state.trackedTransferId === t.id) {
+                    state.trackedTransferId = null; // 釋放追蹤
+                    if (this.engine && typeof this.engine.addLog === 'function') {
+                        this.engine.addLog(`[追蹤] 物品 ${t.itemType} 已送達目的地。`, 'LOGISTICS');
+                    }
                 }
                 state.activeTransfers.splice(i, 1);
             }
