@@ -1615,7 +1615,7 @@ export class WorkerSystem {
             
             sortedSegs.forEach(seg => {
                 if (Array.isArray(seg.routePoints)) {
-                    seg.routePoints.forEach(p => pushPoint(p));
+                    if (seg.routePoints.length > 0) pushPoint(seg.routePoints[0]);
                 }
             });
             
@@ -2269,7 +2269,7 @@ export class WorkerSystem {
                             const p1 = points[seg];
                             const p2 = points[seg + 1] || p1;
                             if (this.engine && typeof this.engine.addLog === 'function') {
-                                this.engine.addLog(`${t.itemType} 由位置${seg + 1}(${Math.round(p1.x)},${Math.round(p1.y)})移動至位置${seg + 2}(${Math.round(p2.x)},${Math.round(p2.y)})`, 'LOGISTICS');
+                                this.engine.addLog(`${t.itemType} 由位置${seg}(${Math.round(p1.x)},${Math.round(p1.y)})移動至位置${seg + 1}(${Math.round(p2.x)},${Math.round(p2.y)})`, 'LOGISTICS');
                             }
                         }
                         t.lastSegment = currentSegment;
