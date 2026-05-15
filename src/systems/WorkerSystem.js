@@ -1678,6 +1678,7 @@ export class WorkerSystem {
             itemType,
             progress: 0,
             lineId: conn.lineId || null,
+            efficiency: Number(conn.efficiency) || 0,
             routePoints
         };
     }
@@ -2235,9 +2236,27 @@ export class WorkerSystem {
         };
 
         // 1. 推進正在運輸中的物品
+        const getTransferSpeed = (transfer) => {
+            const groupId = transfer?.lineId;
+            const line = groupId && Array.isArray(state.logisticsLines)
+                ? state.logisticsLines.find(item => item && (item.groupId === groupId || item.id === groupId) && Number(item.efficiency) > 0)
+                : null;
+            const cfg = this.engine ? this.engine.getEntityConfig(line?.lineType || 'transport_line', 1) : null;
+            return Math.max(0.1, Number(line?.efficiency) || Number(transfer?.efficiency) || Number(cfg?.efficiency) || 4);
+        };
+        const getRouteLengthInTiles = (transfer) => {
+            const points = transfer?.routePoints;
+            if (!Array.isArray(points) || points.length < 2) return 1;
+            let total = 0;
+            for (let j = 0; j < points.length - 1; j++) {
+                total += Math.hypot(points[j + 1].x - points[j].x, points[j + 1].y - points[j].y);
+            }
+            return Math.max(1, total / 20);
+        };
+
         for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
             let t = state.activeTransfers[i];
-            t.progress += deltaTime * 0.4; // 運輸速度 (數值越大越快)
+            t.progress += deltaTime * (getTransferSpeed(t) / getRouteLengthInTiles(t));
             
             // [新增] 追蹤邏輯
             if (state && state.trackedTransferId === t.id) {

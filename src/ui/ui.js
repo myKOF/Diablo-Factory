@@ -447,6 +447,20 @@ export class UIManager {
         this.uiLayer.appendChild(buildingPanel);
 
         // 3. 日誌面板
+        const shortcutCfg = UI_CONFIG.ShortcutBar;
+        if (shortcutCfg) {
+            const shortcutBar = document.createElement("div");
+            shortcutBar.className = "panel shortcut-bar";
+            shortcutBar.id = "shortcut_bar";
+            this.applyAnchorStyle(shortcutBar, shortcutCfg);
+            shortcutBar.style.pointerEvents = "auto";
+            const shortcutList = document.createElement("div");
+            shortcutList.id = "shortcut_list";
+            this.refreshShortcutBar(shortcutList, shortcutCfg);
+            shortcutBar.appendChild(shortcutList);
+            this.uiLayer.appendChild(shortcutBar);
+        }
+
         const logCfg = UI_CONFIG.LogPanel;
         const logPanel = document.createElement("div");
         logPanel.id = "log_panel";
@@ -950,6 +964,33 @@ export class UIManager {
         else if (cfg.shadow) el.style.boxShadow = cfg.shadow;
     }
 
+    static getBuildingIcon(type) {
+        const buildingIcons = {
+            town_center: "🏰", village: "🏰", farmhouse: "🏠",
+            timber_factory: "🪵", stone_factory: "⛏", barn: "🌾",
+            farmland: "🌱", alchemy_lab: "⚗", cathedral: "✚", academy: "📚",
+            tree_plantation: "🌲", mage_place: "✨", swordsman_place: "⚔", archer_place: "🏹",
+            timber_processing_plant: "🪚", smelting_plant: "🔥", tank_workshop: "🛡", stone_processing_plant: "🧱",
+            storehouse: "📦", transport_line: "➡"
+        };
+        return buildingIcons[type] || "🏗";
+    }
+
+    static getBuildConfigsByUiLocation(location, fallbackList = []) {
+        const configs = GameEngine.state.buildingConfigs || {};
+        const values = Object.values(configs).filter(cfg => cfg && Number(cfg.ui_location || 1) === location);
+        if (values.length > 0) return values;
+        return fallbackList.map(item => configs[item.id]).filter(Boolean);
+    }
+
+    static getCostText(cfg) {
+        const costStr = [];
+        for (let r in (cfg.costs || {})) {
+            if (cfg.costs[r] > 0) costStr.push(`${this.getIngredientIcon(r)}${cfg.costs[r]}`);
+        }
+        return costStr.length > 0 ? costStr.join(" ") : "0";
+    }
+
     static refreshBuildingList(container, bp) {
         container.innerHTML = "";
         const configs = GameEngine.state.buildingConfigs;
@@ -968,6 +1009,19 @@ export class UIManager {
         };
 
         // 改為從 bp.list 讀取，確保順序與顯示內容正確
+        const uiLocatedConfigs = this.getBuildConfigsByUiLocation(1, []);
+        if (uiLocatedConfigs.length > 0) {
+            uiLocatedConfigs.forEach(cfg => {
+                this.createBuildingBtn(container, bp, {
+                    id: cfg.model,
+                    name: cfg.name,
+                    icon: this.getBuildingIcon(cfg.model),
+                    desc: `${cfg.desc || ""}<br>成本 ${this.getCostText(cfg)}`
+                });
+            });
+            return;
+        }
+
         bp.list.forEach(listItem => {
             const cfg = configs[listItem.id];
             if (!cfg) return;
@@ -991,9 +1045,28 @@ export class UIManager {
         });
     }
 
-    static createBuildingBtn(container, bp, item) {
+    static refreshShortcutBar(container, bp) {
+        container.innerHTML = "";
+        const configs = GameEngine.state.buildingConfigs || {};
+        if (Object.keys(configs).length === 0) {
+            setTimeout(() => this.refreshShortcutBar(container, bp), 500);
+            return;
+        }
+
+        this.getBuildConfigsByUiLocation(2, []).forEach(cfg => {
+            this.createBuildingBtn(container, bp, {
+                id: cfg.model,
+                name: cfg.name,
+                icon: this.getBuildingIcon(cfg.model),
+                desc: `成本 ${this.getCostText(cfg)}`,
+                countResource: cfg.model
+            }, { compact: true });
+        });
+    }
+
+    static createBuildingBtn(container, bp, item, options = {}) {
         const btn = document.createElement("div");
-        btn.className = "building-item";
+        btn.className = options.compact ? "building-item shortcut-item" : "building-item";
         btn.setAttribute("data-type", item.id);
 
         // 使用 Flexbox 佈局以適應不同高度
@@ -1056,7 +1129,31 @@ export class UIManager {
             border-radius: 4px;
             box-shadow: inset 0 0 10px rgba(255, 87, 34, 0.2);
         `;
-        icon.innerHTML = item.icon || "🏗️";
+        icon.innerHTML = item.icon || ">";
+
+        if (options.compact) {
+            btn.title = `${item.name}\n${String(item.desc || "").replace(/<br>/g, "\n")}`;
+            btn.style.padding = "0";
+            btn.style.alignItems = "center";
+            btn.style.justifyContent = "center";
+            content.style.left = "4px";
+            content.style.right = "4px";
+            content.style.top = "42px";
+            content.style.bottom = "4px";
+            content.style.justifyContent = "center";
+            const count = GameEngine.state.resources?.[item.countResource || item.id] || 0;
+            content.innerHTML = `
+                <div style="color: ${bp.textColor}; font-size: 10px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;">${item.name}</div>
+                <div class="shortcut-count" data-resource="${item.countResource || item.id}" style="color: ${bp.titleColor}; font-size: 11px; font-weight: 900; line-height: 1; text-align: center;">${count}</div>
+            `;
+            icon.style.left = "50%";
+            icon.style.right = "auto";
+            icon.style.top = "6px";
+            icon.style.transform = "translateX(-50%)";
+            icon.style.width = "32px";
+            icon.style.height = "32px";
+            icon.style.fontSize = "20px";
+        }
 
         // 事件綁定
         btn.onmousedown = (e) => {
@@ -1149,6 +1246,10 @@ export class UIManager {
 
     static startStampMode(type) {
         this.cancelBuildingMode();
+        const cfg = GameEngine.state.buildingConfigs[type];
+        if (cfg && cfg.type2 === 'transport_line') {
+            GameEngine.state.activeTransportLineType = type;
+        }
         GameEngine.state.buildingMode = 'STAMP';
         GameEngine.state.placingType = type;
         GameEngine.state.placingRotation = 0;
@@ -1160,6 +1261,7 @@ export class UIManager {
         if (!GameEngine.state.placingType) return;
         GameEngine.state.buildingMode = 'NONE';
         GameEngine.state.placingType = null;
+        GameEngine.state.activeTransportLineType = null;
         GameEngine.state.placingRotation = 0;
         GameEngine.state.previewPos = null; // 核心修復：清除上一次的預覽位置，防止跳躍
         this.activeBuilding = null;
@@ -1865,7 +1967,7 @@ export class UIManager {
         return expanded;
     }
 
-    static buildLogisticsSegments(groupId, sourceId, targetId, targetPoint, gridPoints, routeWidth, sourcePort, targetPort, filter) {
+    static buildLogisticsSegments(groupId, sourceId, targetId, targetPoint, gridPoints, routeWidth, sourcePort, targetPort, filter, lineType = 'transport_line', efficiency = 0) {
         if (!Array.isArray(gridPoints) || gridPoints.length < 2) return [];
         const TS = GameEngine.TILE_SIZE;
         const align = TS / 2;
@@ -1904,6 +2006,8 @@ export class UIManager {
                 y: centerY,
                 routePoints: [{ x: start.x, y: start.y }, { x: end.x, y: end.y }],
                 routeWidth: Math.max(1, Number(routeWidth) || 1),
+                lineType,
+                efficiency: Number(efficiency) || 0,
                 sourcePort,
                 targetPort,
                 filter: filter || null,
@@ -1914,7 +2018,7 @@ export class UIManager {
         return segments;
     }
 
-    static upsertLogisticsLine({ lineId = null, sourceEnt, targetEnt = null, targetPoint = null, points = [], routeWidth = 1, sourcePort = null, targetPort = null, conn = null }) {
+    static upsertLogisticsLine({ lineId = null, sourceEnt, targetEnt = null, targetPoint = null, points = [], routeWidth = 1, sourcePort = null, targetPort = null, conn = null, lineType = 'transport_line', efficiency = 0 }) {
         const lines = this.ensureLogisticsLineStore();
         const sourceId = this.getEntityId(sourceEnt);
         const targetId = targetEnt ? this.getEntityId(targetEnt) : null;
@@ -1982,7 +2086,7 @@ export class UIManager {
         if (!hasPortPosition(cleanSourcePort)) cleanSourcePort = fallbackSourcePort();
         const cleanTargetPort = clonePort(targetPort);
         const filter = conn ? (conn.filter || null) : (previous?.filter || null);
-        const segments = this.buildLogisticsSegments(groupId, sourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter);
+        const segments = this.buildLogisticsSegments(groupId, sourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter, lineType, efficiency);
         const occupied = new Map();
         const occupiedTileCenters = new Map();
         const sameGroup = (seg) => !!seg && ((seg.groupId === groupId) || (seg.id === groupId));
@@ -2066,6 +2170,8 @@ export class UIManager {
             seg.targetId = targetId;
             seg.targetPoint = targetId ? null : cleanTargetPoint;
             seg.routeWidth = Math.max(1, Number(routeWidth) || 1);
+            seg.lineType = lineType || seg.lineType || 'transport_line';
+            seg.efficiency = Number(efficiency) || Number(seg.efficiency) || 0;
             if (cleanSourcePort) seg.sourcePort = cleanSourcePort;
             if (cleanTargetPort) seg.targetPort = cleanTargetPort;
             seg.filter = filter || null;
@@ -2077,6 +2183,8 @@ export class UIManager {
             conn.lineId = groupId;
             conn.routePoints = gridPoints.map(p => ({ x: p.x, y: p.y }));
             conn.routeWidth = Math.max(1, Number(routeWidth) || 1);
+            conn.lineType = lineType || 'transport_line';
+            conn.efficiency = Number(efficiency) || 0;
             conn.sourcePort = cleanSourcePort;
             conn.targetPort = cleanTargetPort;
         }
@@ -2265,6 +2373,12 @@ export class UIManager {
         this.activeLogisticsLine = null;
     }
 
+    static isTransportLinePlacementActive() {
+        const state = GameEngine.state;
+        const cfg = state?.placingType ? state.buildingConfigs?.[state.placingType] : null;
+        return !!cfg && cfg.type2 === 'transport_line';
+    }
+
     static selectLogisticsLine(line, selectGroup = false) {
         if (!line) {
             this.clearLogisticsSelection();
@@ -2367,6 +2481,21 @@ export class UIManager {
         this.hideContextMenu();
         conveyorSystem.startDrag(sourcePort.x, sourcePort.y, ent, sourcePort);
         GameEngine.state.logisticsDragLine = { active: true };
+        return true;
+    }
+
+    static beginTransportLineBuildDrag(worldX, worldY, sourceLine = null) {
+        this.clearWorldSelectionMarquee();
+        this.logisticsSourceEntity = null;
+        this.logisticsSourceLine = sourceLine || null;
+        this.isLogisticsDragging = true;
+        this.hideContextMenu();
+        if (sourceLine) {
+            conveyorSystem.startDrag(worldX, worldY, null, this.getLogisticsLineDragPort(sourceLine), sourceLine);
+        } else {
+            conveyorSystem.startDrag(worldX, worldY, null, null, null);
+        }
+        GameEngine.state.logisticsDragLine = { active: true, buildMode: 'transport_line' };
         return true;
     }
 
@@ -2597,13 +2726,18 @@ export class UIManager {
 
         const clickedLine = this.getLogisticsLineAt(worldX, worldY);
         const isDoubleClick = (e.detail || 0) >= 2;
+        if (this.isTransportLinePlacementActive() && GameEngine.state.buildingMode === 'STAMP') {
+            this.beginTransportLineBuildDrag(worldX, worldY, clickedLine || null);
+            conveyorSystem.updateDrag(worldX, worldY);
+            return;
+        }
         if (clickedLine && !isDoubleClick && this.isSelectedLogisticsLine(clickedLine) && GameEngine.state.buildingMode === 'NONE') {
             this.beginLogisticsDragFromLine(clickedLine, worldX, worldY);
             return;
         }
 
         const state = GameEngine.state;
-        if (state.buildingMode === 'STAMP') {
+        if (state.buildingMode === 'STAMP' && !this.isTransportLinePlacementActive()) {
             state.buildingMode = 'LINE';
             state.lineStartPos = this.getWorldMousePos(e.clientX, e.clientY);
             state.linePreviewEntities = [state.lineStartPos];
@@ -2636,6 +2770,11 @@ export class UIManager {
 
         const state = GameEngine.state;
         if (!state.placingType) return;
+        if (this.isTransportLinePlacementActive()) {
+            state.previewPos = null;
+            state.linePreviewEntities = [];
+            return;
+        }
 
         // 優先更新 HTML 拖曳外框 (確保它在 UI 面板上也能順暢跟隨滑鼠)
         if (state.buildingMode === 'DRAG' && this.dragGhost) {
@@ -2698,7 +2837,7 @@ export class UIManager {
         } else if (state.buildingMode === 'LINE') {
             const pos = this.getWorldMousePos(e.clientX, e.clientY);
             // 如果位移足夠，執行拉排建造
-            if (state.lineStartPos && (Math.abs(pos.x - state.lineStartPos.x) > 10 || Math.abs(pos.y - state.lineStartPos.y) > 10)) {
+            if (!this.isTransportLinePlacementActive() && state.lineStartPos && (Math.abs(pos.x - state.lineStartPos.x) > 10 || Math.abs(pos.y - state.lineStartPos.y) > 10)) {
                 GameEngine.placeBuildingLine(state.placingType, state.lineStartPos.x, state.lineStartPos.y, pos.x, pos.y);
                 this.lastLinePlacementTime = Date.now();
             }
@@ -2784,6 +2923,10 @@ export class UIManager {
             if (this.lastLinePlacementTime && Date.now() - this.lastLinePlacementTime < 100) return;
 
             const pos = this.getWorldMousePos(e.clientX, e.clientY);
+            if (this.isTransportLinePlacementActive()) {
+                GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
+                return;
+            }
             GameEngine.placeBuilding(state.placingType, pos.x, pos.y);
             return;
         }
@@ -4272,6 +4415,13 @@ export class UIManager {
 
         // 更新日誌
         this.updateLogPanel(forceUpdate);
+
+        document.querySelectorAll(".shortcut-count[data-resource]").forEach(el => {
+            const key = el.getAttribute("data-resource");
+            const nextValue = (res && key) ? (res[key] || 0) : 0;
+            const text = String(nextValue);
+            if (el.textContent !== text || forceUpdate) el.textContent = text;
+        });
 
         const warehousePanel = document.getElementById("warehouse_panel");
         if (warehousePanel && warehousePanel.style.display !== "none") {

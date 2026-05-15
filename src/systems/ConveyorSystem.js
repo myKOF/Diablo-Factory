@@ -1,6 +1,7 @@
 import { ConveyorRouter } from './ConveyorRouter.js';
 import { GameEngine } from './game_systems.js';
 import { UI_CONFIG } from '../ui/ui_config.js';
+import { BuildingSystem } from './BuildingSystem.js';
 
 export class ConveyorSystem {
     constructor() {
@@ -75,6 +76,35 @@ export class ConveyorSystem {
 
     getRouteScale() {
         return Math.round(1 / this.getAlignmentUnit());
+    }
+
+    getTransportLineConfig() {
+        const configs = GameEngine.state?.buildingConfigs || {};
+        const selectedType = GameEngine.state?.activeTransportLineType;
+        return (selectedType && configs[selectedType]) ||
+            Object.values(configs).find(cfg => cfg && cfg.type2 === 'transport_line') ||
+            configs.transport_line ||
+            null;
+    }
+
+    getTransportLineCost(segmentCount) {
+        const cfg = this.getTransportLineConfig();
+        const costs = {};
+        Object.entries(cfg?.costs || {}).forEach(([resource, amount]) => {
+            const value = Number(amount) || 0;
+            if (value > 0) costs[resource] = value * Math.max(0, segmentCount);
+        });
+        return costs;
+    }
+
+    canAffordTransportLine(segmentCount) {
+        const costs = this.getTransportLineCost(segmentCount);
+        return Object.entries(costs).every(([resource, amount]) => (GameEngine.state.resources[resource] || 0) >= amount);
+    }
+
+    buildSingleSegmentAt(worldX, worldY) {
+        GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
+        return false;
     }
 
     getPortAnchorGrid(port, portGrid) {
@@ -466,6 +496,20 @@ export class ConveyorSystem {
                 }
             }
             const beforeCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : 0;
+            const segmentCostCount = Math.max(1, this.ghosts.length - 1);
+            if (segmentCostCount < 2) {
+                GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
+                this.cancelDrag();
+                return;
+            }
+            const maxCosts = this.getTransportLineCost(segmentCostCount);
+            const missing = Object.entries(maxCosts).find(([resource, amount]) => (GameEngine.state.resources[resource] || 0) < amount);
+            if (missing) {
+                GameEngine.triggerWarning("1", [missing[0].toUpperCase()]);
+                this.cancelDrag();
+                return;
+            }
+            const transportCfg = this.getTransportLineConfig();
             const createdLine = window.UIManager.upsertLogisticsLine({
                 lineId: drag.sourceLine?.groupId || null,
                 sourceEnt: sourceEntity,
@@ -475,7 +519,9 @@ export class ConveyorSystem {
                 routeWidth: drag.routeWidth || drag.sourcePort?.width || 1,
                 sourcePort: drag.sourcePort,
                 targetPort: targetPort,
-                conn
+                conn,
+                lineType: transportCfg?.model || transportCfg?.type1 || 'transport_line',
+                efficiency: Number(transportCfg?.efficiency) || 0
             });
             if (createdLine?.groupId && touchedTargetGroupId && window.UIManager.mergeLogisticsLineGroups) {
                 window.UIManager.mergeLogisticsLineGroups(createdLine.groupId, touchedTargetGroupId);
@@ -485,6 +531,10 @@ export class ConveyorSystem {
             }
             const afterCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : beforeCount;
             const builtSegments = Math.max(0, afterCount - beforeCount);
+            if (!BuildingSystem.spendResources(GameEngine.state, this.getTransportLineCost(builtSegments))) {
+                this.cancelDrag();
+                return;
+            }
             GameEngine.addLog(`[物流] 傳送帶建造完成，共 ${builtSegments} 節。`, 'LOGISTICS');
         }
 
@@ -614,14 +664,10 @@ export class ConveyorSystem {
 
         // [核心優化] 統一調用 Router 的驗證邏輯，保持 Single Source of Truth
         const isFootprintValid = this.router.validateRouteFootprint(ghosts, routeWidth, (segmentCount) => {
-            const cfg = UI_CONFIG.ConveyorBuild;
-            if (!cfg || cfg.enableCost === false) return true;
+            if (!UI_CONFIG.ConveyorBuild) return true;
 
             // 道具消耗檢查
-            const cost = segmentCount * (cfg.costPerSegment || 0);
-            const resKey = cfg.costResource || "gold_ingots";
-            const availableGold = (GameEngine.state.resources[resKey] || 0) + (GameEngine.state.resources.gold || 0);
-            return availableGold >= cost;
+            return this.canAffordTransportLine(segmentCount);
         });
 
         return isFootprintValid;

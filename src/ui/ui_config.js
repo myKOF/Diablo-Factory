@@ -110,6 +110,21 @@ export const UI_CONFIG = {
     },
 
     // -- 右下角日誌通知欄 -----------------------------------------
+    ShortcutBar: {
+        anchor: "BOTTOM_CENTER",
+        offsetX: 0,
+        offsetY: 24,
+        width: 620,
+        height: 86,
+        itemWidth: 74,
+        itemHeight: 62,
+        titleColor: "#fbc02d",
+        textColor: "#e0e0e0",
+        descColor: "#e0e0e0",
+        descAlpha: 0.72,
+        fontSize: "12px",
+        glass: true
+    },
     LogPanel: {
         anchor: "BOTTOM_RIGHT",
         offsetX: 20,

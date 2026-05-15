@@ -1,3 +1,16 @@
+# 2026-05-15 transport line build-system update
+
+- [x] Parse new buildings.csv fields: ui_location and efficiency.
+- [x] Route ui_location=1 entries into the building panel and ui_location=2 entries into the bottom shortcut bar.
+- [x] Attach building-table transport line config to logistics segments: lineType, efficiency, and build cost.
+- [x] Drive transfer progress from transport line efficiency in tiles per second.
+- [x] Add basic transport_line building preview/rendering support.
+- [x] Shortcut transport-line placement now creates the original logistics segment objects directly instead of map building entities.
+- [x] Preserve zero build time from CSV so transport_line rows can represent instant/no-worker construction.
+- [x] Single-click transport-line placement now creates the same logistics_segment object/render path as drag placement.
+- [x] Disable single-cell transport-line placement; transport lines now require at least two dragged segments.
+- [x] Show the remaining transport_line resource count on the bottom shortcut bar and refresh it after spending.
+
 # 建築升級系統改造計畫
 
 ## 核心目標

@@ -369,15 +369,19 @@ export class BuildingSystem {
 
         if (!this.spendResources(state, cfg.costs)) return false;
 
+        const rawBuildTime = parseFloat(cfg.buildTime);
+        const isInstantBuild = cfg.type2 === 'transport_line' && !isNaN(rawBuildTime) && rawBuildTime <= 0;
         const newBuilding = {
             id: `build_${type1}_${x}_${y}_${Date.now()}`,
             model: cfg.model,
             type1: cfg.type1,
+            type2: cfg.type2,
             lv: cfg.lv || 1,
-            x: x, y: y, name: "待施工",
+            x: x, y: y, name: isInstantBuild ? cfg.name : "待施工",
             rotationSteps: ((Number(state.placingRotation) || 0) % 4 + 4) % 4,
-            isUnderConstruction: true, buildProgress: 0,
-            buildTime: Math.max(1, cfg.buildTime || 5), // 防止 0 或 NaN
+            isUnderConstruction: !isInstantBuild, buildProgress: isInstantBuild ? 1 : 0,
+            buildTime: isInstantBuild ? 0 : Math.max(1, cfg.buildTime || 5), // 防止 0 或 NaN
+            efficiency: Number(cfg.efficiency) || 0,
             amount: cfg.resourceValue || 0,
             maxAmount: cfg.resourceValue || 0,
             isResource: (type1 === 'farmland' || type1 === 'tree_plantation'),
@@ -388,6 +392,12 @@ export class BuildingSystem {
         state.renderVersion++; // 通知渲染器刷新
 
         // --- NPC 位移修復：如果有村民被壓在剛生成的建築下，將其推開 ---
+        if (isInstantBuild) {
+            state.selectedBuildingId = null;
+            engine.updatePathfindingGrid();
+            engine.updateSpatialGrid();
+            return true;
+        }
         const TS = engine.TILE_SIZE;
         const match = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
         const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
@@ -511,7 +521,8 @@ export class BuildingSystem {
         const match = cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
         const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
 
-        const spacing = state.buildingSpacing !== undefined ? state.buildingSpacing : 1;
+        const isTransportLine = cfg.type2 === 'transport_line' || type1 === 'transport_line';
+        const spacing = isTransportLine ? 0 : (state.buildingSpacing !== undefined ? state.buildingSpacing : 1);
 
         // 為了讓拉排更直覺，我們強迫它沿著主軸線排列
         const dx = endX - startX, dy = endY - startY;

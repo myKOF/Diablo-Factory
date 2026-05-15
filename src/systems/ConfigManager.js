@@ -407,7 +407,9 @@ export class ConfigManager {
                 idxNeedVillagers = hIdx('need_villagers'),
                 idxType2 = hIdx('type2'),
                 idxIngredientsProd = hIdx('ingredients_production'),
-                idxProductionPlace = hIdx('production_place');
+                idxProductionPlace = hIdx('production_place'),
+                idxUiLocation = hIdx('ui_location'),
+                idxEfficiency = hIdx('efficiency');
 
             console.log(`[CSV載入] 建築配置欄位索引結果:`, { model: idxModel, type1: idxType1, prod: idxProd, prodType: idxProdType });
 
@@ -442,6 +444,7 @@ export class ConfigManager {
                 const prodList = this.parseBracketArray(row[idxProd]);
 
                 const resValCosts = ConfigManager.parseResourceCosts(row[idxResourceValue]);
+                const parsedBuildTime = parseFloat(row[idxUpgradeTimes]);
                 const ports = (idxPort !== -1) ? ConfigManager.parseBuildingPorts(row[idxPort]) : [];
                 const cfg = {
                     name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : model,
@@ -455,14 +458,16 @@ export class ConfigManager {
                     population: parseInt(row[idxPop]) || 0,
                     costs: ConfigManager.parseResourceCosts(row[idxUpgradeIngredients]),
                     maxCount: parseInt(row[idxMax]) || 999,
-                    buildTime: parseFloat(row[idxUpgradeTimes]) || 5,
+                    buildTime: isNaN(parsedBuildTime) ? 5 : parsedBuildTime,
                     resourceValue: resValCosts.food || resValCosts.wood || resValCosts.stone || resValCosts.gold_ore || 0,
                     npcProduction: prodList,
                     productionMode: (row[idxProdType] || 'normal').toLowerCase().trim(),
                     logistics: logistics,
+                    ui_location: (idxUiLocation !== -1 && row[idxUiLocation]) ? (parseInt(row[idxUiLocation], 10) || 1) : 1,
+                    efficiency: (idxEfficiency !== -1 && row[idxEfficiency]) ? (parseFloat(row[idxEfficiency]) || 0) : 0,
                     // 升級與解鎖相關
                     buildUnlock: row[idxUnlock] || "{0}",
-                    upgradeTime: parseFloat(row[idxUpgradeTimes]) || 0,
+                    upgradeTime: isNaN(parsedBuildTime) ? 0 : parsedBuildTime,
                     need_villagers: (idxNeedVillagers !== -1 && row[idxNeedVillagers]) ? parseInt(row[idxNeedVillagers]) : 0,
                     ingredients_production_raw: (idxIngredientsProd !== -1 && row[idxIngredientsProd]) ? row[idxIngredientsProd].trim() : "",
                     ports: ports,

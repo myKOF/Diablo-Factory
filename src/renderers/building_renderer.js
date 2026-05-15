@@ -212,6 +212,18 @@ export class BuildingRenderer {
             // 箱子蓋線
             g.lineBetween(offX - 10, offY, offX + 10, offY);
             g.lineBetween(offX, offY - 10, offX, offY);
+        } else if (type1 === 'transport_line') {
+            g.fillStyle(0x263238, finalAlpha);
+            g.fillRect(offX - (uw * TS) / 2, offY - (uh * TS) / 2, uw * TS, uh * TS);
+            g.lineStyle(2, 0x00bcd4, finalAlpha);
+            g.strokeRect(offX - (uw * TS) / 2 + 2, offY - (uh * TS) / 2 + 2, uw * TS - 4, uh * TS - 4);
+            g.fillStyle(0x80deea, finalAlpha);
+            g.beginPath();
+            g.moveTo(offX + 6, offY);
+            g.lineTo(offX - 4, offY - 6);
+            g.lineTo(offX - 4, offY + 6);
+            g.closePath();
+            g.fillPath();
         } else if (type1 && (type1.startsWith('tree') || type1.startsWith('wood'))) {
             g.fillStyle(0x2e7d32, finalAlpha);
             g.fillCircle(offX, offY, 20);
