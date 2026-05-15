@@ -861,15 +861,40 @@ export class LogisticsRenderer {
                     const remaining = [...groupSegs];
                     
                     // 找出起點（這裡先以 order 最小的作為起點）
-                    let current = remaining.sort((a, b) => (a.order || 0) - (b.order || 0))[0];
+                    const sourceAnchor = representative?.sourcePort && Number.isFinite(representative.sourcePort.x) && Number.isFinite(representative.sourcePort.y)
+                        ? representative.sourcePort
+                        : null;
+                    const orientSegmentFrom = (seg, anchor) => {
+                        const sp = seg.routePoints?.[0] || { x: seg.x, y: seg.y };
+                        const ep = seg.routePoints?.[seg.routePoints.length - 1] || sp;
+                        const startDist = anchor ? Math.hypot(anchor.x - sp.x, anchor.y - sp.y) : 0;
+                        const endDist = anchor ? Math.hypot(anchor.x - ep.x, anchor.y - ep.y) : Infinity;
+                        seg.__numberLabelPoint = endDist < startDist ? ep : sp;
+                        seg.__numberNextPoint = endDist < startDist ? sp : ep;
+                        return seg;
+                    };
+                    let current = sourceAnchor
+                        ? remaining
+                            .slice()
+                            .sort((a, b) => {
+                                const aSp = a.routePoints?.[0] || { x: a.x, y: a.y };
+                                const aEp = a.routePoints?.[a.routePoints.length - 1] || aSp;
+                                const bSp = b.routePoints?.[0] || { x: b.x, y: b.y };
+                                const bEp = b.routePoints?.[b.routePoints.length - 1] || bSp;
+                                const aDist = Math.min(Math.hypot(sourceAnchor.x - aSp.x, sourceAnchor.y - aSp.y), Math.hypot(sourceAnchor.x - aEp.x, sourceAnchor.y - aEp.y));
+                                const bDist = Math.min(Math.hypot(sourceAnchor.x - bSp.x, sourceAnchor.y - bSp.y), Math.hypot(sourceAnchor.x - bEp.x, sourceAnchor.y - bEp.y));
+                                return aDist - bDist;
+                            })[0]
+                        : remaining.sort((a, b) => (a.order || 0) - (b.order || 0))[0];
                     
                     if (current) {
+                        orientSegmentFrom(current, sourceAnchor);
                         sortedSegs.push(current);
                         remaining.splice(remaining.indexOf(current), 1);
                         
                         while (remaining.length > 0) {
                             const lastSeg = sortedSegs[sortedSegs.length - 1];
-                            const lastEp = lastSeg.routePoints?.[lastSeg.routePoints.length - 1] || { x: lastSeg.x, y: lastSeg.y };
+                            const lastEp = lastSeg.__numberNextPoint || lastSeg.routePoints?.[lastSeg.routePoints.length - 1] || { x: lastSeg.x, y: lastSeg.y };
                             
                             // 尋找起點與上一個節段終點最接近的節段
                             let nextIndex = -1;
@@ -878,7 +903,11 @@ export class LogisticsRenderer {
                             for (let i = 0; i < remaining.length; i++) {
                                 const rSeg = remaining[i];
                                 const rSp = rSeg.routePoints?.[0] || { x: rSeg.x, y: rSeg.y };
-                                const dist = Math.hypot(lastEp.x - rSp.x, lastEp.y - rSp.y);
+                                const rEp = rSeg.routePoints?.[rSeg.routePoints.length - 1] || rSp;
+                                const dist = Math.min(
+                                    Math.hypot(lastEp.x - rSp.x, lastEp.y - rSp.y),
+                                    Math.hypot(lastEp.x - rEp.x, lastEp.y - rEp.y)
+                                );
                                 if (dist < minEdgeDist) {
                                     minEdgeDist = dist;
                                     nextIndex = i;
@@ -886,11 +915,13 @@ export class LogisticsRenderer {
                             }
                             
                             if (nextIndex !== -1) {
+                                orientSegmentFrom(remaining[nextIndex], lastEp);
                                 sortedSegs.push(remaining[nextIndex]);
                                 remaining.splice(nextIndex, 1);
                             } else {
                                 // 如果找不到相連的，取剩餘中 order 最小的（處理斷線情況）
                                 remaining.sort((a, b) => (a.order || 0) - (b.order || 0));
+                                orientSegmentFrom(remaining[0], lastEp);
                                 sortedSegs.push(remaining[0]);
                                 remaining.splice(0, 1);
                             }
@@ -898,7 +929,8 @@ export class LogisticsRenderer {
                     }
 
                     sortedSegs.forEach((seg, index) => {
-                        const sp = seg.routePoints?.[0] || { x: seg.x, y: seg.y };
+                        seg.order = index;
+                        const sp = seg.__numberLabelPoint || seg.routePoints?.[0] || { x: seg.x, y: seg.y };
                         const cx = sp.x;
                         const cy = sp.y;
 

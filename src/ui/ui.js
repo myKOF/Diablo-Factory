@@ -2134,22 +2134,55 @@ export class UIManager {
             });
         });
         const additions = [];
+        const overlapMergeGroupIds = new Set();
+        const blockedOverlapGroupIds = new Set();
+        const getLineGroupId = (line) => line?.groupId || line?.id || null;
+        const collectSameDirectionOverlapGroups = (segment) => {
+            const groupIds = new Set();
+            this.getLogisticsLineDirectedCells(segment).forEach(cell => {
+                const hits = occupiedTileCenters.get(cell.key) || [];
+                hits.forEach(hit => {
+                    const hitGroupId = getLineGroupId(hit);
+                    if (!hitGroupId || hitGroupId === groupId) return;
+                    const hitCells = this.getLogisticsLineDirectedCells(hit).filter(hitCell => hitCell.key === cell.key);
+                    const hasOppositeDirection = hitCells.some(hitCell =>
+                        hitCell.dirX === -cell.dirX &&
+                        hitCell.dirY === -cell.dirY
+                    );
+                    if (hasOppositeDirection) {
+                        blockedOverlapGroupIds.add(hitGroupId);
+                        groupIds.delete(hitGroupId);
+                        return;
+                    }
+                    const matchesDirection = hitCells.some(hitCell => hitCell.dirX === cell.dirX && hitCell.dirY === cell.dirY);
+                    if (matchesDirection) groupIds.add(hitGroupId);
+                });
+            });
+            return groupIds;
+        };
         segments.forEach(segment => {
             const keys = this.getLogisticsSegmentOccupiedKeys(segment);
             const segmentTileKeys = getSegmentTileKeys(segment);
             if (!keys.length) return;
             const alreadySameRoute = lines.some(item => sameGroup(item) && sameRoute(item, segment));
             if (alreadySameRoute) return;
+            const sameDirectionOverlapGroupIds = collectSameDirectionOverlapGroups(segment);
             const overlapsOccupiedLine = keys.some((key) => {
                 const hit = occupied.get(key);
                 return !!hit;
             });
-            if (overlapsOccupiedLine) return;
+            if (overlapsOccupiedLine) {
+                sameDirectionOverlapGroupIds.forEach(id => overlapMergeGroupIds.add(id));
+                return;
+            }
             const centerBlockedByOccupiedLine = segmentTileKeys.some((key) => {
                 const hits = occupiedTileCenters.get(key) || [];
                 return hits.length > 0;
             });
-            if (centerBlockedByOccupiedLine) return;
+            if (centerBlockedByOccupiedLine) {
+                sameDirectionOverlapGroupIds.forEach(id => overlapMergeGroupIds.add(id));
+                return;
+            }
             keys.forEach(key => occupied.set(key, segment));
             segmentTileKeys.forEach(key => {
                 if (!occupiedTileCenters.has(key)) occupiedTileCenters.set(key, []);
@@ -2189,7 +2222,13 @@ export class UIManager {
             conn.targetPort = cleanTargetPort;
         }
 
-        const mergedGroupId = this.mergeConnectedLogisticsGroups(groupId) || groupId;
+        let mergedGroupId = groupId;
+        overlapMergeGroupIds.forEach(otherGroupId => {
+            if (!otherGroupId || otherGroupId === mergedGroupId) return;
+            if (blockedOverlapGroupIds.has(otherGroupId)) return;
+            mergedGroupId = this.mergeLogisticsLineGroups(mergedGroupId, otherGroupId) || mergedGroupId;
+        });
+        mergedGroupId = this.mergeConnectedLogisticsGroups(mergedGroupId) || mergedGroupId;
         if (conn && mergedGroupId !== groupId) {
             conn.lineId = mergedGroupId;
         }
@@ -2263,21 +2302,67 @@ export class UIManager {
         return false;
     }
 
+    static getLogisticsLineDirectedCells(line) {
+        const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+        if (points.length < 2) return [];
+        const TS = GameEngine.TILE_SIZE;
+        const cells = [];
+        const seen = new Set();
+
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            if (!a || !b) continue;
+
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 0.001) continue;
+
+            const dirX = Math.sign(dx);
+            const dirY = Math.sign(dy);
+            const steps = Math.max(1, Math.round(dist / TS));
+            const stepSize = dist / steps;
+
+            for (let step = 0; step < steps; step++) {
+                const px = a.x + (dx / dist) * stepSize * step;
+                const py = a.y + (dy / dist) * stepSize * step;
+                const snapped = this.snapPointToGridCenter({ x: px, y: py });
+                const key = `${snapped.x},${snapped.y}`;
+                const uniqueKey = `${key}:${dirX},${dirY}`;
+                if (seen.has(uniqueKey)) continue;
+                seen.add(uniqueKey);
+                cells.push({ key, dirX, dirY });
+            }
+        }
+
+        return cells;
+    }
+
     static areLogisticsGroupsTouching(primaryGroupId, secondaryGroupId) {
         if (!primaryGroupId || !secondaryGroupId || primaryGroupId === secondaryGroupId) return false;
         const primaryLines = this.getLogisticsSegmentsByGroupId(primaryGroupId);
         const secondaryLines = this.getLogisticsSegmentsByGroupId(secondaryGroupId);
         if (!primaryLines.length || !secondaryLines.length) return false;
 
-        for (const a of primaryLines) {
-            const aNodes = this.getLogisticsLineNodePoints(a);
-            for (const b of secondaryLines) {
-                const bNodes = this.getLogisticsLineNodePoints(b);
-                if (aNodes.some(point => this.isPointOnLogisticsLine(point, b))) return true;
-                if (bNodes.some(point => this.isPointOnLogisticsLine(point, a))) return true;
+        const secondaryCells = new Map();
+        secondaryLines.forEach(line => {
+            this.getLogisticsLineDirectedCells(line).forEach(cell => {
+                if (!secondaryCells.has(cell.key)) secondaryCells.set(cell.key, []);
+                secondaryCells.get(cell.key).push(cell);
+            });
+        });
+
+        let hasSameDirectionOverlap = false;
+        for (const line of primaryLines) {
+            const cells = this.getLogisticsLineDirectedCells(line);
+            for (const cell of cells) {
+                const overlaps = secondaryCells.get(cell.key) || [];
+                if (overlaps.some(other => other.dirX === -cell.dirX && other.dirY === -cell.dirY)) return false;
+                if (overlaps.some(other => other.dirX === cell.dirX && other.dirY === cell.dirY)) hasSameDirectionOverlap = true;
             }
         }
-        return false;
+        return hasSameDirectionOverlap;
     }
 
     static mergeConnectedLogisticsGroups(groupId) {

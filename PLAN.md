@@ -10,6 +10,11 @@
 - [x] Single-click transport-line placement now creates the same logistics_segment object/render path as drag placement.
 - [x] Disable single-cell transport-line placement; transport lines now require at least two dragged segments.
 - [x] Show the remaining transport_line resource count on the bottom shortcut bar and refresh it after spending.
+- [x] Reorder selected merged transport-line numbering from the source building output port after connecting to prebuilt lines.
+- [x] Redefine transport-line merging so groups connect only when at least one grid cell overlaps with the same travel direction.
+- [x] Allow same-direction overlap attempts to merge with occupied prebuilt logistics lines without placing duplicate overlap segments.
+- [x] Block transport-line group merging whenever an opposite-direction overlap exists, even if another cell in the group overlaps in the same direction.
+- [x] Route drag-end target-line merging through the same overlap/direction validation instead of merging touched lines unconditionally.
 
 # 建築升級系統改造計畫
 

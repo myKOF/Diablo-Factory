@@ -523,7 +523,12 @@ export class ConveyorSystem {
                 lineType: transportCfg?.model || transportCfg?.type1 || 'transport_line',
                 efficiency: Number(transportCfg?.efficiency) || 0
             });
-            if (createdLine?.groupId && touchedTargetGroupId && window.UIManager.mergeLogisticsLineGroups) {
+            if (
+                createdLine?.groupId &&
+                touchedTargetGroupId &&
+                window.UIManager.areLogisticsGroupsTouching?.(createdLine.groupId, touchedTargetGroupId) &&
+                window.UIManager.mergeLogisticsLineGroups
+            ) {
                 window.UIManager.mergeLogisticsLineGroups(createdLine.groupId, touchedTargetGroupId);
             }
             if (drag.sourceLine?.filter && createdLine?.groupId) {
