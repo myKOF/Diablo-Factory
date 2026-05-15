@@ -2268,11 +2268,8 @@ export class WorkerSystem {
                         for (let seg = t.lastSegment + 1; seg <= currentSegment; seg++) {
                             const p1 = points[seg];
                             const p2 = points[seg + 1] || p1;
-                            const g1 = { x: Math.floor(p1.x / 20), y: Math.floor(p1.y / 20) };
-                            const g2 = { x: Math.floor(p2.x / 20), y: Math.floor(p2.y / 20) };
-                            
                             if (this.engine && typeof this.engine.addLog === 'function') {
-                                this.engine.addLog(`${t.itemType} 由位置${seg + 1}(${g1.x},${g1.y})移動至位置${seg + 2}(${g2.x},${g2.y})`, 'LOGISTICS');
+                                this.engine.addLog(`${t.itemType} 由位置${seg + 1}(${Math.round(p1.x)},${Math.round(p1.y)})移動至位置${seg + 2}(${Math.round(p2.x)},${Math.round(p2.y)})`, 'LOGISTICS');
                             }
                         }
                         t.lastSegment = currentSegment;

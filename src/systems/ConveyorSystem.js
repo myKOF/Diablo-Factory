@@ -51,7 +51,7 @@ export class ConveyorSystem {
             bendMode: initialBendMode,
             lastWorldPoint: null,
             // [核心修復] 使用方向偏好，確保右/下端口座標歸入建築格網
-            startGrid: this.toGrid(resolvedStartX, resolvedStartY, currentSourcePort?.dir),
+            startGrid: this.toGrid(resolvedStartX, resolvedStartY, isLineExtension ? null : currentSourcePort?.dir),
             routeWidth,
             isLineExtension,
             directionLocked: false // [核心新增] 是否已鎖定移動方向
@@ -262,7 +262,7 @@ export class ConveyorSystem {
 
         const dragTarget = this.resolveDragTarget(currentX, currentY);
         // [核心修復] 獲取目標網格時考慮端口方向偏好
-        const targetPortGrid = this.toGrid(dragTarget.x, dragTarget.y, dragTarget.port?.dir);
+        const targetPortGrid = this.toGrid(dragTarget.x, dragTarget.y, (dragTarget.port?.sourceType === 'logistics_line') ? null : dragTarget.port?.dir);
         const sourcePortGrid = this.activeDrag.startGrid;
         const sourceRouteGrid = this.getPortAnchorGrid(this.activeDrag.sourcePort, sourcePortGrid);
         const targetRouteGrid = dragTarget.port

@@ -2272,9 +2272,42 @@ export class UIManager {
         }
         GameEngine.state.selectedLogisticsLineId = this.getLogisticsLineSelectionKey(line);
         GameEngine.state.selectedLogisticsGroupId = selectGroup ? (line.groupId || line.id) : null;
-        this.activeLogisticsLine = line;
+                this.activeLogisticsLine = line;
 
-
+        // [新增] 點擊物流線時，日誌顯示出它的所有路徑
+        if (GameEngine.state.logisticsLines) {
+            const groupId = line.groupId || line.id;
+            // [優化] 先按建立時間(批次)排序，再按批次內順序排序，確保延伸路徑順序正確
+            const groupLines = this.ensureLogisticsLineStore()
+                .filter(l => l.groupId === groupId || l.id === groupId)
+                .sort((a, b) => {
+                    const timeA = a.createdAt || 0;
+                    const timeB = b.createdAt || 0;
+                    if (timeA !== timeB) return timeA - timeB;
+                    return (a.order || 0) - (b.order || 0);
+                });
+            
+            const points = [];
+            groupLines.forEach(l => {
+                if (Array.isArray(l.routePoints) && l.routePoints.length > 0) {
+                    // [優化] 只取線段的起點，對應畫面上顯示數字（Cell 0, 1, 2...）的位置
+                    // 這樣日誌顯示的數量就會跟畫面上的格子數完全一致，不會因為收集了端點而多出 1~2 個點
+                    points.push(l.routePoints[0]);
+                } else if (Number.isFinite(l.x) && Number.isFinite(l.y)) {
+                    // 備用：若無 routePoints 則使用中心點
+                    points.push({ x: l.x, y: l.y });
+                }
+            });
+            
+            // 由於每個線段只取一個點，且 groupLines 已經按順序排好，
+            // 這裡不需要再進行複雜的去重或死胡同過濾。
+            if (points.length > 0) {
+                // [優化] 改為逐行輸出日誌，確保在介面上直式換行顯示
+                points.forEach((p, index) => {
+                    GameEngine.addLog(`物流線位置${index} (${Math.round(p.x)},${Math.round(p.y)})`, 'LOGISTICS');
+                });
+            }
+        }
     }
 
     static isSelectedBuilding(ent) {
@@ -2306,7 +2339,7 @@ export class UIManager {
         };
     }
 
-    static beginLogisticsDragFromLine(line) {
+    static beginLogisticsDragFromLine(line, clickX = null, clickY = null) {
         if (!line) return false;
         this.clearWorldSelectionMarquee();
         this.logisticsSourceEntity = null;
@@ -2318,7 +2351,9 @@ export class UIManager {
         GameEngine.state.selectedLogisticsGroupId = null;
         GameEngine.state.logisticsDragLine = { active: true };
         this.hideContextMenu();
-        conveyorSystem.startDrag(line.x, line.y, null, this.getLogisticsLineDragPort(line), line);
+        const startX = (typeof clickX === 'number') ? clickX : line.x;
+        const startY = (typeof clickY === 'number') ? clickY : line.y;
+        conveyorSystem.startDrag(startX, startY, null, this.getLogisticsLineDragPort(line), line);
         return true;
     }
 
@@ -2563,7 +2598,7 @@ export class UIManager {
         const clickedLine = this.getLogisticsLineAt(worldX, worldY);
         const isDoubleClick = (e.detail || 0) >= 2;
         if (clickedLine && !isDoubleClick && this.isSelectedLogisticsLine(clickedLine) && GameEngine.state.buildingMode === 'NONE') {
-            this.beginLogisticsDragFromLine(clickedLine);
+            this.beginLogisticsDragFromLine(clickedLine, worldX, worldY);
             return;
         }
 
