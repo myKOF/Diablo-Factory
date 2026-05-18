@@ -872,14 +872,65 @@ export class LogisticsRenderer {
                     if (!scene.logisticsNumberTexts) scene.logisticsNumberTexts = new Map();
                     if (!scene.logisticsVisibleTextIds) scene.logisticsVisibleTextIds = new Set();
                     
-                    // 依據物理連接性（端點鄰近性）進行排序，以實現 0~15 的順序顯示
+                    // 依據物理連接性（中心格網鄰近性）進行排序，以實現完美的 0~N 順序顯示
                     const sortedSegs = [];
                     const remaining = [...groupSegs];
+
+                    // 1. 尋找起點
+                    // 優先使用 canonical source building 作為起點基準
+                    const canonicalSourceId = representative?.sourceId || null;
+                    const sourceEnt = canonicalSourceId ? (state.mapEntities || []).find(e => e && (e.id === canonicalSourceId || `${e.type1}_${e.x}_${e.y}` === canonicalSourceId)) : null;
                     
-                    // 找出起點（這裡先以 order 最小的作為起點）
-                    const sourceAnchor = representative?.sourcePort && Number.isFinite(representative.sourcePort.x) && Number.isFinite(representative.sourcePort.y)
-                        ? representative.sourcePort
-                        : null;
+                    let startAnchor = null;
+                    if (representative?.sourcePort && Number.isFinite(representative.sourcePort.x) && Number.isFinite(representative.sourcePort.y)) {
+                        startAnchor = representative.sourcePort;
+                    } else if (sourceEnt) {
+                        startAnchor = { x: sourceEnt.x, y: sourceEnt.y };
+                    }
+
+                    const getDistanceInHalfTiles = (a, b) => {
+                        return Math.hypot((a.gridX ?? 0) - (b.gridX ?? 0), (a.gridY ?? 0) - (b.gridY ?? 0));
+                    };
+
+                    // 依據距離 startAnchor 的距離選取最靠近的 segment 作為起點
+                    let current = null;
+                    if (startAnchor) {
+                        let minDist = Infinity;
+                        let bestIdx = -1;
+                        for (let i = 0; i < remaining.length; i++) {
+                            const seg = remaining[i];
+                            const dist = Math.hypot(seg.x - startAnchor.x, seg.y - startAnchor.y);
+                            if (dist < minDist) {
+                                minDist = dist;
+                                bestIdx = i;
+                            }
+                        }
+                        if (bestIdx !== -1) {
+                            current = remaining[bestIdx];
+                        }
+                    }
+
+                    // 如果沒有 startAnchor，或者沒找到，則尋找 leaf segment (只有 1 個鄰居的節段)
+                    if (!current && remaining.length > 0) {
+                        let leafSeg = null;
+                        for (let i = 0; i < remaining.length; i++) {
+                            const a = remaining[i];
+                            let neighborCount = 0;
+                            for (let j = 0; j < remaining.length; j++) {
+                                if (i === j) continue;
+                                const b = remaining[j];
+                                if (getDistanceInHalfTiles(a, b) <= 3.2) {
+                                    neighborCount++;
+                                }
+                            }
+                            if (neighborCount === 1) {
+                                leafSeg = a;
+                                break;
+                            }
+                        }
+                        current = leafSeg || remaining[0];
+                    }
+
                     const orientSegmentFrom = (seg, anchor) => {
                         const sp = seg.routePoints?.[0] || { x: seg.x, y: seg.y };
                         const ep = seg.routePoints?.[seg.routePoints.length - 1] || sp;
@@ -889,57 +940,52 @@ export class LogisticsRenderer {
                         seg.__numberNextPoint = endDist < startDist ? sp : ep;
                         return seg;
                     };
-                    let current = sourceAnchor
-                        ? remaining
-                            .slice()
-                            .sort((a, b) => {
-                                const aSp = a.routePoints?.[0] || { x: a.x, y: a.y };
-                                const aEp = a.routePoints?.[a.routePoints.length - 1] || aSp;
-                                const bSp = b.routePoints?.[0] || { x: b.x, y: b.y };
-                                const bEp = b.routePoints?.[b.routePoints.length - 1] || bSp;
-                                const aDist = Math.min(Math.hypot(sourceAnchor.x - aSp.x, sourceAnchor.y - aSp.y), Math.hypot(sourceAnchor.x - aEp.x, sourceAnchor.y - aEp.y));
-                                const bDist = Math.min(Math.hypot(sourceAnchor.x - bSp.x, sourceAnchor.y - bSp.y), Math.hypot(sourceAnchor.x - bEp.x, sourceAnchor.y - bEp.y));
-                                return aDist - bDist;
-                            })[0]
-                        : remaining.sort((a, b) => (a.order || 0) - (b.order || 0))[0];
-                    
+
                     if (current) {
-                        orientSegmentFrom(current, sourceAnchor);
+                        orientSegmentFrom(current, startAnchor);
                         sortedSegs.push(current);
                         remaining.splice(remaining.indexOf(current), 1);
-                        
+
                         while (remaining.length > 0) {
                             const lastSeg = sortedSegs[sortedSegs.length - 1];
                             const lastEp = lastSeg.__numberNextPoint || lastSeg.routePoints?.[lastSeg.routePoints.length - 1] || { x: lastSeg.x, y: lastSeg.y };
-                            
-                            // 尋找起點與上一個節段終點最接近的節段
+
+                            // 尋找在 3.2 半格寬度內最靠近 lastSeg 的節段
                             let nextIndex = -1;
-                            let minEdgeDist = 15; // 容許 15 像素內的偏差
-                            
+                            let minGridDist = 3.2; // 容許 3.2 格網單位內（涵蓋直角拐角）的偏差
+
                             for (let i = 0; i < remaining.length; i++) {
                                 const rSeg = remaining[i];
-                                const rSp = rSeg.routePoints?.[0] || { x: rSeg.x, y: rSeg.y };
-                                const rEp = rSeg.routePoints?.[rSeg.routePoints.length - 1] || rSp;
-                                const dist = Math.min(
-                                    Math.hypot(lastEp.x - rSp.x, lastEp.y - rSp.y),
-                                    Math.hypot(lastEp.x - rEp.x, lastEp.y - rEp.y)
-                                );
-                                if (dist < minEdgeDist) {
-                                    minEdgeDist = dist;
+                                const dist = getDistanceInHalfTiles(lastSeg, rSeg);
+                                if (dist < minGridDist) {
+                                    minGridDist = dist;
                                     nextIndex = i;
                                 }
                             }
-                            
+
                             if (nextIndex !== -1) {
                                 orientSegmentFrom(remaining[nextIndex], lastEp);
                                 sortedSegs.push(remaining[nextIndex]);
                                 remaining.splice(nextIndex, 1);
                             } else {
-                                // 如果找不到相連的，取剩餘中 order 最小的（處理斷線情況）
-                                remaining.sort((a, b) => (a.order || 0) - (b.order || 0));
-                                orientSegmentFrom(remaining[0], lastEp);
-                                sortedSegs.push(remaining[0]);
-                                remaining.splice(0, 1);
+                                // 如果遇到斷線或沒有相鄰的，則選擇剩餘中距離 startAnchor 最近的（或 original order 最小的）
+                                let bestFallbackIdx = 0;
+                                if (startAnchor) {
+                                    let minDist = Infinity;
+                                    for (let i = 0; i < remaining.length; i++) {
+                                        const seg = remaining[i];
+                                        const dist = Math.hypot(seg.x - startAnchor.x, seg.y - startAnchor.y);
+                                        if (dist < minDist) {
+                                            minDist = dist;
+                                            bestFallbackIdx = i;
+                                        }
+                                    }
+                                } else {
+                                    remaining.sort((a, b) => (a.order || 0) - (b.order || 0));
+                                }
+                                orientSegmentFrom(remaining[bestFallbackIdx], lastEp);
+                                sortedSegs.push(remaining[bestFallbackIdx]);
+                                remaining.splice(bestFallbackIdx, 1);
                             }
                         }
                     }
