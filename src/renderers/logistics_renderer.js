@@ -809,9 +809,6 @@ export class LogisticsRenderer {
                     .filter(item => item.route?.points?.length >= 2);
                 if (segmentRoutes.length === 0) return;
 
-                const isSelected = groupSegs.some(line => window.UIManager && typeof window.UIManager.isSelectedLogisticsLine === 'function'
-                    ? window.UIManager.isSelectedLogisticsLine(line)
-                    : state.selectedLogisticsLineId === line.id);
                 const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(representative?.sourceId && representative?.targetId);
                 const hasTransportFilter = hasLogisticsTransportFilter(groupKey, groupSegs);
                 // [核心修復] 嚴格要求物流線必須連接起點與終點才算 "接通" (物理連通)
@@ -828,7 +825,11 @@ export class LogisticsRenderer {
                 const useConnectedIdleStyle = isPhysicallyConnected && !isOperating;
 
                 segmentRoutes.forEach(({ line, route }) => {
-                    drawLogisticsRoute(route.points, route.width || widthTiles, isSelected, isConnected, line, useConnectedIdleStyle, turnCellKeys);
+                    // [核心修正] 單擊時僅高亮被點擊的那一段，而不是用 some 讓整個群組都高亮
+                    const isLineSelected = window.UIManager && typeof window.UIManager.isSelectedLogisticsLine === 'function'
+                        ? window.UIManager.isSelectedLogisticsLine(line)
+                        : state.selectedLogisticsLineId === line.id;
+                    drawLogisticsRoute(route.points, route.width || widthTiles, isLineSelected, isConnected, line, useConnectedIdleStyle, turnCellKeys);
                 });
                 if (isPortToPortCandidate && isPhysicallyConnected) {
                     segmentRoutes.forEach(({ route }) => {
@@ -859,12 +860,15 @@ export class LogisticsRenderer {
                         LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, arrowColor, arrowAlpha, arrowSize);
                     }
                 }
-                if (isSelected) {
-                    segmentRoutes.forEach(({ line, route }) => {
-                        drawSelectedLogisticsSegmentOutlineOnRoute(route.points, route.width || widthTiles, line);
-                    });
+                const isGroupSelected = window.UIManager && typeof window.UIManager.isSelectedLogisticsLine === 'function'
+                    ? groupSegs.some(line => window.UIManager.isSelectedLogisticsLine(line))
+                    : groupSegs.some(line => state.selectedLogisticsLineId === line.id);
 
-                    // 新增：顯示格子順序數字
+                if (isGroupSelected) {
+                    // [核心修正] 移除原先的 segmentRoutes.forEach 繪製紅色方框，因為這會導致單擊也顯示整條方框。
+                    // 紅色方框繪製已經被移至 drawLogisticsRoute 內部 (只針對被選中的單獨 line 繪製)。
+
+                    // 顯示格子順序數字 (群組內有任何線段被選中時就顯示整個群組的編號)
                     if (!scene.logisticsNumberTexts) scene.logisticsNumberTexts = new Map();
                     if (!scene.logisticsVisibleTextIds) scene.logisticsVisibleTextIds = new Set();
                     

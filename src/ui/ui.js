@@ -2647,13 +2647,94 @@ export class UIManager {
         const line = this.getLogisticsLineById(lineId);
         if (!line) return false;
         const lineKey = this.getLogisticsLineSelectionKey(line);
+        const groupId = line.groupId || line.id;
+        
         state.logisticsLines = this.ensureLogisticsLineStore().filter(item => this.getLogisticsLineSelectionKey(item) !== lineKey);
-        if (line.sourceId && line.targetId && !this.getLogisticsSegmentsByGroupId(line.groupId).length) {
-            const sourceEnt = state.mapEntities.find(ent => this.getEntityId(ent) === line.sourceId);
-            if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
-                sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== line.groupId && conn.id !== line.targetId);
+        
+        // [核心修正] 當刪除其中一段時，檢查剩餘的同群組線段是否被切斷。若被切斷，則拆分成不同的群組。
+        const remainingSegments = this.getLogisticsSegmentsByGroupId(groupId);
+        if (remainingSegments.length > 0) {
+            // 建立圖來尋找連通分量
+            const adj = new Map();
+            remainingSegments.forEach(seg => {
+                adj.set(seg.id, []);
+            });
+            for (let i = 0; i < remainingSegments.length; i++) {
+                for (let j = i + 1; j < remainingSegments.length; j++) {
+                    const a = remainingSegments[i];
+                    const b = remainingSegments[j];
+                    const aPts = Array.isArray(a.routePoints) && a.routePoints.length > 0 ? a.routePoints : [{x:a.x, y:a.y}, {x:a.x, y:a.y}];
+                    const bPts = Array.isArray(b.routePoints) && b.routePoints.length > 0 ? b.routePoints : [{x:b.x, y:b.y}, {x:b.x, y:b.y}];
+                    const aStart = aPts[0]; const aEnd = aPts[aPts.length - 1];
+                    const bStart = bPts[0]; const bEnd = bPts[bPts.length - 1];
+                    const threshold = GameEngine.TILE_SIZE * 0.1;
+                    const connected = 
+                        (Math.hypot(aStart.x - bStart.x, aStart.y - bStart.y) < threshold) ||
+                        (Math.hypot(aStart.x - bEnd.x, aStart.y - bEnd.y) < threshold) ||
+                        (Math.hypot(aEnd.x - bStart.x, aEnd.y - bStart.y) < threshold) ||
+                        (Math.hypot(aEnd.x - bEnd.x, aEnd.y - bEnd.y) < threshold);
+                    if (connected) {
+                        adj.get(a.id).push(b.id);
+                        adj.get(b.id).push(a.id);
+                    }
+                }
+            }
+            
+            const visited = new Set();
+            const components = [];
+            remainingSegments.forEach(seg => {
+                if (visited.has(seg.id)) return;
+                const comp = [];
+                const q = [seg.id];
+                visited.add(seg.id);
+                while(q.length > 0) {
+                    const cur = q.shift();
+                    comp.push(cur);
+                    adj.get(cur).forEach(next => {
+                        if (!visited.has(next)) {
+                            visited.add(next);
+                            q.push(next);
+                        }
+                    });
+                }
+                components.push(comp);
+            });
+            
+            // 如果連通分量超過 1 個，代表線段被切斷了，必須將切斷的部分賦予新的 groupId
+            if (components.length > 1) {
+                // 找出包含 sourceId 的分量 (如果有的話)，讓它保留原 groupId，其他的改名
+                let mainCompIndex = 0;
+                for (let c = 0; c < components.length; c++) {
+                    const hasSource = components[c].some(segId => {
+                        const seg = remainingSegments.find(s => s.id === segId);
+                        return seg && seg.sourceId;
+                    });
+                    if (hasSource) {
+                        mainCompIndex = c;
+                        break;
+                    }
+                }
+                
+                for (let c = 0; c < components.length; c++) {
+                    if (c === mainCompIndex) continue;
+                    const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+                    components[c].forEach(segId => {
+                        const seg = remainingSegments.find(s => s.id === segId);
+                        if (seg) seg.groupId = newGroupId;
+                    });
+                }
+                GameEngine.addLog(`[物流] 線段中斷，物流線已拆分為獨立路線。`, 'LOGISTICS');
+            }
+        } else {
+            // 如果這個群組已經沒有任何線段，清除 sourceEnt 的輸出紀錄
+            if (line.sourceId && line.targetId) {
+                const sourceEnt = state.mapEntities.find(ent => this.getEntityId(ent) === line.sourceId);
+                if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
+                    sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId && conn.id !== line.targetId);
+                }
             }
         }
+        
         if (state.selectedLogisticsLineId === lineKey) state.selectedLogisticsLineId = null;
         if (state.selectedLogisticsGroupId === line.groupId || state.selectedLogisticsGroupId === line.id) state.selectedLogisticsGroupId = null;
         if (this.activeLogisticsLine && this.getLogisticsLineSelectionKey(this.activeLogisticsLine) === lineKey) this.activeLogisticsLine = null;
@@ -2683,14 +2764,18 @@ export class UIManager {
     }
 
     static deleteSelectedLogisticsLine() {
-        const selectedLineId = GameEngine.state.selectedLogisticsLineId;
-        if (!selectedLineId && !this.activeLogisticsLine && !this.activeLogisticsConnection) return false;
+        const state = GameEngine.state;
+        const selectedLineId = state.selectedLogisticsLineId;
+        const selectedGroupId = state.selectedLogisticsGroupId;
+        
+        if (!selectedLineId && !selectedGroupId) return false;
 
         let deleted = false;
-        if (this.activeLogisticsConnection?.groupId) {
-            deleted = this.deleteLogisticsLineGroupById(this.activeLogisticsConnection.groupId);
-        } else if (this.activeLogisticsLine) {
-            deleted = this.deleteLogisticsLineById(this.getLogisticsLineSelectionKey(this.activeLogisticsLine));
+        
+        // [核心修正] 統一刪除邏輯：只要有選中群組(雙擊)，就刪除群組。否則只刪除單格(單擊)。
+        // 移除強制根據 activeLogisticsConnection 刪除群組的舊邏輯，確保玩家點擊行為能 100% 反映在刪除結果上。
+        if (selectedGroupId) {
+            deleted = this.deleteLogisticsLineGroupById(selectedGroupId);
         } else if (selectedLineId) {
             deleted = this.deleteLogisticsLineById(selectedLineId);
         }
@@ -2702,10 +2787,8 @@ export class UIManager {
         this.activeLogisticsConnection = null;
         this.activeLogisticsLine = null;
         this.logisticsSourceLine = null;
-        if (GameEngine.state.selectedLogisticsLineId === selectedLineId) {
-            GameEngine.state.selectedLogisticsLineId = null;
-        }
-        GameEngine.state.selectedLogisticsGroupId = null;
+        state.selectedLogisticsLineId = null;
+        state.selectedLogisticsGroupId = null;
         return true;
     }
 
