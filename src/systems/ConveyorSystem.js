@@ -510,8 +510,54 @@ export class ConveyorSystem {
                 return;
             }
             const transportCfg = this.getTransportLineConfig();
+            
+            let shouldMergeWithSource = false;
+            if (drag.sourceLine && (drag.sourceLine.groupId || drag.sourceLine.id)) {
+                const sourceGroupId = drag.sourceLine.groupId || drag.sourceLine.id;
+                const lines = (GameEngine.state.logisticsLines || []).filter(l => l && (l.groupId === sourceGroupId || l.id === sourceGroupId));
+                const grid = this.toGrid(drag.startX, drag.startY);
+                let p1MatchCount = 0;
+                let p2MatchCount = 0;
+                lines.forEach(l => {
+                    const pts = Array.isArray(l.routePoints) ? l.routePoints : [{x: l.x, y: l.y}, {x: l.x, y: l.y}];
+                    if (pts.length === 0) return;
+                    const p1 = this.toGrid(pts[0].x, pts[0].y);
+                    const p2 = this.toGrid(pts[pts.length - 1].x, pts[pts.length - 1].y);
+                    if (p1.x === grid.x && p1.y === grid.y) p1MatchCount++;
+                    if (p2.x === grid.x && p2.y === grid.y) p2MatchCount++;
+                });
+                
+                // 只有從群組的真正終點延伸，才是連續的物流線 (允許合併)。
+                // 若是單格點 (p1 與 p2 重疊且只有一條線)，也視為終點。
+                const isTrueEnd = (p2MatchCount === 1 && p1MatchCount === 0) || 
+                                  (p1MatchCount === 1 && p2MatchCount === 1 && lines.length === 1);
+
+                if (isTrueEnd) {
+                    shouldMergeWithSource = true;
+                    // 檢查是否為完全反向拖曳，反向也不允許合併
+                    const sourceRoute = Array.isArray(drag.sourceLine.routePoints) ? drag.sourceLine.routePoints : [];
+                    if (sourceRoute.length >= 2 && points.length >= 2) {
+                        const getDir = (a, b) => {
+                            if (!a || !b) return null;
+                            const dx = b.x - a.x;
+                            const dy = b.y - a.y;
+                            if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+                            return Math.abs(dx) >= Math.abs(dy)
+                                ? { x: Math.sign(dx) || 1, y: 0 }
+                                : { x: 0, y: Math.sign(dy) || 1 };
+                        };
+                        // 取得來源線段最後一個 vector
+                        const originalDir = getDir(sourceRoute[sourceRoute.length - 2], sourceRoute[sourceRoute.length - 1]);
+                        const extensionDir = getDir(points[0], points[1]);
+                        if (originalDir && extensionDir && originalDir.x === -extensionDir.x && originalDir.y === -extensionDir.y) {
+                            shouldMergeWithSource = false;
+                        }
+                    }
+                }
+            }
+
             const createdLine = window.UIManager.upsertLogisticsLine({
-                lineId: drag.sourceLine?.groupId || null,
+                lineId: shouldMergeWithSource ? (drag.sourceLine.groupId || drag.sourceLine.id) : null,
                 sourceEnt: sourceEntity,
                 targetEnt: targetBuilding,
                 targetPoint: targetPort || points[points.length - 1],

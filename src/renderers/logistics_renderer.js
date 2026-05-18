@@ -644,15 +644,17 @@ export class LogisticsRenderer {
                 }
             }
 
-            // Final fallback: 只要群組中存在「任一輸出建築端」到「任一輸入建築端」的同分量連通，
-            // 就判定為 port-to-port 連通，避免轉彎延伸時方向資料干擾造成誤判。
+            // Final fallback: 為了避免「路過」的物流線被錯誤判定為接通，
+            // 嚴格限制只有從「起點節點 (startKeys)」到「終點節點 (endKeys)」的連接才算有效。
             if (!connected) {
                 const outputStarts = [];
                 const inputEnds = [];
-                nodeKeys.forEach((k) => {
+                (startKeys.length > 0 ? startKeys : nodeKeys).forEach((k) => {
                     const outs = getPortOwnersNearNode(k, true);
-                    const ins = getPortOwnersNearNode(k, false);
                     if (outs.length > 0) outputStarts.push({ key: k, owners: outs });
+                });
+                (endKeys.length > 0 ? endKeys : nodeKeys).forEach((k) => {
+                    const ins = getPortOwnersNearNode(k, false);
                     if (ins.length > 0) inputEnds.push({ key: k, owners: ins });
                 });
                 for (const s of outputStarts) {
@@ -725,10 +727,22 @@ export class LogisticsRenderer {
                         });
                     }
                 } else {
-                    cellKeys.forEach((k) => {
+                    // [核心修正] 細胞層級 (cell-level) 也必須嚴格限制為起點與終點附近的細胞，不能全域掃描
+                    const startCells = new Set();
+                    const endCells = new Set();
+                    startKeys.forEach(nk => {
+                        getNearbyCellKeys(getNodePoint(nk), GameEngine.TILE_SIZE * 1.5).forEach(ck => startCells.add(ck));
+                    });
+                    endKeys.forEach(nk => {
+                        getNearbyCellKeys(getNodePoint(nk), GameEngine.TILE_SIZE * 1.5).forEach(ck => endCells.add(ck));
+                    });
+                    
+                    (startCells.size > 0 ? Array.from(startCells) : cellKeys).forEach((k) => {
                         const outs = getPortOwnersNearCell(k, true);
-                        const ins = getPortOwnersNearCell(k, false);
                         if (outs.length > 0) outputCells.push({ key: k, owners: outs });
+                    });
+                    (endCells.size > 0 ? Array.from(endCells) : cellKeys).forEach((k) => {
+                        const ins = getPortOwnersNearCell(k, false);
                         if (ins.length > 0) inputCells.push({ key: k, owners: ins });
                     });
                 }
@@ -800,13 +814,11 @@ export class LogisticsRenderer {
                     : state.selectedLogisticsLineId === line.id);
                 const isPortToPortCandidate = portToPortCandidateGroupIds.has(groupKey) || !!(representative?.sourceId && representative?.targetId);
                 const hasTransportFilter = hasLogisticsTransportFilter(groupKey, groupSegs);
-                const isPhysicallyConnected = isPortToPortCandidate
-                    ? portToPortConnectedGroupIds.has(groupKey)
-                    : hasTransportFilter;
+                // [核心修復] 嚴格要求物流線必須連接起點與終點才算 "接通" (物理連通)
+                // 移除 `hasTransportFilter` 的 fallback，避免斷頭/斷尾但帶有 filter 的路線錯誤顯示亮色
+                const isPhysicallyConnected = portToPortConnectedGroupIds.has(groupKey);
                 const isOperating = isPhysicallyConnected && hasTransportFilter;
-                const isConnected = isPortToPortCandidate
-                    ? (isPhysicallyConnected || isOperating)
-                    : hasTransportFilter;
+                const isConnected = isPhysicallyConnected || isOperating;
                 const connectedCellKeys = portToPortConnectedCellKeysByGroup.get(groupKey) || new Set();
                 const connectedCellPaths = portToPortConnectedCellPathsByGroup.get(groupKey) || [];
                 const pathTurnCellKeys = getPathTurnCellKeys(connectedCellPaths);
