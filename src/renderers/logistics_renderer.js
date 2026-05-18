@@ -514,7 +514,7 @@ export class LogisticsRenderer {
             const getPortOwnersNearCell = (cellKey, wantOutput) => {
                 if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return [];
                 const cellPoint = cellPointByKey.get(cellKey) || getNodePoint(cellKey);
-                const maxSnap = GameEngine.TILE_SIZE * 1.5;
+                const maxSnap = GameEngine.TILE_SIZE * 0.9;
                 const owners = [];
                 (state.mapEntities || []).forEach((ent) => {
                     if (!ent || ent.isUnderConstruction) return;
@@ -731,10 +731,10 @@ export class LogisticsRenderer {
                     const startCells = new Set();
                     const endCells = new Set();
                     startKeys.forEach(nk => {
-                        getNearbyCellKeys(getNodePoint(nk), GameEngine.TILE_SIZE * 1.5).forEach(ck => startCells.add(ck));
+                        getNearbyCellKeys(getNodePoint(nk), GameEngine.TILE_SIZE * 0.9).forEach(ck => startCells.add(ck));
                     });
                     endKeys.forEach(nk => {
-                        getNearbyCellKeys(getNodePoint(nk), GameEngine.TILE_SIZE * 1.5).forEach(ck => endCells.add(ck));
+                        getNearbyCellKeys(getNodePoint(nk), GameEngine.TILE_SIZE * 0.9).forEach(ck => endCells.add(ck));
                     });
                     
                     (startCells.size > 0 ? Array.from(startCells) : cellKeys).forEach((k) => {

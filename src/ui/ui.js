@@ -2649,7 +2649,13 @@ export class UIManager {
         const lineKey = this.getLogisticsLineSelectionKey(line);
         const groupId = line.groupId || line.id;
         
-        state.logisticsLines = this.ensureLogisticsLineStore().filter(item => this.getLogisticsLineSelectionKey(item) !== lineKey);
+        const lineGridX = line.gridX;
+        const lineGridY = line.gridY;
+        state.logisticsLines = this.ensureLogisticsLineStore().filter(item => {
+            const isTarget = this.getLogisticsLineSelectionKey(item) === lineKey;
+            const isDuplicate = item && item.gridX === lineGridX && item.gridY === lineGridY;
+            return !isTarget && !isDuplicate;
+        });
         
         // [核心修正] 當刪除其中一段時，檢查剩餘的同群組線段是否被切斷。若被切斷，則拆分成不同的群組。
         const remainingSegments = this.getLogisticsSegmentsByGroupId(groupId);
