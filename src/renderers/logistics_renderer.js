@@ -954,16 +954,16 @@ export class LogisticsRenderer {
                 }
                 drawnCanonicalGroups.add(groupKey);
             });
-
-            // 隱藏未使用的文字
-            if (scene.logisticsNumberTexts) {
-                scene.logisticsNumberTexts.forEach((txt, key) => {
-                    if (!scene.logisticsVisibleTextIds || !scene.logisticsVisibleTextIds.has(key)) {
-                        txt.setVisible(false);
-                    }
-                });
-                if (scene.logisticsVisibleTextIds) scene.logisticsVisibleTextIds.clear();
-            }
+        }
+        
+        // 隱藏未使用的文字 (移出 if 區塊，確保即使所有線段被刪除也能正確隱藏)
+        if (scene.logisticsNumberTexts) {
+            scene.logisticsNumberTexts.forEach((txt, key) => {
+                if (!scene.logisticsVisibleTextIds || !scene.logisticsVisibleTextIds.has(key)) {
+                    txt.setVisible(false);
+                }
+            });
+            if (scene.logisticsVisibleTextIds) scene.logisticsVisibleTextIds.clear();
         }
 
         // 用整個群組拓撲畫轉角箭頭，避免單段 route（通常只有兩點）看不到轉彎。
