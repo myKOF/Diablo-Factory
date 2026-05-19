@@ -340,7 +340,7 @@ export class UIManager {
             }
             if (e.key === "Delete") {
                 if (this.isTextInputEvent(e)) return;
-                if (this.deleteSelectedLogisticsLine()) {
+                if (LogisticsUI.deleteSelectedLogisticsLine()) {
                     e.preventDefault();
                     e.stopPropagation();
                 }
@@ -1512,63 +1512,7 @@ export class UIManager {
     }
 
 
-    static clearLogisticsSelection() {
-        GameEngine.state.selectedLogisticsLineId = null;
-        GameEngine.state.selectedLogisticsGroupId = null;
-        this.activeLogisticsConnection = null;
-        this.activeLogisticsLine = null;
-    }
 
-    static isTransportLinePlacementActive() {
-        const state = GameEngine.state;
-        const cfg = state?.placingType ? state.buildingConfigs?.[state.placingType] : null;
-        return !!cfg && cfg.type2 === 'transport_line';
-    }
-
-    static selectLogisticsLine(line, selectGroup = false) {
-        if (!line) {
-            this.clearLogisticsSelection();
-            return;
-        }
-        GameEngine.state.selectedLogisticsLineId = conveyorSystem.getLogisticsLineSelectionKey(line);
-        GameEngine.state.selectedLogisticsGroupId = selectGroup ? (line.groupId || line.id) : null;
-                this.activeLogisticsLine = line;
-
-        // [新增] 點擊物流線時，日誌顯示出它的所有路徑
-        if (GameEngine.state.logisticsLines) {
-            const groupId = line.groupId || line.id;
-            // [優化] 先按建立時間(批次)排序，再按批次內順序排序，確保延伸路徑順序正確
-            const groupLines = conveyorSystem.ensureLogisticsLineStore()
-                .filter(l => l.groupId === groupId || l.id === groupId)
-                .sort((a, b) => {
-                    const timeA = a.createdAt || 0;
-                    const timeB = b.createdAt || 0;
-                    if (timeA !== timeB) return timeA - timeB;
-                    return (a.order || 0) - (b.order || 0);
-                });
-            
-            const points = [];
-            groupLines.forEach(l => {
-                if (Array.isArray(l.routePoints) && l.routePoints.length > 0) {
-                    // [優化] 只取線段的起點，對應畫面上顯示數字（Cell 0, 1, 2...）的位置
-                    // 這樣日誌顯示的數量就會跟畫面上的格子數完全一致，不會因為收集了端點而多出 1~2 個點
-                    points.push(l.routePoints[0]);
-                } else if (Number.isFinite(l.x) && Number.isFinite(l.y)) {
-                    // 備用：若無 routePoints 則使用中心點
-                    points.push({ x: l.x, y: l.y });
-                }
-            });
-            
-            // 由於每個線段只取一個點，且 groupLines 已經按順序排好，
-            // 這裡不需要再進行複雜的去重或死胡同過濾。
-            if (points.length > 0) {
-                // [優化] 改為逐行輸出日誌，確保在介面上直式換行顯示
-                points.forEach((p, index) => {
-                    GameEngine.addLog(`物流線位置${index} (${Math.round(p.x)},${Math.round(p.y)})`, 'LOGISTICS');
-                });
-            }
-        }
-    }
 
     static isSelectedBuilding(ent) {
         if (!ent) return false;
@@ -1579,71 +1523,7 @@ export class UIManager {
             selectedIds.includes(id);
     }
 
-    static getLogisticsLineDragPort(line, anchorX = null, anchorY = null) {
-        const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
-        const first = points[0];
-        const second = points[1];
-        let dir = null;
-        if (first && second) {
-            const dx = second.x - first.x;
-            const dy = second.y - first.y;
-            if (Math.abs(dx) >= Math.abs(dy)) dir = dx >= 0 ? "right" : "left";
-            else dir = dy >= 0 ? "down" : "up";
-        }
-        return {
-            dir,
-            width: Math.max(1, Number(line?.routeWidth) || 1),
-            x: Number.isFinite(anchorX) ? anchorX : line?.x,
-            y: Number.isFinite(anchorY) ? anchorY : line?.y,
-            sourceType: "logistics_line"
-        };
-    }
 
-    static beginLogisticsDragFromLine(line, clickX = null, clickY = null) {
-        if (!line) return false;
-        this.clearWorldSelectionMarquee();
-        this.logisticsSourceEntity = null;
-        this.logisticsSourceLine = line;
-        this.isLogisticsDragging = true;
-        this.activeLogisticsLine = line;
-        this.activeLogisticsConnection = null;
-        GameEngine.state.selectedLogisticsLineId = conveyorSystem.getLogisticsLineSelectionKey(line);
-        GameEngine.state.selectedLogisticsGroupId = null;
-        GameEngine.state.logisticsDragLine = { active: true };
-        this.hideContextMenu();
-        const startX = (typeof clickX === 'number') ? clickX : line.x;
-        const startY = (typeof clickY === 'number') ? clickY : line.y;
-        conveyorSystem.startDrag(startX, startY, null, this.getLogisticsLineDragPort(line, startX, startY), line);
-        return true;
-    }
-
-    static beginLogisticsDragFromBuilding(ent, sourcePort) {
-        if (!ent || !sourcePort) return false;
-        if (!this.isSelectedBuilding(ent)) return false;
-        this.clearWorldSelectionMarquee();
-        this.logisticsSourceEntity = ent;
-        this.logisticsSourceLine = null;
-        this.isLogisticsDragging = true;
-        this.hideContextMenu();
-        conveyorSystem.startDrag(sourcePort.x, sourcePort.y, ent, sourcePort);
-        GameEngine.state.logisticsDragLine = { active: true };
-        return true;
-    }
-
-    static beginTransportLineBuildDrag(worldX, worldY, sourceLine = null) {
-        this.clearWorldSelectionMarquee();
-        this.logisticsSourceEntity = null;
-        this.logisticsSourceLine = sourceLine || null;
-        this.isLogisticsDragging = true;
-        this.hideContextMenu();
-        if (sourceLine) {
-            conveyorSystem.startDrag(worldX, worldY, null, this.getLogisticsLineDragPort(sourceLine, worldX, worldY), sourceLine);
-        } else {
-            conveyorSystem.startDrag(worldX, worldY, null, null, null);
-        }
-        GameEngine.state.logisticsDragLine = { active: true, buildMode: 'transport_line' };
-        return true;
-    }
 
     static clearWorldSelectionMarquee() {
         const scene = window.PhaserScene;
@@ -1679,18 +1559,7 @@ export class UIManager {
             key === "ㄐ";
     }
 
-    static cancelLogisticsDrag() {
-        if (!this.isLogisticsDragging && !GameEngine.state.logisticsDragLine) return false;
-        conveyorSystem.cancelDrag();
-        this.clearWorldSelectionMarquee();
-        this.logisticsSourceEntity = null;
-        this.logisticsSourceLine = null;
-        this.potentialLogisticsDrag = null;
-        this.isLogisticsDragging = false;
-        GameEngine.state.logisticsDragLine = null;
-        GameEngine.addLog(`[物流] 已取消物流線建造。`, 'LOGISTICS');
-        return true;
-    }
+
 
     static cancelActiveConstructionPreview() {
         if (this.cancelLogisticsDrag()) return true;
@@ -1704,34 +1573,7 @@ export class UIManager {
     }
 
 
-    static deleteSelectedLogisticsLine() {
-        const state = GameEngine.state;
-        const selectedLineId = state.selectedLogisticsLineId;
-        const selectedGroupId = state.selectedLogisticsGroupId;
-        
-        if (!selectedLineId && !selectedGroupId) return false;
 
-        let deleted = false;
-        
-        // [核心修正] 統一刪除邏輯：只要有選中群組(雙擊)，就刪除群組。否則只刪除單格(單擊)。
-        // 移除強制根據 activeLogisticsConnection 刪除群組的舊邏輯，確保玩家點擊行為能 100% 反映在刪除結果上。
-        if (selectedGroupId) {
-            deleted = conveyorSystem.deleteLogisticsLineGroupById(selectedGroupId);
-        } else if (selectedLineId) {
-            deleted = conveyorSystem.deleteLogisticsLineById(selectedLineId);
-        }
-
-        if (!deleted) return false;
-
-        const menu = document.getElementById("logistics_menu");
-        if (menu) menu.style.display = "none";
-        this.activeLogisticsConnection = null;
-        this.activeLogisticsLine = null;
-        this.logisticsSourceLine = null;
-        state.selectedLogisticsLineId = null;
-        state.selectedLogisticsGroupId = null;
-        return true;
-    }
 
 
     static handleWorldMouseDown(e) {
@@ -1885,7 +1727,7 @@ export class UIManager {
         } else if (state.buildingMode === 'LINE') {
             const pos = this.getWorldMousePos(e.clientX, e.clientY);
             // 如果位移足夠，執行拉排建造
-            if (!this.isTransportLinePlacementActive() && state.lineStartPos && (Math.abs(pos.x - state.lineStartPos.x) > 10 || Math.abs(pos.y - state.lineStartPos.y) > 10)) {
+            if (!LogisticsUI.isTransportLinePlacementActive() && state.lineStartPos && (Math.abs(pos.x - state.lineStartPos.x) > 10 || Math.abs(pos.y - state.lineStartPos.y) > 10)) {
                 GameEngine.placeBuildingLine(state.placingType, state.lineStartPos.x, state.lineStartPos.y, pos.x, pos.y);
                 this.lastLinePlacementTime = Date.now();
             }
@@ -2879,36 +2721,7 @@ export class UIManager {
         if (tip) tip.style.display = "none";
     }
 
-    static getLogisticsTooltipEl() {
-        let tip = document.getElementById("logistics_tooltip");
-        if (!tip) {
-            tip = document.createElement("div");
-            tip.id = "logistics_tooltip";
-            tip.style.cssText = "position:absolute; z-index:3000; display:none; pointer-events:none; background:rgba(12,12,12,0.96); color:#f5f5f5; border:2px solid #f5f5f5; padding:6px 9px; font-size:16px; line-height:1.35; white-space:nowrap; box-shadow:0 3px 8px rgba(0,0,0,0.55);";
-            document.body.appendChild(tip);
-        }
-        return tip;
-    }
 
-    static showLogisticsTooltip(event, text) {
-        const tip = this.getLogisticsTooltipEl();
-        tip.innerHTML = `<div>${text}</div>`;
-        tip.style.display = "block";
-        this.moveLogisticsTooltip(event);
-    }
-
-    static moveLogisticsTooltip(event) {
-        const tip = document.getElementById("logistics_tooltip");
-        if (!tip || tip.style.display === "none") return;
-        const margin = 12;
-        const rect = tip.getBoundingClientRect();
-        let left = event.clientX + margin;
-        let top = event.clientY + margin;
-        if (left + rect.width > window.innerWidth - 6) left = event.clientX - rect.width - margin;
-        if (top + rect.height > window.innerHeight - 6) top = event.clientY - rect.height - margin;
-        tip.style.left = `${Math.max(6, left)}px`;
-        tip.style.top = `${Math.max(6, top)}px`;
-    }
 
     static getLogisticsTooltipEl() { return LogisticsUI.getLogisticsTooltipEl(); }
     static showLogisticsTooltip(event, text) { LogisticsUI.showLogisticsTooltip(event, text); }
