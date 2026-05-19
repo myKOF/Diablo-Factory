@@ -1562,7 +1562,7 @@ export class UIManager {
 
 
     static cancelActiveConstructionPreview() {
-        if (this.cancelLogisticsDrag()) return true;
+        if (LogisticsUI.cancelLogisticsDrag()) return true;
         if (!GameEngine.state.placingType && GameEngine.state.buildingMode === 'NONE') return false;
         this.cancelBuildingMode();
         this.clearWorldSelectionMarquee();
@@ -2743,30 +2743,10 @@ export class UIManager {
         // 注意：這裡不再自動隱藏 settings_panel，避免 toggle 時發生衝突
     }
 
-    static cancelLogisticsDrag() { return LogisticsUI.cancelLogisticsDrag(); }
-
     static updateValues(forceUpdate = false) {
         const state = GameEngine.state;
         const res = state.resources;
 
-        // 更新區域：日誌系統 (優化篩選與顏色)
-        const lc = document.getElementById("log_content");
-        if (lc) {
-            const history = state.log;
-            const filtered = history.filter(item => this.logFilters[item.category]);
-
-            // 建立內容字串並附帶顏色
-            const content = filtered.map(item => {
-                const color = item.category === 'PATH' ? '#ffff00' : '#ffffff';
-                return `<div style="color: ${color}">> ${item.msg}</div>`;
-            }).join("");
-
-            if (lc.innerHTML !== content || forceUpdate) {
-                const isAtBottom = lc.scrollHeight - lc.scrollTop - lc.clientHeight < 30;
-                lc.innerHTML = content;
-                if (isAtBottom) lc.scrollTop = lc.scrollHeight;
-            }
-        }
 
         // 更新資源
         const rb = document.getElementById("resource_bar");
