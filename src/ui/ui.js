@@ -2,6 +2,8 @@ import { UI_CONFIG } from "./ui_config.js";
 import { GameEngine } from "../systems/game_systems.js";
 import { SynthesisSystem } from "../systems/SynthesisSystem.js";
 import { conveyorSystem } from "../systems/ConveyorSystem.js";
+import { WarehouseUI } from "./WarehouseUI.js";
+import { LogisticsUI } from "./LogisticsUI.js";
 
 
 /**
@@ -11,9 +13,20 @@ import { conveyorSystem } from "../systems/ConveyorSystem.js";
 export class UIManager {
     static uiLayer;
     static dragGhost = null;
-    static logisticsSourceEntity = null; static logisticsSourceLine = null; static activeLogisticsConnection = null; static activeLogisticsLine = null;
-    static isLogisticsDragging = false;
-    static potentialLogisticsDrag = null;
+    
+    static get logisticsSourceEntity() { return LogisticsUI.logisticsSourceEntity; }
+    static set logisticsSourceEntity(val) { LogisticsUI.logisticsSourceEntity = val; }
+    static get logisticsSourceLine() { return LogisticsUI.logisticsSourceLine; }
+    static set logisticsSourceLine(val) { LogisticsUI.logisticsSourceLine = val; }
+    static get activeLogisticsConnection() { return LogisticsUI.activeLogisticsConnection; }
+    static set activeLogisticsConnection(val) { LogisticsUI.activeLogisticsConnection = val; }
+    static get activeLogisticsLine() { return LogisticsUI.activeLogisticsLine; }
+    static set activeLogisticsLine(val) { LogisticsUI.activeLogisticsLine = val; }
+    static get isLogisticsDragging() { return LogisticsUI.isLogisticsDragging; }
+    static set isLogisticsDragging(val) { LogisticsUI.isLogisticsDragging = val; }
+    static get potentialLogisticsDrag() { return LogisticsUI.potentialLogisticsDrag; }
+    static set potentialLogisticsDrag(val) { LogisticsUI.potentialLogisticsDrag = val; }
+    
     static activeWarehouseEntity = null;
     static activeBuilding = null;
     static uiPositions = {};
@@ -280,6 +293,8 @@ export class UIManager {
 
         // [核心修正] 將 UIManager 暴露至全域，確保 HTML 字串中的 onclick 能正確呼叫方法
         window.UIManager = this;
+        window.WarehouseUI = WarehouseUI;
+        window.LogisticsUI = LogisticsUI;
 
         this.loadUIPositions();
         this.renderAll();
@@ -751,7 +766,7 @@ export class UIManager {
             warehouseBtn.innerHTML = warehouseBtnCfg.icon || "📦";
             warehouseBtn.onclick = (e) => {
                 e.stopPropagation();
-                this.toggleWarehousePanel(this.activeWarehouseEntity);
+                WarehouseUI.toggleWarehousePanel(this.activeWarehouseEntity);
             };
             this.uiLayer.appendChild(warehouseBtn);
         }
@@ -1759,18 +1774,18 @@ export class UIManager {
 
         const clickedLine = conveyorSystem.getLogisticsLineAt(worldX, worldY);
         const isDoubleClick = (e.detail || 0) >= 2;
-        if (this.isTransportLinePlacementActive() && GameEngine.state.buildingMode === 'STAMP') {
-            this.beginTransportLineBuildDrag(worldX, worldY, clickedLine || null);
+        if (LogisticsUI.isTransportLinePlacementActive() && GameEngine.state.buildingMode === 'STAMP') {
+            LogisticsUI.beginTransportLineBuildDrag(worldX, worldY, clickedLine || null);
             conveyorSystem.updateDrag(worldX, worldY);
             return;
         }
         if (clickedLine && !isDoubleClick && conveyorSystem.isSelectedLogisticsLine(clickedLine) && GameEngine.state.buildingMode === 'NONE') {
-            this.beginLogisticsDragFromLine(clickedLine, worldX, worldY);
+            LogisticsUI.beginLogisticsDragFromLine(clickedLine, worldX, worldY);
             return;
         }
 
         const state = GameEngine.state;
-        if (state.buildingMode === 'STAMP' && !this.isTransportLinePlacementActive()) {
+        if (state.buildingMode === 'STAMP' && !LogisticsUI.isTransportLinePlacementActive()) {
             state.buildingMode = 'LINE';
             state.lineStartPos = this.getWorldMousePos(e.clientX, e.clientY);
             state.linePreviewEntities = [state.lineStartPos];
@@ -1787,7 +1802,7 @@ export class UIManager {
             if (dist > threshold) {
                 const pending = this.potentialLogisticsDrag;
                 this.potentialLogisticsDrag = null;
-                if (this.beginLogisticsDragFromBuilding(pending.entity, pending.sourcePort)) {
+                if (LogisticsUI.beginLogisticsDragFromBuilding(pending.entity, pending.sourcePort)) {
                     const world = this.getWorldPoint(e.clientX, e.clientY);
                     conveyorSystem.updateDrag(world.x, world.y);
                     return;
@@ -1803,7 +1818,7 @@ export class UIManager {
 
         const state = GameEngine.state;
         if (!state.placingType) return;
-        if (this.isTransportLinePlacementActive()) {
+        if (LogisticsUI.isTransportLinePlacementActive()) {
             state.previewPos = null;
             state.linePreviewEntities = [];
             return;
@@ -1835,7 +1850,7 @@ export class UIManager {
     static handleWorldMouseUp(e) {
         // [右鍵邏輯專區]
         if (e.button === 2) {
-            if (this.cancelLogisticsDrag()) {
+            if (LogisticsUI.cancelLogisticsDrag()) {
                 GameEngine.state.rightClickStartedInPlacementMode = false;
                 GameEngine.state.suppressRightClickMoveUntil = Date.now() + 250;
                 if (typeof e.preventDefault === "function") e.preventDefault();
@@ -1940,7 +1955,7 @@ export class UIManager {
             if (!e.target.closest("#settings_btn") && !e.target.closest("#settings_panel") &&
                 !e.target.closest("#warehouse_btn") && !e.target.closest("#warehouse_panel")) {
                 this.hideSettingsPanel();
-                this.hideWarehousePanel();
+                WarehouseUI.hideWarehousePanel();
             }
 
             // 如果點到的是具體的 UI 標籤或按鈕 (而非背景層)，則中止後續地圖交互邏輯
@@ -1956,7 +1971,7 @@ export class UIManager {
             if (this.lastLinePlacementTime && Date.now() - this.lastLinePlacementTime < 100) return;
 
             const pos = this.getWorldMousePos(e.clientX, e.clientY);
-            if (this.isTransportLinePlacementActive()) {
+            if (LogisticsUI.isTransportLinePlacementActive()) {
                 GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
                 return;
             }
@@ -2021,7 +2036,7 @@ export class UIManager {
             if (!clicked.isUnderConstruction && (clicked.type1 === "storehouse" || clicked.type2 === "storehouse")) {
                 const panel = document.getElementById("warehouse_panel");
                 if (panel && panel.style.display === "none") {
-                    this.toggleWarehousePanel(clicked);
+                    WarehouseUI.toggleWarehousePanel(clicked);
                 }
             } else {
                 this.showContextMenu(clicked);
@@ -2040,7 +2055,7 @@ export class UIManager {
             GameEngine.state.selectedBuildingIds = [];
             GameEngine.state.selectedBuildingId = null;
             GameEngine.state.selectedResourceId = null;
-            this.selectLogisticsLine(clickedLine, isDoubleClick);
+            LogisticsUI.selectLogisticsLine(clickedLine, isDoubleClick);
             GameEngine.state.lastSelectionTime = now;
             GameEngine.state.lastSelectedLogisticsGroupId = groupId;
             if (isDoubleClick) {
@@ -2049,9 +2064,9 @@ export class UIManager {
             }
             const source = GameEngine.state.mapEntities.find(ent => this.getEntityId(ent) === clickedLine.sourceId);
             if (source && clickedLine.targetId) {
-                this.showLogisticsMenu(source, clickedLine.targetId, e.clientX, e.clientY, conveyorSystem.getLogisticsLineSelectionKey(clickedLine));
+                LogisticsUI.showLogisticsMenu(source, clickedLine.targetId, e.clientX, e.clientY, conveyorSystem.getLogisticsLineSelectionKey(clickedLine));
             } else {
-                this.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
+                LogisticsUI.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
             }
             return;
         }
@@ -2689,25 +2704,6 @@ export class UIManager {
         this.showContextMenu(ent); // 立即刷新 UI
     }
 
-    static dismissWarehouseWorkers(event) {
-        if (event) event.stopPropagation();
-        const ent = this.activeWarehouseEntity;
-        if (!ent) return;
-
-        const previousMenuEntity = this.activeMenuEntity;
-        this.activeMenuEntity = ent;
-        this.dismissWorkers(null);
-        this.activeMenuEntity = previousMenuEntity;
-        this.renderWarehousePanel();
-    }
-
-    static adjustWarehousePanelWorkers(event, delta) {
-        if (event) event.stopPropagation();
-        const ent = this.activeWarehouseEntity;
-        if (!ent) return;
-        GameEngine.adjustWarehouseWorkers(ent, delta);
-        this.renderWarehousePanel();
-    }
 
     static adjustWorkers(event, delta) {
         if (event) event.stopPropagation();
@@ -2798,61 +2794,6 @@ export class UIManager {
         if (settings) settings.style.display = "none";
     }
 
-    static toggleWarehousePanel(entity = null) {
-        const panel = document.getElementById("warehouse_panel");
-        if (!panel) return;
-
-        if (entity) {
-            this.activeWarehouseEntity = entity;
-        }
-
-        if (panel.style.display === "none") {
-            this.hideContextMenu(); // 先關閉其它選單
-            this.hideSettingsPanel();
-
-            const ent = this.activeWarehouseEntity;
-            const customId = ent ? `warehouse_panel_${ent.id || `${ent.type1}_${ent.x}_${ent.y}`}` : "warehouse_panel_global";
-            panel.dataset.dragId = customId;
-            this.applyAnchorStyle(panel, UI_CONFIG.WarehousePanel, customId);
-
-            this.renderWarehousePanel();
-            panel.style.display = "flex";
-            panel.style.flexDirection = "column";
-        } else {
-            panel.style.display = "none";
-        }
-    }
-
-    // 倉庫系統狀態緩存
-    static warehouseFilterValue = 1; // 1: 資源(Lv1), 2: 材料(Lv2+)
-    static warehouseSortById = false;
-
-    static setWarehouseFilter(lv) {
-        this.warehouseFilterValue = lv;
-        this.renderWarehousePanel();
-    }
-
-    static sortWarehouse() {
-        this.warehouseSortById = !this.warehouseSortById; // 切換排序狀態
-        this.renderWarehousePanel();
-    }
-
-    static getWarehouseAssignedWorkers(ent) {
-        if (!ent || !GameEngine.state.units || !GameEngine.state.units.villagers) return [];
-        const eid = ent.id || `${ent.type1}_${ent.x}_${ent.y}`;
-        return GameEngine.state.units.villagers
-            .filter(v => v.assignedWarehouseId === eid)
-            .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
-    }
-
-    static getWarehouseWorkerCooldown(worker) {
-        if (!worker || !worker.logisticsWorkKey) return 0;
-        const parts = String(worker.logisticsWorkKey).split('|');
-        const type = parts[parts.length - 1];
-        const total = this.getIngredientProductionTime(type, 1);
-        if (!Number.isFinite(total) || total <= 0) return 0;
-        return Math.max(0, Math.min(1, (worker.logisticsWorkTimer || 0) / total));
-    }
 
     static getBuildingWorkerCooldown(worker) {
         if (!worker) return 0;
@@ -2862,7 +2803,7 @@ export class UIManager {
                 : 1;
             return total > 0 ? Math.max(0, Math.min(1, (worker.gatherTimer || 0) / total)) : 0;
         }
-        return this.getWarehouseWorkerCooldown(worker);
+        return WarehouseUI.getWarehouseWorkerCooldown(worker);
     }
 
     static updateBuildingWorkerSlots() {
@@ -2901,170 +2842,6 @@ export class UIManager {
         });
     }
 
-    static renderWarehouseWorkerSlots(ent) {
-        if (!ent) return '';
-        const bCfg = GameEngine.getBuildingConfig(ent.type1, ent.lv || 1) || {};
-        const workers = this.getWarehouseAssignedWorkers(ent);
-        const targetCount = Math.max(ent.targetWorkerCount || 0, workers.length, bCfg.need_villagers || 5);
-        const slotCount = Math.max(1, targetCount);
-        const slots = [];
-
-        for (let i = 0; i < slotCount; i++) {
-            const worker = workers[i];
-            const progress = worker ? this.getWarehouseWorkerCooldown(worker) : 0;
-            const deg = Math.round(progress * 360);
-            const face = worker ? '👨' : '';
-            slots.push(`
-                <div class="warehouse-worker-slot" data-worker-id="${worker ? worker.id : ''}" style="width: 27px; height: 27px; min-width: 27px; min-height: 27px; flex: 0 0 27px; aspect-ratio: 1 / 1; border-radius: 50%; border: 1.5px solid ${worker ? '#c59a79' : 'rgba(255,255,255,0.16)'}; background: ${worker ? `conic-gradient(rgba(50,240,106,0.75) ${deg}deg, rgba(255,255,255,0.08) ${deg}deg 360deg)` : 'rgba(0,0,0,0.28)'}; display: flex; align-items: center; justify-content: center; box-sizing: border-box; box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 5px rgba(0,0,0,0.35);">
-                    <div style="width: 20px; height: 20px; min-width: 20px; min-height: 20px; flex: 0 0 20px; aspect-ratio: 1 / 1; border-radius: 50%; background: ${worker ? '#5b3d31' : 'rgba(255,255,255,0.03)'}; display: flex; align-items: center; justify-content: center; color: #f6e2cf; font-size: 13px; line-height: 1;">
-                        ${face}
-                    </div>
-                </div>
-            `);
-        }
-
-        return `
-            <div id="warehouse_worker_slots" style="display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 8px 10px; margin-bottom: 10px; border: 1.5px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(0,0,0,0.26); box-sizing: border-box; overflow: hidden;">
-                ${slots.join('')}
-            </div>
-        `;
-    }
-
-    static updateWarehouseWorkerSlots() {
-        const container = document.getElementById("warehouse_worker_slots");
-        if (!container || !this.activeWarehouseEntity) return;
-        const workers = this.getWarehouseAssignedWorkers(this.activeWarehouseEntity);
-        const workerMap = new Map(workers.map(worker => [worker.id, worker]));
-        container.querySelectorAll(".warehouse-worker-slot").forEach(slot => {
-            const worker = workerMap.get(slot.dataset.workerId);
-            if (!worker) return;
-            const deg = Math.round(this.getWarehouseWorkerCooldown(worker) * 360);
-            slot.style.background = `conic-gradient(rgba(50,240,106,0.75) ${deg}deg, rgba(255,255,255,0.08) ${deg}deg 360deg)`;
-        });
-    }
-
-    static renderWarehousePanel() {
-        const panel = document.getElementById("warehouse_panel");
-        if (!panel) return;
-        const cfg = UI_CONFIG.WarehousePanel;
-        const ent = this.activeWarehouseEntity;
-
-        // 強制設置容器為 flex 佈局以支援內部高度自動填滿
-        panel.style.display = "flex";
-        panel.style.flexDirection = "column";
-        panel.style.padding = "20px";
-        panel.style.boxSizing = "border-box";
-
-        // 右上角關閉按鈕
-        let html = `
-            <div onclick="event.stopPropagation(); window.UIManager.toggleWarehousePanel()" 
-                 style="position: absolute; top: 15px; right: 20px; width: 30px; height: 30px; 
-                        display: flex; align-items: center; justify-content: center; 
-                        cursor: pointer; color: #fbc02d; font-size: 28px; transition: all 0.2s; z-index: 10;"
-                 onmouseover="this.style.transform='scale(1.2)'; this.style.color='#fff'" 
-                 onmouseout="this.style.transform='scale(1)'; this.style.color='#fbc02d'">
-                ×
-            </div>
-        `;
-
-        html += `<div class="title" style="text-align:center; font-size: 20px; border-bottom: 2px solid #8b6e4b; margin-bottom: 8px; padding-bottom: 10px; color: ${cfg.titleColor || '#fbc02d'};">${cfg.title}</div>`;
-
-        html += `
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 8px; gap: 10px; min-height: 30px;">
-                <div style="display:flex; align-items:center; gap: 12px;">
-                    ${ent ? `<button onclick="window.UIManager.dismissWarehouseWorkers(event)" 
-                        style="padding: 5px 12px; border: 1px solid #b86b6b; border-radius: 4px; background: #5a1f1f; color: #fff1f1; cursor: pointer; transition: 0.2s; font-weight: bold;" title="解散這間倉庫的派駐工人">解散</button>
-                    <button onclick="window.UIManager.adjustWarehousePanelWorkers(event, -1)"
-                        style="width: 24px; height: 24px; border-radius: 50%; background: #5b3d31; border: 2px solid #c59a79; color: #f6e2cf; font-size: 16px; font-weight: 900; cursor: pointer; display:flex; align-items:center; justify-content:center; line-height:1; box-shadow: 0 2px 5px rgba(0,0,0,0.35);" title="減少 1 位派駐工人">－</button>` : ``}
-                </div>
-                <button onclick="window.UIManager.sortWarehouse(); event.stopPropagation();" 
-                        style="padding: 5px 12px; border: 1px solid #6b5232; border-radius: 4px; background: ${this.warehouseSortById ? '#3a2b16' : '#221a10'}; color: #ddd; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 5px;" title="依 ID 排序">
-                    <span style="font-size: 12px;">排序</span> ${this.warehouseSortById ? '↑' : '↓'}
-                </button>
-            </div>
-        `;
-
-        html += this.renderWarehouseWorkerSlots(ent);
-
-        html += `<div style="display:flex; flex-wrap: wrap; gap:10px; padding: 15px; color: #e0e0e0; flex: 1; align-content: flex-start; justify-content: flex-start; background: rgba(0,0,0,0.3); border-radius: 8px; overflow-y: auto; margin-bottom: 5px;">`;
-
-        const configs = { ...GameEngine.state.ingredientConfigs };
-        const warehouseStorage = ent ? (ent.storage || {}) : {};
-        // 確保 wood, stone, gold 有配置資料以供顯示
-        ['wood', 'stone', 'gold'].forEach(resType => {
-            if (!configs[resType]) {
-                const baseId = resType === 'wood' ? 6 : (resType === 'stone' ? 7 : (resType === 'gold' ? 12 : 999));
-                configs[resType] = { id: baseId, name: GameEngine.RESOURCE_NAMES[resType] || resType, icon: resType, type: resType, stack: 5000, lv: 1 };
-            }
-        });
-        Object.keys(warehouseStorage || {}).forEach((resType, index) => {
-            if ((warehouseStorage[resType] || 0) <= 0 || configs[resType]) return;
-            configs[resType] = {
-                id: 9000 + index,
-                name: GameEngine.RESOURCE_NAMES[resType] || resType,
-                icon: resType,
-                type: resType,
-                stack: 5000,
-                lv: 1
-            };
-        });
-
-        let itemsForTab = Object.values(configs).filter(c => {
-            if (!c || !c.type) return false;
-            const amount = warehouseStorage[c.type] || 0;
-            // 顯示所有有庫存的項目，不再區分等級 (頁籤)
-            return amount > 0;
-        });
-
-        if (this.warehouseSortById) {
-            itemsForTab.sort((a, b) => a.id - b.id);
-        }
-
-        // 將資源按堆疊數拆分
-        const stackedItems = [];
-        itemsForTab.forEach(item => {
-            let total = warehouseStorage[item.type] || 0;
-            const stackLimit = item.stack || 1000;
-            if (total <= 0) return;
-            while (total > 0) {
-                const current = Math.min(total, stackLimit);
-                stackedItems.push({
-                    ...item,
-                    currentAmount: current,
-                    isFull: current >= stackLimit
-                });
-                total -= current;
-            }
-        });
-
-        if (stackedItems.length === 0) {
-            html += `<div style="width:100%; text-align:center; padding: 40px; color: #666; font-size: 14px;">此分類目前無任何物品</div>`;
-        } else {
-            stackedItems.forEach(stack => {
-                const amtColor = cfg.itemTextColor || '#fff';
-                const displayIcon = this.getIngredientIcon(stack.type);
-
-
-
-                // 適應 420px 寬度的 5 欄佈局
-                html += `
-                    <div style="position: relative; width: calc(20% - 8px); aspect-ratio: 1; min-width: 50px; background: rgba(255,255,255,0.05); border: 1px solid rgba(139,110,75,0.5); border-radius: 6px; display:flex; justify-content:center; align-items:center; overflow: hidden; cursor: default; transition: all 0.2s;" 
-                         onmouseenter="this.style.background='rgba(255,255,255,0.1)'; this.style.borderColor='#fbc02d'; window.UIManager.showItemTooltip(event, '${stack.name}', '${stack.id}', '${stack.currentAmount}', '${stack.stack}')"
-                         onmousemove="window.UIManager.moveItemTooltip(event)"
-                         onmouseleave="this.style.background='rgba(255,255,255,0.05)'; this.style.borderColor='rgba(139,110,75,0.5)'; window.UIManager.hideItemTooltip()">
-                        <div style="font-size: ${cfg.itemIconSize || 28}px; pointer-events: none;">${displayIcon}</div>
-                        <div style="position: absolute; bottom: 2px; left: 0; right: 0; text-align: center; font-size: ${cfg.itemFontSize || 10}px; font-family: monospace; color: ${amtColor}; font-weight: bold; text-shadow: 1px 1px 1px #000; pointer-events: none;">
-                            ${(cfg.useAbbreviation !== false && stack.currentAmount >= 1000) ? (stack.currentAmount / 1000).toFixed(1) + 'k' : stack.currentAmount}
-                        </div>
-                    </div>
-                `;
-            });
-        }
-
-        html += `</div>`; // end grid
-
-        panel.innerHTML = html;
-    }
 
     static getItemTooltipEl() {
         let tip = document.getElementById("item_tooltip");
@@ -3133,15 +2910,12 @@ export class UIManager {
         tip.style.top = `${Math.max(6, top)}px`;
     }
 
-    static hideLogisticsTooltip() {
-        const tip = document.getElementById("logistics_tooltip");
-        if (tip) tip.style.display = "none";
-    }
+    static getLogisticsTooltipEl() { return LogisticsUI.getLogisticsTooltipEl(); }
+    static showLogisticsTooltip(event, text) { LogisticsUI.showLogisticsTooltip(event, text); }
+    static moveLogisticsTooltip(event) { LogisticsUI.moveLogisticsTooltip(event); }
+    static hideLogisticsTooltip() { LogisticsUI.hideLogisticsTooltip(); }
 
-    static hideWarehousePanel() {
-        const panel = document.getElementById("warehouse_panel");
-        if (panel) panel.style.display = "none";
-    }
+    static hideWarehousePanel() { WarehouseUI.hideWarehousePanel(); }
 
     static hideContextMenu() {
         this.activeMenuEntity = null;
@@ -3150,238 +2924,13 @@ export class UIManager {
         const destroyBtn = document.getElementById("destroy_btn");
         if (destroyBtn) destroyBtn.style.display = "none";
 
-        this.hideWarehousePanel(); // 關閉右鍵選單時順便把倉庫也關閉
+        WarehouseUI.hideWarehousePanel(); // 關閉右鍵選單時順便把倉庫也關閉
         const lm = document.getElementById("logistics_menu"); if (lm) lm.style.display = "none";
 
         // 注意：這裡不再自動隱藏 settings_panel，避免 toggle 時發生衝突
     }
 
-    static showLogisticsMenu(sourceEnt, targetId, mouseX, mouseY, lineId = null) {
-        this.hideContextMenu();
-        if (!sourceEnt) return;
-        const outputTargets = Array.isArray(sourceEnt?.outputTargets) ? sourceEnt.outputTargets : [];
-        const connForLine = outputTargets.find(t => t.id === targetId) || null;
-        const hintedSegment = lineId ? conveyorSystem.getLogisticsLineById(lineId) : null;
-        const groupId = connForLine?.lineId || hintedSegment?.groupId || null;
-        const selectedSegment = lineId ? conveyorSystem.getLogisticsLineById(lineId) : (groupId ? conveyorSystem.getLogisticsLineById(groupId) : null);
-        const selectedLineId = selectedSegment ? conveyorSystem.getLogisticsLineSelectionKey(selectedSegment) : null;
-        this.activeLogisticsConnection = { source: sourceEnt, targetId: targetId, lineId: selectedLineId, groupId };
-        this.activeLogisticsLine = selectedSegment;
-        GameEngine.state.selectedLogisticsLineId = selectedLineId;
-        let menu = document.getElementById("logistics_menu");
-        if (!menu) {
-            menu = document.createElement("div"); menu.id = "logistics_menu"; menu.className = "panel glass-panel";
-            menu.style.cssText = `position: absolute; z-index: 2000; padding: 15px; display: flex; flex-direction: column; gap: 10px; background: rgba(20,20,20,0.95); border: 2px solid #4caf50; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); pointer-events: auto;`;
-            this.uiLayer.appendChild(menu);
-            this.makeDraggable(menu, "logistics_menu");
-        }
-        menu.dataset.dragId = `logistics_menu_${groupId || targetId || "standalone"}`;
-        let availableItems = [];
-        const sourceCfg = GameEngine.getBuildingConfig(sourceEnt.type1, sourceEnt.lv || 1);
-        const isProcessingPlantSource = sourceCfg && sourceCfg.type2 === 'processing_plant';
-        const isGatheringSource = sourceCfg && (
-            sourceCfg.type2 === 'gathering' ||
-            ['timber_factory', 'tree_plantation', 'stone_factory', 'quarry', 'barn', 'farmland', 'gold_mining_factory'].includes(sourceEnt.type1)
-        );
-        if (isGatheringSource) {
-            availableItems = this.getGatheringLogisticsItems(sourceEnt, sourceCfg);
-        } else if (isProcessingPlantSource) {
-            const recipes = typeof SynthesisSystem !== 'undefined'
-                ? (SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, sourceEnt) || [])
-                : [];
-            availableItems = recipes.filter(r => r.isUnlocked).map(r => r.type);
-            if (!sourceEnt.currentRecipe && !sourceEnt._missingRecipeFilterHintLogged) {
-                GameEngine.addLog(`[物流] ${sourceEnt.name || sourceEnt.type1} 尚未設定加工廠生產線；物流線視窗只是在設定搬運品項，不是配方設定入口。`, 'LOGISTICS');
-                sourceEnt._missingRecipeFilterHintLogged = true;
-            }
-        } else if (typeof SynthesisSystem !== 'undefined') {
-            const recipes = SynthesisSystem.getBuildingRecipes(GameEngine.state, GameEngine, sourceEnt) || [];
-            if (recipes.length > 0) availableItems = recipes.filter(r => r.isUnlocked).map(r => r.type);
-        }
-        if (!isProcessingPlantSource && availableItems.length === 0) {
-            if (['storehouse', 'warehouse', 'village', 'town_center'].includes(sourceEnt.type1)) {
-                const storage = sourceEnt.storage || {};
-                availableItems = Object.keys(storage).filter(k => storage[k] > 0);
-            } else {
-                availableItems = Object.keys(GameEngine.state.resources).filter(k => GameEngine.state.resources[k] > 0);
-            }
-            if (sourceEnt.outputBuffer) availableItems = [...new Set([...availableItems, ...Object.keys(sourceEnt.outputBuffer)])];
-        }
-        availableItems = [...new Set(availableItems)];
-        const conn = outputTargets.find(t => t.id === targetId) || null;
-        if (conn && conn.filter && availableItems.length > 0 && !availableItems.includes(conn.filter)) {
-            conn.filter = null;
-            if (conn.lineId) {
-                conveyorSystem.setLogisticsGroupFilter(conn.lineId, null);
-            }
-        }
-        const currentFilter = conn ? conn.filter : (selectedSegment?.filter || null);
-        const helperText = isProcessingPlantSource
-            ? (sourceEnt.currentRecipe
-                ? `此物流線已實體化。選擇材料後，工人會自動運輸；目前生產線為 ${this.escapeHtml(this.getIngredientDisplayName(sourceEnt.currentRecipe.type))}。`
-                : `此物流線已實體化。請先在生產界面設定主要材料，再選擇要自動運輸的材料。`)
-            : '此物流線已實體化，可被點擊、選取與刪除。設定材料後，派駐工人會自動開始運輸。';
-        let html = `
-            <div class="logistics-node-menu">
-                <div class="logistics-node-header">
-                    <div>
-                        <div class="logistics-node-title">物流線節點</div>
-                        <div class="logistics-node-status">${currentFilter ? `自動運輸：${this.escapeHtml(this.getIngredientDisplayName(currentFilter))}` : '尚未設定運輸材料'}</div>
-                    </div>
-                    <button class="logistics-delete-btn" onclick="window.UIManager.deleteLogisticsLine(event)">刪除連線 ✖</button>
-                </div>
-                <div class="logistics-node-help">${helperText}</div>
-                <div class="logistics-filter-title">自動運輸材料</div>
-                <div class="logistics-filter-list">
-        `;
-        if (!currentFilter) {
-            html += `<div class="logistics-empty-note">選擇一種材料後會立刻開始自動運輸。</div>`;
-        }
-        availableItems.forEach(item => {
-            const cfg = GameEngine.state.ingredientConfigs ? GameEngine.state.ingredientConfigs[item] : null;
-            const displayName = (cfg && cfg.name) ? cfg.name : (GameEngine.RESOURCE_NAMES[item] || item);
-            html += `
-                <button class="logistics-filter-btn ${currentFilter === item ? 'is-active' : ''}" onclick="window.UIManager.setLogisticsFilter(event, '${item}')">
-                    <span>${this.getIngredientIcon(item)}</span>
-                    <strong>${this.escapeHtml(displayName)}</strong>
-                </button>
-            `;
-        });
-        if (availableItems.length === 0) {
-            html += `<div class="logistics-empty-note">目前沒有可運輸材料。</div>`;
-        }
-        menu.innerHTML = html + `</div></div>`;
-        menu.style.display = "flex";
-        const savedPos = this.uiPositions?.[menu.dataset.dragId];
-        if (savedPos) {
-            menu.style.left = savedPos.left;
-            menu.style.top = savedPos.top;
-        } else {
-            const menuWidth = menu.offsetWidth || 420;
-            const menuHeight = menu.offsetHeight || 220;
-            const rightPadding = 24;
-            const x = Math.max(16, window.innerWidth - menuWidth - rightPadding);
-            const y = Math.max(16, Math.round((window.innerHeight - menuHeight) / 2));
-            menu.style.left = `${x}px`;
-            menu.style.top = `${y}px`;
-        }
-        menu.style.right = "auto";
-        menu.style.bottom = "auto";
-        menu.style.transform = "none";
-        menu.style.margin = "0";
-
-    }
-
-    static showLogisticsLineMenu(line, mouseX, mouseY) {
-        if (!line) return;
-        const sourceEnt = conveyorSystem.getLogisticsLineSourceEntity(line);
-        if (sourceEnt) {
-            this.showLogisticsMenu(sourceEnt, line.targetId || null, mouseX, mouseY, line.id);
-            return;
-        }
-        this.hideContextMenu();
-        this.activeLogisticsLine = line;
-        this.activeLogisticsConnection = null;
-        GameEngine.state.selectedLogisticsLineId = conveyorSystem.getLogisticsLineSelectionKey(line);
-        let menu = document.getElementById("logistics_menu");
-        if (!menu) {
-            menu = document.createElement("div"); menu.id = "logistics_menu"; menu.className = "panel glass-panel";
-            menu.style.cssText = `position: absolute; z-index: 2000; padding: 15px; display: flex; flex-direction: column; gap: 10px; background: rgba(20,20,20,0.95); border: 2px solid #4caf50; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); pointer-events: auto;`;
-            this.uiLayer.appendChild(menu);
-            this.makeDraggable(menu, "logistics_menu");
-        }
-        menu.dataset.dragId = `logistics_menu_${line.groupId || line.id || "standalone"}`;
-        menu.innerHTML = `
-            <div class="logistics-node-menu">
-                <div class="logistics-node-header">
-                    <div>
-                        <div class="logistics-node-title">物流線節點</div>
-                        <div class="logistics-node-status">已選取線段</div>
-                    </div>
-                    <button class="logistics-delete-btn" onclick="window.UIManager.deleteLogisticsLine(event)">刪除連線 ✖</button>
-                </div>
-                <div class="logistics-node-help">此物流線已實體化，可被點擊、選取與刪除。地板終點可作為後續分段建造的節點。</div>
-            </div>
-        `;
-        menu.style.display = "flex";
-        const savedPos = this.uiPositions?.[menu.dataset.dragId];
-        if (savedPos) {
-            menu.style.left = savedPos.left;
-            menu.style.top = savedPos.top;
-        } else {
-            const menuWidth = menu.offsetWidth || 420;
-            const menuHeight = menu.offsetHeight || 180;
-            const rightPadding = 24;
-            const x = Math.max(16, window.innerWidth - menuWidth - rightPadding);
-            const y = Math.max(16, Math.round((window.innerHeight - menuHeight) / 2));
-            menu.style.left = `${x}px`;
-            menu.style.top = `${y}px`;
-        }
-        menu.style.right = "auto";
-        menu.style.bottom = "auto";
-        menu.style.transform = "none";
-        menu.style.margin = "0";
-    }
-
-    static getGatheringLogisticsItems(sourceEnt, sourceCfg) {
-        if (!sourceEnt) return [];
-        const produce = (sourceCfg && sourceCfg.produce_resource) || {};
-        const producedKeys = Object.keys(produce).map(k => String(k).toLowerCase()).filter(Boolean);
-        if (producedKeys.length > 0) return producedKeys;
-
-        const typeMap = {
-            timber_factory: 'wood',
-            tree_plantation: 'wood',
-            stone_factory: 'stone',
-            quarry: 'stone',
-            barn: 'food',
-            farmland: 'food',
-            gold_mining_factory: 'gold_ore'
-        };
-        const mapped = typeMap[sourceEnt.type1];
-        return mapped ? [mapped] : [];
-    }
-
-    static setLogisticsFilter(event, filterItem) {
-        if (event) event.stopPropagation();
-        if (this.activeLogisticsConnection) {
-            const outputTargets = Array.isArray(this.activeLogisticsConnection.source?.outputTargets)
-                ? this.activeLogisticsConnection.source.outputTargets
-                : [];
-            const conn = outputTargets.find(t => t.id === this.activeLogisticsConnection.targetId);
-            if (conn) {
-                conn.filter = filterItem;
-                if (conn.lineId) {
-                    conveyorSystem.setLogisticsGroupFilter(conn.lineId, filterItem);
-                }
-            } else if (this.activeLogisticsConnection.groupId) {
-                conveyorSystem.setLogisticsGroupFilter(this.activeLogisticsConnection.groupId, filterItem);
-                if (this.activeLogisticsLine) this.activeLogisticsLine.filter = filterItem;
-            }
-            if (conn || this.activeLogisticsConnection.groupId) {
-                const filterName = this.getIngredientDisplayName(filterItem);
-                GameEngine.addLog(`[物流] 路線搬運品項已更新：${filterName}。`, 'LOGISTICS');
-                if (GameEngine.workerSystem && typeof GameEngine.workerSystem.updateWorkerAssignments === 'function') {
-                    GameEngine.workerSystem.updateWorkerAssignments();
-                }
-            }
-            const menu = document.getElementById('logistics_menu');
-            if (menu) this.showLogisticsMenu(this.activeLogisticsConnection.source, this.activeLogisticsConnection.targetId, parseInt(menu.style.left) - 15, parseInt(menu.style.top) + 20);
-        }
-    }
-
-    static deleteLogisticsLine(event) {
-        if (event) event.stopPropagation();
-        if (this.activeLogisticsConnection && !this.activeLogisticsConnection.groupId && Array.isArray(this.activeLogisticsConnection.source?.outputTargets)) {
-            this.activeLogisticsConnection.source.outputTargets = this.activeLogisticsConnection.source.outputTargets.filter(t => t.id !== this.activeLogisticsConnection.targetId);
-            GameEngine.addLog(`[物流] 路線已刪除`, 'LOGISTICS');
-        } else {
-            this.deleteSelectedLogisticsLine();
-        }
-        const menu = document.getElementById("logistics_menu"); if (menu) menu.style.display = "none";
-        this.activeLogisticsConnection = null;
-        this.activeLogisticsLine = null;
-    }
+    static cancelLogisticsDrag() { return LogisticsUI.cancelLogisticsDrag(); }
 
     static updateValues(forceUpdate = false) {
         const state = GameEngine.state;
@@ -3458,15 +3007,15 @@ export class UIManager {
 
         const warehousePanel = document.getElementById("warehouse_panel");
         if (warehousePanel && warehousePanel.style.display !== "none") {
-            this.updateWarehouseWorkerSlots();
+            WarehouseUI.updateWarehouseWorkerSlots();
             const activeStorage = this.activeWarehouseEntity ? (this.activeWarehouseEntity.storage || {}) : {};
             const warehouseState = Object.keys(activeStorage || {})
                 .sort()
                 .map(key => `${key}:${activeStorage[key] || 0}`)
-                .join("|") + `|workers:${this.activeWarehouseEntity ? this.getWarehouseAssignedWorkers(this.activeWarehouseEntity).map(v => v.id).join(',') : ''}`;
+                .join("|") + `|workers:${this.activeWarehouseEntity ? WarehouseUI.getWarehouseAssignedWorkers(this.activeWarehouseEntity).map(v => v.id).join(',') : ''}`;
             if (this.lastUIState.warehouse !== warehouseState || forceUpdate) {
                 this.lastUIState.warehouse = warehouseState;
-                this.renderWarehousePanel();
+                WarehouseUI.renderWarehousePanel();
             }
         }
     }

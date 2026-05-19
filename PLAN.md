@@ -70,3 +70,26 @@
 -   玩家只需專注於升級城鎮中心。
 -   整個領地的技術水平隨城鎮中心同步提升。
 -   介面更加簡潔，避免不必要的資源檢查與點擊。
+
+# 自動化物流渲染與建築建造癱瘓修復計畫
+
+## 核心目標
+1.  **修復 WorkerSystem.js 建造指派邏輯**：重啟工人驅動的建築任務，修復 `CONSTRUCTING` 狀態與 `assignNextConstructionTask` 的觸發。
+2.  **避免建築派駐阻礙新建項目**：確保已被指派的專屬建築工人不會阻止或妨礙新建築的落實。
+3.  **驗證 processAutomatedLogistics 邏輯**：在 `LogisticsRenderer.js` 的座標轉換修正後，確保物流處理流程正確無誤。
+4.  **確保物流資源圖示平滑輸送**：資源箱必須平滑地在功能性建築的 Port 之間沿著輸送帶運行，且不阻礙遊戲主更新循環。
+5.  **全系統死鎖與連動測試**：確保建造任務與自動物流線能同時進行，沒有任何死鎖。
+
+## 實施步驟
+1.  **修改 WorkerSystem.js 建造與指派邏輯**：
+    -   在 `assignNextConstructionTask` 中，若視覺半徑內無建造任務，則 fallback 至全專案地圖的建造任務，打破「距離過遠不建造」的限制。
+    -   在 `updateWorkerAssignments` 定時器更新中，將所有剩餘無所事事的 IDLE 村民自動拉取分配至下一個建造任務 (優先) 或下一個生產任務，防止工人保持永久 IDLE。
+2.  **確保派駐工人不影響新建築落實**：
+    -   只有未被指定專屬建築（如生產工廠）的閒置村民 (`!v.assignedWarehouseId`) 會參與自動建造指派。
+    -   已手動指派的工人會被正確保留在建築中，新任務不會強行破壞既有的物流/生產工廠職位。
+3.  **驗證物流系統與資源輸送**：
+    -   檢查 `createActiveTransfer` 與 `processAutomatedLogistics`，確保 `activeTransfers` 的 `progress` 更新與 speed/distance 計算完全吻合。
+    -   確認動態物品能在 Phaser 的 `graphics` 繪製下穩定跟隨多段 pathpoints 移動，不與主 update 循環產生衝突或掉幀。
+4.  **系統測試與 finalize 收尾**：
+    -   進行自動化系統測試。
+    -   執行 `npm run finalize` 完成最終代碼洗滌與檢驗。

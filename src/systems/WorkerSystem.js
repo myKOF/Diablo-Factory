@@ -794,9 +794,12 @@ export class WorkerSystem {
     assignNextConstructionTask(v) {
         if (!v || v.config?.type !== 'villagers') return false;
         const visionRadius = (v.field_vision || 15) * 20 * 2;
-        const projects = this.state.mapEntities.filter(e =>
+        let projects = this.state.mapEntities.filter(e =>
             e && e.isUnderConstruction && Math.hypot(v.x - e.x, v.y - e.y) <= visionRadius
         );
+        if (projects.length === 0) {
+            projects = this.state.mapEntities.filter(e => e && e.isUnderConstruction);
+        }
 
         if (projects.length === 0) return false;
         projects.sort((a, b) => (a.priority || 0) - (b.priority || 0));
@@ -1140,6 +1143,15 @@ export class WorkerSystem {
                 }
             });
         }
+
+        // 4. 對於仍處於 IDLE 且沒有被派駐的 free 村民，自動為其分派建造或其它任務，打破建造癱瘓
+        allIdle.forEach(v => {
+            if (v.state === 'IDLE' && !v.assignedWarehouseId && !v.isRecalled && !v.isPlayerLocked) {
+                if (!this.assignNextConstructionTask(v)) {
+                    this.assignNextTask(v);
+                }
+            }
+        });
     }
 
     adjustWarehouseWorkers(entity, delta) {
