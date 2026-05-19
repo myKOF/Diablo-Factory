@@ -2473,6 +2473,69 @@ export class UIManager {
         return primaryGroupId;
     }
 
+    static cleanupDeletedLinePreviousTurnOverride(deletedLine, originalGroupId) {
+        if (!deletedLine || !originalGroupId) return;
+        const TS = GameEngine.TILE_SIZE;
+        const lines = this.ensureLogisticsLineStore();
+        const getSequenceOrder = (line) => Number.isFinite(line?.splitSequenceOrder)
+            ? line.splitSequenceOrder
+            : (Number.isFinite(line?.order) ? line.order : 0);
+        const deletedOrder = getSequenceOrder(deletedLine);
+        const previous = lines
+            .filter(line => line && (line.groupId === originalGroupId || line.id === originalGroupId))
+            .filter(line => getSequenceOrder(line) < deletedOrder)
+            .sort((a, b) => getSequenceOrder(b) - getSequenceOrder(a))[0] || null;
+        if (!previous?.turnArrowOverride) return;
+
+        const pointsTowardDeletedLine = (override) => {
+            if (!Number.isFinite(override?.anchorX) || !Number.isFinite(override?.anchorY)) return false;
+            if (!Number.isFinite(override?.extensionDirX) || !Number.isFinite(override?.extensionDirY)) return false;
+            const targetX = override.anchorX + override.extensionDirX * TS;
+            const targetY = override.anchorY + override.extensionDirY * TS;
+            return Math.hypot(targetX - (deletedLine.x || 0), targetY - (deletedLine.y || 0)) <= TS * 0.25;
+        };
+
+        if (!pointsTowardDeletedLine(previous.turnArrowOverride)) return;
+        const overrideKey = `${previous.turnArrowOverride.groupId || "line"}:${previous.turnArrowOverride.cellKey}`;
+        const overrideCellKey = previous.turnArrowOverride.cellKey;
+        delete previous.turnArrowOverride;
+
+        if (Array.isArray(GameEngine.state.logisticsTurnArrowOverrides)) {
+            GameEngine.state.logisticsTurnArrowOverrides = GameEngine.state.logisticsTurnArrowOverrides.filter(override => {
+                if (override?.overrideKey === overrideKey) return false;
+                return override?.cellKey !== overrideCellKey;
+            });
+        }
+    }
+
+    static orderLogisticsSegmentsByDirection(segments) {
+        if (!Array.isArray(segments) || segments.length <= 1) return Array.isArray(segments) ? [...segments] : [];
+        const TS = GameEngine.TILE_SIZE || 64;
+        const threshold = TS * 0.1;
+        const pointDistance = (a, b) => Math.hypot((a?.x || 0) - (b?.x || 0), (a?.y || 0) - (b?.y || 0));
+        const getStart = (seg) => Array.isArray(seg?.routePoints) && seg.routePoints.length > 0 ? seg.routePoints[0] : { x: seg?.x || 0, y: seg?.y || 0 };
+        const getEnd = (seg) => Array.isArray(seg?.routePoints) && seg.routePoints.length > 1 ? seg.routePoints[seg.routePoints.length - 1] : getStart(seg);
+        const hasIncoming = (seg) => {
+            const start = getStart(seg);
+            return segments.some(other => other !== seg && pointDistance(getEnd(other), start) < threshold);
+        };
+        let current = segments.find(seg => !hasIncoming(seg)) || [...segments].sort((a, b) => (a.order || 0) - (b.order || 0))[0];
+        const ordered = [];
+        const remaining = new Set(segments);
+
+        while (current && remaining.has(current)) {
+            ordered.push(current);
+            remaining.delete(current);
+            const end = getEnd(current);
+            current = [...remaining].find(seg => pointDistance(getStart(seg), end) < threshold) || null;
+        }
+
+        if (remaining.size > 0) {
+            ordered.push(...[...remaining].sort((a, b) => (a.order || 0) - (b.order || 0)));
+        }
+        return ordered;
+    }
+
     static getLogisticsLineSourceEntity(line) {
         if (!line || !line.sourceId || !GameEngine.state?.mapEntities) return null;
         return GameEngine.state.mapEntities.find(ent => this.getEntityId(ent) === line.sourceId) || null;
@@ -2699,6 +2762,7 @@ export class UIManager {
             const isDuplicate = item && item.gridX === lineGridX && item.gridY === lineGridY;
             return !isTarget && !isDuplicate;
         });
+        this.cleanupDeletedLinePreviousTurnOverride(line, groupId);
         
         // [核心修正] 當刪除其中一段時，檢查剩餘的同群組線段是否被切斷。若被切斷，則拆分成不同的群組。
         const remainingSegments = this.getLogisticsSegmentsByGroupId(groupId);
@@ -2726,7 +2790,14 @@ export class UIManager {
                             ? { x: Math.sign(dx) || 1, y: 0 }
                             : { x: 0, y: Math.sign(dy) || 1 };
                     };
+                    const isDeletedBridge = (p1, p2) => {
+                        const deletedPoint = { x: line.x || 0, y: line.y || 0 };
+                        const midPoint = { x: ((p1?.x || 0) + (p2?.x || 0)) / 2, y: ((p1?.y || 0) + (p2?.y || 0)) / 2 };
+                        const nearDeleted = point => Math.hypot((point?.x || 0) - deletedPoint.x, (point?.y || 0) - deletedPoint.y) < threshold;
+                        return nearDeleted(p1) || nearDeleted(p2) || nearDeleted(midPoint);
+                    };
                     const isNearTurnEndpoint = (p1, p2) => {
+                        if (isDeletedBridge(p1, p2)) return false;
                         const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
                         if (dist > GameEngine.TILE_SIZE + threshold) return false;
                         const aDir = getDir(aPts);
@@ -2787,8 +2858,10 @@ export class UIManager {
                 for (let c = 0; c < components.length; c++) {
                     if (c === mainCompIndex) continue;
                     const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random()*1000)}`;
-                    components[c].forEach(segId => {
-                        const seg = remainingSegments.find(s => s.id === segId);
+                    const componentSegments = components[c]
+                        .map(segId => remainingSegments.find(s => s.id === segId))
+                        .filter(Boolean);
+                    this.orderLogisticsSegmentsByDirection(componentSegments).forEach((seg, index) => {
                         if (seg) {
                             seg.groupId = newGroupId;
                             seg.sourceId = null;
@@ -2796,7 +2869,8 @@ export class UIManager {
                             seg.sourcePort = null;
                             seg.targetPort = null;
                             seg.targetPoint = null;
-                            seg.splitSequenceOrder = Number.isFinite(seg.order) ? seg.order : 0;
+                            seg.order = index;
+                            seg.splitSequenceOrder = index;
                         }
                     });
                 }
