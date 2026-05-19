@@ -2,6 +2,7 @@ import { UI_CONFIG } from "../ui/ui_config.js";
 import { ResourceSystem } from "./ResourceSystem.js";
 import { SynthesisSystem } from "./SynthesisSystem.js";
 import { BattleSystem } from "./BattleSystem.js";
+import { conveyorSystem } from "./ConveyorSystem.js";
 
 /**
  * 工人系統 (WorkerSystem.js)
@@ -1294,8 +1295,8 @@ export class WorkerSystem {
             : null;
 
         if (directConn) {
-            const transferRoute = (window.UIManager && typeof window.UIManager.getConnectionTransferRoute === 'function')
-                ? window.UIManager.getConnectionTransferRoute(source, target, directConn)
+            const transferRoute = (conveyorSystem && typeof conveyorSystem.getConnectionTransferRoute === 'function')
+                ? conveyorSystem.getConnectionTransferRoute(source, target, directConn)
                 : null;
             let routePoints = transferRoute && Array.isArray(transferRoute.points) && transferRoute.points.length >= 2
                 ? transferRoute.points.map(p => ({ x: p.x, y: p.y }))

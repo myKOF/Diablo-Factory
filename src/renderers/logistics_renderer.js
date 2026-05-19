@@ -1,5 +1,6 @@
 import { GameEngine } from "../systems/game_systems.js";
 import { UI_CONFIG } from "../ui/ui_config.js";
+import { conveyorSystem } from "../systems/ConveyorSystem.js";
 
 export class LogisticsRenderer {
     static render(graphics, state, scene, options = {}) {
@@ -802,8 +803,8 @@ export class LogisticsRenderer {
                 const segmentRoutes = groupSegs
                     .map(line => ({
                         line,
-                        route: window.UIManager && typeof window.UIManager.getLogisticsLineRoute === 'function'
-                            ? window.UIManager.getLogisticsLineRoute(line)
+                        route: conveyorSystem && typeof conveyorSystem.getLogisticsLineRoute === 'function'
+                            ? conveyorSystem.getLogisticsLineRoute(line)
                             : null
                     }))
                     .filter(item => item.route?.points?.length >= 2);
@@ -826,8 +827,8 @@ export class LogisticsRenderer {
 
                 segmentRoutes.forEach(({ line, route }) => {
                     // [核心修正] 單擊時僅高亮被點擊的那一段，而不是用 some 讓整個群組都高亮
-                    const isLineSelected = window.UIManager && typeof window.UIManager.isSelectedLogisticsLine === 'function'
-                        ? window.UIManager.isSelectedLogisticsLine(line)
+                    const isLineSelected = conveyorSystem && typeof conveyorSystem.isSelectedLogisticsLine === 'function'
+                        ? conveyorSystem.isSelectedLogisticsLine(line)
                         : state.selectedLogisticsLineId === line.id;
                     drawLogisticsRoute(route.points, route.width || widthTiles, isLineSelected, isConnected, line, useConnectedIdleStyle, turnCellKeys);
                 });
@@ -860,8 +861,8 @@ export class LogisticsRenderer {
                         LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, arrowColor, arrowAlpha, arrowSize);
                     }
                 }
-                const isGroupSelected = window.UIManager && typeof window.UIManager.isSelectedLogisticsLine === 'function'
-                    ? groupSegs.some(line => window.UIManager.isSelectedLogisticsLine(line))
+                const isGroupSelected = conveyorSystem && typeof conveyorSystem.isSelectedLogisticsLine === 'function'
+                    ? groupSegs.some(line => conveyorSystem.isSelectedLogisticsLine(line))
                     : groupSegs.some(line => state.selectedLogisticsLineId === line.id);
 
                 if (isGroupSelected) {
@@ -1086,8 +1087,8 @@ export class LogisticsRenderer {
                         if (conn.lineId) return;
                         const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
                         if (target) {
-                            const route = (window.UIManager && typeof window.UIManager.getConnectionRoute === 'function')
-                                ? window.UIManager.getConnectionRoute(ent, target, conn)
+                            const route = (conveyorSystem && typeof conveyorSystem.getConnectionRoute === 'function')
+                                ? conveyorSystem.getConnectionRoute(ent, target, conn)
                                 : null;
                             const points = route && Array.isArray(route.points) && route.points.length >= 2
                                 ? route.points
@@ -1180,9 +1181,9 @@ export class LogisticsRenderer {
                 isPortConnector: point.isPortConnector
             }));
             let ghostPoints = rawGhostPoints;
-            if (window.UIManager && typeof window.UIManager.buildGridRoutePoints === 'function' && typeof window.UIManager.buildLogisticsSegments === 'function') {
-                const gridPoints = window.UIManager.buildGridRoutePoints(rawGhostPoints);
-                const segments = window.UIManager.buildLogisticsSegments(
+            if (conveyorSystem && typeof conveyorSystem.buildGridRoutePoints === 'function' && typeof conveyorSystem.buildLogisticsSegments === 'function') {
+                const gridPoints = conveyorSystem.buildGridRoutePoints(rawGhostPoints);
+                const segments = conveyorSystem.buildLogisticsSegments(
                     '__preview__',
                     null,
                     null,
@@ -1244,8 +1245,8 @@ export class LogisticsRenderer {
                     // 1. 取得完整且連續的幾何路由路徑
                     const outputTargets = Array.isArray(source.outputTargets) ? source.outputTargets : [];
                     const conn = outputTargets.find(c => c.id === t.targetId);
-                    const routeInfo = (window.UIManager && typeof window.UIManager.getConnectionTransferRoute === 'function')
-                        ? window.UIManager.getConnectionTransferRoute(source, target, conn)
+                    const routeInfo = (conveyorSystem && typeof conveyorSystem.getConnectionTransferRoute === 'function')
+                        ? conveyorSystem.getConnectionTransferRoute(source, target, conn)
                         : { points: [{ x: source.x, y: source.y }, { x: target.x, y: target.y }] };
 
                     const points = routeInfo.points;
@@ -1399,8 +1400,8 @@ export class LogisticsRenderer {
             : null;
         if (!directConn) return routePoints;
 
-        const transferRoute = (window.UIManager && typeof window.UIManager.getConnectionTransferRoute === 'function')
-            ? window.UIManager.getConnectionTransferRoute(source, target, directConn)
+        const transferRoute = (conveyorSystem && typeof conveyorSystem.getConnectionTransferRoute === 'function')
+            ? conveyorSystem.getConnectionTransferRoute(source, target, directConn)
             : null;
         return routePoints || (transferRoute && Array.isArray(transferRoute.points) && transferRoute.points.length >= 2
             ? transferRoute.points.map(p => ({ x: p.x, y: p.y }))

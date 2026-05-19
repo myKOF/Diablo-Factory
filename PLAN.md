@@ -1,3 +1,21 @@
+# MVC 領域驅動重構模式 (DDD Refactoring Mode) 物流拓樸搬移計畫
+
+## 核心目標
+1. 將原本位於 `ui.js` 的 27 個底層物流狀態與拓樸計算方法，完整搬移至 `ConveyorSystem.js`。
+2. 將這些靜態方法 (Static Methods) 改寫為 `ConveyorSystem` 的實例方法 (Instance Methods)，移除 `static` 關鍵字。
+3. 修正搬移方法內部的 UI 輔助方法呼叫，如 `this.getBuildingPortSlots` 或 `this.getNearestPortSlot` 等替換為 `window.UIManager.getBuildingPortSlots` / `window.UIManager.getNearestPortSlot`。
+4. 修補 `ConveyorSystem.js` 內部的自我呼叫：將 `window.UIManager.[被搬移方法]` 改為 `this.[被搬移方法]`。
+5. 修補外部調用斷點：全專案搜尋並替換所有 `window.UIManager.[被搬移的方法]` 或 `UIManager.[被搬移的方法]` 為 `conveyorSystem.[被搬移的方法]`。
+6. 驗證並測試，執行 `npm run finalize` 完成收尾。
+
+## 實施步驟
+- [x] 步驟 1：更新 `PLAN.md` 並規劃。
+- [x] 步驟 2：從 `ui.js` 剪下 27 個物流拓樸與狀態管理方法，將其貼入 `ConveyorSystem.js` 並改為實例方法。
+- [x] 步驟 3：修正 `ConveyorSystem.js` 中對 these 搬移方法的內部呼叫，將原本的 `window.UIManager` 或 `UIManager` 或 `this.getNearestPortSlot` 等正確替換（自己呼叫自己用 `this.xxx`，呼叫剩餘 UI 方法用 `window.UIManager.xxx`）。
+- [x] 步驟 4：從 `ui.js` 移除這些方法，保留未搬移的輔助方法 (如 `getBuildingPortSlots`, `getNearestPortSlot` 等)。
+- [x] 步驟 5：使用安全搜尋工具全域尋找 `window.UIManager.xxx` 和 `UIManager.xxx` (其中 `xxx` 是被搬移的方法名稱)，在各個系統與渲染器中將其替換成對 `conveyorSystem` 的呼叫，並確保對 `conveyorSystem` 的正確導入。
+- [x] 步驟 6：執行系統驗證與 `npm run finalize`。
+
 # 2026-05-15 transport line build-system update
 
 - [x] Parse new buildings.csv fields: ui_location and efficiency.
