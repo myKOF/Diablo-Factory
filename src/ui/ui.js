@@ -2087,6 +2087,16 @@ export class UIManager {
         const cleanTargetPort = clonePort(targetPort);
         const filter = conn ? (conn.filter || null) : (previous?.filter || null);
         const segments = this.buildLogisticsSegments(groupId, sourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter, lineType, efficiency);
+        const existingGroupSegments = lines.filter(line => line && (line.groupId === groupId || line.id === groupId));
+        const extendsSplitSequence = existingGroupSegments.some(line => Number.isFinite(line?.splitSequenceOrder));
+        const splitSequenceStart = extendsSplitSequence
+            ? Math.max(...existingGroupSegments.map(line => Number.isFinite(line?.splitSequenceOrder) ? line.splitSequenceOrder : (Number(line?.order) || 0))) + 1
+            : null;
+        if (Number.isFinite(splitSequenceStart)) {
+            segments.forEach((segment, index) => {
+                segment.splitSequenceOrder = splitSequenceStart + index;
+            });
+        }
         const occupied = new Map();
         const occupiedTileCenters = new Map();
         const sameGroup = (seg) => !!seg && ((seg.groupId === groupId) || (seg.id === groupId));
@@ -2344,6 +2354,39 @@ export class UIManager {
         const primaryLines = this.getLogisticsSegmentsByGroupId(primaryGroupId);
         const secondaryLines = this.getLogisticsSegmentsByGroupId(secondaryGroupId);
         if (!primaryLines.length || !secondaryLines.length) return false;
+
+        const getEndpointDirs = (line) => {
+            const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+            if (points.length < 2) return [];
+            const start = points[0];
+            const end = points[points.length - 1];
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const dir = Math.abs(dx) >= Math.abs(dy)
+                ? { x: Math.sign(dx) || 1, y: 0 }
+                : { x: 0, y: Math.sign(dy) || 1 };
+            return [
+                { key: `${Math.round(start.x)},${Math.round(start.y)}`, dirX: dir.x, dirY: dir.y },
+                { key: `${Math.round(end.x)},${Math.round(end.y)}`, dirX: dir.x, dirY: dir.y }
+            ];
+        };
+
+        const secondaryEndpoints = new Map();
+        secondaryLines.forEach(line => {
+            getEndpointDirs(line).forEach(endpoint => {
+                if (!secondaryEndpoints.has(endpoint.key)) secondaryEndpoints.set(endpoint.key, []);
+                secondaryEndpoints.get(endpoint.key).push(endpoint);
+            });
+        });
+
+        for (const line of primaryLines) {
+            for (const endpoint of getEndpointDirs(line)) {
+                const matches = secondaryEndpoints.get(endpoint.key) || [];
+                if (matches.some(other => !(other.dirX === -endpoint.dirX && other.dirY === -endpoint.dirY))) {
+                    return true;
+                }
+            }
+        }
 
         const secondaryCells = new Map();
         secondaryLines.forEach(line => {
@@ -2674,11 +2717,31 @@ export class UIManager {
                     const aStart = aPts[0]; const aEnd = aPts[aPts.length - 1];
                     const bStart = bPts[0]; const bEnd = bPts[bPts.length - 1];
                     const threshold = GameEngine.TILE_SIZE * 0.1;
+                    const getDir = (pts) => {
+                        const start = pts[0];
+                        const end = pts[pts.length - 1];
+                        const dx = (end?.x || 0) - (start?.x || 0);
+                        const dy = (end?.y || 0) - (start?.y || 0);
+                        return Math.abs(dx) >= Math.abs(dy)
+                            ? { x: Math.sign(dx) || 1, y: 0 }
+                            : { x: 0, y: Math.sign(dy) || 1 };
+                    };
+                    const isNearTurnEndpoint = (p1, p2) => {
+                        const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+                        if (dist > GameEngine.TILE_SIZE + threshold) return false;
+                        const aDir = getDir(aPts);
+                        const bDir = getDir(bPts);
+                        return aDir.x !== bDir.x && aDir.y !== bDir.y;
+                    };
                     const connected = 
                         (Math.hypot(aStart.x - bStart.x, aStart.y - bStart.y) < threshold) ||
                         (Math.hypot(aStart.x - bEnd.x, aStart.y - bEnd.y) < threshold) ||
                         (Math.hypot(aEnd.x - bStart.x, aEnd.y - bStart.y) < threshold) ||
-                        (Math.hypot(aEnd.x - bEnd.x, aEnd.y - bEnd.y) < threshold);
+                        (Math.hypot(aEnd.x - bEnd.x, aEnd.y - bEnd.y) < threshold) ||
+                        isNearTurnEndpoint(aStart, bStart) ||
+                        isNearTurnEndpoint(aStart, bEnd) ||
+                        isNearTurnEndpoint(aEnd, bStart) ||
+                        isNearTurnEndpoint(aEnd, bEnd);
                     if (connected) {
                         adj.get(a.id).push(b.id);
                         adj.get(b.id).push(a.id);
@@ -2726,7 +2789,15 @@ export class UIManager {
                     const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random()*1000)}`;
                     components[c].forEach(segId => {
                         const seg = remainingSegments.find(s => s.id === segId);
-                        if (seg) seg.groupId = newGroupId;
+                        if (seg) {
+                            seg.groupId = newGroupId;
+                            seg.sourceId = null;
+                            seg.targetId = null;
+                            seg.sourcePort = null;
+                            seg.targetPort = null;
+                            seg.targetPoint = null;
+                            seg.splitSequenceOrder = Number.isFinite(seg.order) ? seg.order : 0;
+                        }
                     });
                 }
                 GameEngine.addLog(`[物流] 線段中斷，物流線已拆分為獨立路線。`, 'LOGISTICS');
@@ -2741,6 +2812,9 @@ export class UIManager {
             }
         }
         
+        [...new Set(this.ensureLogisticsLineStore().map(item => item?.groupId || item?.id).filter(Boolean))]
+            .forEach(id => this.mergeConnectedLogisticsGroups(id));
+
         if (state.selectedLogisticsLineId === lineKey) state.selectedLogisticsLineId = null;
         if (state.selectedLogisticsGroupId === line.groupId || state.selectedLogisticsGroupId === line.id) state.selectedLogisticsGroupId = null;
         if (this.activeLogisticsLine && this.getLogisticsLineSelectionKey(this.activeLogisticsLine) === lineKey) this.activeLogisticsLine = null;

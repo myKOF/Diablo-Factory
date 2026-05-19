@@ -893,6 +893,23 @@ export class LogisticsRenderer {
                     };
 
                     // 依據距離 startAnchor 的距離選取最靠近的 segment 作為起點
+                    const hasSplitSequenceOrder = !startAnchor && remaining.some(seg => Number.isFinite(seg?.splitSequenceOrder));
+                    if (hasSplitSequenceOrder) {
+                        remaining.sort((a, b) => {
+                            const orderA = Number.isFinite(a?.splitSequenceOrder) ? a.splitSequenceOrder : (a.order || 0);
+                            const orderB = Number.isFinite(b?.splitSequenceOrder) ? b.splitSequenceOrder : (b.order || 0);
+                            return orderA - orderB;
+                        });
+                        remaining.forEach(seg => {
+                            const sp = seg.routePoints?.[0] || { x: seg.x, y: seg.y };
+                            const ep = seg.routePoints?.[seg.routePoints.length - 1] || sp;
+                            seg.__numberLabelPoint = sp;
+                            seg.__numberNextPoint = ep;
+                            sortedSegs.push(seg);
+                        });
+                        remaining.length = 0;
+                    }
+
                     let current = null;
                     if (startAnchor) {
                         let minDist = Infinity;
