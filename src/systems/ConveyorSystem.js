@@ -41,6 +41,7 @@ export class ConveyorSystem {
         const initialBendMode = isLineExtension
             ? ((currentSourcePort?.dir === 'up' || currentSourcePort?.dir === 'down') ? 'y-first' : 'x-first')
             : 'x-first';
+        const startGridDirBias = currentSourcePort?.sourceType === "logistics_line" ? null : currentSourcePort?.dir;
         this.activeDrag = {
             startX: resolvedStartX,
             startY: resolvedStartY,
@@ -51,8 +52,8 @@ export class ConveyorSystem {
             targetPort: null,
             bendMode: initialBendMode,
             lastWorldPoint: null,
-            // [核心修復] 使用方向偏好，確保右/下端口座標歸入建築格網
-            startGrid: this.toGrid(resolvedStartX, resolvedStartY, currentSourcePort?.dir),
+            // [核心修復] 建築端口才使用方向偏好；物流線延伸要保留實際點擊格。
+            startGrid: this.toGrid(resolvedStartX, resolvedStartY, startGridDirBias),
             routeWidth,
             isLineExtension,
             directionLocked: false // [核心新增] 是否已鎖定移動方向
@@ -510,27 +511,41 @@ export class ConveyorSystem {
                 return;
             }
             const transportCfg = this.getTransportLineConfig();
-            
+
             let shouldMergeWithSource = false;
             if (drag.sourceLine && (drag.sourceLine.groupId || drag.sourceLine.id)) {
                 const sourceGroupId = drag.sourceLine.groupId || drag.sourceLine.id;
                 const lines = (GameEngine.state.logisticsLines || []).filter(l => l && (l.groupId === sourceGroupId || l.id === sourceGroupId));
-                const grid = this.toGrid(drag.startX, drag.startY);
-                let p1MatchCount = 0;
-                let p2MatchCount = 0;
-                lines.forEach(l => {
-                    const pts = Array.isArray(l.routePoints) ? l.routePoints : [{x: l.x, y: l.y}, {x: l.x, y: l.y}];
-                    if (pts.length === 0) return;
-                    const p1 = this.toGrid(pts[0].x, pts[0].y);
-                    const p2 = this.toGrid(pts[pts.length - 1].x, pts[pts.length - 1].y);
-                    if (p1.x === grid.x && p1.y === grid.y) p1MatchCount++;
-                    if (p2.x === grid.x && p2.y === grid.y) p2MatchCount++;
-                });
-                
+                const getEndpointMatchCounts = (grid) => {
+                    let p1MatchCount = 0;
+                    let p2MatchCount = 0;
+                    lines.forEach(l => {
+                        const pts = Array.isArray(l.routePoints) ? l.routePoints : [{ x: l.x, y: l.y }, { x: l.x, y: l.y }];
+                        if (pts.length === 0) return;
+                        const p1 = this.toGrid(pts[0].x, pts[0].y);
+                        const p2 = this.toGrid(pts[pts.length - 1].x, pts[pts.length - 1].y);
+                        if (p1.x === grid.x && p1.y === grid.y) p1MatchCount++;
+                        if (p2.x === grid.x && p2.y === grid.y) p2MatchCount++;
+                    });
+                    return { p1MatchCount, p2MatchCount };
+                };
+                const sourceLinePoints = Array.isArray(drag.sourceLine.routePoints) ? drag.sourceLine.routePoints : [];
+                const sourceLineEndpointCandidates = sourceLinePoints.length >= 2
+                    ? [sourceLinePoints[sourceLinePoints.length - 1], sourceLinePoints[0]]
+                    : [{ x: drag.startX, y: drag.startY }];
+                const mergeAnchor = sourceLineEndpointCandidates
+                    .map(point => {
+                        const grid = this.toGrid(point.x, point.y);
+                        return { point, grid, counts: getEndpointMatchCounts(grid) };
+                    })
+                    .find(item => (
+                        (item.counts.p2MatchCount === 1 && item.counts.p1MatchCount === 0) ||
+                        (item.counts.p1MatchCount === 1 && item.counts.p2MatchCount === 1 && lines.length === 1)
+                    ));
+
                 // 只有從群組的真正終點延伸，才是連續的物流線 (允許合併)。
                 // 若是單格點 (p1 與 p2 重疊且只有一條線)，也視為終點。
-                const isTrueEnd = (p2MatchCount === 1 && p1MatchCount === 0) || 
-                                  (p1MatchCount === 1 && p2MatchCount === 1 && lines.length === 1);
+                const isTrueEnd = !!mergeAnchor;
 
                 if (isTrueEnd) {
                     shouldMergeWithSource = true;

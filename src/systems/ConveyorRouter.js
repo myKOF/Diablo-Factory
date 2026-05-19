@@ -414,8 +414,7 @@ export class ConveyorRouter {
     }
 
     /**
-     * Terminal Snapping: Snap to building port if within 1 tile
-     */
+34     */
     getSnapPoint(point, entities, tileSize) {
         for (const ent of entities) {
             if (ent.isUnderConstruction) continue;

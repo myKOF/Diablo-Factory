@@ -2518,7 +2518,7 @@ export class UIManager {
             selectedIds.includes(id);
     }
 
-    static getLogisticsLineDragPort(line) {
+    static getLogisticsLineDragPort(line, anchorX = null, anchorY = null) {
         const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
         const first = points[0];
         const second = points[1];
@@ -2532,8 +2532,8 @@ export class UIManager {
         return {
             dir,
             width: Math.max(1, Number(line?.routeWidth) || 1),
-            x: line?.x,
-            y: line?.y,
+            x: Number.isFinite(anchorX) ? anchorX : line?.x,
+            y: Number.isFinite(anchorY) ? anchorY : line?.y,
             sourceType: "logistics_line"
         };
     }
@@ -2552,7 +2552,7 @@ export class UIManager {
         this.hideContextMenu();
         const startX = (typeof clickX === 'number') ? clickX : line.x;
         const startY = (typeof clickY === 'number') ? clickY : line.y;
-        conveyorSystem.startDrag(startX, startY, null, this.getLogisticsLineDragPort(line), line);
+        conveyorSystem.startDrag(startX, startY, null, this.getLogisticsLineDragPort(line, startX, startY), line);
         return true;
     }
 
@@ -2576,7 +2576,7 @@ export class UIManager {
         this.isLogisticsDragging = true;
         this.hideContextMenu();
         if (sourceLine) {
-            conveyorSystem.startDrag(worldX, worldY, null, this.getLogisticsLineDragPort(sourceLine), sourceLine);
+            conveyorSystem.startDrag(worldX, worldY, null, this.getLogisticsLineDragPort(sourceLine, worldX, worldY), sourceLine);
         } else {
             conveyorSystem.startDrag(worldX, worldY, null, null, null);
         }
