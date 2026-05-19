@@ -1771,6 +1771,264 @@ export class ConveyorSystem {
         if (!selectedId) return false;
         return this.getLogisticsLineSelectionKey(line) === selectedId;
     }
+
+    orderLogisticsSegmentsByDirection(segments) {
+        if (!Array.isArray(segments) || segments.length <= 1) return Array.isArray(segments) ? [...segments] : [];
+        const TS = GameEngine.TILE_SIZE || 64;
+        const threshold = TS * 0.1;
+        const pointDistance = (a, b) => Math.hypot((a?.x || 0) - (b?.x || 0), (a?.y || 0) - (b?.y || 0));
+        const getStart = (seg) => Array.isArray(seg?.routePoints) && seg.routePoints.length > 0 ? seg.routePoints[0] : { x: seg?.x || 0, y: seg?.y || 0 };
+        const getEnd = (seg) => Array.isArray(seg?.routePoints) && seg.routePoints.length > 1 ? seg.routePoints[seg.routePoints.length - 1] : getStart(seg);
+        const hasIncoming = (seg) => {
+            const start = getStart(seg);
+            return segments.some(other => other !== seg && pointDistance(getEnd(other), start) < threshold);
+        };
+        let current = segments.find(seg => !hasIncoming(seg)) || [...segments].sort((a, b) => (a.order || 0) - (b.order || 0))[0];
+        const ordered = [];
+        const remaining = new Set(segments);
+
+        while (current && remaining.has(current)) {
+            ordered.push(current);
+            remaining.delete(current);
+            const end = getEnd(current);
+            current = [...remaining].find(seg => pointDistance(getStart(seg), end) < threshold) || null;
+        }
+
+        if (remaining.size > 0) {
+            ordered.push(...[...remaining].sort((a, b) => (a.order || 0) - (b.order || 0)));
+        }
+        return ordered;
+    }
+
+    deleteLogisticsLineById(lineId) {
+        const state = GameEngine.state;
+        const line = this.getLogisticsLineById(lineId);
+        if (!line) return false;
+        const lineKey = this.getLogisticsLineSelectionKey(line);
+        const groupId = line.groupId || line.id;
+        
+        const lineGridX = line.gridX;
+        const lineGridY = line.gridY;
+        state.logisticsLines = this.ensureLogisticsLineStore().filter(item => {
+            const isTarget = this.getLogisticsLineSelectionKey(item) === lineKey;
+            const isDuplicate = item && item.gridX === lineGridX && item.gridY === lineGridY;
+            return !isTarget && !isDuplicate;
+        });
+        this.cleanupDeletedLinePreviousTurnOverride(line, groupId);
+        
+        // [核心修正] 當刪除其中一段時，檢查剩餘的同群組線段是否被切斷。若被切斷，則拆分成不同的群組。
+        const remainingSegments = this.getLogisticsSegmentsByGroupId(groupId);
+        if (remainingSegments.length > 0) {
+            // 建立圖來尋找連通分量
+            const adj = new Map();
+            remainingSegments.forEach(seg => {
+                adj.set(seg.id, []);
+            });
+            for (let i = 0; i < remainingSegments.length; i++) {
+                for (let j = i + 1; j < remainingSegments.length; j++) {
+                    const a = remainingSegments[i];
+                    const b = remainingSegments[j];
+                    const aPts = Array.isArray(a.routePoints) && a.routePoints.length > 0 ? a.routePoints : [{x:a.x, y:a.y}, {x:a.x, y:a.y}];
+                    const bPts = Array.isArray(b.routePoints) && b.routePoints.length > 0 ? b.routePoints : [{x:b.x, y:b.y}, {x:b.x, y:b.y}];
+                    const aStart = aPts[0]; const aEnd = aPts[aPts.length - 1];
+                    const bStart = bPts[0]; const bEnd = bPts[bPts.length - 1];
+                    const threshold = GameEngine.TILE_SIZE * 0.1;
+                    const getDir = (pts) => {
+                        const start = pts[0];
+                        const end = pts[pts.length - 1];
+                        const dx = (end?.x || 0) - (start?.x || 0);
+                        const dy = (end?.y || 0) - (start?.y || 0);
+                        return Math.abs(dx) >= Math.abs(dy)
+                            ? { x: Math.sign(dx) || 1, y: 0 }
+                            : { x: 0, y: Math.sign(dy) || 1 };
+                    };
+                    const isDeletedBridge = (p1, p2) => {
+                        const deletedPoint = { x: line.x || 0, y: line.y || 0 };
+                        const midPoint = { x: ((p1?.x || 0) + (p2?.x || 0)) / 2, y: ((p1?.y || 0) + (p2?.y || 0)) / 2 };
+                        const nearDeleted = point => Math.hypot((point?.x || 0) - deletedPoint.x, (point?.y || 0) - deletedPoint.y) < threshold;
+                        return nearDeleted(p1) || nearDeleted(p2) || nearDeleted(midPoint);
+                    };
+                    const isNearTurnEndpoint = (p1, p2) => {
+                        if (isDeletedBridge(p1, p2)) return false;
+                        const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+                        if (dist > GameEngine.TILE_SIZE + threshold) return false;
+                        const aDir = getDir(aPts);
+                        const bDir = getDir(bPts);
+                        return aDir.x !== bDir.x && aDir.y !== bDir.y;
+                    };
+                    const connected = 
+                        (Math.hypot(aStart.x - bStart.x, aStart.y - bStart.y) < threshold) ||
+                        (Math.hypot(aStart.x - bEnd.x, aStart.y - bEnd.y) < threshold) ||
+                        (Math.hypot(aEnd.x - bStart.x, aEnd.y - bStart.y) < threshold) ||
+                        (Math.hypot(aEnd.x - bEnd.x, aEnd.y - bEnd.y) < threshold) ||
+                        isNearTurnEndpoint(aStart, bStart) ||
+                        isNearTurnEndpoint(aStart, bEnd) ||
+                        isNearTurnEndpoint(aEnd, bStart) ||
+                        isNearTurnEndpoint(aEnd, bEnd);
+                    if (connected) {
+                        adj.get(a.id).push(b.id);
+                        adj.get(b.id).push(a.id);
+                    }
+                }
+            }
+            
+            const visited = new Set();
+            const components = [];
+            remainingSegments.forEach(seg => {
+                if (visited.has(seg.id)) return;
+                const comp = [];
+                const q = [seg.id];
+                visited.add(seg.id);
+                while(q.length > 0) {
+                    const cur = q.shift();
+                    comp.push(cur);
+                    adj.get(cur).forEach(next => {
+                        if (!visited.has(next)) {
+                            visited.add(next);
+                            q.push(next);
+                        }
+                    });
+                }
+                components.push(comp);
+            });
+            
+            // 如果連通分量超過 1 個，代表線段被切斷了，必須將切斷的部分賦予新的 groupId
+            if (components.length > 1) {
+                // 找出包含 sourceId 的分量 (如果有的話)，讓它保留原 groupId，其他的改名
+                let mainCompIndex = 0;
+                for (let c = 0; c < components.length; c++) {
+                    const hasSource = components[c].some(segId => {
+                        const seg = remainingSegments.find(s => s.id === segId);
+                        return seg && seg.sourceId;
+                    });
+                    if (hasSource) {
+                        mainCompIndex = c;
+                        break;
+                    }
+                }
+                
+                for (let c = 0; c < components.length; c++) {
+                    if (c === mainCompIndex) continue;
+                    const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+                    const componentSegments = components[c]
+                        .map(segId => remainingSegments.find(s => s.id === segId))
+                        .filter(Boolean);
+                    this.orderLogisticsSegmentsByDirection(componentSegments).forEach((seg, index) => {
+                        if (seg) {
+                            seg.groupId = newGroupId;
+                            seg.sourceId = null;
+                            seg.targetId = null;
+                            seg.sourcePort = null;
+                            seg.targetPort = null;
+                            seg.targetPoint = null;
+                            seg.order = index;
+                            seg.splitSequenceOrder = index;
+                        }
+                    });
+                }
+                GameEngine.addLog(`[物流] 線段中斷，物流線已拆分為獨立路線。`, 'LOGISTICS');
+            }
+        } else {
+            // 如果這個群組已經沒有任何線段，清除 sourceEnt 的輸出紀錄
+            if (line.sourceId && line.targetId) {
+                const sourceEnt = state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === line.sourceId);
+                if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
+                    sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId && conn.id !== line.targetId);
+                }
+            }
+        }
+        
+        [...new Set(this.ensureLogisticsLineStore().map(item => item?.groupId || item?.id).filter(Boolean))]
+            .forEach(id => this.mergeConnectedLogisticsGroups(id));
+
+        if (state.selectedLogisticsLineId === lineKey) state.selectedLogisticsLineId = null;
+        if (state.selectedLogisticsGroupId === line.groupId || state.selectedLogisticsGroupId === line.id) state.selectedLogisticsGroupId = null;
+        if (window.UIManager.activeLogisticsLine && this.getLogisticsLineSelectionKey(window.UIManager.activeLogisticsLine) === lineKey) window.UIManager.activeLogisticsLine = null;
+        if (window.UIManager.activeLogisticsConnection?.lineId === lineKey) window.UIManager.activeLogisticsConnection = null;
+        GameEngine.addLog(`[物流] 物流線段已刪除`, 'LOGISTICS');
+        return true;
+    }
+
+    deleteLogisticsLineGroupById(groupId) {
+        const state = GameEngine.state;
+        const segments = this.getLogisticsSegmentsByGroupId(groupId);
+        if (!segments.length) return false;
+        const first = segments[0];
+        state.logisticsLines = this.ensureLogisticsLineStore().filter(item => item.groupId !== groupId && item.id !== groupId);
+        if (first.sourceId && first.targetId) {
+            const sourceEnt = state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === first.sourceId);
+            if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
+                sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId && conn.id !== first.targetId);
+            }
+        }
+        if (segments.some(line => this.isSelectedLogisticsLine(line))) state.selectedLogisticsLineId = null;
+        if (state.selectedLogisticsGroupId === groupId) state.selectedLogisticsGroupId = null;
+        if (window.UIManager.activeLogisticsLine && window.UIManager.activeLogisticsLine.groupId === groupId) window.UIManager.activeLogisticsLine = null;
+        if (window.UIManager.activeLogisticsConnection?.groupId === groupId) window.UIManager.activeLogisticsConnection = null;
+        GameEngine.addLog(`[物流] 物流線群組已刪除`, 'LOGISTICS');
+        return true;
+    }
+
+    getLogisticsLineAt(worldX, worldY) {
+        return this.getLogisticsLinesAt(worldX, worldY)[0] || null;
+    }
+
+    getLogisticsLinesAt(worldX, worldY) {
+        const TS = GameEngine.TILE_SIZE;
+        const getVisibleRects = (line) => {
+            const points = Array.isArray(line.routePoints)
+                ? line.routePoints.map(p => ({ x: p.x, y: p.y }))
+                : [];
+            if (points.length < 2) return [];
+            const width = Math.max(1, Math.round(Number(line.routeWidth) || 1));
+            const rects = [];
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist < 0.001) continue;
+
+                const dir = { x: dx / dist, y: dy / dist };
+                const steps = Math.max(1, Math.round(dist / TS));
+                const stepSize = dist / steps;
+
+                for (let step = 0; step < steps; step++) {
+                    const px = a.x + dir.x * stepSize * step;
+                    const py = a.y + dir.y * stepSize * step;
+
+                    const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
+                    rects.push({
+                        x: px - (isHorizontal ? TS / 2 : (width * TS) / 2),
+                        y: py - (isHorizontal ? (width * TS) / 2 : TS / 2),
+                        w: (isHorizontal ? TS : width * TS),
+                        h: (isHorizontal ? width * TS : TS),
+                        segment: line
+                    });
+                }
+            }
+            return rects;
+        };
+        const hits = [];
+        this.ensureLogisticsLineStore().forEach(line => {
+            getVisibleRects(line).forEach(rect => {
+                if (
+                    worldX >= rect.x && worldX <= rect.x + rect.w &&
+                    worldY >= rect.y && worldY <= rect.y + rect.h
+                ) {
+                    const cx = rect.x + rect.w / 2;
+                    const cy = rect.y + rect.h / 2;
+                    hits.push({
+                        line: rect.segment || line,
+                        distance: Math.hypot(worldX - cx, worldY - cy)
+                    });
+                }
+            });
+        });
+        hits.sort((a, b) => a.distance - b.distance || (b.line.createdAt || 0) - (a.line.createdAt || 0));
+        return hits.map(hit => hit.line);
+    }
 }
 
 export const conveyorSystem = new ConveyorSystem();
