@@ -1148,9 +1148,7 @@ export class WorkerSystem {
         // 4. 對於仍處於 IDLE 且沒有被派駐的 free 村民，自動為其分派建造或其它任務，打破建造癱瘓
         allIdle.forEach(v => {
             if (v.state === 'IDLE' && !v.assignedWarehouseId && !v.isRecalled && !v.isPlayerLocked) {
-                if (!this.assignNextConstructionTask(v)) {
-                    this.assignNextTask(v);
-                }
+                this.assignNextTask(v);
             }
         });
     }
