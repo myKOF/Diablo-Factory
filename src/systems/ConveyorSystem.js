@@ -1664,6 +1664,7 @@ export class ConveyorSystem {
 
             for (const otherGroupId of otherGroupIds) {
                 if (!this.areLogisticsGroupsTouching(activeGroupId, otherGroupId)) continue;
+                console.log(`[Merge Debug] Group ${activeGroupId} and Group ${otherGroupId} are TOUCHING. Merging them!`);
                 activeGroupId = this.mergeLogisticsLineGroups(activeGroupId, otherGroupId);
                 merged = true;
                 break;
@@ -1845,7 +1846,9 @@ export class ConveyorSystem {
                     const isDeletedBridge = (p1, p2) => {
                         const deletedPoint = { x: line.x || 0, y: line.y || 0 };
                         const midPoint = { x: ((p1?.x || 0) + (p2?.x || 0)) / 2, y: ((p1?.y || 0) + (p2?.y || 0)) / 2 };
-                        const nearDeleted = point => Math.hypot((point?.x || 0) - deletedPoint.x, (point?.y || 0) - deletedPoint.y) < threshold;
+                        // Use larger tolerance for deleted bridge matching to handle grid coordinate snapping drift robustly
+                        const bridgeThreshold = GameEngine.TILE_SIZE * 0.75;
+                        const nearDeleted = point => Math.hypot((point?.x || 0) - deletedPoint.x, (point?.y || 0) - deletedPoint.y) < bridgeThreshold;
                         return nearDeleted(p1) || nearDeleted(p2) || nearDeleted(midPoint);
                     };
                     const isNearTurnEndpoint = (p1, p2) => {
@@ -1866,8 +1869,18 @@ export class ConveyorSystem {
                         isNearTurnEndpoint(aEnd, bStart) ||
                         isNearTurnEndpoint(aEnd, bEnd);
                     if (connected) {
+                        console.log(`[Split Debug] Segments ${a.id} and ${b.id} are CONNECTED. details:`, {
+                            aStart, aEnd, bStart, bEnd,
+                            dist_aEnd_bStart: Math.hypot(aEnd.x - bStart.x, aEnd.y - bStart.y),
+                            isNearTurnEndpoint: isNearTurnEndpoint(aEnd, bStart)
+                        });
                         adj.get(a.id).push(b.id);
                         adj.get(b.id).push(a.id);
+                    } else {
+                        const dist = Math.hypot(aEnd.x - bStart.x, aEnd.y - bStart.y);
+                        if (dist < GameEngine.TILE_SIZE * 1.5) {
+                            console.log(`[Split Debug] Segments ${a.id} and ${b.id} are NOT connected but close. dist=${dist}, threshold=${threshold}, isDeletedBridge=${isDeletedBridge(aEnd, bStart)}`);
+                        }
                     }
                 }
             }
@@ -1892,6 +1905,7 @@ export class ConveyorSystem {
                 components.push(comp);
             });
             
+            console.log(`[Split Debug] Components calculated:`, components.map(c => c.length));
             // 如果連通分量超過 1 個，代表線段被切斷了，必須將切斷的部分賦予新的 groupId
             if (components.length > 1) {
                 // 找出包含 sourceId 的分量 (如果有的話)，讓它保留原 groupId，其他的改名
