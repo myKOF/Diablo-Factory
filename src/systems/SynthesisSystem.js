@@ -206,6 +206,11 @@ export class SynthesisSystem {
                 // 將成品放入輸出緩衝區 (不再直接全域加總)
                 const outType = ent.currentRecipe.type;
                 ent.outputBuffer[outType] = (ent.outputBuffer[outType] || 0) + ent.currentRecipe.amount;
+
+                // 生產完成，立即刷新 UI
+                if (window.UIManager) {
+                    window.UIManager.updateValues(true);
+                }
             }
         });
     }

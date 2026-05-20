@@ -317,12 +317,17 @@ export class BuildingMenuUI {
                 const currentNeeds = currentRecipe ? window.UIManager.getRecipeNeeds(currentRecipe.type, inputBuffer) : [];
                 const productionProgress = entity.currentRecipe ? Math.max(0, Math.min(1, entity.craftingProgress || 0)) : 0;
                 const currentRecipeName = entity.currentRecipe ? formatRecipeName(entity.currentRecipe.type) : '選擇產品';
+                
+                // 計算倒計時所用時間
+                const currentRecipeCfg = currentRecipe ? window.UIManager.getRecipeConfig(currentRecipe.type) : null;
+                const totalSeconds = currentRecipeCfg ? (currentRecipeCfg.production_times ?? currentRecipeCfg.craftTime ?? 5) : 5;
+                const remainingSeconds = Math.max(0, (1 - productionProgress) * totalSeconds);
+
                 const workerMax = Math.max(1, cfg_current?.need_villagers || 5);
                 const factoryWorkers = window.UIManager.getFactoryWorkers(entity);
                 const workerCount = Math.max(0, Math.min(workerMax, factoryWorkers.length));
                 const efficiency = Math.round((workerCount / workerMax) * 100);
                 const productAmount = currentRecipe ? Math.floor(outputBuffer[currentRecipe.type] || 0) : 0;
-                const productCap = 100;
                 const workerDots = Array.from({ length: workerMax }).map((_, i) => `
                     <div class="factory-worker-dot ${i < workerCount ? 'active' : ''}"></div>
                 `).join('');
@@ -332,7 +337,7 @@ export class BuildingMenuUI {
                             <div class="factory-ingredient-frame">
                                 <div class="factory-ingredient-icon">${window.UIManager.getIngredientIcon(need.type)}</div>
                             </div>
-                            <div class="factory-ingredient-count">${need.required}</div>
+                            <div class="factory-ingredient-count">${need.stored}/${need.required}</div>
                         </div>
                     `).join('')
                     : `<div class="factory-empty-note">選擇產品</div>`;
@@ -347,6 +352,9 @@ export class BuildingMenuUI {
                                 <div class="factory-product-frame">
                                     ${currentRecipe ? `<button class="factory-product-clear" type="button" onclick="window.UIManager.clearFactoryProduct(event)">×</button>` : ''}
                                     <div class="factory-product-icon">${currentRecipe ? window.UIManager.getIngredientIcon(currentRecipe.type) : ''}</div>
+                                    <div class="factory-product-mask" style="position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: linear-gradient(to top, rgba(0,0,0,0.6) ${(1 - productionProgress) * 100}%, transparent 0%); display: ${currentRecipe && productionProgress > 0 ? 'flex' : 'none'}; align-items: center; justify-content: center; pointer-events: none; color: #fff; font-size: 13px; font-weight: bold; text-shadow: 0 1px 3px #000;">
+                                        ${productionProgress > 0 && productionProgress < 1 ? `${remainingSeconds.toFixed(1)}s` : ''}
+                                    </div>
                                 </div>
                                 <div class="factory-product-count">${currentRecipe ? `${productAmount}` : '選擇產品'}</div>
                             </div>
@@ -383,10 +391,22 @@ export class BuildingMenuUI {
                     const needInfo = window.UIManager.getRecipeNeeds(rec.type, inputBuffer)[0] || { label: '0 / 0', progress: 0 };
                     const pct = Math.round(needInfo.progress * 100);
 
+                    const recCfg = window.UIManager.getRecipeConfig(rec.type);
+                    const recId = recCfg ? recCfg.id : '';
+                    const toolTipName = name + (isUnlocked ? '' : ' (未解鎖)');
+                    const toolTipAmount = isUnlocked ? needInfo.stored : 0;
+                    const toolTipStack = isUnlocked ? needInfo.required : rec.amount;
+
                     gridHtml += `
-                        <button class="recipe-btn ${isCrafting ? 'is-active' : ''}" data-uid="${rec.uid}" data-type="${rec.type}" onclick="window.UIManager.selectRecipe(event, '${rec.uid}', '${rec.type}')"
-                                style="opacity:${opacity}; filter:${filter}; --recipe-progress:${pct}%;"
-                                ${isUnlocked ? '' : 'disabled'} title="${isUnlocked ? `${window.UIManager.escapeHtml(name)}：${needInfo.label}` : '建築等級不足，尚未解鎖'}">
+                        <button class="recipe-btn ${isCrafting ? 'is-active' : ''} ${isUnlocked ? '' : 'is-disabled'}" 
+                                data-uid="${rec.uid}" data-type="${rec.type}"
+                                data-name="${window.UIManager.escapeHtml(toolTipName)}" data-id="${recId}"
+                                data-amount="${toolTipAmount}" data-stack="${toolTipStack}"
+                                onclick="${isUnlocked ? `window.UIManager.selectRecipe(event, '${rec.uid}', '${rec.type}')` : 'event.stopPropagation()'}"
+                                style="opacity:${opacity}; filter:${filter}; --recipe-progress:${pct}%; pointer-events: auto;"
+                                onmouseenter="window.UIManager.showItemTooltip(event)"
+                                onmousemove="window.UIManager.moveItemTooltip(event)"
+                                onmouseleave="window.UIManager.hideItemTooltip()">
                             <div class="recipe-icon-frame"><div>${icon}</div></div>
                         </button>
                     `;

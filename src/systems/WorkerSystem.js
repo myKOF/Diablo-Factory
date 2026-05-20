@@ -408,6 +408,7 @@ export class WorkerSystem {
                                 const outputType = targetEnt.type1 === 'farmland' ? 'food' : 'wood';
                                 if (!targetEnt.outputBuffer) targetEnt.outputBuffer = {};
                                 targetEnt.outputBuffer[outputType] = (targetEnt.outputBuffer[outputType] || 0) + canTake;
+                                if (window.UIManager) window.UIManager.updateValues(true);
                                 v.cargo = 0;
                                 v.cargoType = null;
                             }
@@ -2266,6 +2267,22 @@ export class WorkerSystem {
             }
             return Math.max(1, total / 20);
         };
+        const getStorageAmount = (ent, itemType) => {
+            const key = String(itemType || '').toLowerCase();
+            return (ent?.storage && Number(ent.storage[key])) || 0;
+        };
+        const removeFromWarehouseStorage = (ent, itemType, amount = 1) => {
+            if (!ent || !itemType || amount <= 0) return false;
+            const key = String(itemType).toLowerCase();
+            if (!ent.storage) ent.storage = {};
+            if ((ent.storage[key] || 0) < amount) return false;
+            ent.storage[key] -= amount;
+            if (ent.storage[key] <= 0) delete ent.storage[key];
+            if (state.resources) {
+                state.resources[key] = Math.max(0, (state.resources[key] || 0) - amount);
+            }
+            return true;
+        };
 
         for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
             let t = state.activeTransfers[i];
@@ -2313,12 +2330,12 @@ export class WorkerSystem {
                 let target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
                 if (target) {
                     const tType = target.type1 || target.type;
-                    if (['warehouse', 'barn', 'town_center', 'village'].includes(tType)) {
-                        state.resources[t.itemType] = (state.resources[t.itemType] || 0) + 1;
-                    } else {
+                    const deposited = ResourceSystem.depositResourceToBuilding(state, this.engine, target, t.itemType, 1, null);
+                    if (!deposited && !['warehouse', 'storehouse', 'barn', 'town_center', 'village'].includes(tType)) {
                         if (!target.inputBuffer) target.inputBuffer = {};
                         target.inputBuffer[t.itemType] = (target.inputBuffer[t.itemType] || 0) + 1;
                     }
+                    if (window.UIManager) window.UIManager.updateValues(true);
                     // addTransportLog(`[物流] ${String(t.itemType).toUpperCase()} 已送達 ${getEntityLabel(target)}。`);
                 }
                 if (state && state.trackedTransferId === t.id) {
@@ -2357,13 +2374,14 @@ export class WorkerSystem {
                     if (isWarehouse) {
                         if (conn.filter) {
                             if (this.engine && typeof this.engine.addLog === 'function' && !ent._debugLogged) {
-                                this.engine.addLog(`[DEBUG] Warehouse checking: ${conn.filter}, value: ${state.resources[conn.filter]}`, 'LOGISTICS');
+                                this.engine.addLog(`[DEBUG] Warehouse checking: ${conn.filter}, value: ${getStorageAmount(ent, conn.filter)}`, 'LOGISTICS');
                                 ent._debugLogged = true;
                             }
-                            if (state.resources[conn.filter] >= 1) {
+                            if (getStorageAmount(ent, conn.filter) >= 1) {
                                 const transfer = this.createActiveTransfer(state, ent, conn, conn.filter);
                                 if (!transfer) continue;
-                                state.resources[conn.filter] -= 1;
+                                if (!removeFromWarehouseStorage(ent, conn.filter, 1)) continue;
+                                if (window.UIManager) window.UIManager.updateValues(true);
                                 state.activeTransfers.push(transfer);
                                 itemSpawned = true;
                                 const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
@@ -2372,10 +2390,11 @@ export class WorkerSystem {
                         }
                     } else if (ent.outputBuffer) {
                         for (let resType in ent.outputBuffer) {
-                            if (ent.outputBuffer[resType] >= 1 && (!conn.filter || conn.filter === resType)) {
+                            if (ent.outputBuffer[resType] >= 1 && conn.filter === resType) {
                                 const transfer = this.createActiveTransfer(state, ent, conn, resType);
                                 if (!transfer) continue;
                                 ent.outputBuffer[resType] -= 1;
+                                if (window.UIManager) window.UIManager.updateValues(true);
                                 state.activeTransfers.push(transfer);
                                 itemSpawned = true;
                                 const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);

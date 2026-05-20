@@ -67,6 +67,7 @@ export class ResourceSystem {
             state.resources[resKey] = (state.resources[resKey] || 0) + amount;
         }
         if (addLog) addLog(`[資源繳庫] 工人存入了 ${amount} 單位的 ${type.toUpperCase()}`, 'TASK');
+        if (window.UIManager) window.UIManager.updateValues(true);
     }
 
     static getBuildingStorage(building) {
@@ -152,6 +153,7 @@ export class ResourceSystem {
         const supportMap = {
             village: 'ALL',
             town_center: 'ALL',
+            warehouse: 'ALL',
             storehouse: 'ALL',
             timber_factory: ['WOOD', 'TREE'],
             stone_factory: ['STONE', 'ROCK'],
@@ -187,30 +189,32 @@ export class ResourceSystem {
             ['farmland', 'tree_plantation'].includes(building.type1) ||
             (cfg.logistics && cfg.logistics.canOutput && !cfg.logistics.canInput)
         );
+        let success = false;
         if (isGatheringOutput) {
             if (!building.outputBuffer) building.outputBuffer = {};
             building.outputBuffer[resKey] = (building.outputBuffer[resKey] || 0) + amount;
             if (addLog) addLog(`[資源屯積] ${building.name || building.type1} 收到 ${amount} 單位的 ${resKey.toUpperCase()}`, 'TASK');
-            return true;
-        }
-
-        if (cfg && cfg.logistics && cfg.logistics.canInput && cfg.type2 === 'processing_plant') {
+            success = true;
+        } else if (cfg && cfg.logistics && cfg.logistics.canInput && cfg.type2 === 'processing_plant') {
             if (!building.inputBuffer) building.inputBuffer = {};
             building.inputBuffer[resKey] = (building.inputBuffer[resKey] || 0) + amount;
             if (addLog) addLog(`[資源繳庫] 工人將 ${amount} 單位的 ${resKey.toUpperCase()} 放入 ${building.name || building.type1}`, 'TASK');
-            return true;
-        }
-
-        if (['storehouse', 'warehouse', 'village', 'town_center'].includes(building.type1)) {
+            success = true;
+        } else if (['storehouse', 'warehouse', 'barn', 'village', 'town_center'].includes(building.type1)) {
             const storage = this.getBuildingStorage(building);
             storage[resKey] = (storage[resKey] || 0) + amount;
             state.resources[resKey] = (state.resources[resKey] || 0) + amount;
             if (addLog) addLog(`[資源入庫] ${building.name || building.type1} 收到 ${amount} 單位的 ${resKey.toUpperCase()}`, 'TASK');
-            return true;
+            success = true;
+        } else {
+            this.depositResource(state, resKey, amount, addLog);
+            success = true;
         }
 
-        this.depositResource(state, resKey, amount, addLog);
-        return true;
+        if (success && window.UIManager) {
+            window.UIManager.updateValues(true);
+        }
+        return success;
     }
 
     /**

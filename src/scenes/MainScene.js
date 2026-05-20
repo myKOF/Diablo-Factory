@@ -880,9 +880,12 @@ export class MainScene extends Phaser.Scene {
                 window.UIManager.hideLogisticsTooltip();
             }
 
+            // 每幀極輕量更新當前選中加工廠的生產遮罩與進度條動畫
+            window.UIManager.updateCraftingProgress();
+
             const shouldRefreshUI = time - (this._lastUIUpdateTime || 0) >= 250;
             if (shouldRefreshUI) {
-                window.UIManager.updateValues();
+                // 已移除 250ms 定期輪詢 UIManager.updateValues()，改為事件與數據變更驅動即時更新
 
                 const coordsEl = document.getElementById("coords_display");
                 if (coordsEl) {

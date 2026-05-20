@@ -34,10 +34,29 @@ export class LogisticsUI {
         if (!tip || tip.style.display === "none") return;
         const margin = 12;
         const rect = tip.getBoundingClientRect();
-        let left = event.clientX + margin;
-        let top = event.clientY + margin;
-        if (left + rect.width > window.innerWidth - 6) left = event.clientX - rect.width - margin;
-        if (top + rect.height > window.innerHeight - 6) top = event.clientY - rect.height - margin;
+        
+        // 優先顯示於游標左上角
+        let left = event.clientX - rect.width - margin;
+        let top = event.clientY - rect.height - margin;
+        
+        // 如果左邊超出界面，改為顯示在游標右側
+        if (left < 6) {
+            left = event.clientX + margin;
+        }
+        // 如果右邊也超出界面，強制靠右對齊
+        if (left + rect.width > window.innerWidth - 6) {
+            left = window.innerWidth - rect.width - 6;
+        }
+        
+        // 如果上方超出界面，改為顯示在游標下方
+        if (top < 6) {
+            top = event.clientY + margin;
+        }
+        // 如果下方也超出界面，強制靠下對齊
+        if (top + rect.height > window.innerHeight - 6) {
+            top = window.innerHeight - rect.height - 6;
+        }
+        
         tip.style.left = `${Math.max(6, left)}px`;
         tip.style.top = `${Math.max(6, top)}px`;
     }

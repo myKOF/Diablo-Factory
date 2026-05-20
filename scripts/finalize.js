@@ -7,10 +7,11 @@ try {
     { stdio: "ignore" }
   );
 } catch (e) {
-  // fallback 聲音
+  // fallback: 使用 PowerShell 腳本實現 Windows 原生橫幅通知與聲音
   try {
     execSync(
-      `powershell -c (New-Object Media.SoundPlayer 'C:\\Windows\\Media\\notify.wav').PlaySync()`
+      `powershell -ExecutionPolicy Bypass -File scripts/notify.ps1`,
+      { stdio: "ignore" }
     );
   } catch {}
 }

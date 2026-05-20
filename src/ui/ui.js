@@ -388,7 +388,8 @@ export class UIManager {
             e.preventDefault();
         });
 
-        setInterval(() => this.updateValues(), 500);
+        // 移除定時輪詢，改由事件驅動即時更新
+        // setInterval(() => this.updateValues(), 500);
 
         window.addEventListener("mousemove", (e) => {
             if (this.potentialDragType && !this.dragGhost) {
@@ -2019,6 +2020,64 @@ export class UIManager {
     static getBuildingWorkerCooldown(worker) { return BuildingMenuUI.getBuildingWorkerCooldown(worker); }
     static updateBuildingWorkerSlots() { return BuildingMenuUI.updateBuildingWorkerSlots(); }
 
+    // 每幀極輕量更新當前選中加工廠的生產遮罩與進度條
+    static updateCraftingProgress() {
+        const factoryEnt = this.activeMenuEntity;
+        if (!factoryEnt || factoryEnt.isUnderConstruction) return;
+
+        const menu = document.getElementById("context_menu");
+        if (!menu || menu.style.display === "none") return;
+
+        const cfg = GameEngine.getBuildingConfig(factoryEnt.type1, factoryEnt.lv || 1);
+        if (cfg && cfg.type2 === "processing_plant") {
+            const productionProgress = factoryEnt.currentRecipe ? Math.max(0, Math.min(1, factoryEnt.craftingProgress || 0)) : 0;
+
+            // 1. 更新當前生產進度圈 remain-deg 屬性
+            const currentIcon = menu.querySelector(".factory-current-icon");
+            if (currentIcon) {
+                currentIcon.style.setProperty("--remain-deg", `${Math.round((1 - productionProgress) * 360)}deg`);
+            }
+
+            // 2. 更新產品 icon 倒計時遮罩與文字
+            const productMaskEl = menu.querySelector(".factory-product-mask");
+            if (productMaskEl) {
+                if (factoryEnt.currentRecipe && productionProgress > 0) {
+                    const currentRecipeCfg = this.getRecipeConfig(factoryEnt.currentRecipe.type);
+                    const totalSeconds = currentRecipeCfg ? (currentRecipeCfg.production_times ?? currentRecipeCfg.craftTime ?? 5) : 5;
+                    const remainingSeconds = Math.max(0, (1 - productionProgress) * totalSeconds);
+
+                    productMaskEl.style.background = `linear-gradient(to top, rgba(0,0,0,0.6) ${(1 - productionProgress) * 100}%, transparent 0%)`;
+                    productMaskEl.style.display = 'flex';
+                    productMaskEl.textContent = (productionProgress < 1) ? `${remainingSeconds.toFixed(1)}s` : '';
+                } else {
+                    productMaskEl.style.display = 'none';
+                    productMaskEl.textContent = '';
+                }
+            }
+
+            // 3. 更新配方按鈕的進度條 (正在生產的那一個)
+            const recipeBtns = menu.querySelectorAll(".recipe-btn");
+            recipeBtns.forEach(btn => {
+                const type = btn.getAttribute("data-type");
+                const prog = btn.querySelector(".recipe-progress");
+                if (prog) {
+                    const isCrafting = factoryEnt.currentRecipe && factoryEnt.currentRecipe.type === type;
+                    const progFill = prog.querySelector("span") || prog;
+                    if (isCrafting) {
+                        const p = Math.min(100, productionProgress * 100);
+                        progFill.style.width = `${p}%`;
+                        prog.style.display = "block";
+                    } else {
+                        progFill.style.width = "0%";
+                        prog.style.display = "block";
+                    }
+                }
+            });
+        }
+    }
+
+    static activeTooltipElement = null;
+
     static getItemTooltipEl() {
         let tip = document.getElementById("item_tooltip");
         if (!tip) {
@@ -2031,10 +2090,38 @@ export class UIManager {
     }
 
     static showItemTooltip(event, name, id, amount, stack) {
+        const target = event.currentTarget || event.target;
+        this.activeTooltipElement = target;
+
+        if (name !== undefined) {
+            target.dataset.tooltipName = name;
+            target.dataset.tooltipId = id;
+            target.dataset.tooltipAmount = amount;
+            target.dataset.tooltipStack = stack;
+        } else {
+            target.dataset.tooltipName = target.getAttribute("data-name") || "";
+            target.dataset.tooltipId = target.getAttribute("data-id") || "";
+            target.dataset.tooltipAmount = target.getAttribute("data-amount") || "0";
+            target.dataset.tooltipStack = target.getAttribute("data-stack") || "0";
+        }
+
+        this.updateTooltipContent();
         const tip = this.getItemTooltipEl();
-        tip.innerHTML = `<div>${name} (ID:${id})</div><div>數量: ${amount} / ${stack}</div>`;
         tip.style.display = "block";
         this.moveItemTooltip(event);
+    }
+
+    static updateTooltipContent() {
+        const target = this.activeTooltipElement;
+        if (!target) return;
+
+        const name = target.dataset.tooltipName || "";
+        const id = target.dataset.tooltipId || "";
+        const amount = target.dataset.tooltipAmount || "0";
+        const stack = target.dataset.tooltipStack || "0";
+
+        const tip = this.getItemTooltipEl();
+        tip.innerHTML = `<div>${name} (ID:${id})</div><div>數量: ${amount} / ${stack}</div>`;
     }
 
     static moveItemTooltip(event) {
@@ -2042,15 +2129,35 @@ export class UIManager {
         if (!tip || tip.style.display === "none") return;
         const margin = 12;
         const rect = tip.getBoundingClientRect();
-        let left = event.clientX + margin;
-        let top = event.clientY + margin;
-        if (left + rect.width > window.innerWidth - 6) left = event.clientX - rect.width - margin;
-        if (top + rect.height > window.innerHeight - 6) top = event.clientY - rect.height - margin;
+        
+        // 優先顯示於游標左上角
+        let left = event.clientX - rect.width - margin;
+        let top = event.clientY - rect.height - margin;
+        
+        // 如果左邊超出界面，改為顯示在游標右側
+        if (left < 6) {
+            left = event.clientX + margin;
+        }
+        // 如果右邊也超出界面，強制靠右對齊
+        if (left + rect.width > window.innerWidth - 6) {
+            left = window.innerWidth - rect.width - 6;
+        }
+        
+        // 如果上方超出界面，改為顯示在游標下方
+        if (top < 6) {
+            top = event.clientY + margin;
+        }
+        // 如果下方也超出界面，強制靠下對齊
+        if (top + rect.height > window.innerHeight - 6) {
+            top = window.innerHeight - rect.height - 6;
+        }
+        
         tip.style.left = `${Math.max(6, left)}px`;
         tip.style.top = `${Math.max(6, top)}px`;
     }
 
     static hideItemTooltip() {
+        this.activeTooltipElement = null;
         const tip = document.getElementById("item_tooltip");
         if (tip) tip.style.display = "none";
     }
@@ -2324,6 +2431,30 @@ export class UIManager {
                         }
                     }
                 }
+
+                // 更新當前加工廠主面板的產品數量 (.factory-product-count)
+                const productCountEl = menu.querySelector(".factory-product-count");
+                if (productCountEl) {
+                    const outputBuffer = factoryEnt.outputBuffer || {};
+                    const productAmount = factoryEnt.currentRecipe ? Math.floor(outputBuffer[factoryEnt.currentRecipe.type] || 0) : 0;
+                    productCountEl.textContent = factoryEnt.currentRecipe ? `${productAmount}` : '選擇產品';
+                }
+
+                // 更新當前加工廠主面板的材料現有量/需求量 (.factory-ingredient-count)
+                const ingredientTiles = menu.querySelectorAll(".factory-ingredient-tile");
+                ingredientTiles.forEach(tile => {
+                    const needType = tile.getAttribute("data-need-type");
+                    const countEl = tile.querySelector(".factory-ingredient-count");
+                    if (needType && countEl && factoryEnt.currentRecipe) {
+                        const inputBuffer = factoryEnt.inputBuffer || {};
+                        const currentNeeds = UIManager.getRecipeNeeds(factoryEnt.currentRecipe.type, inputBuffer);
+                        const need = currentNeeds.find(n => n.type === needType);
+                        if (need) {
+                            countEl.textContent = `${need.stored}/${need.required}`;
+                        }
+                    }
+                });
+
                 menu.querySelectorAll(".recipe-material-ratio").forEach(el => {
                     const recipeType = el.getAttribute("data-recipe-type");
                     const ingCfg = GameEngine.state.ingredientConfigs
@@ -2382,6 +2513,15 @@ export class UIManager {
                     iconFrame.style.background = isCrafting ? "rgba(255,235,59,0.14)" : "rgba(255,255,255,0.05)";
                     iconFrame.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.04)";
                 }
+
+                // 4. 更新配方按鈕的 dataset，以提供 Hover Tooltip 即時最新的數量顯示
+                const isUnlocked = !btn.classList.contains("is-disabled");
+                const inputBuffer = factoryEnt.inputBuffer || {};
+                const needInfo = UIManager.getRecipeNeeds(type, inputBuffer)[0] || { stored: 0, required: 0, progress: 0 };
+                const toolTipAmount = isUnlocked ? needInfo.stored : 0;
+                btn.setAttribute("data-amount", toolTipAmount);
+                const pct = Math.round(needInfo.progress * 100);
+                btn.style.setProperty("--recipe-progress", `${pct}%`);
             });
         }
 
@@ -2417,6 +2557,22 @@ export class UIManager {
                 btn.classList.remove("active");
             }
         });
+
+        // 6. 如果有 hover 的 Tooltip 正在顯示，動態刷新其顯示的數值
+        if (this.activeTooltipElement) {
+            if (document.body.contains(this.activeTooltipElement)) {
+                const target = this.activeTooltipElement;
+                if (target.hasAttribute("data-amount")) {
+                    target.dataset.tooltipAmount = target.getAttribute("data-amount");
+                }
+                if (target.hasAttribute("data-stack")) {
+                    target.dataset.tooltipStack = target.getAttribute("data-stack");
+                }
+                this.updateTooltipContent();
+            } else {
+                this.hideItemTooltip();
+            }
+        }
     }
 
     static updateStickyPositions() {
