@@ -1513,6 +1513,16 @@ export class ConveyorSystem {
             mergedGroupId = this.mergeLogisticsLineGroups(mergedGroupId, otherGroupId) || mergedGroupId;
         });
         mergedGroupId = this.mergeConnectedLogisticsGroups(mergedGroupId) || mergedGroupId;
+
+        // [修正 v2] 建造/延伸/合併全部完成後，對最終群組再做一次統一重整。
+        // 確保純延伸（未觸發 mergeLogisticsLineGroups）的情境下 order 也正確。
+        const postBuildSegs = (GameEngine.state.logisticsLines || []).filter(
+            l => l && (l.groupId === mergedGroupId || l.id === mergedGroupId)
+        );
+        if (postBuildSegs.length > 0) {
+            this.orderLogisticsSegmentsByDirection(postBuildSegs);
+        }
+
         if (conn && mergedGroupId !== groupId) {
             conn.lineId = mergedGroupId;
         }
@@ -1747,6 +1757,13 @@ export class ConveyorSystem {
             if (hasPortPosition(canonicalTargetPort)) line.targetPort = canonicalTargetPort;
             if (filter) line.filter = filter;
         });
+
+        // [修正 v2] 合併後強制重整 order/splitSequenceOrder，防止兩群組各自的 0..n
+        // 合併成一個群組後產生重複值，導致後續刪除前後段分割完全錯誤。
+        const allMergedSegs = lines.filter(l => l && l.groupId === primaryGroupId);
+        if (allMergedSegs.length > 0) {
+            this.orderLogisticsSegmentsByDirection(allMergedSegs);
+        }
 
         if (GameEngine.state.selectedLogisticsGroupId === secondaryGroupId) GameEngine.state.selectedLogisticsGroupId = primaryGroupId;
         return primaryGroupId;
