@@ -1347,9 +1347,11 @@ export class LogisticsRenderer {
         state.activeTransfers.forEach(t => {
             const source = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.sourceId);
             const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
-            if (!source || !target) return;
+            const hasStoredRoute = Array.isArray(t.routePoints) && t.routePoints.length >= 2;
+            if (!source && !hasStoredRoute) return;
+            if (!target && !hasStoredRoute) return;
 
-            const directConn = Array.isArray(source.outputTargets)
+            const directConn = source && Array.isArray(source.outputTargets)
                 ? source.outputTargets.find(conn => conn && conn.id === t.targetId)
                 : null;
             const routePoints = LogisticsRenderer.normalizeTransferRoutePoints(
@@ -1362,13 +1364,15 @@ export class LogisticsRenderer {
 
             let px, py;
             if (Array.isArray(routePoints) && routePoints.length >= 2) {
-                const pathPoint = LogisticsRenderer.getPointOnTransferPath(routePoints, t.progress, GameEngine.TILE_SIZE * 0.5);
+                const pathPoint = LogisticsRenderer.getPointOnTransferPath(routePoints, t.progress, 0);
                 if (!pathPoint) return;
                 px = pathPoint.x;
                 py = pathPoint.y;
-            } else {
+            } else if (source && target) {
                 px = source.x + (target.x - source.x) * t.progress;
                 py = source.y + (target.y - source.y) * t.progress;
+            } else {
+                return;
             }
             LogisticsRenderer.logTransferRenderDebug(graphics, state, scene, source, target, routePoints, t, px, py);
 
@@ -1376,10 +1380,20 @@ export class LogisticsRenderer {
                 ? scene.getResourceIconColor(t.itemType)
                 : 0xffffff;
 
+            const itemSize = GameEngine.TILE_SIZE;
+            const half = itemSize / 2;
+            const strokeWidth = Math.max(2, Math.min(3, itemSize * 0.12));
+            const inset = strokeWidth / 2;
+
             graphics.fillStyle(0x222222, 1);
-            graphics.fillRect(px - 10, py - 10, 20, 20);
-            graphics.lineStyle(3, color, 1);
-            graphics.strokeRect(px - 10, py - 10, 20, 20);
+            graphics.fillRect(px - half, py - half, itemSize, itemSize);
+            graphics.lineStyle(strokeWidth, color, 1);
+            graphics.strokeRect(
+                px - half + inset,
+                py - half + inset,
+                itemSize - strokeWidth,
+                itemSize - strokeWidth
+            );
             graphics.fillStyle(color, 0.8);
             graphics.fillRect(px - 4, py - 4, 8, 8);
         });

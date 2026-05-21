@@ -2281,6 +2281,39 @@ export class WorkerSystem {
             }
             return true;
         };
+        const getRouteLengthPixels = (points) => {
+            if (!Array.isArray(points) || points.length < 2) return 0;
+            let total = 0;
+            for (let j = 0; j < points.length - 1; j++) {
+                total += Math.hypot(points[j + 1].x - points[j].x, points[j + 1].y - points[j].y);
+            }
+            return total;
+        };
+        const getTransferPathKey = (transfer) => {
+            const points = transfer?.routePoints || [];
+            const first = points[0];
+            const last = points[points.length - 1];
+            return [
+                transfer?.lineId || "line",
+                first ? `${Math.round(first.x)},${Math.round(first.y)}` : "start",
+                last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"
+            ].join("|");
+        };
+        const canStartTransfer = (transfer) => {
+            if (!transfer || !Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) return true;
+            const key = getTransferPathKey(transfer);
+            const totalLength = getRouteLengthPixels(transfer.routePoints);
+            if (totalLength <= 0) return true;
+            const cellSize = this.engine?.TILE_SIZE || 20;
+            return !state.activeTransfers.some(active => {
+                if (!active || active.id === transfer.id) return false;
+                if (!Array.isArray(active.routePoints) || active.routePoints.length < 2) return false;
+                if (getTransferPathKey(active) !== key) return false;
+                const activeTotal = getRouteLengthPixels(active.routePoints) || totalLength;
+                const activeDistance = Math.max(0, Math.min(1, Number(active.progress) || 0)) * activeTotal;
+                return activeDistance < cellSize;
+            });
+        };
 
         for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
             let t = state.activeTransfers[i];
@@ -2351,6 +2384,10 @@ export class WorkerSystem {
         }
 
         // 2. 讓滿足工人條件的建築自動發送物品
+        if (conveyorSystem && typeof conveyorSystem.applyBlockedTransferQueues === 'function') {
+            conveyorSystem.applyBlockedTransferQueues(state);
+        }
+
         state.mapEntities.forEach(ent => {
             if (!ent.outputTargets || ent.outputTargets.length === 0) return;
 
@@ -2382,6 +2419,7 @@ export class WorkerSystem {
                             if (getStorageAmount(ent, conn.filter) >= 1) {
                                 const transfer = this.createActiveTransfer(state, ent, conn, conn.filter);
                                 if (!transfer) continue;
+                                if (!canStartTransfer(transfer)) continue;
                                 if (!removeFromWarehouseStorage(ent, conn.filter, 1)) continue;
                                 if (window.UIManager) window.UIManager.updateValues(true);
                                 state.activeTransfers.push(transfer);
@@ -2395,6 +2433,7 @@ export class WorkerSystem {
                             if (ent.outputBuffer[resType] >= 1 && conn.filter === resType) {
                                 const transfer = this.createActiveTransfer(state, ent, conn, resType);
                                 if (!transfer) continue;
+                                if (!canStartTransfer(transfer)) continue;
                                 ent.outputBuffer[resType] -= 1;
                                 if (window.UIManager) window.UIManager.updateValues(true);
                                 state.activeTransfers.push(transfer);
@@ -2408,5 +2447,9 @@ export class WorkerSystem {
                 }
             }
         });
+
+        if (conveyorSystem && typeof conveyorSystem.applyBlockedTransferQueues === 'function') {
+            conveyorSystem.applyBlockedTransferQueues(state);
+        }
     }
 }

@@ -1997,7 +1997,7 @@ export class ConveyorSystem {
                 const segLen = Math.hypot(p2.x - p1.x, p2.y - p1.y);
                 if (segLen === 0) continue;
 
-                const u = ((pos.x - p1.x) * (p2.x - p1.x) + (pos.y - p1.y) * (pos.y - p1.y)) / (segLen * segLen);
+                const u = ((pos.x - p1.x) * (p2.x - p1.x) + (pos.y - p1.y) * (p2.y - p1.y)) / (segLen * segLen);
                 const t = Math.max(0, Math.min(1, u));
                 const proj = {
                     x: p1.x + t * (p2.x - p1.x),
@@ -2021,6 +2021,24 @@ export class ConveyorSystem {
             }
             return total;
         };
+        const getDistanceToPath = (points, pos) => {
+            if (!Array.isArray(points) || points.length < 2 || !pos) return Infinity;
+            let bestDist = Infinity;
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i + 1];
+                const segLenSq = Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2);
+                if (segLenSq <= 0) continue;
+                const u = ((pos.x - p1.x) * (p2.x - p1.x) + (pos.y - p1.y) * (p2.y - p1.y)) / segLenSq;
+                const t = Math.max(0, Math.min(1, u));
+                const proj = {
+                    x: p1.x + t * (p2.x - p1.x),
+                    y: p1.y + t * (p2.y - p1.y)
+                };
+                bestDist = Math.min(bestDist, Math.hypot(pos.x - proj.x, pos.y - proj.y));
+            }
+            return bestDist;
+        };
 
         for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
             const t = state.activeTransfers[i];
@@ -2034,8 +2052,11 @@ export class ConveyorSystem {
             let bestSegDist = Infinity;
             (state.logisticsLines || []).forEach(line => {
                 if (!line) return;
-                const d = Math.hypot(line.x - currentPos.x, line.y - currentPos.y);
-                if (d < bestSegDist && d <= TS * 1.0) {
+                const route = Array.isArray(line.routePoints) && line.routePoints.length >= 2
+                    ? line.routePoints
+                    : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
+                const d = getDistanceToPath(route, currentPos);
+                if (d < bestSegDist && d <= TS * 0.75) {
                     bestSegDist = d;
                     currentSeg = line;
                 }
@@ -2079,6 +2100,64 @@ export class ConveyorSystem {
             t.targetId = currentSeg.targetId || null;
             t.efficiency = Number(currentSeg.efficiency) || 0;
         }
+
+        this.applyBlockedTransferQueues(state);
+    }
+
+    applyBlockedTransferQueues(state) {
+        if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const getPathTotalLength = (points) => {
+            if (!Array.isArray(points) || points.length < 2) return 0;
+            let total = 0;
+            for (let i = 0; i < points.length - 1; i++) {
+                total += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+            }
+            return total;
+        };
+        const pathKey = (transfer) => {
+            const points = transfer.routePoints || [];
+            const first = points[0];
+            const last = points[points.length - 1];
+            return [
+                transfer.lineId || "line",
+                first ? `${Math.round(first.x)},${Math.round(first.y)}` : "start",
+                last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"
+            ].join("|");
+        };
+
+        const groups = new Map();
+        state.activeTransfers.forEach(transfer => {
+            if (!transfer) return;
+            if (!Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) return;
+            const key = pathKey(transfer);
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(transfer);
+        });
+
+        groups.forEach(transfers => {
+            const totalLength = getPathTotalLength(transfers[0]?.routePoints);
+            if (totalLength <= 0) return;
+            transfers.sort((a, b) => {
+                const da = Math.max(0, Math.min(1, Number(a.progress) || 0)) * totalLength;
+                const db = Math.max(0, Math.min(1, Number(b.progress) || 0)) * totalLength;
+                if (db !== da) return db - da;
+                return String(a.id || "").localeCompare(String(b.id || ""));
+            });
+
+            let nextMaxDistance = totalLength;
+            transfers.forEach(transfer => {
+                const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
+                const queuedDistance = Math.max(0, Math.min(desired, nextMaxDistance));
+                transfer.progress = Math.max(0, Math.min(1, queuedDistance / totalLength));
+                if (transfer.targetId) {
+                    delete transfer.blockedOnBrokenLine;
+                } else {
+                    transfer.blockedOnBrokenLine = true;
+                }
+                nextMaxDistance = queuedDistance - TS;
+            });
+        });
     }
 
     recalculateLogisticsGroupEndpoints(groupId) {
