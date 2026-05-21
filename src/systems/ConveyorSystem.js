@@ -3,6 +3,102 @@ import { GameEngine } from './game_systems.js';
 import { UI_CONFIG } from '../ui/ui_config.js';
 import { BuildingSystem } from './BuildingSystem.js';
 
+class SpatialHashGrid {
+    constructor(cellSize = 64) {
+        this.cellSize = cellSize;
+        this.grid = new Map();
+    }
+
+    clear() {
+        this.grid.clear();
+    }
+
+    _getBucket(x, y) {
+        const cx = Math.floor(x / this.cellSize);
+        const cy = Math.floor(y / this.cellSize);
+        return `${cx},${cy}`;
+    }
+
+    insert(segment) {
+        if (!segment) return;
+        const rects = this._getSegmentRects(segment);
+        rects.forEach(rect => {
+            const minX = rect.x;
+            const maxX = rect.x + rect.w;
+            const minY = rect.y;
+            const maxY = rect.y + rect.h;
+
+            const startCx = Math.floor(minX / this.cellSize);
+            const endCx = Math.floor(maxX / this.cellSize);
+            const startCy = Math.floor(minY / this.cellSize);
+            const endCy = Math.floor(maxY / this.cellSize);
+
+            for (let cx = startCx; cx <= endCx; cx++) {
+                for (let cy = startCy; cy <= endCy; cy++) {
+                    const key = `${cx},${cy}`;
+                    if (!this.grid.has(key)) {
+                        this.grid.set(key, new Set());
+                    }
+                    this.grid.get(key).add(segment);
+                }
+            }
+        });
+    }
+
+    getNearby(worldX, worldY) {
+        const cx = Math.floor(worldX / this.cellSize);
+        const cy = Math.floor(worldY / this.cellSize);
+        const results = new Set();
+        
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                const key = `${cx + dx},${cy + dy}`;
+                const bucket = this.grid.get(key);
+                if (bucket) {
+                    bucket.forEach(item => results.add(item));
+                }
+            }
+        }
+        return results;
+    }
+
+    _getSegmentRects(line) {
+        const TS = GameEngine.TILE_SIZE || 20;
+        const points = Array.isArray(line.routePoints)
+            ? line.routePoints.map(p => ({ x: p.x, y: p.y }))
+            : [];
+        if (points.length < 2) return [];
+        const width = Math.max(1, Math.round(Number(line.routeWidth) || 1));
+        const rects = [];
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 0.001) continue;
+
+            const dir = { x: dx / dist, y: dy / dist };
+            const steps = Math.max(1, Math.round(dist / TS));
+            const stepSize = dist / steps;
+
+            for (let step = 0; step < steps; step++) {
+                const px = a.x + dir.x * stepSize * step;
+                const py = a.y + dir.y * stepSize * step;
+
+                const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
+                rects.push({
+                    x: px - (isHorizontal ? TS / 2 : (width * TS) / 2),
+                    y: py - (isHorizontal ? (width * TS) / 2 : TS / 2),
+                    w: (isHorizontal ? TS : width * TS),
+                    h: (isHorizontal ? width * TS : TS)
+                });
+            }
+        }
+        return rects;
+    }
+}
+
 export class ConveyorSystem {
     constructor() {
         this.activeDrag = null;
@@ -14,7 +110,8 @@ export class ConveyorSystem {
         this.lastRouteKey = null;
         this.logisticsOccupiedKeys = new Set();
         // [合併鎖定] 防止拆分後立刻被自動合併覆蓋，由 deleteLogisticsLineById 啟用
-        this.mergeLock = null;
+        this.isProcessingMerge = false;
+        this.spatialGrid = new SpatialHashGrid(64);
     }
 
     startDrag(startX, startY, sourceEntity = null, sourcePort = null, sourceLine = null) {
@@ -707,14 +804,22 @@ export class ConveyorSystem {
         }
     }
 
+    rebuildSpatialHashGrid() {
+        this.spatialGrid.clear();
+        const lines = this.ensureLogisticsLineStore();
+        lines.forEach(line => {
+            if (line) {
+                this.spatialGrid.insert(line);
+            }
+        });
+    }
+
     toGrid(worldX, worldY, dirBias = null) {
         const TS = GameEngine.TILE_SIZE;
         const scale = this.getRouteScale();
         const gridUnit = TS / scale;
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
 
-        // [核心修復] 處理邊界歧義：對於右側與下側邊界點，微調座標使其歸入「前一格」(即建築內部格子)
-        // 這樣 Anchor (port+1) 才會剛好落在緊貼建築的格子，消除 1 格間距
         let bx = worldX;
         let by = worldY;
         if (dirBias === 'right') bx -= 1;
@@ -1072,7 +1177,7 @@ export class ConveyorSystem {
 
         const remaining = segmentPoints.map(points => points.slice());
         const points = remaining.shift();
-        const samePoint = (a, b) => a && b && Math.hypot(a.x - b.x, a.y - b.y) < 1;
+        const samePoint = (a, b) => a && b && a.x === b.x && a.y === b.y;
 
         while (remaining.length > 0) {
             const first = points[0];
@@ -1277,14 +1382,21 @@ export class ConveyorSystem {
                 sourcePort,
                 targetPort,
                 filter: filter || null,
+                prevId: null,
+                nextId: null,
                 order: i,
                 createdAt: Date.now()
             });
+        }
+        for (let i = 0; i < segments.length; i++) {
+            segments[i].prevId = i > 0 ? segments[i - 1].id : null;
+            segments[i].nextId = i < segments.length - 1 ? segments[i + 1].id : null;
         }
         return segments;
     }
 
     upsertLogisticsLine({ lineId = null, sourceEnt, targetEnt = null, targetPoint = null, points = [], routeWidth = 1, sourcePort = null, targetPort = null, conn = null, lineType = 'transport_line', efficiency = 0 }) {
+        if (this.isProcessingMerge) return null;
         const lines = this.ensureLogisticsLineStore();
         const sourceId = window.UIManager.getEntityId(sourceEnt);
         const targetId = targetEnt ? window.UIManager.getEntityId(targetEnt) : null;
@@ -1421,8 +1533,8 @@ export class ConveyorSystem {
                 hits.forEach(hit => {
                     const hitGroupId = getLineGroupId(hit);
                     if (!hitGroupId || hitGroupId === groupId) return;
-                    // [嚴格化合併檢查] 若目標群組目前處於合併鎖定中（剛被拆分），禁止合併
-                    if (this.mergeLock !== null && this.mergeLock === hitGroupId) {
+                    // [嚴格化合併檢查] 若目前處於合併處理中，禁止合併
+                    if (this.isProcessingMerge === true) {
                         blockedOverlapGroupIds.add(hitGroupId);
                         return;
                     }
@@ -1527,6 +1639,7 @@ export class ConveyorSystem {
             conn.lineId = mergedGroupId;
         }
         this.recalculateLogisticsGroupEndpoints(mergedGroupId);
+        this.rebuildSpatialHashGrid();
         return additions[additions.length - 1] || segments.map(segment => occupied.get(this.getLogisticsSegmentOccupyKey(segment))).filter(Boolean).pop() || this.getLogisticsLineById(mergedGroupId) || null;
     }
 
@@ -1694,8 +1807,7 @@ export class ConveyorSystem {
     }
 
     mergeConnectedLogisticsGroups(groupId) {
-        // [合併鎖定] 若該 groupId 正在鎖定期間（剛被拆分），直接回傳，不執行自動合併
-        if (this.mergeLock !== null && this.mergeLock === groupId) {
+        if (this.isProcessingMerge === true) {
             return groupId;
         }
 
@@ -1720,6 +1832,9 @@ export class ConveyorSystem {
     }
 
     mergeLogisticsLineGroups(primaryGroupId, secondaryGroupId) {
+        if (this.isProcessingMerge === true) {
+            return primaryGroupId;
+        }
         if (!primaryGroupId || !secondaryGroupId || primaryGroupId === secondaryGroupId) return primaryGroupId || secondaryGroupId || null;
         const lines = this.ensureLogisticsLineStore();
         const primaryLines = lines.filter(line => line && (line.groupId === primaryGroupId || line.id === primaryGroupId));
@@ -1827,127 +1942,63 @@ export class ConveyorSystem {
     }
 
     orderLogisticsSegmentsByDirection(segments) {
-        if (!Array.isArray(segments) || segments.length <= 1) return Array.isArray(segments) ? [...segments] : [];
-
-        const align = (GameEngine.TILE_SIZE || 64) / 2;
-        const getGCoords = (seg) => {
-            if (Number.isFinite(seg?.startGx) && Number.isFinite(seg?.startGy) &&
-                Number.isFinite(seg?.endGx) && Number.isFinite(seg?.endGy)) {
-                return { startGx: seg.startGx, startGy: seg.startGy, endGx: seg.endGx, endGy: seg.endGy };
+        if (!Array.isArray(segments) || segments.length <= 1) {
+            if (Array.isArray(segments) && segments.length === 1) {
+                segments[0].order = 0;
+                segments[0].splitSequenceOrder = 0;
             }
-            const s = seg?.routePoints?.[0] || { x: seg?.x || 0, y: seg?.y || 0 };
-            const e = seg?.routePoints?.[seg?.routePoints?.length - 1] || s;
-            return {
-                startGx: Math.round(s.x / align), startGy: Math.round(s.y / align),
-                endGx: Math.round(e.x / align), endGy: Math.round(e.y / align)
-            };
-        };
-        const gKey = (gx, gy) => `${gx},${gy}`;
+            return Array.isArray(segments) ? [...segments] : [];
+        }
 
-        const startMap = new Map();
-        const endKeySet = new Set();
-        segments.forEach(seg => {
-            const { startGx, startGy, endGx, endGy } = getGCoords(seg);
-            startMap.set(gKey(startGx, startGy), seg);
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    endKeySet.add(gKey(endGx + dx, endGy + dy));
+        const segMap = new Map(segments.map(seg => [seg.id, seg]));
+        const ordered = [];
+        const visited = new Set();
+
+        // 1. 尋找所有鏈的起點 (即 prevId 為 null，或者 prevId 指向的節點不在 segments 中)
+        const heads = segments.filter(seg => !seg.prevId || !segMap.has(seg.prevId));
+
+        // 如果找不到任何頭部（例如全部成環），選取一個沒有被指向或 order 最小的
+        if (heads.length === 0) {
+            heads.push(segments[0]);
+        }
+
+        // 2. 對每個起點，沿 nextId 指針進行鏈式遍歷
+        heads.forEach(head => {
+            let curr = head;
+            while (curr && !visited.has(curr.id)) {
+                ordered.push(curr);
+                visited.add(curr.id);
+                curr = curr.nextId ? segMap.get(curr.nextId) : null;
+            }
+        });
+
+        // 3. 處理剩餘未被收集的孤立節點 (例如斷鏈)
+        if (ordered.length < segments.length) {
+            segments.forEach(seg => {
+                if (!visited.has(seg.id)) {
+                    let curr = seg;
+                    // 先往前追溯到該子鏈的頭部
+                    while (curr.prevId && segMap.has(curr.prevId) && !visited.has(curr.prevId)) {
+                        curr = segMap.get(curr.prevId);
+                    }
+                    // 往後收集
+                    while (curr && !visited.has(curr.id)) {
+                        ordered.push(curr);
+                        visited.add(curr.id);
+                        curr = curr.nextId ? segMap.get(curr.nextId) : null;
+                    }
                 }
-            }
-        });
-
-        // [優先選取] 優先選取具有 sourceId 或 sourcePort 的線段作為排序起點
-        let startSeg = segments.find(seg => {
-            const { startGx, startGy } = getGCoords(seg);
-            return !endKeySet.has(gKey(startGx, startGy)) && (seg.sourceId || seg.sourcePort);
-        });
-
-        // 若無帶 source 資訊的頭部，退而求其次：任意找一個起點（不被其他段指向的）
-        if (!startSeg) {
-            startSeg = segments.find(seg => {
-                const { startGx, startGy } = getGCoords(seg);
-                return !endKeySet.has(gKey(startGx, startGy));
             });
         }
 
-        // 環形路線或資料異常 → fallback 用 order 最小的
-        if (!startSeg) {
-            startSeg = [...segments].sort((a, b) =>
-                (Number.isFinite(a?.splitSequenceOrder) ? a.splitSequenceOrder : (a.order || 0)) -
-                (Number.isFinite(b?.splitSequenceOrder) ? b.splitSequenceOrder : (b.order || 0))
-            )[0];
+        // 4. 重置與自癒 DLL 指針
+        // 為了確保 prevId/nextId 鏈與最終排序後的順序 100% 一致（Proximity Auto-Link 自癒）：
+        for (let i = 0; i < ordered.length; i++) {
+            ordered[i].prevId = i > 0 ? ordered[i - 1].id : null;
+            ordered[i].nextId = i < ordered.length - 1 ? ordered[i + 1].id : null;
+            ordered[i].order = i;
+            ordered[i].splitSequenceOrder = i;
         }
-
-        // O(n) 有向鏈式追蹤（加 ±1 容差處理舊合成終點）
-        const ordered = [];
-        const remaining = new Set(segments);
-        let current = startSeg;
-        while (current && remaining.has(current)) {
-            ordered.push(current);
-            remaining.delete(current);
-            const { endGx, endGy } = getGCoords(current);
-            // 先嘗試精準匹配，再嘗試 ±2 容差（支援轉角半格格點連接，按距離優先搜尋）
-            let next = startMap.get(gKey(endGx, endGy));
-            if (!next || !remaining.has(next)) {
-                const offsets = [
-                    // Dist 1
-                    [-1, 0], [1, 0], [0, -1], [0, 1],
-                    // Dist 1.41
-                    [-1, -1], [-1, 1], [1, -1], [1, 1],
-                    // Dist 2
-                    [-2, 0], [2, 0], [0, -2], [0, 2],
-                    // Dist 2.24
-                    [-2, -1], [-2, 1], [2, -1], [2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2],
-                    // Dist 2.83
-                    [-2, -2], [-2, 2], [2, -2], [2, 2]
-                ];
-                for (const [dx, dy] of offsets) {
-                    const candidate = startMap.get(gKey(endGx + dx, endGy + dy));
-                    if (candidate && remaining.has(candidate)) { next = candidate; break; }
-                }
-            }
-            current = (next && remaining.has(next)) ? next : null;
-        }
-
-        // 斷鏈時：用最近鄰居接力（而非 order 排序），確保路線方向不亂
-        // 每次從剩餘段中找起點最靠近上一段終點的線段，繼續建立子鏈
-        while (remaining.size > 0) {
-            // 找距離上一段終點最近的起點
-            const { endGx: lastEndGx, endGy: lastEndGy } = getGCoords(ordered[ordered.length - 1]);
-            let bestSeg = null;
-            let bestDist = Infinity;
-            for (const seg of remaining) {
-                const { startGx, startGy } = getGCoords(seg);
-                const d = Math.abs(startGx - lastEndGx) + Math.abs(startGy - lastEndGy); // 曼哈頓距離
-                if (d < bestDist) { bestDist = d; bestSeg = seg; }
-            }
-            if (!bestSeg) break;
-            // 從 bestSeg 繼續建子鏈
-            let cur = bestSeg;
-            while (cur && remaining.has(cur)) {
-                ordered.push(cur);
-                remaining.delete(cur);
-                const { endGx, endGy } = getGCoords(cur);
-                let nxt = startMap.get(gKey(endGx, endGy));
-                if (!nxt || !remaining.has(nxt)) {
-                    const offs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1],
-                                  [-2,0],[2,0],[0,-2],[0,2]];
-                    for (const [dx, dy] of offs) {
-                        const c = startMap.get(gKey(endGx+dx, endGy+dy));
-                        if (c && remaining.has(c)) { nxt = c; break; }
-                    }
-                }
-                cur = (nxt && remaining.has(nxt)) ? nxt : null;
-            }
-        }
-
-        // [強制重置編號] 確保 order 與 splitSequenceOrder 嚴格從 0 遞增，消除跳號問題
-        ordered.forEach((seg, index) => {
-            if (seg) {
-                seg.order = index;
-                seg.splitSequenceOrder = index;
-            }
-        });
 
         return ordered;
     }
@@ -2292,85 +2343,81 @@ export class ConveyorSystem {
     }
 
     deleteLogisticsLineById(lineId) {
-        const state = GameEngine.state;
-        const line = this.getLogisticsLineById(lineId);
-        if (!line) return false;
-        const lineKey = this.getLogisticsLineSelectionKey(line);
-        const groupId = line.groupId || line.id;
+        this.isProcessingMerge = true;
+        try {
+            const state = GameEngine.state;
+            const line = this.getLogisticsLineById(lineId);
+            if (!line) return false;
+            const lineKey = this.getLogisticsLineSelectionKey(line);
+            const groupId = line.groupId || line.id;
 
-        const lineGridX = line.gridX;
-        const lineGridY = line.gridY;
-        state.logisticsLines = this.ensureLogisticsLineStore().filter(item => {
-            const isTarget = this.getLogisticsLineSelectionKey(item) === lineKey;
-            const isDuplicate = item && item.gridX === lineGridX && item.gridY === lineGridY;
-            return !isTarget && !isDuplicate;
-        });
-        this.cleanupDeletedLinePreviousTurnOverride(line, groupId);
+            const lineGridX = line.gridX;
+            const lineGridY = line.gridY;
 
-        // [核心修正 v3] 使用「order 值直接分割」取代不可靠的 BFS 端點連通判定。
-        // BFS 端點判定的容差 (0.1 * TILE_SIZE ≈ 6px) 在轉角處容易因座標精度問題而失敗，
-        // 導致完整的前半段被誤判為多個 component。
-        // 改用排序值直接決定前後半段，語意更清晰、結果更穩定。
-        //
-        // 規則：
-        // - 斷點之前 (order < deletedOrder)：保留原 groupId，重新整理 order 從 0 遞增。
-        // - 斷點之後 (order > deletedOrder)：賦予新 groupId，order 從 0 遞增。
-        // - 若某段的 order === deletedOrder（非常罕見的衝突），視為後半段。
-        //
-        // ⚠️ 完全移除 mergeConnectedLogisticsGroups 呼叫，防止分割後立刻被重新合併。
+            // DLL 指標斷開
+            const segments = this.ensureLogisticsLineStore();
+            const prevSeg = segments.find(s => s && s.nextId === line.id);
+            const nextSeg = segments.find(s => s && s.prevId === line.id);
+            if (prevSeg) prevSeg.nextId = null;
+            if (nextSeg) nextSeg.prevId = null;
 
-        const getSequenceOrder = (seg) =>
-            Number.isFinite(seg?.splitSequenceOrder) ? seg.splitSequenceOrder
-                : (Number.isFinite(seg?.order) ? seg.order : 0);
+            state.logisticsLines = segments.filter(item => {
+                const isTarget = this.getLogisticsLineSelectionKey(item) === lineKey;
+                const isDuplicate = item && item.gridX === lineGridX && item.gridY === lineGridY;
+                return !isTarget && !isDuplicate;
+            });
+            this.cleanupDeletedLinePreviousTurnOverride(line, groupId);
 
-        const deletedOrder = getSequenceOrder(line);
-        const remainingSegments = this.getLogisticsSegmentsByGroupId(groupId);
+            // [核心修正 v3] 使用「order 值直接分割」取代不可靠的 BFS 端點連通判定。
+            const getSequenceOrder = (seg) =>
+                Number.isFinite(seg?.splitSequenceOrder) ? seg.splitSequenceOrder
+                    : (Number.isFinite(seg?.order) ? seg.order : 0);
 
-        if (remainingSegments.length > 0) {
-            // 依 order 值將剩餘線段分為前半段與後半段
-            const frontSegments = remainingSegments.filter(seg => getSequenceOrder(seg) < deletedOrder);
-            const backSegments = remainingSegments.filter(seg => getSequenceOrder(seg) >= deletedOrder);
+            const deletedOrder = getSequenceOrder(line);
+            const remainingSegments = this.getLogisticsSegmentsByGroupId(groupId);
 
-            if (frontSegments.length > 0 && backSegments.length > 0) {
-                // [合併鎖定] 啟用鎖定，防止拆分後立刻被 mergeConnectedLogisticsGroups 重新合併
-                this.mergeLock = groupId;
-                setTimeout(() => { this.mergeLock = null; }, 100);
+            if (remainingSegments.length > 0) {
+                // 依 order 值將剩餘線段分為前半段與後半段
+                const frontSegments = remainingSegments.filter(seg => getSequenceOrder(seg) < deletedOrder);
+                const backSegments = remainingSegments.filter(seg => getSequenceOrder(seg) >= deletedOrder);
 
-                const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-                backSegments.forEach(seg => {
-                    if (seg) seg.groupId = newGroupId;
-                });
+                if (frontSegments.length > 0 && backSegments.length > 0) {
+                    const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+                    backSegments.forEach(seg => {
+                        if (seg) seg.groupId = newGroupId;
+                    });
 
-                // 自動重新計算兩段物流線的端點及與建築物的連接關係
-                this.recalculateLogisticsGroupEndpoints(groupId);
-                this.recalculateLogisticsGroupEndpoints(newGroupId);
+                    // 自動重新計算兩段物流線的端點及與建築物的連接關係
+                    this.recalculateLogisticsGroupEndpoints(groupId);
+                    this.recalculateLogisticsGroupEndpoints(newGroupId);
 
-                GameEngine.addLog(`[物流] 線段中斷，物流線已拆分為獨立路線。`, 'LOGISTICS');
+                    GameEngine.addLog(`[物流] 線段中斷，物流線已拆分為獨立路線。`, 'LOGISTICS');
+                } else {
+                    // 只有前半或只有後半（從端點刪除），只需重新計算該群組即可
+                    this.recalculateLogisticsGroupEndpoints(groupId);
+                }
             } else {
-                // 只有前半或只有後半（從端點刪除），只需重新計算該群組即可
-                this.recalculateLogisticsGroupEndpoints(groupId);
-            }
-        } else {
-            // 如果這個群組已經沒有任何線段，清除 sourceEnt 的輸出紀錄
-            if (line.sourceId) {
-                const sourceEnt = state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === line.sourceId);
-                if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
-                    sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId && conn.id !== line.targetId);
+                // 如果這個群組已經沒有任何線段，清除 sourceEnt 的輸出紀錄
+                if (line.sourceId) {
+                    const sourceEnt = state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === line.sourceId);
+                    if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
+                        sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId && conn.id !== line.targetId);
+                    }
                 }
             }
+
+            this.updateActiveTransfersOnLogisticsChange(state);
+
+            if (state.selectedLogisticsLineId === lineKey) state.selectedLogisticsLineId = null;
+            if (state.selectedLogisticsGroupId === line.groupId || state.selectedLogisticsGroupId === line.id) state.selectedLogisticsGroupId = null;
+            if (window.UIManager.activeLogisticsLine && this.getLogisticsLineSelectionKey(window.UIManager.activeLogisticsLine) === lineKey) window.UIManager.activeLogisticsLine = null;
+            if (window.UIManager.activeLogisticsConnection?.lineId === lineKey) window.UIManager.activeLogisticsConnection = null;
+            GameEngine.addLog(`[物流] 物流線段已刪除`, 'LOGISTICS');
+            return true;
+        } finally {
+            this.isProcessingMerge = false;
+            this.rebuildSpatialHashGrid();
         }
-
-        this.updateActiveTransfersOnLogisticsChange(state);
-
-        // ⚠️ 此處完全不呼叫 mergeConnectedLogisticsGroups，
-        // 防止剛分割的新/舊 group 因端點空間相鄰而被立刻重新合併。
-
-        if (state.selectedLogisticsLineId === lineKey) state.selectedLogisticsLineId = null;
-        if (state.selectedLogisticsGroupId === line.groupId || state.selectedLogisticsGroupId === line.id) state.selectedLogisticsGroupId = null;
-        if (window.UIManager.activeLogisticsLine && this.getLogisticsLineSelectionKey(window.UIManager.activeLogisticsLine) === lineKey) window.UIManager.activeLogisticsLine = null;
-        if (window.UIManager.activeLogisticsConnection?.lineId === lineKey) window.UIManager.activeLogisticsConnection = null;
-        GameEngine.addLog(`[物流] 物流線段已刪除`, 'LOGISTICS');
-        return true;
     }
 
     deleteLogisticsLineGroupById(groupId) {
@@ -2391,6 +2438,7 @@ export class ConveyorSystem {
         if (window.UIManager.activeLogisticsConnection?.groupId === groupId) window.UIManager.activeLogisticsConnection = null;
         this.updateActiveTransfersOnLogisticsChange(state);
         GameEngine.addLog(`[物流] 物流線群組已刪除`, 'LOGISTICS');
+        this.rebuildSpatialHashGrid();
         return true;
     }
 
@@ -2436,7 +2484,8 @@ export class ConveyorSystem {
             return rects;
         };
         const hits = [];
-        this.ensureLogisticsLineStore().forEach(line => {
+        const nearbyLines = this.spatialGrid.getNearby(worldX, worldY);
+        nearbyLines.forEach(line => {
             getVisibleRects(line).forEach(rect => {
                 if (
                     worldX >= rect.x && worldX <= rect.x + rect.w &&

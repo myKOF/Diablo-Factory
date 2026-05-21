@@ -36,6 +36,9 @@ export class WorkerSystem {
      * 更新所有工人的狀態與移動
      */
     update(dt) {
+        if (conveyorSystem && typeof conveyorSystem.update === 'function') {
+            conveyorSystem.update(dt);
+        }
         this.processAutomatedLogistics(window.GAME_STATE || this.engine.state, dt);
         const selectedIds = new Set(this.state.selectedUnitIds || []);
         const sortedVillagers = [...this.state.units.villagers].sort((a, b) => {

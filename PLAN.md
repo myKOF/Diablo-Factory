@@ -1,3 +1,21 @@
+# ConveyorSystem 核心重構計畫 (四階段方案)
+
+## 核心目標與實施步驟
+- [ ] **第一階段：消除非確定性邏輯 (Deterministic State)**
+  - 移除 mergeLock 的 ticks 與 setTimeout，改用 `isProcessingMerge` 旗標與 `try...finally` 區塊，阻斷刪除期間的所有合併。
+- [ ] **第二階段：資料結構升級 (Doubly Linked List)**
+  - 為 `LogisticsSegment` 新增 `prevId` 與 `nextId`。
+  - 在增加、刪除、合併線段時，直接修改節點指標。
+  - 重構 `orderLogisticsSegmentsByDirection`，直接遍歷指標鏈。
+- [ ] **第三階段：效能優化 (Spatial Partitioning)**
+  - 實作 64x64 大小的 `SpatialHashGrid`。
+  - 在線段變更時註冊到 Hash Grid。
+  - 重構 `getLogisticsLinesAt`，僅查詢鄰近 9 格。
+- [ ] **第四階段：數值精度強制 (Numerical Precision)**
+  - 定義全域 `GRID_SIZE = 10` 常數。
+  - 強制 `toGrid` 使用 `Math.floor(value / GRID_SIZE)` 映射。
+  - 網格點比對一律改為精確的 `a.x === b.x && a.y === b.y` 比較。
+
 # MVC 領域驅動重構模式 (DDD Refactoring Mode) 物流拓樸搬移計畫
 
 ## 核心目標
