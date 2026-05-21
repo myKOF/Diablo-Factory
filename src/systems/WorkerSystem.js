@@ -2325,24 +2325,28 @@ export class WorkerSystem {
             }
 
             if (t.progress >= 1) {
-                let target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
-                if (target) {
-                    const tType = target.type1 || target.type;
-                    const deposited = ResourceSystem.depositResourceToBuilding(state, this.engine, target, t.itemType, 1, null);
-                    if (!deposited && !['warehouse', 'storehouse', 'barn', 'town_center', 'village'].includes(tType)) {
-                        if (!target.inputBuffer) target.inputBuffer = {};
-                        target.inputBuffer[t.itemType] = (target.inputBuffer[t.itemType] || 0) + 1;
+                if (t.targetId) {
+                    let target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
+                    if (target) {
+                        const tType = target.type1 || target.type;
+                        const deposited = ResourceSystem.depositResourceToBuilding(state, this.engine, target, t.itemType, 1, null);
+                        if (!deposited && !['warehouse', 'storehouse', 'barn', 'town_center', 'village'].includes(tType)) {
+                            if (!target.inputBuffer) target.inputBuffer = {};
+                            target.inputBuffer[t.itemType] = (target.inputBuffer[t.itemType] || 0) + 1;
+                        }
+                        if (window.UIManager) window.UIManager.updateValues(true);
+                        // addTransportLog(`[物流] ${String(t.itemType).toUpperCase()} 已送達 ${getEntityLabel(target)}。`);
                     }
-                    if (window.UIManager) window.UIManager.updateValues(true);
-                    // addTransportLog(`[物流] ${String(t.itemType).toUpperCase()} 已送達 ${getEntityLabel(target)}。`);
-                }
-                if (state && state.trackedTransferId === t.id) {
-                    state.trackedTransferId = null; // 釋放追蹤
-                    if (this.engine && typeof this.engine.addLog === 'function') {
-                        this.engine.addLog(`[追蹤] 物品 ${t.itemType} 已送達目的地。`, 'LOGISTICS');
+                    if (state && state.trackedTransferId === t.id) {
+                        state.trackedTransferId = null; // 釋放追蹤
+                        if (this.engine && typeof this.engine.addLog === 'function') {
+                            this.engine.addLog(`[追蹤] 物品 ${t.itemType} 已送達目的地。`, 'LOGISTICS');
+                        }
                     }
+                    state.activeTransfers.splice(i, 1);
+                } else {
+                    t.progress = 1;
                 }
-                state.activeTransfers.splice(i, 1);
             }
         }
 

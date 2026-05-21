@@ -1526,6 +1526,7 @@ export class ConveyorSystem {
         if (conn && mergedGroupId !== groupId) {
             conn.lineId = mergedGroupId;
         }
+        this.recalculateLogisticsGroupEndpoints(mergedGroupId);
         return additions[additions.length - 1] || segments.map(segment => occupied.get(this.getLogisticsSegmentOccupyKey(segment))).filter(Boolean).pop() || this.getLogisticsLineById(mergedGroupId) || null;
     }
 
@@ -1766,6 +1767,7 @@ export class ConveyorSystem {
         }
 
         if (GameEngine.state.selectedLogisticsGroupId === secondaryGroupId) GameEngine.state.selectedLogisticsGroupId = primaryGroupId;
+        this.recalculateLogisticsGroupEndpoints(primaryGroupId);
         return primaryGroupId;
     }
 
@@ -1950,6 +1952,266 @@ export class ConveyorSystem {
         return ordered;
     }
 
+    updateActiveTransfersOnLogisticsChange(state) {
+        if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
+        const TS = GameEngine.TILE_SIZE || 20;
+
+        const getPointOnPath = (points, progress) => {
+            if (!Array.isArray(points) || points.length === 0) return { x: 0, y: 0 };
+            if (points.length === 1) return { x: points[0].x, y: points[0].y };
+            const clamped = Math.max(0, Math.min(1, progress));
+            let total = 0;
+            const lengths = [];
+            for (let i = 0; i < points.length - 1; i++) {
+                const d = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+                lengths.push(d);
+                total += d;
+            }
+            if (total <= 0) return { x: points[0].x, y: points[0].y };
+            let targetDist = clamped * total;
+            for (let i = 0; i < lengths.length; i++) {
+                const len = lengths[i];
+                if (targetDist <= len || i === lengths.length - 1) {
+                    const ratio = len === 0 ? 0 : (targetDist / len);
+                    const p1 = points[i];
+                    const p2 = points[i + 1];
+                    return {
+                        x: p1.x + (p2.x - p1.x) * ratio,
+                        y: p1.y + (p2.y - p1.y) * ratio
+                    };
+                }
+                targetDist -= len;
+            }
+            return { x: points[points.length - 1].x, y: points[points.length - 1].y };
+        };
+
+        const getPathDistanceToProj = (points, pos) => {
+            if (!Array.isArray(points) || points.length < 2) return 0;
+            let bestDist = Infinity;
+            let bestPathDist = 0;
+            let currentPathDist = 0;
+
+            for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i + 1];
+                const segLen = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+                if (segLen === 0) continue;
+
+                const u = ((pos.x - p1.x) * (p2.x - p1.x) + (pos.y - p1.y) * (pos.y - p1.y)) / (segLen * segLen);
+                const t = Math.max(0, Math.min(1, u));
+                const proj = {
+                    x: p1.x + t * (p2.x - p1.x),
+                    y: p1.y + t * (p2.y - p1.y)
+                };
+                const distToProj = Math.hypot(pos.x - proj.x, pos.y - proj.y);
+                if (distToProj < bestDist) {
+                    bestDist = distToProj;
+                    bestPathDist = currentPathDist + t * segLen;
+                }
+                currentPathDist += segLen;
+            }
+            return bestPathDist;
+        };
+
+        const getPathTotalLength = (points) => {
+            if (!Array.isArray(points) || points.length < 2) return 0;
+            let total = 0;
+            for (let i = 0; i < points.length - 1; i++) {
+                total += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+            }
+            return total;
+        };
+
+        for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
+            const t = state.activeTransfers[i];
+            if (!Array.isArray(t.routePoints) || t.routePoints.length < 2) continue;
+
+            // 計算目前視覺位置
+            const currentPos = getPointOnPath(t.routePoints, t.progress);
+
+            // 尋找地圖上最接近的輸送帶線段
+            let currentSeg = null;
+            let bestSegDist = Infinity;
+            (state.logisticsLines || []).forEach(line => {
+                if (!line) return;
+                const d = Math.hypot(line.x - currentPos.x, line.y - currentPos.y);
+                if (d < bestSegDist && d <= TS * 1.0) {
+                    bestSegDist = d;
+                    currentSeg = line;
+                }
+            });
+
+            if (!currentSeg) {
+                // 底下輸送帶被刪除 -> 物品掉落或毀損
+                state.activeTransfers.splice(i, 1);
+                continue;
+            }
+
+            // 更新 lineId 到該線段的最新 groupId
+            const newGroupId = currentSeg.groupId || currentSeg.id;
+            t.lineId = newGroupId;
+
+            // 取得該群組全新的完整路徑點
+            const groupSegs = (state.logisticsLines || []).filter(l => l && (l.groupId === newGroupId || l.id === newGroupId));
+            const ordered = this.orderLogisticsSegmentsByDirection(groupSegs);
+            const pathPoints = [];
+            ordered.forEach(seg => {
+                if (Array.isArray(seg.routePoints)) {
+                    seg.routePoints.forEach(p => {
+                        if (pathPoints.length === 0 ||
+                            Math.hypot(pathPoints[pathPoints.length - 1].x - p.x, pathPoints[pathPoints.length - 1].y - p.y) > 0.1) {
+                            pathPoints.push({ x: p.x, y: p.y });
+                        }
+                    });
+                }
+            });
+
+            if (pathPoints.length < 2) {
+                state.activeTransfers.splice(i, 1);
+                continue;
+            }
+
+            // 投影回新路徑上，重新計算 progress，保持在相同實體位置
+            const projDist = getPathDistanceToProj(pathPoints, currentPos);
+            const totalLen = getPathTotalLength(pathPoints);
+            t.progress = totalLen > 0 ? Math.max(0, Math.min(1, projDist / totalLen)) : 1;
+            t.routePoints = pathPoints;
+            t.targetId = currentSeg.targetId || null;
+            t.efficiency = Number(currentSeg.efficiency) || 0;
+        }
+    }
+
+    recalculateLogisticsGroupEndpoints(groupId) {
+        const state = GameEngine.state;
+        const groupSegments = this.getLogisticsSegmentsByGroupId(groupId);
+        if (!Array.isArray(groupSegments) || groupSegments.length === 0) return;
+
+        const ordered = this.orderLogisticsSegmentsByDirection(groupSegments);
+        const firstSeg = ordered[0];
+        const lastSeg = ordered[ordered.length - 1];
+
+        if (!firstSeg || !Array.isArray(firstSeg.routePoints) || firstSeg.routePoints.length === 0) return;
+        if (!lastSeg || !Array.isArray(lastSeg.routePoints) || lastSeg.routePoints.length === 0) return;
+
+        const startPt = firstSeg.routePoints[0];
+        const endPt = lastSeg.routePoints[lastSeg.routePoints.length - 1];
+
+        let sourceEnt = null;
+        let sourcePort = null;
+        let targetEnt = null;
+        let targetPort = null;
+
+        const TS = GameEngine.TILE_SIZE || 64;
+        const matchThreshold = TS * 0.9; // 允許鄰近一個網格以內的距離
+        let bestSourceDist = matchThreshold;
+        let bestTargetDist = matchThreshold;
+
+        // 搜尋所有的 mapEntities 尋找匹配的端點建築與端口
+        (state.mapEntities || []).forEach(ent => {
+            if (ent.isUnderConstruction) return;
+            const cfg = GameEngine.getEntityConfig(ent.type1);
+            if (!cfg) return;
+
+            const ports = window.UIManager?.getBuildingPortSlots(ent) || [];
+            ports.forEach(port => {
+                if (!port || !Number.isFinite(port.x) || !Number.isFinite(port.y)) return;
+                
+                // 檢查是否為 source (輸出端)
+                if (cfg.logistics?.canOutput) {
+                    const dist = Math.hypot(port.x - startPt.x, port.y - startPt.y);
+                    if (dist < bestSourceDist) {
+                        bestSourceDist = dist;
+                        sourceEnt = ent;
+                        sourcePort = {
+                            dir: port.dir,
+                            slotIndex: port.slotIndex,
+                            defIndex: port.defIndex,
+                            width: port.width,
+                            x: port.x,
+                            y: port.y
+                        };
+                    }
+                }
+
+                // 檢查是否為 target (輸入端)
+                if (cfg.logistics?.canInput) {
+                    const dist = Math.hypot(port.x - endPt.x, port.y - endPt.y);
+                    if (dist < bestTargetDist) {
+                        bestTargetDist = dist;
+                        targetEnt = ent;
+                        targetPort = {
+                            dir: port.dir,
+                            slotIndex: port.slotIndex,
+                            defIndex: port.defIndex,
+                            width: port.width,
+                            x: port.x,
+                            y: port.y
+                        };
+                    }
+                }
+            });
+        });
+
+        const sourceId = sourceEnt ? (window.UIManager?.getEntityId(sourceEnt) || sourceEnt.id) : null;
+        const targetId = targetEnt ? (window.UIManager?.getEntityId(targetEnt) || targetEnt.id) : null;
+
+        // 更新該群組所有線段的連線資訊
+        groupSegments.forEach(seg => {
+            seg.sourceId = sourceId;
+            seg.targetId = targetId;
+            seg.sourcePort = sourcePort;
+            seg.targetPort = targetPort;
+            if (targetId) {
+                seg.targetPoint = null;
+            }
+        });
+
+        // 更新 sourceEnt 的 outputTargets 連線資訊
+        if (sourceEnt && targetEnt) {
+            if (!Array.isArray(sourceEnt.outputTargets)) {
+                sourceEnt.outputTargets = [];
+            }
+            let conn = sourceEnt.outputTargets.find(item => item.lineId === groupId);
+            if (!conn) {
+                conn = {
+                    id: targetId,
+                    lineId: groupId
+                };
+                sourceEnt.outputTargets.push(conn);
+            }
+            conn.id = targetId;
+            conn.sourcePort = sourcePort;
+            conn.targetPort = targetPort;
+            conn.routeWidth = firstSeg.routeWidth || 1;
+            conn.lineType = firstSeg.lineType || 'transport_line';
+            conn.efficiency = firstSeg.efficiency || 0;
+            conn.filter = firstSeg.filter || null;
+
+            // 合併產生一份完整的排序好的路徑點，讓 UIManager/WorkerSystem 可以完美載入
+            const pathPoints = [];
+            ordered.forEach(seg => {
+                if (Array.isArray(seg.routePoints)) {
+                    seg.routePoints.forEach(p => {
+                        if (pathPoints.length === 0 ||
+                            Math.hypot(pathPoints[pathPoints.length - 1].x - p.x, pathPoints[pathPoints.length - 1].y - p.y) > 0.1) {
+                            pathPoints.push({ x: p.x, y: p.y });
+                        }
+                    });
+                }
+            });
+            conn.routePoints = pathPoints;
+        }
+
+        // 清除所有其他建築中對應此 groupId 的 outputTargets (如果斷線或轉移)
+        (state.mapEntities || []).forEach(ent => {
+            if (ent !== sourceEnt && Array.isArray(ent.outputTargets)) {
+                ent.outputTargets = ent.outputTargets.filter(conn => conn.lineId !== groupId);
+            } else if (ent === sourceEnt && (!sourceEnt || !targetEnt) && Array.isArray(ent.outputTargets)) {
+                ent.outputTargets = ent.outputTargets.filter(conn => conn.lineId !== groupId);
+            }
+        });
+    }
+
     deleteLogisticsLineById(lineId) {
         const state = GameEngine.state;
         const line = this.getLogisticsLineById(lineId);
@@ -1994,59 +2256,32 @@ export class ConveyorSystem {
                 // [合併鎖定] 啟用鎖定，防止拆分後立刻被 mergeConnectedLogisticsGroups 重新合併
                 this.mergeLock = groupId;
                 setTimeout(() => { this.mergeLock = null; }, 100);
-                // ── 前半段：保留原 groupId，清除 targetId（路徑已中斷，不再通往原目標）
-                // ⚠️ 若不清除 targetId，渲染器仍會找到 sourceEnt+targetEnt 並判定為通路（藍色高亮）
-                this.orderLogisticsSegmentsByDirection(frontSegments).forEach((seg, index) => {
-                    if (seg) {
-                        seg.targetId = null;
-                        seg.targetPort = null;
-                        seg.targetPoint = null;
-                        seg.order = index;
-                        seg.splitSequenceOrder = index;
-                    }
-                });
 
-                // 同步清除 sourceEnt.outputTargets 中對應的斷線記錄
-                if (line.sourceId) {
-                    const sourceEnt = state.mapEntities?.find(ent => window.UIManager.getEntityId(ent) === line.sourceId);
-                    if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
-                        sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId);
-                    }
-                }
-
-                // ── 後半段：賦予新 groupId，清除所有連線資訊，order 從 0 開始 ──────
                 const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-                this.orderLogisticsSegmentsByDirection(backSegments).forEach((seg, index) => {
-                    if (seg) {
-                        seg.groupId = newGroupId;
-                        seg.sourceId = null;
-                        seg.targetId = null;
-                        seg.sourcePort = null;
-                        seg.targetPort = null;
-                        seg.targetPoint = null;
-                        seg.order = index;
-                        seg.splitSequenceOrder = index;
-                    }
+                backSegments.forEach(seg => {
+                    if (seg) seg.groupId = newGroupId;
                 });
+
+                // 自動重新計算兩段物流線的端點及與建築物的連接關係
+                this.recalculateLogisticsGroupEndpoints(groupId);
+                this.recalculateLogisticsGroupEndpoints(newGroupId);
+
                 GameEngine.addLog(`[物流] 線段中斷，物流線已拆分為獨立路線。`, 'LOGISTICS');
             } else {
-                // 只有前半或只有後半（從端點刪除），只需重整 order
-                this.orderLogisticsSegmentsByDirection(remainingSegments).forEach((seg, index) => {
-                    if (seg) {
-                        seg.order = index;
-                        seg.splitSequenceOrder = index;
-                    }
-                });
+                // 只有前半或只有後半（從端點刪除），只需重新計算該群組即可
+                this.recalculateLogisticsGroupEndpoints(groupId);
             }
         } else {
             // 如果這個群組已經沒有任何線段，清除 sourceEnt 的輸出紀錄
-            if (line.sourceId && line.targetId) {
+            if (line.sourceId) {
                 const sourceEnt = state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === line.sourceId);
                 if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
                     sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId && conn.id !== line.targetId);
                 }
             }
         }
+
+        this.updateActiveTransfersOnLogisticsChange(state);
 
         // ⚠️ 此處完全不呼叫 mergeConnectedLogisticsGroups，
         // 防止剛分割的新/舊 group 因端點空間相鄰而被立刻重新合併。
@@ -2075,6 +2310,7 @@ export class ConveyorSystem {
         if (state.selectedLogisticsGroupId === groupId) state.selectedLogisticsGroupId = null;
         if (window.UIManager.activeLogisticsLine && window.UIManager.activeLogisticsLine.groupId === groupId) window.UIManager.activeLogisticsLine = null;
         if (window.UIManager.activeLogisticsConnection?.groupId === groupId) window.UIManager.activeLogisticsConnection = null;
+        this.updateActiveTransfersOnLogisticsChange(state);
         GameEngine.addLog(`[物流] 物流線群組已刪除`, 'LOGISTICS');
         return true;
     }
