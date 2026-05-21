@@ -603,7 +603,9 @@ export class LogisticsRenderer {
                 }
             }
 
-            if (!connected) {
+            // [修正] 只有有明確 sourceEnt & targetEnt 的群組才嘗試此 fallback，
+            // 避免沒有起終點的分割後群組誤判為通路。
+            if (!connected && representative && sourceEnt && targetEnt) {
                 for (const sk of startKeys) {
                     if (connected) break;
                     const sourceOwners = getPortOwnersNearNode(sk, true);
@@ -645,9 +647,9 @@ export class LogisticsRenderer {
                 }
             }
 
-            // Final fallback: 為了避免「路過」的物流線被錯誤判定為接通，
-            // 嚴格限制只有從「起點節點 (startKeys)」到「終點節點 (endKeys)」的連接才算有效。
-            if (!connected) {
+            // Final fallback: 僅當群組擁有明確起終點實體時才執行，
+            // 防止分割後的後半段（無 sourceId/targetId）靠近建築 port 而誤判為通路。
+            if (!connected && representative && sourceEnt && targetEnt) {
                 const outputStarts = [];
                 const inputEnds = [];
                 (startKeys.length > 0 ? startKeys : nodeKeys).forEach((k) => {
@@ -728,24 +730,9 @@ export class LogisticsRenderer {
                         });
                     }
                 } else {
-                    // [核心修正] 細胞層級 (cell-level) 也必須嚴格限制為起點與終點附近的細胞，不能全域掃描
-                    const startCells = new Set();
-                    const endCells = new Set();
-                    startKeys.forEach(nk => {
-                        getNearbyCellKeys(getNodePoint(nk), GameEngine.TILE_SIZE * 0.9).forEach(ck => startCells.add(ck));
-                    });
-                    endKeys.forEach(nk => {
-                        getNearbyCellKeys(getNodePoint(nk), GameEngine.TILE_SIZE * 0.9).forEach(ck => endCells.add(ck));
-                    });
-                    
-                    (startCells.size > 0 ? Array.from(startCells) : cellKeys).forEach((k) => {
-                        const outs = getPortOwnersNearCell(k, true);
-                        if (outs.length > 0) outputCells.push({ key: k, owners: outs });
-                    });
-                    (endCells.size > 0 ? Array.from(endCells) : cellKeys).forEach((k) => {
-                        const ins = getPortOwnersNearCell(k, false);
-                        if (ins.length > 0) inputCells.push({ key: k, owners: ins });
-                    });
+                    // [核心修正 v2] 沒有明確起終點實體的群組（如分割後的後半段）
+                    // 完全跳過 cell-level 掃描，直接不判定為通路，避免誤判。
+                    // （不填充 outputCells / inputCells，後面的迴圈自然不會設定 connected = true）
                 }
                 for (const s of outputCells) {
                     for (const t of inputCells) {
@@ -873,140 +860,144 @@ export class LogisticsRenderer {
                     if (!scene.logisticsNumberTexts) scene.logisticsNumberTexts = new Map();
                     if (!scene.logisticsVisibleTextIds) scene.logisticsVisibleTextIds = new Set();
                     
-                    // 依據物理連接性（中心格網鄰近性）進行排序，以實現完美的 0~N 順序顯示
+                    // ── 純整數半格座標 Map + 有向鏈式排序（O(n)，支援 8 方向，零浮點） ──
+                    // startGx/startGy：segment 起點的半格整數座標（優先讀 seg.startGx）
+                    // endGx/endGy    ：segment 終點的半格整數座標（優先讀 seg.endGx）
+                    // 舊資料若無這些欄位，從 routePoints 計算（向下相容）
+
                     const sortedSegs = [];
-                    const remaining = [...groupSegs];
+                    const remaining  = [...groupSegs];
 
-                    // 1. 尋找起點
-                    // 優先使用 canonical source building 作為起點基準
-                    const canonicalSourceId = representative?.sourceId || null;
-                    const sourceEnt = canonicalSourceId ? (state.mapEntities || []).find(e => e && (e.id === canonicalSourceId || `${e.type1}_${e.x}_${e.y}` === canonicalSourceId)) : null;
-                    
+                    // 取出 startAnchor（用來確認鏈的方向是否需要翻轉）
+                    const _canonicalSourceId = representative?.sourceId || null;
+                    const _sourceEnt = _canonicalSourceId
+                        ? (state.mapEntities || []).find(e => e && (e.id === _canonicalSourceId || `${e.type1}_${e.x}_${e.y}` === _canonicalSourceId))
+                        : null;
                     let startAnchor = null;
-                    if (representative?.sourcePort && Number.isFinite(representative.sourcePort.x) && Number.isFinite(representative.sourcePort.y)) {
+                    if (representative?.sourcePort && Number.isFinite(representative.sourcePort.x)) {
                         startAnchor = representative.sourcePort;
-                    } else if (sourceEnt) {
-                        startAnchor = { x: sourceEnt.x, y: sourceEnt.y };
+                    } else if (_sourceEnt) {
+                        startAnchor = { x: _sourceEnt.x, y: _sourceEnt.y };
                     }
 
-                    const getDistanceInHalfTiles = (a, b) => {
-                        return Math.hypot((a.gridX ?? 0) - (b.gridX ?? 0), (a.gridY ?? 0) - (b.gridY ?? 0));
+                    const _align = (GameEngine.TILE_SIZE || 64) / 2;
+                    const _getGCoords = (seg) => {
+                        if (Number.isFinite(seg?.startGx) && Number.isFinite(seg?.startGy) &&
+                            Number.isFinite(seg?.endGx)   && Number.isFinite(seg?.endGy)) {
+                            return { startGx: seg.startGx, startGy: seg.startGy, endGx: seg.endGx, endGy: seg.endGy };
+                        }
+                        const s = seg?.routePoints?.[0] || { x: seg?.x || 0, y: seg?.y || 0 };
+                        const e = seg?.routePoints?.[seg?.routePoints?.length - 1] || s;
+                        return {
+                            startGx: Math.round(s.x / _align), startGy: Math.round(s.y / _align),
+                            endGx:   Math.round(e.x / _align), endGy:   Math.round(e.y / _align)
+                        };
                     };
+                    const _gKey = (gx, gy) => `${gx},${gy}`;
 
-                    // 依據距離 startAnchor 的距離選取最靠近的 segment 作為起點
-                    const hasSplitSequenceOrder = !startAnchor && remaining.some(seg => Number.isFinite(seg?.splitSequenceOrder));
-                    if (hasSplitSequenceOrder) {
-                        remaining.sort((a, b) => {
-                            const orderA = Number.isFinite(a?.splitSequenceOrder) ? a.splitSequenceOrder : (a.order || 0);
-                            const orderB = Number.isFinite(b?.splitSequenceOrder) ? b.splitSequenceOrder : (b.order || 0);
-                            return orderA - orderB;
-                        });
-                        remaining.forEach(seg => {
-                            const sp = seg.routePoints?.[0] || { x: seg.x, y: seg.y };
-                            const ep = seg.routePoints?.[seg.routePoints.length - 1] || sp;
-                            seg.__numberLabelPoint = sp;
-                            seg.__numberNextPoint = ep;
-                            sortedSegs.push(seg);
-                        });
-                        remaining.length = 0;
-                    }
-
-                    let current = null;
-                    if (startAnchor) {
-                        let minDist = Infinity;
-                        let bestIdx = -1;
-                        for (let i = 0; i < remaining.length; i++) {
-                            const seg = remaining[i];
-                            const dist = Math.hypot(seg.x - startAnchor.x, seg.y - startAnchor.y);
-                            if (dist < minDist) {
-                                minDist = dist;
-                                bestIdx = i;
+                    // 建立 startMap 與 endKeySet（整數格座標，無浮點問題）
+                    // _endKeySet 擴展至 ±2 鄰居以容納轉彎 2 格半格座標偏差，排除自身起點
+                    const _startMap  = new Map();
+                    const _endKeySet = new Set();
+                    remaining.forEach(seg => {
+                        const { startGx, startGy, endGx, endGy } = _getGCoords(seg);
+                        _startMap.set(_gKey(startGx, startGy), seg);
+                        for (let dx = -2; dx <= 2; dx++) {
+                            for (let dy = -2; dy <= 2; dy++) {
+                                const gx = endGx + dx;
+                                const gy = endGy + dy;
+                                if (gx === startGx && gy === startGy) continue;
+                                _endKeySet.add(_gKey(gx, gy));
                             }
                         }
-                        if (bestIdx !== -1) {
-                            current = remaining[bestIdx];
-                        }
+                    });
+
+                    // 找真正起點：起點格座標不在任何人的終點範圍集合裡
+                    let _startSeg = remaining.find(seg => {
+                        const { startGx, startGy } = _getGCoords(seg);
+                        return !_endKeySet.has(_gKey(startGx, startGy));
+                    });
+                    // 環形/資料異常 fallback
+                    if (!_startSeg) {
+                        _startSeg = [...remaining].sort((a, b) =>
+                            (Number.isFinite(a?.splitSequenceOrder) ? a.splitSequenceOrder : (a.order || 0)) -
+                            (Number.isFinite(b?.splitSequenceOrder) ? b.splitSequenceOrder : (b.order || 0))
+                        )[0];
                     }
 
-                    // 如果沒有 startAnchor，或者沒找到，則尋找 leaf segment (只有 1 個鄰居的節段)
-                    if (!current && remaining.length > 0) {
-                        let leafSeg = null;
-                        for (let i = 0; i < remaining.length; i++) {
-                            const a = remaining[i];
-                            let neighborCount = 0;
-                            for (let j = 0; j < remaining.length; j++) {
-                                if (i === j) continue;
-                                const b = remaining[j];
-                                if (getDistanceInHalfTiles(a, b) <= 3.2) {
-                                    neighborCount++;
+                    // O(n) 有向鏈式走完整條線（精準 + ±2 容差）
+                    const _remaining = new Set(remaining);
+                    let _cur = _startSeg;
+                    while (_cur && _remaining.has(_cur)) {
+                        sortedSegs.push(_cur);
+                        _remaining.delete(_cur);
+                        const { endGx, endGy } = _getGCoords(_cur);
+                        // 先嘗試精準匹配，再嘗試 ±2 容差（支援轉角半格格點連接，按距離優先搜尋）
+                        let _next = _startMap.get(_gKey(endGx, endGy));
+                        if (!_next || !_remaining.has(_next)) {
+                            const offsets = [
+                                // Dist 1
+                                [-1, 0], [1, 0], [0, -1], [0, 1],
+                                // Dist 1.41
+                                [-1, -1], [-1, 1], [1, -1], [1, 1],
+                                // Dist 2
+                                [-2, 0], [2, 0], [0, -2], [0, 2],
+                                // Dist 2.24
+                                [-2, -1], [-2, 1], [2, -1], [2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2],
+                                // Dist 2.83
+                                [-2, -2], [-2, 2], [2, -2], [2, 2]
+                            ];
+                            for (const [dx, dy] of offsets) {
+                                const c = _startMap.get(_gKey(endGx + dx, endGy + dy));
+                                if (c && _remaining.has(c)) { _next = c; break; }
+                            }
+                        }
+                        _cur = (_next && _remaining.has(_next)) ? _next : null;
+                    }
+                    // 斷鏈時：最近鄰居接力（不用 order 排序），確保路線方向連貫
+                    while (_remaining.size > 0) {
+                        const { endGx: _lEx, endGy: _lEy } = _getGCoords(sortedSegs[sortedSegs.length - 1]);
+                        let _best = null, _bestD = Infinity;
+                        for (const s of _remaining) {
+                            const { startGx: sx, startGy: sy } = _getGCoords(s);
+                            const d = Math.abs(sx - _lEx) + Math.abs(sy - _lEy);
+                            if (d < _bestD) { _bestD = d; _best = s; }
+                        }
+                        if (!_best) break;
+                        let _c2 = _best;
+                        while (_c2 && _remaining.has(_c2)) {
+                            sortedSegs.push(_c2);
+                            _remaining.delete(_c2);
+                            const { endGx: ex2, endGy: ey2 } = _getGCoords(_c2);
+                            let _n2 = _startMap.get(_gKey(ex2, ey2));
+                            if (!_n2 || !_remaining.has(_n2)) {
+                                for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1],[-2,0],[2,0],[0,-2],[0,2]]) {
+                                    const cc = _startMap.get(_gKey(ex2+dx, ey2+dy));
+                                    if (cc && _remaining.has(cc)) { _n2 = cc; break; }
                                 }
                             }
-                            if (neighborCount === 1) {
-                                leafSeg = a;
-                                break;
-                            }
-                        }
-                        current = leafSeg || remaining[0];
-                    }
-
-                    const orientSegmentFrom = (seg, anchor) => {
-                        const sp = seg.routePoints?.[0] || { x: seg.x, y: seg.y };
-                        const ep = seg.routePoints?.[seg.routePoints.length - 1] || sp;
-                        const startDist = anchor ? Math.hypot(anchor.x - sp.x, anchor.y - sp.y) : 0;
-                        const endDist = anchor ? Math.hypot(anchor.x - ep.x, anchor.y - ep.y) : Infinity;
-                        seg.__numberLabelPoint = endDist < startDist ? ep : sp;
-                        seg.__numberNextPoint = endDist < startDist ? sp : ep;
-                        return seg;
-                    };
-
-                    if (current) {
-                        orientSegmentFrom(current, startAnchor);
-                        sortedSegs.push(current);
-                        remaining.splice(remaining.indexOf(current), 1);
-
-                        while (remaining.length > 0) {
-                            const lastSeg = sortedSegs[sortedSegs.length - 1];
-                            const lastEp = lastSeg.__numberNextPoint || lastSeg.routePoints?.[lastSeg.routePoints.length - 1] || { x: lastSeg.x, y: lastSeg.y };
-
-                            // 尋找在 3.2 半格寬度內最靠近 lastSeg 的節段
-                            let nextIndex = -1;
-                            let minGridDist = 3.2; // 容許 3.2 格網單位內（涵蓋直角拐角）的偏差
-
-                            for (let i = 0; i < remaining.length; i++) {
-                                const rSeg = remaining[i];
-                                const dist = getDistanceInHalfTiles(lastSeg, rSeg);
-                                if (dist < minGridDist) {
-                                    minGridDist = dist;
-                                    nextIndex = i;
-                                }
-                            }
-
-                            if (nextIndex !== -1) {
-                                orientSegmentFrom(remaining[nextIndex], lastEp);
-                                sortedSegs.push(remaining[nextIndex]);
-                                remaining.splice(nextIndex, 1);
-                            } else {
-                                // 如果遇到斷線或沒有相鄰的，則選擇剩餘中距離 startAnchor 最近的（或 original order 最小的）
-                                let bestFallbackIdx = 0;
-                                if (startAnchor) {
-                                    let minDist = Infinity;
-                                    for (let i = 0; i < remaining.length; i++) {
-                                        const seg = remaining[i];
-                                        const dist = Math.hypot(seg.x - startAnchor.x, seg.y - startAnchor.y);
-                                        if (dist < minDist) {
-                                            minDist = dist;
-                                            bestFallbackIdx = i;
-                                        }
-                                    }
-                                } else {
-                                    remaining.sort((a, b) => (a.order || 0) - (b.order || 0));
-                                }
-                                orientSegmentFrom(remaining[bestFallbackIdx], lastEp);
-                                sortedSegs.push(remaining[bestFallbackIdx]);
-                                remaining.splice(bestFallbackIdx, 1);
-                            }
+                            _c2 = (_n2 && _remaining.has(_n2)) ? _n2 : null;
                         }
                     }
+
+
+                    // 若整條鏈的方向與 startAnchor 相反，翻轉
+                    if (startAnchor && sortedSegs.length > 1) {
+                        const firstGC = _getGCoords(sortedSegs[0]);
+                        const lastGC  = _getGCoords(sortedSegs[sortedSegs.length - 1]);
+                        const firstPx = { x: firstGC.startGx * _align, y: firstGC.startGy * _align };
+                        const lastPx  = { x: lastGC.startGx  * _align, y: lastGC.startGy  * _align };
+                        const fd = Math.hypot(firstPx.x - startAnchor.x, firstPx.y - startAnchor.y);
+                        const ld = Math.hypot(lastPx.x  - startAnchor.x, lastPx.y  - startAnchor.y);
+                        if (ld < fd) sortedSegs.reverse();
+                    }
+
+                    // 為每個 segment 標記顯示座標（起點格的像素位置）
+                    sortedSegs.forEach(seg => {
+                        const gc = _getGCoords(seg);
+                        seg.__numberLabelPoint = { x: gc.startGx * _align, y: gc.startGy * _align };
+                        seg.__numberNextPoint  = { x: gc.endGx   * _align, y: gc.endGy   * _align };
+                    });
 
                     sortedSegs.forEach((seg, index) => {
                         seg.order = index;

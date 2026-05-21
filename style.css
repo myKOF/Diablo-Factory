@@ -732,6 +732,12 @@ html {
     flex: 0 0 auto;
 }
 
+.shortcut-item.active {
+    border: 3px solid var(--aoe-gold) !important;
+    background: rgba(139, 110, 75, 0.3) !important;
+    box-shadow: 0 0 20px rgba(251, 192, 45, 0.6) !important;
+}
+
 .building-item:hover {
     background: rgba(139, 110, 75, 0.2) !important;
     border-color: var(--aoe-gold) !important;

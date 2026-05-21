@@ -1260,6 +1260,7 @@ export class UIManager {
         document.body.appendChild(this.dragGhost);
         GameEngine.state.placingType = type;
         GameEngine.state.placingRotation = 0;
+        this.updateValues();
     }
 
     static startStampMode(type) {
@@ -1273,6 +1274,7 @@ export class UIManager {
         GameEngine.state.placingRotation = 0;
         this.activeBuilding = type;
         GameEngine.addLog(`進入建造模式：${GameEngine.state.buildingConfigs[type].name} (ESC 取消)`);
+        this.updateValues();
     }
 
     static cancelBuildingMode() {
@@ -1288,6 +1290,7 @@ export class UIManager {
             document.body.removeChild(this.dragGhost);
             this.dragGhost = null;
         }
+        this.updateValues();
     }
 
     static getWorldMousePos(clientX, clientY) {
@@ -1620,8 +1623,13 @@ export class UIManager {
         const clickedLine = conveyorSystem.getLogisticsLineAt(worldX, worldY);
         const isDoubleClick = (e.detail || 0) >= 2;
         if (LogisticsUI.isTransportLinePlacementActive() && GameEngine.state.buildingMode === 'STAMP') {
-            LogisticsUI.beginTransportLineBuildDrag(worldX, worldY, clickedLine || null);
-            conveyorSystem.updateDrag(worldX, worldY);
+            this.potentialTransportLineBuildDrag = {
+                startX: e.clientX,
+                startY: e.clientY,
+                worldX,
+                worldY,
+                clickedLine: clickedLine || null
+            };
             return;
         }
         if (clickedLine && !isDoubleClick && conveyorSystem.isSelectedLogisticsLine(clickedLine) && GameEngine.state.buildingMode === 'NONE') {
@@ -1638,6 +1646,21 @@ export class UIManager {
     }
 
     static handleWorldMouseMove(e) {
+        if (this.potentialTransportLineBuildDrag && !this.isLogisticsDragging) {
+            const threshold = UI_CONFIG.Interaction?.minDragDistance || 10;
+            const dist = Math.hypot(
+                e.clientX - this.potentialTransportLineBuildDrag.startX,
+                e.clientY - this.potentialTransportLineBuildDrag.startY
+            );
+            if (dist > threshold) {
+                const pending = this.potentialTransportLineBuildDrag;
+                this.potentialTransportLineBuildDrag = null;
+                LogisticsUI.beginTransportLineBuildDrag(pending.worldX, pending.worldY, pending.clickedLine);
+                conveyorSystem.updateDrag(pending.worldX, pending.worldY);
+                return;
+            }
+        }
+
         if (this.potentialLogisticsDrag && !this.isLogisticsDragging) {
             const threshold = UI_CONFIG.Interaction?.minDragDistance || 10;
             const dist = Math.hypot(
@@ -1711,6 +1734,7 @@ export class UIManager {
         // [左鍵邏輯專區]
         if (e.button !== 0) return;
         this.potentialLogisticsDrag = null;
+        this.potentialTransportLineBuildDrag = null;
 
         if (this.isLogisticsDragging) {
             conveyorSystem.submitDrag();
@@ -1718,6 +1742,7 @@ export class UIManager {
             this.logisticsSourceLine = null;
             this.isLogisticsDragging = false;
             GameEngine.state.logisticsDragLine = null;
+            this.updateValues();
             return;
         }
 
@@ -1733,10 +1758,12 @@ export class UIManager {
             if (!LogisticsUI.isTransportLinePlacementActive() && state.lineStartPos && (Math.abs(pos.x - state.lineStartPos.x) > 10 || Math.abs(pos.y - state.lineStartPos.y) > 10)) {
                 GameEngine.placeBuildingLine(state.placingType, state.lineStartPos.x, state.lineStartPos.y, pos.x, pos.y);
                 this.lastLinePlacementTime = Date.now();
+                this.updateValues();
             }
             state.buildingMode = 'STAMP';
             state.linePreviewEntities = [];
             state.lineStartPos = null;
+            this.updateValues();
         }
     }
 
@@ -1810,6 +1837,37 @@ export class UIManager {
         // 點擊大地圖區域 (點在 0,0 層級或非 UI 區域)
         this.hideSettingsPanel();
 
+        const world = this.getWorldPoint(e.clientX, e.clientY);
+        const worldX = world.x;
+        const worldY = world.y;
+        const clickedLine = conveyorSystem.getLogisticsLineAt(worldX, worldY);
+
+        // 如果處於建造物流線模式，且點擊到了物流線，優先進行物流線的選取/雙擊全選，不被 Stamp 建造模式阻斷
+        if (LogisticsUI.isTransportLinePlacementActive() && clickedLine) {
+            const now = Date.now();
+            const groupId = clickedLine.groupId || clickedLine.id;
+            const isDoubleClick = (e.detail || 0) >= 2
+                || (GameEngine.state.lastSelectedLogisticsGroupId === groupId && (now - GameEngine.state.lastSelectionTime < 500));
+            GameEngine.state.selectedUnitIds = [];
+            GameEngine.state.selectedBuildingIds = [];
+            GameEngine.state.selectedBuildingId = null;
+            GameEngine.state.selectedResourceId = null;
+            LogisticsUI.selectLogisticsLine(clickedLine, isDoubleClick);
+            GameEngine.state.lastSelectionTime = now;
+            GameEngine.state.lastSelectedLogisticsGroupId = groupId;
+            if (isDoubleClick) {
+                const groupCount = conveyorSystem.getLogisticsSegmentsByGroupId(groupId).length;
+                GameEngine.addLog(`[物流] 已選取同群組物流線 ${groupCount} 段。`, 'LOGISTICS');
+            }
+            const source = GameEngine.state.mapEntities.find(ent => this.getEntityId(ent) === clickedLine.sourceId);
+            if (source && clickedLine.targetId) {
+                LogisticsUI.showLogisticsMenu(source, clickedLine.targetId, e.clientX, e.clientY, conveyorSystem.getLogisticsLineSelectionKey(clickedLine));
+            } else {
+                LogisticsUI.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
+            }
+            return;
+        }
+
         // Stamp 模式：點擊地圖直接建造
         if (state.buildingMode === 'STAMP') {
             // 如果剛拉完一排，跳過本次點擊觸發 (避免在結尾點多蓋一個)
@@ -1821,15 +1879,13 @@ export class UIManager {
                 return;
             }
             GameEngine.placeBuilding(state.placingType, pos.x, pos.y);
+            this.updateValues();
             return;
         }
 
         // 隱藏右鍵選單邏輯
         this.hideContextMenu();
 
-        const world = this.getWorldPoint(e.clientX, e.clientY);
-        const worldX = world.x;
-        const worldY = world.y;
         const nearbyUnit = GameEngine.state.units.villagers.find(u => u.visible !== false && Math.hypot(u.x - worldX, u.y - worldY) < 50);
         if (nearbyUnit) return;
 
@@ -1890,7 +1946,6 @@ export class UIManager {
         }
 
         // [物流線實體] 點擊優先級低於建築，高於地板。
-        const clickedLine = conveyorSystem.getLogisticsLineAt(worldX, worldY);
         if (clickedLine) {
             const now = Date.now();
             const groupId = clickedLine.groupId || clickedLine.id;

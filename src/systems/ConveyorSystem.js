@@ -13,6 +13,8 @@ export class ConveyorSystem {
         this.isDragFrameQueued = false;
         this.lastRouteKey = null;
         this.logisticsOccupiedKeys = new Set();
+        // [合併鎖定] 防止拆分後立刻被自動合併覆蓋，由 deleteLogisticsLineById 啟用
+        this.mergeLock = null;
     }
 
     startDrag(startX, startY, sourceEntity = null, sourcePort = null, sourceLine = null) {
@@ -1235,6 +1237,22 @@ export class ConveyorSystem {
             const centerY = (start.y + end.y) / 2;
             const gx = Math.round(centerX / align);
             const gy = Math.round(centerY / align);
+            // ── 方向屬性（整數半格座標 + 離散角度）──────────────────────────────
+            // startGx/startGy：routePoints[0]（起點）的半格整數座標
+            // endGx/endGy：targetEnd（邏輯終點）的半格整數座標
+            //   ★ 鍵點：必須用 targetEnd 而非合成終點(end)，否則轉角處會對不上下一段的 startGx
+            // dir：方向角度（0=右, 45=右下, 90=下, 135=左下, 180=左, 225=左上, 270=上, 315=右上）
+            const startGx = Math.round(start.x / align);
+            const startGy = Math.round(start.y / align);
+            const endGx = Math.round(targetEnd.x / align);  // 用邏輯終點，不用合成終點
+            const endGy = Math.round(targetEnd.y / align);
+            // [方向修正] dir 使用實際路徑向量 (next - start) 計算，確保與物流「流動方向」一致
+            // 舊邏輯使用 targetEnd - start（跨 2 格的向量），在轉角段會產生斜向誤判。
+            // 改用 next（gridPoints[i+1]）與 start（gridPoints[i]）的差值，即每段的實際走向。
+            const tDirSignX = Math.sign(next.x - start.x);
+            const tDirSignY = Math.sign(next.y - start.y);
+            const rawAngle = Math.atan2(tDirSignY, tDirSignX) * 180 / Math.PI;
+            const dir = Math.round(((rawAngle % 360) + 360) % 360);
             segments.push({
                 id: `${groupId}_seg_${gx}_${gy}_${i}`,
                 groupId,
@@ -1244,6 +1262,11 @@ export class ConveyorSystem {
                 targetPoint: targetId ? null : targetPoint,
                 gridX: gx,
                 gridY: gy,
+                startGx,
+                startGy,
+                endGx,
+                endGy,
+                dir,
                 alignUnit: 0.5,
                 x: centerX,
                 y: centerY,
@@ -1377,6 +1400,7 @@ export class ConveyorSystem {
             }
             return Array.from(keys);
         };
+        // 使用完整的 lines（含本群組舊段）建立佔用索引，確保延伸時不會蓋掉自身已有線段
         lines.forEach(item => {
             this.getLogisticsSegmentOccupiedKeys(item).forEach(key => {
                 if (key && !occupied.has(key)) occupied.set(key, item);
@@ -1397,6 +1421,11 @@ export class ConveyorSystem {
                 hits.forEach(hit => {
                     const hitGroupId = getLineGroupId(hit);
                     if (!hitGroupId || hitGroupId === groupId) return;
+                    // [嚴格化合併檢查] 若目標群組目前處於合併鎖定中（剛被拆分），禁止合併
+                    if (this.mergeLock !== null && this.mergeLock === hitGroupId) {
+                        blockedOverlapGroupIds.add(hitGroupId);
+                        return;
+                    }
                     const hitCells = this.getLogisticsLineDirectedCells(hit).filter(hitCell => hitCell.key === cell.key);
                     const hasOppositeDirection = hitCells.some(hitCell =>
                         hitCell.dirX === -cell.dirX &&
@@ -1417,6 +1446,7 @@ export class ConveyorSystem {
             const keys = this.getLogisticsSegmentOccupiedKeys(segment);
             const segmentTileKeys = getSegmentTileKeys(segment);
             if (!keys.length) return;
+            // 使用完整 lines 比對同路由（確保延伸不會重複追加完全相同的段）
             const alreadySameRoute = lines.some(item => sameGroup(item) && sameRoute(item, segment));
             if (alreadySameRoute) return;
             const sameDirectionOverlapGroupIds = collectSameDirectionOverlapGroups(segment);
@@ -1443,6 +1473,7 @@ export class ConveyorSystem {
             });
             additions.push(segment);
         });
+        // 在原始 lines 基礎上追加新生成的 additions（延伸模式的正確行為）
         const mergedLines = lines.concat(additions);
 
         // [物流延伸修正] 同一群組在多次延伸後，舊段也必須同步最新端點/連線資訊，
@@ -1652,6 +1683,11 @@ export class ConveyorSystem {
     }
 
     mergeConnectedLogisticsGroups(groupId) {
+        // [合併鎖定] 若該 groupId 正在鎖定期間（剛被拆分），直接回傳，不執行自動合併
+        if (this.mergeLock !== null && this.mergeLock === groupId) {
+            return groupId;
+        }
+
         let activeGroupId = groupId;
         if (!activeGroupId) return null;
 
@@ -1664,7 +1700,6 @@ export class ConveyorSystem {
 
             for (const otherGroupId of otherGroupIds) {
                 if (!this.areLogisticsGroupsTouching(activeGroupId, otherGroupId)) continue;
-                console.log(`[Merge Debug] Group ${activeGroupId} and Group ${otherGroupId} are TOUCHING. Merging them!`);
                 activeGroupId = this.mergeLogisticsLineGroups(activeGroupId, otherGroupId);
                 merged = true;
                 break;
@@ -1756,7 +1791,6 @@ export class ConveyorSystem {
         if (!line || !line.sourceId || !GameEngine.state?.mapEntities) return null;
         return GameEngine.state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === line.sourceId) || null;
     }
-
     getLogisticsLineSelectionKey(line) {
         if (!line) return null;
         const gx = line.gridX !== undefined ? line.gridX : Math.round((line.x || 0) / (GameEngine.TILE_SIZE / 2));
@@ -1775,29 +1809,127 @@ export class ConveyorSystem {
 
     orderLogisticsSegmentsByDirection(segments) {
         if (!Array.isArray(segments) || segments.length <= 1) return Array.isArray(segments) ? [...segments] : [];
-        const TS = GameEngine.TILE_SIZE || 64;
-        const threshold = TS * 0.1;
-        const pointDistance = (a, b) => Math.hypot((a?.x || 0) - (b?.x || 0), (a?.y || 0) - (b?.y || 0));
-        const getStart = (seg) => Array.isArray(seg?.routePoints) && seg.routePoints.length > 0 ? seg.routePoints[0] : { x: seg?.x || 0, y: seg?.y || 0 };
-        const getEnd = (seg) => Array.isArray(seg?.routePoints) && seg.routePoints.length > 1 ? seg.routePoints[seg.routePoints.length - 1] : getStart(seg);
-        const hasIncoming = (seg) => {
-            const start = getStart(seg);
-            return segments.some(other => other !== seg && pointDistance(getEnd(other), start) < threshold);
+
+        const align = (GameEngine.TILE_SIZE || 64) / 2;
+        const getGCoords = (seg) => {
+            if (Number.isFinite(seg?.startGx) && Number.isFinite(seg?.startGy) &&
+                Number.isFinite(seg?.endGx) && Number.isFinite(seg?.endGy)) {
+                return { startGx: seg.startGx, startGy: seg.startGy, endGx: seg.endGx, endGy: seg.endGy };
+            }
+            const s = seg?.routePoints?.[0] || { x: seg?.x || 0, y: seg?.y || 0 };
+            const e = seg?.routePoints?.[seg?.routePoints?.length - 1] || s;
+            return {
+                startGx: Math.round(s.x / align), startGy: Math.round(s.y / align),
+                endGx: Math.round(e.x / align), endGy: Math.round(e.y / align)
+            };
         };
-        let current = segments.find(seg => !hasIncoming(seg)) || [...segments].sort((a, b) => (a.order || 0) - (b.order || 0))[0];
+        const gKey = (gx, gy) => `${gx},${gy}`;
+
+        const startMap = new Map();
+        const endKeySet = new Set();
+        segments.forEach(seg => {
+            const { startGx, startGy, endGx, endGy } = getGCoords(seg);
+            startMap.set(gKey(startGx, startGy), seg);
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    endKeySet.add(gKey(endGx + dx, endGy + dy));
+                }
+            }
+        });
+
+        // [優先選取] 優先選取具有 sourceId 或 sourcePort 的線段作為排序起點
+        let startSeg = segments.find(seg => {
+            const { startGx, startGy } = getGCoords(seg);
+            return !endKeySet.has(gKey(startGx, startGy)) && (seg.sourceId || seg.sourcePort);
+        });
+
+        // 若無帶 source 資訊的頭部，退而求其次：任意找一個起點（不被其他段指向的）
+        if (!startSeg) {
+            startSeg = segments.find(seg => {
+                const { startGx, startGy } = getGCoords(seg);
+                return !endKeySet.has(gKey(startGx, startGy));
+            });
+        }
+
+        // 環形路線或資料異常 → fallback 用 order 最小的
+        if (!startSeg) {
+            startSeg = [...segments].sort((a, b) =>
+                (Number.isFinite(a?.splitSequenceOrder) ? a.splitSequenceOrder : (a.order || 0)) -
+                (Number.isFinite(b?.splitSequenceOrder) ? b.splitSequenceOrder : (b.order || 0))
+            )[0];
+        }
+
+        // O(n) 有向鏈式追蹤（加 ±1 容差處理舊合成終點）
         const ordered = [];
         const remaining = new Set(segments);
-
+        let current = startSeg;
         while (current && remaining.has(current)) {
             ordered.push(current);
             remaining.delete(current);
-            const end = getEnd(current);
-            current = [...remaining].find(seg => pointDistance(getStart(seg), end) < threshold) || null;
+            const { endGx, endGy } = getGCoords(current);
+            // 先嘗試精準匹配，再嘗試 ±2 容差（支援轉角半格格點連接，按距離優先搜尋）
+            let next = startMap.get(gKey(endGx, endGy));
+            if (!next || !remaining.has(next)) {
+                const offsets = [
+                    // Dist 1
+                    [-1, 0], [1, 0], [0, -1], [0, 1],
+                    // Dist 1.41
+                    [-1, -1], [-1, 1], [1, -1], [1, 1],
+                    // Dist 2
+                    [-2, 0], [2, 0], [0, -2], [0, 2],
+                    // Dist 2.24
+                    [-2, -1], [-2, 1], [2, -1], [2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2],
+                    // Dist 2.83
+                    [-2, -2], [-2, 2], [2, -2], [2, 2]
+                ];
+                for (const [dx, dy] of offsets) {
+                    const candidate = startMap.get(gKey(endGx + dx, endGy + dy));
+                    if (candidate && remaining.has(candidate)) { next = candidate; break; }
+                }
+            }
+            current = (next && remaining.has(next)) ? next : null;
         }
 
-        if (remaining.size > 0) {
-            ordered.push(...[...remaining].sort((a, b) => (a.order || 0) - (b.order || 0)));
+        // 斷鏈時：用最近鄰居接力（而非 order 排序），確保路線方向不亂
+        // 每次從剩餘段中找起點最靠近上一段終點的線段，繼續建立子鏈
+        while (remaining.size > 0) {
+            // 找距離上一段終點最近的起點
+            const { endGx: lastEndGx, endGy: lastEndGy } = getGCoords(ordered[ordered.length - 1]);
+            let bestSeg = null;
+            let bestDist = Infinity;
+            for (const seg of remaining) {
+                const { startGx, startGy } = getGCoords(seg);
+                const d = Math.abs(startGx - lastEndGx) + Math.abs(startGy - lastEndGy); // 曼哈頓距離
+                if (d < bestDist) { bestDist = d; bestSeg = seg; }
+            }
+            if (!bestSeg) break;
+            // 從 bestSeg 繼續建子鏈
+            let cur = bestSeg;
+            while (cur && remaining.has(cur)) {
+                ordered.push(cur);
+                remaining.delete(cur);
+                const { endGx, endGy } = getGCoords(cur);
+                let nxt = startMap.get(gKey(endGx, endGy));
+                if (!nxt || !remaining.has(nxt)) {
+                    const offs = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1],
+                                  [-2,0],[2,0],[0,-2],[0,2]];
+                    for (const [dx, dy] of offs) {
+                        const c = startMap.get(gKey(endGx+dx, endGy+dy));
+                        if (c && remaining.has(c)) { nxt = c; break; }
+                    }
+                }
+                cur = (nxt && remaining.has(nxt)) ? nxt : null;
+            }
         }
+
+        // [強制重置編號] 確保 order 與 splitSequenceOrder 嚴格從 0 遞增，消除跳號問題
+        ordered.forEach((seg, index) => {
+            if (seg) {
+                seg.order = index;
+                seg.splitSequenceOrder = index;
+            }
+        });
+
         return ordered;
     }
 
@@ -1807,7 +1939,7 @@ export class ConveyorSystem {
         if (!line) return false;
         const lineKey = this.getLogisticsLineSelectionKey(line);
         const groupId = line.groupId || line.id;
-        
+
         const lineGridX = line.gridX;
         const lineGridY = line.gridY;
         state.logisticsLines = this.ensureLogisticsLineStore().filter(item => {
@@ -1816,131 +1948,78 @@ export class ConveyorSystem {
             return !isTarget && !isDuplicate;
         });
         this.cleanupDeletedLinePreviousTurnOverride(line, groupId);
-        
-        // [核心修正] 當刪除其中一段時，檢查剩餘的同群組線段是否被切斷。若被切斷，則拆分成不同的群組。
+
+        // [核心修正 v3] 使用「order 值直接分割」取代不可靠的 BFS 端點連通判定。
+        // BFS 端點判定的容差 (0.1 * TILE_SIZE ≈ 6px) 在轉角處容易因座標精度問題而失敗，
+        // 導致完整的前半段被誤判為多個 component。
+        // 改用排序值直接決定前後半段，語意更清晰、結果更穩定。
+        //
+        // 規則：
+        // - 斷點之前 (order < deletedOrder)：保留原 groupId，重新整理 order 從 0 遞增。
+        // - 斷點之後 (order > deletedOrder)：賦予新 groupId，order 從 0 遞增。
+        // - 若某段的 order === deletedOrder（非常罕見的衝突），視為後半段。
+        //
+        // ⚠️ 完全移除 mergeConnectedLogisticsGroups 呼叫，防止分割後立刻被重新合併。
+
+        const getSequenceOrder = (seg) =>
+            Number.isFinite(seg?.splitSequenceOrder) ? seg.splitSequenceOrder
+                : (Number.isFinite(seg?.order) ? seg.order : 0);
+
+        const deletedOrder = getSequenceOrder(line);
         const remainingSegments = this.getLogisticsSegmentsByGroupId(groupId);
+
         if (remainingSegments.length > 0) {
-            // 建立圖來尋找連通分量
-            const adj = new Map();
-            remainingSegments.forEach(seg => {
-                adj.set(seg.id, []);
-            });
-            for (let i = 0; i < remainingSegments.length; i++) {
-                for (let j = i + 1; j < remainingSegments.length; j++) {
-                    const a = remainingSegments[i];
-                    const b = remainingSegments[j];
-                    const aPts = Array.isArray(a.routePoints) && a.routePoints.length > 0 ? a.routePoints : [{x:a.x, y:a.y}, {x:a.x, y:a.y}];
-                    const bPts = Array.isArray(b.routePoints) && b.routePoints.length > 0 ? b.routePoints : [{x:b.x, y:b.y}, {x:b.x, y:b.y}];
-                    const aStart = aPts[0]; const aEnd = aPts[aPts.length - 1];
-                    const bStart = bPts[0]; const bEnd = bPts[bPts.length - 1];
-                    const threshold = GameEngine.TILE_SIZE * 0.1;
-                    const getDir = (pts) => {
-                        const start = pts[0];
-                        const end = pts[pts.length - 1];
-                        const dx = (end?.x || 0) - (start?.x || 0);
-                        const dy = (end?.y || 0) - (start?.y || 0);
-                        return Math.abs(dx) >= Math.abs(dy)
-                            ? { x: Math.sign(dx) || 1, y: 0 }
-                            : { x: 0, y: Math.sign(dy) || 1 };
-                    };
-                    const isDeletedBridge = (p1, p2) => {
-                        const deletedPoint = { x: line.x || 0, y: line.y || 0 };
-                        const midPoint = { x: ((p1?.x || 0) + (p2?.x || 0)) / 2, y: ((p1?.y || 0) + (p2?.y || 0)) / 2 };
-                        // Use larger tolerance for deleted bridge matching to handle grid coordinate snapping drift robustly
-                        const bridgeThreshold = GameEngine.TILE_SIZE * 0.75;
-                        const nearDeleted = point => Math.hypot((point?.x || 0) - deletedPoint.x, (point?.y || 0) - deletedPoint.y) < bridgeThreshold;
-                        return nearDeleted(p1) || nearDeleted(p2) || nearDeleted(midPoint);
-                    };
-                    const isNearTurnEndpoint = (p1, p2) => {
-                        if (isDeletedBridge(p1, p2)) return false;
-                        const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
-                        if (dist > GameEngine.TILE_SIZE + threshold) return false;
-                        const aDir = getDir(aPts);
-                        const bDir = getDir(bPts);
-                        return aDir.x !== bDir.x && aDir.y !== bDir.y;
-                    };
-                    const connected = 
-                        (Math.hypot(aStart.x - bStart.x, aStart.y - bStart.y) < threshold) ||
-                        (Math.hypot(aStart.x - bEnd.x, aStart.y - bEnd.y) < threshold) ||
-                        (Math.hypot(aEnd.x - bStart.x, aEnd.y - bStart.y) < threshold) ||
-                        (Math.hypot(aEnd.x - bEnd.x, aEnd.y - bEnd.y) < threshold) ||
-                        isNearTurnEndpoint(aStart, bStart) ||
-                        isNearTurnEndpoint(aStart, bEnd) ||
-                        isNearTurnEndpoint(aEnd, bStart) ||
-                        isNearTurnEndpoint(aEnd, bEnd);
-                    if (connected) {
-                        console.log(`[Split Debug] Segments ${a.id} and ${b.id} are CONNECTED. details:`, {
-                            aStart, aEnd, bStart, bEnd,
-                            dist_aEnd_bStart: Math.hypot(aEnd.x - bStart.x, aEnd.y - bStart.y),
-                            isNearTurnEndpoint: isNearTurnEndpoint(aEnd, bStart)
-                        });
-                        adj.get(a.id).push(b.id);
-                        adj.get(b.id).push(a.id);
-                    } else {
-                        const dist = Math.hypot(aEnd.x - bStart.x, aEnd.y - bStart.y);
-                        if (dist < GameEngine.TILE_SIZE * 1.5) {
-                            console.log(`[Split Debug] Segments ${a.id} and ${b.id} are NOT connected but close. dist=${dist}, threshold=${threshold}, isDeletedBridge=${isDeletedBridge(aEnd, bStart)}`);
-                        }
+            // 依 order 值將剩餘線段分為前半段與後半段
+            const frontSegments = remainingSegments.filter(seg => getSequenceOrder(seg) < deletedOrder);
+            const backSegments = remainingSegments.filter(seg => getSequenceOrder(seg) >= deletedOrder);
+
+            if (frontSegments.length > 0 && backSegments.length > 0) {
+                // [合併鎖定] 啟用鎖定，防止拆分後立刻被 mergeConnectedLogisticsGroups 重新合併
+                this.mergeLock = groupId;
+                setTimeout(() => { this.mergeLock = null; }, 100);
+                // ── 前半段：保留原 groupId，清除 targetId（路徑已中斷，不再通往原目標）
+                // ⚠️ 若不清除 targetId，渲染器仍會找到 sourceEnt+targetEnt 並判定為通路（藍色高亮）
+                this.orderLogisticsSegmentsByDirection(frontSegments).forEach((seg, index) => {
+                    if (seg) {
+                        seg.targetId = null;
+                        seg.targetPort = null;
+                        seg.targetPoint = null;
+                        seg.order = index;
+                        seg.splitSequenceOrder = index;
+                    }
+                });
+
+                // 同步清除 sourceEnt.outputTargets 中對應的斷線記錄
+                if (line.sourceId) {
+                    const sourceEnt = state.mapEntities?.find(ent => window.UIManager.getEntityId(ent) === line.sourceId);
+                    if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
+                        sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId);
                     }
                 }
-            }
-            
-            const visited = new Set();
-            const components = [];
-            remainingSegments.forEach(seg => {
-                if (visited.has(seg.id)) return;
-                const comp = [];
-                const q = [seg.id];
-                visited.add(seg.id);
-                while(q.length > 0) {
-                    const cur = q.shift();
-                    comp.push(cur);
-                    adj.get(cur).forEach(next => {
-                        if (!visited.has(next)) {
-                            visited.add(next);
-                            q.push(next);
-                        }
-                    });
-                }
-                components.push(comp);
-            });
-            
-            console.log(`[Split Debug] Components calculated:`, components.map(c => c.length));
-            // 如果連通分量超過 1 個，代表線段被切斷了，必須將切斷的部分賦予新的 groupId
-            if (components.length > 1) {
-                // 找出包含 sourceId 的分量 (如果有的話)，讓它保留原 groupId，其他的改名
-                let mainCompIndex = 0;
-                for (let c = 0; c < components.length; c++) {
-                    const hasSource = components[c].some(segId => {
-                        const seg = remainingSegments.find(s => s.id === segId);
-                        return seg && seg.sourceId;
-                    });
-                    if (hasSource) {
-                        mainCompIndex = c;
-                        break;
+
+                // ── 後半段：賦予新 groupId，清除所有連線資訊，order 從 0 開始 ──────
+                const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+                this.orderLogisticsSegmentsByDirection(backSegments).forEach((seg, index) => {
+                    if (seg) {
+                        seg.groupId = newGroupId;
+                        seg.sourceId = null;
+                        seg.targetId = null;
+                        seg.sourcePort = null;
+                        seg.targetPort = null;
+                        seg.targetPoint = null;
+                        seg.order = index;
+                        seg.splitSequenceOrder = index;
                     }
-                }
-                
-                for (let c = 0; c < components.length; c++) {
-                    if (c === mainCompIndex) continue;
-                    const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random()*1000)}`;
-                    const componentSegments = components[c]
-                        .map(segId => remainingSegments.find(s => s.id === segId))
-                        .filter(Boolean);
-                    this.orderLogisticsSegmentsByDirection(componentSegments).forEach((seg, index) => {
-                        if (seg) {
-                            seg.groupId = newGroupId;
-                            seg.sourceId = null;
-                            seg.targetId = null;
-                            seg.sourcePort = null;
-                            seg.targetPort = null;
-                            seg.targetPoint = null;
-                            seg.order = index;
-                            seg.splitSequenceOrder = index;
-                        }
-                    });
-                }
+                });
                 GameEngine.addLog(`[物流] 線段中斷，物流線已拆分為獨立路線。`, 'LOGISTICS');
+            } else {
+                // 只有前半或只有後半（從端點刪除），只需重整 order
+                this.orderLogisticsSegmentsByDirection(remainingSegments).forEach((seg, index) => {
+                    if (seg) {
+                        seg.order = index;
+                        seg.splitSequenceOrder = index;
+                    }
+                });
             }
         } else {
             // 如果這個群組已經沒有任何線段，清除 sourceEnt 的輸出紀錄
@@ -1951,9 +2030,9 @@ export class ConveyorSystem {
                 }
             }
         }
-        
-        [...new Set(this.ensureLogisticsLineStore().map(item => item?.groupId || item?.id).filter(Boolean))]
-            .forEach(id => this.mergeConnectedLogisticsGroups(id));
+
+        // ⚠️ 此處完全不呼叫 mergeConnectedLogisticsGroups，
+        // 防止剛分割的新/舊 group 因端點空間相鄰而被立刻重新合併。
 
         if (state.selectedLogisticsLineId === lineKey) state.selectedLogisticsLineId = null;
         if (state.selectedLogisticsGroupId === line.groupId || state.selectedLogisticsGroupId === line.id) state.selectedLogisticsGroupId = null;
