@@ -1401,7 +1401,7 @@ export class ConveyorSystem {
         const sourceId = window.UIManager.getEntityId(sourceEnt);
         const targetId = targetEnt ? window.UIManager.getEntityId(targetEnt) : null;
         const groupId = lineId || conn?.lineId || this.makeLogisticsLineId(sourceId, targetId, targetPoint);
-        const cleanTargetPoint = targetId ? null : this.snapPointToGridCenter(targetPoint);
+        const cleanTargetPoint = (targetId || !targetPoint) ? null : this.snapPointToGridCenter(targetPoint);
         const gridPoints = this.buildGridRoutePoints(points);
         const previous = lines.find(item => item.groupId === groupId || item.id === groupId);
         const clonePort = (port) => {
@@ -2297,19 +2297,19 @@ export class ConveyorSystem {
         });
 
         // 更新 sourceEnt 的 outputTargets 連線資訊
-        if (sourceEnt && targetEnt) {
+        if (sourceEnt) {
             if (!Array.isArray(sourceEnt.outputTargets)) {
                 sourceEnt.outputTargets = [];
             }
             let conn = sourceEnt.outputTargets.find(item => item.lineId === groupId);
             if (!conn) {
                 conn = {
-                    id: targetId,
+                    id: targetId || null,
                     lineId: groupId
                 };
                 sourceEnt.outputTargets.push(conn);
             }
-            conn.id = targetId;
+            conn.id = targetId || null;
             conn.sourcePort = sourcePort;
             conn.targetPort = targetPort;
             conn.routeWidth = firstSeg.routeWidth || 1;
@@ -2336,7 +2336,7 @@ export class ConveyorSystem {
         (state.mapEntities || []).forEach(ent => {
             if (ent !== sourceEnt && Array.isArray(ent.outputTargets)) {
                 ent.outputTargets = ent.outputTargets.filter(conn => conn.lineId !== groupId);
-            } else if (ent === sourceEnt && (!sourceEnt || !targetEnt) && Array.isArray(ent.outputTargets)) {
+            } else if (ent === sourceEnt && !sourceEnt && Array.isArray(ent.outputTargets)) {
                 ent.outputTargets = ent.outputTargets.filter(conn => conn.lineId !== groupId);
             }
         });

@@ -2318,9 +2318,77 @@ export class WorkerSystem {
             });
         };
 
+        // ==========================================
+        // [新增] 計算每條物流線上物品的最大允許進度以實現堆積 (Backpressure & Stacking)
+        // ==========================================
+        const transfersByPath = new Map();
+        state.activeTransfers.forEach(t => {
+            if (!t) return;
+            const key = getTransferPathKey(t);
+            if (!transfersByPath.has(key)) {
+                transfersByPath.set(key, []);
+            }
+            transfersByPath.get(key).push(t);
+        });
+
+        const cellSize = this.engine?.TILE_SIZE || 20;
+
+        transfersByPath.forEach((groupTransfers, pathKey) => {
+            // 根據 progress 由大到小排序（最前方的物品在 index 0），若 progress 相同則以 id 排序以保證穩定排序
+            groupTransfers.sort((a, b) => {
+                const diff = (b.progress || 0) - (a.progress || 0);
+                if (Math.abs(diff) > 0.0001) return diff;
+                return String(a.id).localeCompare(String(b.id));
+            });
+
+            let prevMaxDist = Infinity;
+            for (let j = 0; j < groupTransfers.length; j++) {
+                const t = groupTransfers[j];
+                const totalLength = getRouteLengthPixels(t.routePoints);
+                if (totalLength <= 0) {
+                    t.maxAllowedProgress = 1.0;
+                    continue;
+                }
+
+                // 檢查 target 是否存在
+                const target = t.targetId ? state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId) : null;
+                const isBreakpoint = !target;
+
+                let maxDist = totalLength;
+                if (j === 0) {
+                    // 最前方的物品
+                    if (isBreakpoint) {
+                        // 如果是斷點，堆積在斷點前一格（減去一個 cellSize）
+                        maxDist = Math.max(0, totalLength - cellSize);
+                    } else {
+                        // 有接通目標，最大位置就是總長度
+                        maxDist = totalLength;
+                    }
+                } else {
+                    // 後方的物品，受限於前方物品的位置
+                    const frontItem = groupTransfers[j - 1];
+                    const frontDist = (frontItem.progress || 0) * getRouteLengthPixels(frontItem.routePoints);
+                    // 堆積在前一個物品後方，間隔一個 cellSize，且不能超越前一個物品的 maxDist - cellSize
+                    maxDist = Math.max(0, Math.min(frontDist, prevMaxDist) - cellSize);
+                }
+
+                prevMaxDist = maxDist;
+                t.maxAllowedProgress = maxDist / totalLength;
+            }
+        });
+
         for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
             let t = state.activeTransfers[i];
-            t.progress += deltaTime * (getTransferSpeed(t) / getRouteLengthInTiles(t));
+            const maxAllowed = t.maxAllowedProgress !== undefined ? t.maxAllowedProgress : 1.0;
+            
+            if (t.progress < maxAllowed) {
+                t.progress += deltaTime * (getTransferSpeed(t) / getRouteLengthInTiles(t));
+                if (t.progress > maxAllowed) {
+                    t.progress = maxAllowed;
+                }
+            } else if (t.progress > maxAllowed) {
+                t.progress = maxAllowed;
+            }
             
             // [新增] 追蹤邏輯
             if (state && state.trackedTransferId === t.id) {
