@@ -2148,6 +2148,7 @@ export class ConveyorSystem {
             const totalLen = getPathTotalLength(pathPoints);
             t.progress = totalLen > 0 ? Math.max(0, Math.min(1, projDist / totalLen)) : 1;
             t.routePoints = pathPoints;
+            t.sourceId = currentSeg.sourceId || null;
             t.targetId = currentSeg.targetId || null;
             t.efficiency = Number(currentSeg.efficiency) || 0;
         }

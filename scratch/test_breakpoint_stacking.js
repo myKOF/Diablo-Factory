@@ -192,6 +192,77 @@ const t2Dist = t2.progress * 100;
 assert(Math.abs(t1Dist - 80) < 0.1, `第 1 個物品應堆積在斷點前一格（80px），實際位置：${t1Dist}px`);
 assert(Math.abs(t2Dist - 60) < 0.1, `第 2 個物品應在第 1 個物品後方排隊（60px），實際位置：${t2Dist}px`);
 
+// ==========================================
+// 4. 驗證物流線拆分時 activeTransfers 的元數據同步
+// ==========================================
+console.log("\n=== 驗證 4：物流線拆分時 activeTransfers 的元數據同步 ===");
+// 模擬物流線拆分：
+// 斷點前段 (groupId: group_front, sourceId: factory_1, targetId: null)
+// 斷點後段 (groupId: group_back, sourceId: null, targetId: warehouse_1)
+const frontSeg = {
+    id: 'seg_front_1',
+    groupId: 'group_front',
+    sourceId: 'factory_1',
+    targetId: null,
+    efficiency: 4,
+    routePoints: [
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 40, y: 0 }
+    ]
+};
+
+const backSeg = {
+    id: 'seg_back_1',
+    groupId: 'group_back',
+    sourceId: null,
+    targetId: 'warehouse_1',
+    efficiency: 4,
+    routePoints: [
+        { x: 60, y: 0 },
+        { x: 80, y: 0 },
+        { x: 100, y: 0 }
+    ]
+};
+
+GameEngine.state.logisticsLines = [frontSeg, backSeg];
+
+// 重設在途物品的 progress 與 原始長路徑，模擬拆分前的狀態
+t1.routePoints = routePoints; 
+t2.routePoints = routePoints; 
+t1.progress = 0.8; // 投影後應到 backSeg (x=80)
+t2.progress = 0.6; // 投影後應到 backSeg (x=60)
+
+sys.updateActiveTransfersOnLogisticsChange(GameEngine.state);
+
+assert(t1.lineId === 'group_back', `t1.lineId 應更新為 group_back，實際為：${t1.lineId}`);
+assert(t1.sourceId === null, `t1.sourceId 應更新為 null，實際為：${t1.sourceId}`);
+assert(t1.targetId === 'warehouse_1', `t1.targetId 應保持為 warehouse_1，實際為：${t1.targetId}`);
+
+assert(t2.lineId === 'group_back', `t2.lineId 應更新為 group_back，實際為：${t2.lineId}`);
+assert(t2.sourceId === null, `t2.sourceId 應更新為 null，實際為：${t2.sourceId}`);
+assert(t2.targetId === 'warehouse_1', `t2.targetId 應保持為 warehouse_1，實際為：${t2.targetId}`);
+
+// 新增一個在前段的物品 t3
+const t3 = {
+    id: 'transfer_test_3',
+    sourceId: 'factory_1',
+    targetId: 'warehouse_1',
+    progress: 0.2, // 投影後應到 frontSeg (x=20)
+    routePoints: routePoints,
+    lineId: 'group_broken'
+};
+GameEngine.state.activeTransfers.push(t3);
+sys.updateActiveTransfersOnLogisticsChange(GameEngine.state);
+
+const t3Updated = GameEngine.state.activeTransfers.find(t => t.id === 'transfer_test_3');
+assert(t3Updated !== undefined, "t3 不應被刪除");
+if (t3Updated) {
+    assert(t3Updated.lineId === 'group_front', `t3.lineId 應更新為 group_front，實際為：${t3Updated.lineId}`);
+    assert(t3Updated.sourceId === 'factory_1', `t3.sourceId 應更新為 factory_1，實際為：${t3Updated.sourceId}`);
+    assert(t3Updated.targetId === null, `t3.targetId 應更新為 null，實際為：${t3Updated.targetId}`);
+}
+
 console.log("\n===========================================");
 if (passed) {
     console.log("🎉 物流斷點與堆積測試全部通過！");
