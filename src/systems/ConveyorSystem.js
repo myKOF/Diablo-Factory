@@ -1322,22 +1322,32 @@ export class ConveyorSystem {
         const TS = GameEngine.TILE_SIZE;
         const align = TS / 2;
         const segments = [];
-        for (let i = 0; i < gridPoints.length - 1; i += 2) {
+        let i = 0;
+        while (i < gridPoints.length - 1) {
             const start = gridPoints[i];
             const next = gridPoints[Math.min(i + 1, gridPoints.length - 1)];
             const targetEnd = gridPoints[Math.min(i + 2, gridPoints.length - 1)];
-            const dx = targetEnd.x - start.x;
-            const dy = targetEnd.y - start.y;
-            let end = targetEnd;
-            if (Math.hypot(dx, dy) < TS - 0.001) {
-                const dirX = Math.sign(next.x - start.x);
-                const dirY = Math.sign(next.y - start.y);
+            const dirX = Math.sign(next.x - start.x);
+            const dirY = Math.sign(next.y - start.y);
+            const nextDirX = Math.sign(targetEnd.x - next.x);
+            const nextDirY = Math.sign(targetEnd.y - next.y);
+            const canUseTargetEnd = i + 2 < gridPoints.length &&
+                dirX === nextDirX &&
+                dirY === nextDirY;
+            const segmentEnd = canUseTargetEnd ? targetEnd : next;
+            const dx = segmentEnd.x - start.x;
+            const dy = segmentEnd.y - start.y;
+            let end = segmentEnd;
+            if (canUseTargetEnd && Math.hypot(dx, dy) < TS - 0.001) {
                 end = {
                     x: start.x + dirX * TS,
                     y: start.y + dirY * TS
                 };
             }
-            if (start.x === end.x && start.y === end.y) continue;
+            if (start.x === end.x && start.y === end.y) {
+                i += 1;
+                continue;
+            }
             const centerX = (start.x + end.x) / 2;
             const centerY = (start.y + end.y) / 2;
             const gx = Math.round(centerX / align);
@@ -1349,8 +1359,8 @@ export class ConveyorSystem {
             // dir：方向角度（0=右, 45=右下, 90=下, 135=左下, 180=左, 225=左上, 270=上, 315=右上）
             const startGx = Math.round(start.x / align);
             const startGy = Math.round(start.y / align);
-            const endGx = Math.round(targetEnd.x / align);  // 用邏輯終點，不用合成終點
-            const endGy = Math.round(targetEnd.y / align);
+            const endGx = Math.round(end.x / align);  // 用邏輯終點，不用合成終點
+            const endGy = Math.round(end.y / align);
             // [方向修正] dir 使用實際路徑向量 (next - start) 計算，確保與物流「流動方向」一致
             // 舊邏輯使用 targetEnd - start（跨 2 格的向量），在轉角段會產生斜向誤判。
             // 改用 next（gridPoints[i+1]）與 start（gridPoints[i]）的差值，即每段的實際走向。
@@ -1387,6 +1397,7 @@ export class ConveyorSystem {
                 order: i,
                 createdAt: Date.now()
             });
+            i += canUseTargetEnd ? 2 : 1;
         }
         for (let i = 0; i < segments.length; i++) {
             segments[i].prevId = i > 0 ? segments[i - 1].id : null;
@@ -1950,49 +1961,108 @@ export class ConveyorSystem {
             return Array.isArray(segments) ? [...segments] : [];
         }
 
-        const segMap = new Map(segments.map(seg => [seg.id, seg]));
-        const ordered = [];
-        const visited = new Set();
-
-        // 1. 尋找所有鏈的起點 (即 prevId 為 null，或者 prevId 指向的節點不在 segments 中)
-        const heads = segments.filter(seg => !seg.prevId || !segMap.has(seg.prevId));
-
-        // 如果找不到任何頭部（例如全部成環），選取一個沒有被指向或 order 最小的
-        if (heads.length === 0) {
-            heads.push(segments[0]);
-        }
-
-        // 2. 對每個起點，沿 nextId 指針進行鏈式遍歷
-        heads.forEach(head => {
-            let curr = head;
-            while (curr && !visited.has(curr.id)) {
-                ordered.push(curr);
-                visited.add(curr.id);
-                curr = curr.nextId ? segMap.get(curr.nextId) : null;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const align = TS / 2;
+        const getSequenceOrder = (seg) => Number.isFinite(seg?.splitSequenceOrder)
+            ? seg.splitSequenceOrder
+            : (Number.isFinite(seg?.order) ? seg.order : 0);
+        const getCoords = (seg) => {
+            if (Number.isFinite(seg?.startGx) && Number.isFinite(seg?.startGy) &&
+                Number.isFinite(seg?.endGx) && Number.isFinite(seg?.endGy)) {
+                return { startGx: seg.startGx, startGy: seg.startGy, endGx: seg.endGx, endGy: seg.endGy };
             }
+            const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+            const start = points[0] || { x: seg?.x || 0, y: seg?.y || 0 };
+            const end = points[points.length - 1] || start;
+            return {
+                startGx: Math.round(start.x / align),
+                startGy: Math.round(start.y / align),
+                endGx: Math.round(end.x / align),
+                endGy: Math.round(end.y / align)
+            };
+        };
+        const coordKey = (gx, gy) => gx + "," + gy;
+        const directionOf = (seg) => {
+            const c = getCoords(seg);
+            return {
+                x: Math.sign(c.endGx - c.startGx),
+                y: Math.sign(c.endGy - c.startGy)
+            };
+        };
+        const sortStable = (list) => [...list].sort((a, b) =>
+            getSequenceOrder(a) - getSequenceOrder(b) ||
+            String(a.id || "").localeCompare(String(b.id || ""))
+        );
+
+        const byStart = new Map();
+        const byEnd = new Map();
+        const addEndpoint = (map, key, seg) => {
+            if (!map.has(key)) map.set(key, []);
+            map.get(key).push(seg);
+        };
+        segments.forEach(seg => {
+            const c = getCoords(seg);
+            addEndpoint(byStart, coordKey(c.startGx, c.startGy), seg);
+            addEndpoint(byEnd, coordKey(c.endGx, c.endGy), seg);
         });
 
-        // 3. 處理剩餘未被收集的孤立節點 (例如斷鏈)
-        if (ordered.length < segments.length) {
-            segments.forEach(seg => {
-                if (!visited.has(seg.id)) {
-                    let curr = seg;
-                    // 先往前追溯到該子鏈的頭部
-                    while (curr.prevId && segMap.has(curr.prevId) && !visited.has(curr.prevId)) {
-                        curr = segMap.get(curr.prevId);
-                    }
-                    // 往後收集
-                    while (curr && !visited.has(curr.id)) {
-                        ordered.push(curr);
-                        visited.add(curr.id);
-                        curr = curr.nextId ? segMap.get(curr.nextId) : null;
-                    }
-                }
+        const offsets = [
+            [0, 0],
+            [-1, 0], [1, 0], [0, -1], [0, 1],
+            [-1, -1], [-1, 1], [1, -1], [1, 1],
+            [-2, 0], [2, 0], [0, -2], [0, 2],
+            [-2, -1], [-2, 1], [2, -1], [2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2],
+            [-2, -2], [-2, 2], [2, -2], [2, 2]
+        ];
+
+        const countIncoming = (seg) => {
+            const c = getCoords(seg);
+            let count = 0;
+            offsets.forEach(([dx, dy]) => {
+                (byEnd.get(coordKey(c.startGx + dx, c.startGy + dy)) || []).forEach(candidate => {
+                    if (candidate !== seg) count++;
+                });
             });
+            return count;
+        };
+
+        const ordered = [];
+        const remaining = new Set(segments);
+        let current = sortStable(segments).find(seg => countIncoming(seg) === 0) || sortStable(segments)[0];
+
+        const pickNext = (seg) => {
+            const c = getCoords(seg);
+            const currentDir = directionOf(seg);
+            const candidates = [];
+            offsets.forEach(([dx, dy], offsetIndex) => {
+                (byStart.get(coordKey(c.endGx + dx, c.endGy + dy)) || []).forEach(candidate => {
+                    if (!remaining.has(candidate) || candidate === seg) return;
+                    const candidateDir = directionOf(candidate);
+                    if (currentDir.x === -candidateDir.x && currentDir.y === -candidateDir.y) return;
+                    const distance = Math.hypot(dx, dy);
+                    const turnPenalty = currentDir.x === candidateDir.x && currentDir.y === candidateDir.y ? 0 : 0.25;
+                    candidates.push({ candidate, score: distance + turnPenalty, offsetIndex });
+                });
+            });
+            candidates.sort((a, b) =>
+                a.score - b.score ||
+                a.offsetIndex - b.offsetIndex ||
+                getSequenceOrder(a.candidate) - getSequenceOrder(b.candidate) ||
+                String(a.candidate.id || "").localeCompare(String(b.candidate.id || ""))
+            );
+            return candidates[0]?.candidate || null;
+        };
+
+        while (current && remaining.has(current)) {
+            ordered.push(current);
+            remaining.delete(current);
+            current = pickNext(current);
         }
 
-        // 4. 重置與自癒 DLL 指針
-        // 為了確保 prevId/nextId 鏈與最終排序後的順序 100% 一致（Proximity Auto-Link 自癒）：
+        if (remaining.size > 0) {
+            sortStable([...remaining]).forEach(seg => ordered.push(seg));
+        }
+
         for (let i = 0; i < ordered.length; i++) {
             ordered[i].prevId = i > 0 ? ordered[i - 1].id : null;
             ordered[i].nextId = i < ordered.length - 1 ? ordered[i + 1].id : null;

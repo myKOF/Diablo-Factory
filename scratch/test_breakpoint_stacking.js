@@ -184,13 +184,13 @@ for (let step = 0; step < 10; step++) {
 
 // 驗證 3：堆積位置檢查
 // 總長度 = 100px, cellSize = 20px
-// 第 1 個物品 (最前端) 應該卡在 100 - 20 = 80px (progress = 0.8)
-// 第 2 個物品 應該卡在 80 - 20 = 60px (progress = 0.6)
+// 第 1 個物品 (最前端) 應該填滿斷點最後一格（100px）
+// 第 2 個物品 應該在第 1 個物品後方排隊（80px）
 const t1Dist = t1.progress * 100;
 const t2Dist = t2.progress * 100;
 
-assert(Math.abs(t1Dist - 80) < 0.1, `第 1 個物品應堆積在斷點前一格（80px），實際位置：${t1Dist}px`);
-assert(Math.abs(t2Dist - 60) < 0.1, `第 2 個物品應在第 1 個物品後方排隊（60px），實際位置：${t2Dist}px`);
+assert(Math.abs(t1Dist - 100) < 0.1, `第 1 個物品應填滿斷點最後一格（100px），實際位置：${t1Dist}px`);
+assert(Math.abs(t2Dist - 80) < 0.1, `第 2 個物品應在第 1 個物品後方排隊（80px），實際位置：${t2Dist}px`);
 
 // ==========================================
 // 4. 驗證物流線拆分時 activeTransfers 的元數據同步

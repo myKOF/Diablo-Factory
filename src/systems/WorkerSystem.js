@@ -2358,8 +2358,8 @@ export class WorkerSystem {
                 if (j === 0) {
                     // 最前方的物品
                     if (isBreakpoint) {
-                        // 如果是斷點，堆積在斷點前一格（減去一個 cellSize）
-                        maxDist = Math.max(0, totalLength - cellSize);
+                        // 斷點本身仍是可佔用的物流格，第一個物品停在最後一格。
+                        maxDist = totalLength;
                     } else {
                         // 有接通目標，最大位置就是總長度
                         maxDist = totalLength;
