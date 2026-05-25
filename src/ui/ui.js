@@ -1865,6 +1865,7 @@ export class UIManager {
             } else {
                 LogisticsUI.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
             }
+            this.updateValues(true);
             return;
         }
 
@@ -1968,6 +1969,7 @@ export class UIManager {
             } else {
                 LogisticsUI.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
             }
+            this.updateValues(true);
             return;
         }
 

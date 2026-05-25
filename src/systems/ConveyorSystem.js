@@ -550,6 +550,13 @@ export class ConveyorSystem {
             return;
         }
 
+        const savedLogisticsLines = Array.isArray(GameEngine.state.logisticsLines)
+            ? [...GameEngine.state.logisticsLines]
+            : [];
+        const savedTurnArrowOverrides = Array.isArray(GameEngine.state.logisticsTurnArrowOverrides)
+            ? [...GameEngine.state.logisticsTurnArrowOverrides]
+            : [];
+
         const drag = this.activeDrag;
         const TS = GameEngine.TILE_SIZE;
         const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
@@ -615,36 +622,46 @@ export class ConveyorSystem {
             if (drag.sourceLine && (drag.sourceLine.groupId || drag.sourceLine.id)) {
                 const sourceGroupId = drag.sourceLine.groupId || drag.sourceLine.id;
                 const lines = (GameEngine.state.logisticsLines || []).filter(l => l && (l.groupId === sourceGroupId || l.id === sourceGroupId));
-                const getEndpointMatchCounts = (grid) => {
-                    let p1MatchCount = 0;
-                    let p2MatchCount = 0;
-                    lines.forEach(l => {
-                        const pts = Array.isArray(l.routePoints) ? l.routePoints : [{ x: l.x, y: l.y }, { x: l.x, y: l.y }];
-                        if (pts.length === 0) return;
+                
+                // 1. 統計所有點的 grid 出現次數以決定物理端點
+                const gridCounts = new Map();
+                lines.forEach(l => {
+                    const pts = Array.isArray(l.routePoints) ? l.routePoints : [{ x: l.x, y: l.y }, { x: l.x, y: l.y }];
+                    if (pts.length < 2) return;
+                    const p1 = this.toGrid(pts[0].x, pts[0].y);
+                    const p2 = this.toGrid(pts[pts.length - 1].x, pts[pts.length - 1].y);
+                    
+                    const k1 = `${p1.x},${p1.y}`;
+                    const k2 = `${p2.x},${p2.y}`;
+                    gridCounts.set(k1, (gridCounts.get(k1) || 0) + 1);
+                    gridCounts.set(k2, (gridCounts.get(k2) || 0) + 1);
+                });
+                
+                const endpoints = [];
+                gridCounts.forEach((count, key) => {
+                    if (count === 1) {
+                        const [gx, gy] = key.split(',').map(Number);
+                        endpoints.push({ x: gx, y: gy });
+                    }
+                });
+                
+                if (lines.length === 1) {
+                    const pts = Array.isArray(lines[0].routePoints) ? lines[0].routePoints : [{ x: lines[0].x, y: lines[0].y }];
+                    if (pts.length >= 2) {
                         const p1 = this.toGrid(pts[0].x, pts[0].y);
                         const p2 = this.toGrid(pts[pts.length - 1].x, pts[pts.length - 1].y);
-                        if (p1.x === grid.x && p1.y === grid.y) p1MatchCount++;
-                        if (p2.x === grid.x && p2.y === grid.y) p2MatchCount++;
-                    });
-                    return { p1MatchCount, p2MatchCount };
-                };
-                const sourceLinePoints = Array.isArray(drag.sourceLine.routePoints) ? drag.sourceLine.routePoints : [];
-                const sourceLineEndpointCandidates = sourceLinePoints.length >= 2
-                    ? [sourceLinePoints[sourceLinePoints.length - 1], sourceLinePoints[0]]
-                    : [{ x: drag.startX, y: drag.startY }];
-                const mergeAnchor = sourceLineEndpointCandidates
-                    .map(point => {
-                        const grid = this.toGrid(point.x, point.y);
-                        return { point, grid, counts: getEndpointMatchCounts(grid) };
-                    })
-                    .find(item => (
-                        (item.counts.p2MatchCount === 1 && item.counts.p1MatchCount === 0) ||
-                        (item.counts.p1MatchCount === 1 && item.counts.p2MatchCount === 1 && lines.length === 1)
-                    ));
-
-                // 只有從群組的真正終點延伸，才是連續的物流線 (允許合併)。
-                // 若是單格點 (p1 與 p2 重疊且只有一條線)，也視為終點。
-                const isTrueEnd = !!mergeAnchor;
+                        endpoints.push(p1, p2);
+                    }
+                }
+                
+                // 2. 檢查 drag.startX, drag.startY 對應 of grid 點是否鄰近（距離在一格 20px 以內）任何端點
+                const startGrid = this.toGrid(drag.startX, drag.startY);
+                const isNearEndpoint = endpoints.some(ep => {
+                    const dist = Math.max(Math.abs(ep.x - startGrid.x), Math.abs(ep.y - startGrid.y));
+                    return dist <= this.getRouteScale(); // 容許虛擬段造成的偏移（一格對應 routeScale 個 grid 單位）
+                });
+                
+                let isTrueEnd = isNearEndpoint;
 
                 if (isTrueEnd) {
                     shouldMergeWithSource = true;
@@ -660,7 +677,6 @@ export class ConveyorSystem {
                                 ? { x: Math.sign(dx) || 1, y: 0 }
                                 : { x: 0, y: Math.sign(dy) || 1 };
                         };
-                        // 取得來源線段最後一個 vector
                         const originalDir = getDir(sourceRoute[sourceRoute.length - 2], sourceRoute[sourceRoute.length - 1]);
                         const extensionDir = getDir(points[0], points[1]);
                         if (originalDir && extensionDir && originalDir.x === -extensionDir.x && originalDir.y === -extensionDir.y) {
@@ -697,6 +713,8 @@ export class ConveyorSystem {
             const afterCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : beforeCount;
             const builtSegments = Math.max(0, afterCount - beforeCount);
             if (!BuildingSystem.spendResources(GameEngine.state, this.getTransportLineCost(builtSegments))) {
+                GameEngine.state.logisticsLines = savedLogisticsLines;
+                GameEngine.state.logisticsTurnArrowOverrides = savedTurnArrowOverrides;
                 this.cancelDrag();
                 return;
             }
@@ -1061,6 +1079,25 @@ export class ConveyorSystem {
 
         if (transferPoints.length < 2) return null;
 
+        const getCardinalDir = (from, to) => {
+            if (!from || !to) return null;
+            const dx = to.x - from.x;
+            const dy = to.y - from.y;
+            if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+            if (Math.abs(dx) >= Math.abs(dy)) return { x: Math.sign(dx) || 1, y: 0 };
+            return { x: 0, y: Math.sign(dy) || 1 };
+        };
+        for (let i = 1; i < transferPoints.length - 1; i++) {
+            const prev = transferPoints[i - 1];
+            const curr = transferPoints[i];
+            const next = transferPoints[i + 1];
+            const inDir = getCardinalDir(prev, curr);
+            const outDir = getCardinalDir(curr, next);
+            if (inDir && outDir && (inDir.x !== outDir.x || inDir.y !== outDir.y)) {
+                curr.isCorner = true;
+            }
+        }
+
         return {
             points: transferPoints,
             width: Math.max(1, Number(conn?.routeWidth) || 1)
@@ -1402,6 +1439,12 @@ export class ConveyorSystem {
         for (let i = 0; i < segments.length; i++) {
             segments[i].prevId = i > 0 ? segments[i - 1].id : null;
             segments[i].nextId = i < segments.length - 1 ? segments[i + 1].id : null;
+            
+            const prevSeg = i > 0 ? segments[i - 1] : null;
+            const nextSeg = i < segments.length - 1 ? segments[i + 1] : null;
+            const isCorner = (prevSeg && prevSeg.dir !== segments[i].dir) || 
+                             (nextSeg && nextSeg.dir !== segments[i].dir);
+            segments[i].isCorner = !!isCorner;
         }
         return segments;
     }
@@ -1575,7 +1618,7 @@ export class ConveyorSystem {
             const sameDirectionOverlapGroupIds = collectSameDirectionOverlapGroups(segment);
             const overlapsOccupiedLine = keys.some((key) => {
                 const hit = occupied.get(key);
-                return !!hit;
+                return hit && !sameGroup(hit);
             });
             if (overlapsOccupiedLine) {
                 sameDirectionOverlapGroupIds.forEach(id => overlapMergeGroupIds.add(id));
@@ -1583,7 +1626,7 @@ export class ConveyorSystem {
             }
             const centerBlockedByOccupiedLine = segmentTileKeys.some((key) => {
                 const hits = occupiedTileCenters.get(key) || [];
-                return hits.length > 0;
+                return hits.some(hit => !sameGroup(hit));
             });
             if (centerBlockedByOccupiedLine) {
                 sameDirectionOverlapGroupIds.forEach(id => overlapMergeGroupIds.add(id));
@@ -1651,6 +1694,7 @@ export class ConveyorSystem {
         }
         this.recalculateLogisticsGroupEndpoints(mergedGroupId);
         this.rebuildSpatialHashGrid();
+        this.updateActiveTransfersOnLogisticsChange(GameEngine.state);
         return additions[additions.length - 1] || segments.map(segment => occupied.get(this.getLogisticsSegmentOccupyKey(segment))).filter(Boolean).pop() || this.getLogisticsLineById(mergedGroupId) || null;
     }
 
@@ -2068,6 +2112,12 @@ export class ConveyorSystem {
             ordered[i].nextId = i < ordered.length - 1 ? ordered[i + 1].id : null;
             ordered[i].order = i;
             ordered[i].splitSequenceOrder = i;
+
+            const prevSeg = i > 0 ? ordered[i - 1] : null;
+            const nextSeg = i < ordered.length - 1 ? ordered[i + 1] : null;
+            const isCorner = (prevSeg && prevSeg.dir !== ordered[i].dir) || 
+                             (nextSeg && nextSeg.dir !== ordered[i].dir);
+            ordered[i].isCorner = !!isCorner;
         }
 
         return ordered;
@@ -2076,6 +2126,57 @@ export class ConveyorSystem {
     updateActiveTransfersOnLogisticsChange(state) {
         if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
         const TS = GameEngine.TILE_SIZE || 20;
+
+        const findShortestPathBetweenPoints = (segments, startPt, endPt) => {
+            if (!Array.isArray(segments) || segments.length === 0) return [];
+            const nodes = [];
+            segments.forEach(seg => {
+                if (Array.isArray(seg.routePoints) && seg.routePoints.length >= 2) {
+                    for (let i = 0; i < seg.routePoints.length - 1; i++) {
+                        const p1 = seg.routePoints[i];
+                        const p2 = seg.routePoints[i + 1];
+                        let n1 = nodes.find(n => Math.hypot(n.x - p1.x, n.y - p1.y) < 2);
+                        if (!n1) { n1 = { x: p1.x, y: p1.y, edges: [] }; nodes.push(n1); }
+                        let n2 = nodes.find(n => Math.hypot(n.x - p2.x, n.y - p2.y) < 2);
+                        if (!n2) { n2 = { x: p2.x, y: p2.y, edges: [] }; nodes.push(n2); }
+
+                        if (!n1.edges.includes(n2)) n1.edges.push(n2);
+                        if (!n2.edges.includes(n1)) n2.edges.push(n1);
+                    }
+                }
+            });
+
+            let startNode = null; let startDist = Infinity;
+            let endNode = null; let endDist = Infinity;
+
+            nodes.forEach(n => {
+                const ds = Math.hypot(n.x - startPt.x, n.y - startPt.y);
+                if (ds < startDist) { startDist = ds; startNode = n; }
+                const dt = Math.hypot(n.x - endPt.x, n.y - endPt.y);
+                if (dt < endDist) { endDist = dt; endNode = n; }
+            });
+
+            if (startNode && endNode) {
+                const queue = [[startNode]];
+                const visited = new Set([startNode]);
+                while (queue.length > 0) {
+                    const path = queue.shift();
+                    const curr = path[path.length - 1];
+
+                    if (curr === endNode) {
+                        return path.map(n => ({ x: n.x, y: n.y }));
+                    }
+
+                    curr.edges.forEach(neighbor => {
+                        if (!visited.has(neighbor)) {
+                            visited.add(neighbor);
+                            queue.push([...path, neighbor]);
+                        }
+                    });
+                }
+            }
+            return [];
+        };
 
         const getPointOnPath = (points, progress) => {
             if (!Array.isArray(points) || points.length === 0) return { x: 0, y: 0 };
@@ -2096,6 +2197,7 @@ export class ConveyorSystem {
                     const ratio = len === 0 ? 0 : (targetDist / len);
                     const p1 = points[i];
                     const p2 = points[i + 1];
+
                     return {
                         x: p1.x + (p2.x - p1.x) * ratio,
                         y: p1.y + (p2.y - p1.y) * ratio
@@ -2195,18 +2297,119 @@ export class ConveyorSystem {
 
             // 取得該群組全新的完整路徑點
             const groupSegs = (state.logisticsLines || []).filter(l => l && (l.groupId === newGroupId || l.id === newGroupId));
+            let pathPoints = null;
+
             const ordered = this.orderLogisticsSegmentsByDirection(groupSegs);
-            const pathPoints = [];
-            ordered.forEach(seg => {
-                if (Array.isArray(seg.routePoints)) {
-                    seg.routePoints.forEach(p => {
-                        if (pathPoints.length === 0 ||
-                            Math.hypot(pathPoints[pathPoints.length - 1].x - p.x, pathPoints[pathPoints.length - 1].y - p.y) > 0.1) {
-                            pathPoints.push({ x: p.x, y: p.y });
+            if (ordered.length > 0) {
+                const firstSeg = ordered[0];
+                const lastSeg = ordered[ordered.length - 1];
+                if (firstSeg && lastSeg && Array.isArray(firstSeg.routePoints) && Array.isArray(lastSeg.routePoints)) {
+                    const startPt = firstSeg.routePoints[0];
+                    const endPt = lastSeg.routePoints[lastSeg.routePoints.length - 1];
+                    if (startPt && endPt) {
+                        const shortest = findShortestPathBetweenPoints(groupSegs, startPt, endPt);
+                        if (shortest && shortest.length >= 2) {
+                            // 尋找起點與終點建築
+                            const sourceEnt = (t.sourceId || currentSeg.sourceId)
+                                ? state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === (t.sourceId || currentSeg.sourceId))
+                                : null;
+                            const targetEnt = (t.targetId || currentSeg.targetId)
+                                ? state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === (t.targetId || currentSeg.targetId))
+                                : null;
+
+                            if (sourceEnt && targetEnt) {
+                                const first = shortest[0];
+                                const last = shortest[shortest.length - 1];
+
+                                const sourcePort = currentSeg.sourcePort || t.sourcePort
+                                    ? window.UIManager.resolveCurrentPortSlot(sourceEnt, currentSeg.sourcePort || t.sourcePort, first?.x, first?.y)
+                                    : window.UIManager.getNearestPortSlot(sourceEnt, first?.x ?? targetEnt.x, first?.y ?? targetEnt.y);
+
+                                const targetPort = currentSeg.targetPort || t.targetPort
+                                    ? window.UIManager.resolveCurrentPortSlot(targetEnt, currentSeg.targetPort || t.targetPort, last?.x, last?.y)
+                                    : window.UIManager.getNearestPortSlot(targetEnt, last?.x ?? sourceEnt.x, last?.y ?? sourceEnt.y);
+
+                                const sourceAnchor = sourcePort ? { x: sourcePort.x, y: sourcePort.y } : { x: sourceEnt.x, y: sourceEnt.y };
+                                const targetAnchor = targetPort ? { x: targetPort.x, y: targetPort.y } : { x: targetEnt.x, y: targetEnt.y };
+
+                                // 方向校正與對齊 (子任務 C-2)
+                                const distFirstToSource = Math.hypot(shortest[0].x - sourceAnchor.x, shortest[0].y - sourceAnchor.y);
+                                const distLastToSource = Math.hypot(shortest[shortest.length - 1].x - sourceAnchor.x, shortest[shortest.length - 1].y - sourceAnchor.y);
+                                if (distLastToSource < distFirstToSource) {
+                                    shortest.reverse();
+                                }
+
+                                const transferPoints = [];
+                                const pushPoint = (point) => {
+                                    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+                                    const lastPoint = transferPoints[transferPoints.length - 1];
+                                    if (!lastPoint || Math.hypot(lastPoint.x - point.x, lastPoint.y - point.y) > 1) {
+                                        transferPoints.push({ x: point.x, y: point.y });
+                                    }
+                                };
+
+                                pushPoint(sourceAnchor);
+                                shortest.forEach(pushPoint);
+                                pushPoint(targetAnchor);
+
+                                if (transferPoints.length >= 2) {
+                                    pathPoints = transferPoints;
+                                }
+                            } else {
+                                // 即使無建築，也應與原路徑方向比對
+                                if (Array.isArray(t.routePoints) && t.routePoints.length >= 2) {
+                                    const distFirstToOldStart = Math.hypot(shortest[0].x - t.routePoints[0].x, shortest[0].y - t.routePoints[0].y);
+                                    const distLastToOldStart = Math.hypot(shortest[shortest.length - 1].x - t.routePoints[0].x, shortest[shortest.length - 1].y - t.routePoints[0].y);
+                                    if (distLastToOldStart < distFirstToOldStart) {
+                                        shortest.reverse();
+                                    }
+                                }
+                                pathPoints = shortest;
+                            }
                         }
-                    });
+                    }
                 }
-            });
+            }
+
+            if (!pathPoints) {
+                pathPoints = [];
+                ordered.forEach(seg => {
+                    if (Array.isArray(seg.routePoints)) {
+                        seg.routePoints.forEach(p => {
+                            if (pathPoints.length === 0 ||
+                                Math.hypot(pathPoints[pathPoints.length - 1].x - p.x, pathPoints[pathPoints.length - 1].y - p.y) > 0.1) {
+                                pathPoints.push({ x: p.x, y: p.y });
+                            }
+                        });
+                    }
+                });
+                // Correctly annotate corners instead of using ordered[idx].isCorner (子任務 C-3)
+                if (pathPoints.length >= 3) {
+                    const getCardinalDir = (from, to) => {
+                        if (!from || !to) return null;
+                        const dx = to.x - from.x;
+                        const dy = to.y - from.y;
+                        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+                        if (Math.abs(dx) >= Math.abs(dy)) return { x: Math.sign(dx) || 1, y: 0 };
+                        return { x: 0, y: Math.sign(dy) || 1 };
+                    };
+                    for (let idx = 1; idx < pathPoints.length - 1; idx++) {
+                        const prev = pathPoints[idx - 1];
+                        const curr = pathPoints[idx];
+                        const next = pathPoints[idx + 1];
+                        const inDir = getCardinalDir(prev, curr);
+                        const outDir = getCardinalDir(curr, next);
+                        if (inDir && outDir && (inDir.x !== outDir.x || inDir.y !== outDir.y)) {
+                            curr.isCorner = true;
+                        }
+                    }
+                }
+            } else {
+                const renderer = window.LogisticsRenderer || (typeof LogisticsRenderer !== 'undefined' ? LogisticsRenderer : null);
+                if (renderer && typeof renderer.annotateRoutePoints === 'function') {
+                    renderer.annotateRoutePoints(pathPoints);
+                }
+            }
 
             if (pathPoints.length < 2) {
                 state.activeTransfers.splice(i, 1);
@@ -2263,21 +2466,84 @@ export class ConveyorSystem {
             transfers.sort((a, b) => {
                 const da = Math.max(0, Math.min(1, Number(a.progress) || 0)) * totalLength;
                 const db = Math.max(0, Math.min(1, Number(b.progress) || 0)) * totalLength;
-                if (db !== da) return db - da;
+                if (Math.abs(da - db) >= TS * 0.5) return db - da;
                 return String(a.id || "").localeCompare(String(b.id || ""));
             });
 
-            let nextMaxDistance = totalLength;
-            transfers.forEach(transfer => {
+            // 計算最後一個傳送帶網格的中心距離
+            const points = transfers[0]?.routePoints;
+            let dist_pn = totalLength;
+            if (Array.isArray(points) && points.length >= 2) {
+                let tempDist = 0;
+                const limit = points.length - 2;
+                for (let k = 0; k < limit; k++) {
+                    tempDist += Math.hypot(points[k + 1].x - points[k].x, points[k + 1].y - points[k].y);
+                }
+                dist_pn = tempDist;
+            }
+
+            // 找出路徑中所有 corner 點的累積距離
+            const cornerDists = [];
+            if (Array.isArray(points)) {
+                let accumulated = 0;
+                for (let k = 0; k < points.length - 1; k++) {
+                    const segLen = Math.hypot(points[k + 1].x - points[k].x, points[k + 1].y - points[k].y);
+                    if (points[k].isCorner) {
+                        cornerDists.push(accumulated);
+                    }
+                    accumulated += segLen;
+                }
+                if (points[points.length - 1]?.isCorner) {
+                    cornerDists.push(accumulated);
+                }
+            }
+
+            let prevQueuedDistance = totalLength;
+            let prevDesired = null;
+            transfers.forEach((transfer, index) => {
                 const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
-                const queuedDistance = Math.max(0, Math.min(desired, nextMaxDistance));
+                
+                let spacing = TS;
+                if (index > 0) {
+                    const hasCornerBetween = cornerDists.some(cd => cd > desired && cd < prevQueuedDistance);
+                    spacing = hasCornerBetween ? TS * 1.4 : TS;
+                }
+
+                let maxAllowed;
+                if (index === 0) {
+                    if (desired <= dist_pn) {
+                        maxAllowed = dist_pn;
+                    } else {
+                        maxAllowed = totalLength;
+                    }
+                } else {
+                    const physicalLimit = prevQueuedDistance - spacing;
+                    if (desired <= dist_pn) {
+                        if (prevQueuedDistance > dist_pn) {
+                            maxAllowed = Math.min(dist_pn, physicalLimit);
+                        } else {
+                            maxAllowed = physicalLimit;
+                        }
+                    } else {
+                        maxAllowed = physicalLimit;
+                    }
+                }
+
+                let queuedDistance;
+                if (index > 0 && Math.abs(desired - prevDesired) < TS * 0.5) {
+                    queuedDistance = Math.max(0, Math.min(desired, prevQueuedDistance));
+                } else {
+                    queuedDistance = Math.max(0, Math.min(desired, maxAllowed));
+                }
+                
                 transfer.progress = Math.max(0, Math.min(1, queuedDistance / totalLength));
                 if (transfer.targetId) {
                     delete transfer.blockedOnBrokenLine;
                 } else {
                     transfer.blockedOnBrokenLine = true;
                 }
-                nextMaxDistance = queuedDistance - TS;
+                prevDesired = desired;
+                prevQueuedDistance = queuedDistance;
             });
         });
     }

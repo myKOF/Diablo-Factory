@@ -314,7 +314,7 @@ export class LogisticsUI {
         GameEngine.state.selectedLogisticsGroupId = selectGroup ? (line.groupId || line.id) : null;
         LogisticsUI.activeLogisticsLine = line;
 
-        if (GameEngine.state.logisticsLines) {
+        if (selectGroup && GameEngine.state.logisticsLines) {
             const groupId = line.groupId || line.id;
             const groupLines = conveyorSystem.ensureLogisticsLineStore()
                 .filter(l => l.groupId === groupId || l.id === groupId)

@@ -1241,30 +1241,13 @@ export class LogisticsRenderer {
                         : { points: [{ x: source.x, y: source.y }, { x: target.x, y: target.y }] };
 
                     const points = routeInfo.points;
-
-                    // 2. 計算多邊形總長度
-                    let totalLength = 0;
-                    const segments = [];
-                    for (let i = 0; i < points.length - 1; i++) {
-                        const d = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-                        segments.push({ start: points[i], end: points[i + 1], dist: d });
-                        totalLength += d;
+                    if (Array.isArray(points)) {
+                        LogisticsRenderer.annotateRoutePoints(points);
                     }
 
-                    // 3. 根據 progress 尋找目前所在的線段與座標
-                    let targetDist = totalLength * t.progress;
-                    let currentX = source.x;
-                    let currentY = source.y;
-
-                    for (const seg of segments) {
-                        if (targetDist <= seg.dist) {
-                            const ratio = seg.dist === 0 ? 0 : (targetDist / seg.dist);
-                            currentX = seg.start.x + (seg.end.x - seg.start.x) * ratio;
-                            currentY = seg.start.y + (seg.end.y - seg.start.y) * ratio;
-                            break;
-                        }
-                        targetDist -= seg.dist;
-                    }
+                    const pathPoint = LogisticsRenderer.getPointOnTransferPath(points, t.progress, 0);
+                    let currentX = pathPoint ? pathPoint.x : source.x;
+                    let currentY = pathPoint ? pathPoint.y : source.y;
 
                     // 防止超出邊界
                     if (t.progress >= 1) {
@@ -1359,6 +1342,9 @@ export class LogisticsRenderer {
                 target,
                 LogisticsRenderer.resolveTransferRoutePoints(source, target, directConn, t)
             );
+            if (Array.isArray(routePoints)) {
+                LogisticsRenderer.annotateRoutePoints(routePoints);
+            }
 
             if (directConn?.lineId && (!Array.isArray(routePoints) || routePoints.length < 2)) return;
 
@@ -1486,6 +1472,7 @@ export class LogisticsRenderer {
                 const a = points[i];
                 const b = points[i + 1];
                 const localProgress = length > 0 ? targetDistance / length : 0;
+
                 return {
                     x: a.x + (b.x - a.x) * localProgress,
                     y: a.y + (b.y - a.y) * localProgress
@@ -1495,6 +1482,20 @@ export class LogisticsRenderer {
         }
         const last = points[points.length - 1];
         return { x: last.x, y: last.y };
+    }
+
+    static annotateRoutePoints(points) {
+        if (!Array.isArray(points) || points.length < 3) return;
+        for (let i = 1; i < points.length - 1; i++) {
+            const prev = points[i - 1];
+            const curr = points[i];
+            const next = points[i + 1];
+            const inDir = LogisticsRenderer.getCardinalDir(prev, curr);
+            const outDir = LogisticsRenderer.getCardinalDir(curr, next);
+            if (inDir && outDir && (inDir.x !== outDir.x || inDir.y !== outDir.y)) {
+                curr.isCorner = true;
+            }
+        }
     }
 
     static drawLogisticsGroupTurnArrows(g, segments, widthTiles, color, alpha, size, onlyCellKeys = null) {

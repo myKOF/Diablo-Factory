@@ -2354,22 +2354,63 @@ export class WorkerSystem {
                 const target = t.targetId ? state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId) : null;
                 const isBreakpoint = !target;
 
-                let maxDist = totalLength;
+                                                                // 計算最後一個傳送帶網格的中心距離
+                const points = t.routePoints;
+                let dist_pn = totalLength;
+                if (Array.isArray(points) && points.length >= 2) {
+                    let tempDist = 0;
+                    const limit = points.length - 2;
+                    for (let k = 0; k < limit; k++) {
+                        tempDist += Math.hypot(points[k + 1].x - points[k].x, points[k + 1].y - points[k].y);
+                    }
+                    dist_pn = tempDist;
+                }
+
+                // 找出路徑中所有 corner 點的累積距離
+                const cornerDists = [];
+                if (Array.isArray(points)) {
+                    let accumulated = 0;
+                    for (let k = 0; k < points.length - 1; k++) {
+                        const segLen = Math.hypot(points[k + 1].x - points[k].x, points[k + 1].y - points[k].y);
+                        if (points[k].isCorner) {
+                            cornerDists.push(accumulated);
+                        }
+                        accumulated += segLen;
+                    }
+                    if (points[points.length - 1]?.isCorner) {
+                        cornerDists.push(accumulated);
+                    }
+                }
+
+                let spacing = cellSize;
+                const desired = (t.progress || 0) * totalLength;
+                if (j > 0) {
+                    const frontItem = groupTransfers[j - 1];
+                    const frontDist = (frontItem.progress || 0) * getRouteLengthPixels(frontItem.routePoints);
+                    const hasCornerBetween = cornerDists.some(cd => cd > desired && cd < frontDist);
+                    spacing = hasCornerBetween ? cellSize * 1.4 : cellSize;
+                }
+
+                                let maxDist = totalLength;
                 if (j === 0) {
-                    // 最前方的物品
-                    if (isBreakpoint) {
-                        // 斷點本身仍是可佔用的物流格，第一個物品停在最後一格。
-                        maxDist = totalLength;
+                    if (desired <= dist_pn) {
+                        maxDist = dist_pn;
                     } else {
-                        // 有接通目標，最大位置就是總長度
                         maxDist = totalLength;
                     }
                 } else {
-                    // 後方的物品，受限於前方物品的位置
                     const frontItem = groupTransfers[j - 1];
                     const frontDist = (frontItem.progress || 0) * getRouteLengthPixels(frontItem.routePoints);
-                    // 堆積在前一個物品後方，間隔一個 cellSize，且不能超越前一個物品的 maxDist - cellSize
-                    maxDist = Math.max(0, Math.min(frontDist, prevMaxDist) - cellSize);
+                    const physicalLimit = Math.max(0, Math.min(frontDist, prevMaxDist) - spacing);
+                    if (desired <= dist_pn) {
+                        if (frontDist > dist_pn || prevMaxDist > dist_pn) {
+                            maxDist = Math.min(dist_pn, physicalLimit);
+                        } else {
+                            maxDist = physicalLimit;
+                        }
+                    } else {
+                        maxDist = physicalLimit;
+                    }
                 }
 
                 prevMaxDist = maxDist;

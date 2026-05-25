@@ -111,3 +111,22 @@
 4.  **系統測試與 finalize 收尾**：
     -   進行自動化系統測試。
     -   執行 `npm run finalize` 完成最終代碼洗滌與檢驗。
+
+# 傳送帶轉角抖動與堆積問題修復計畫
+- [ ] **任務 A：轉角識別 (Corner Flagging)**
+  - 在 `ConveyorSystem.js` 中的 `buildLogisticsSegments` 和 `orderLogisticsSegmentsByDirection` 函數中，為 Segment 新增 `isCorner: boolean` 屬性。
+- [ ] **任務 B：優化隊列阻塞邏輯 (Queue Tolerance)**
+  - 修改 `applyBlockedTransferQueues` 函數，引入 `TS * 0.5` 的距離容差，避免微小誤差導致的轉角堆積。
+- [x] **任務 C：視覺插值修正 (Visual Interpolation)**
+  - 在 `ConveyorSystem.js` 的 `getPointOnPath` 以及 `logistics_renderer.js` 的 `LogisticsRenderer.getPointOnTransferPath` 中實作二次貝茲曲線插值，平滑轉彎視覺效果。（已依用戶要求移除了貝茲平滑，還原回 90 度切角轉彎）
+- [x] **任務 D：編寫驗證腳本與自動化測試**
+  - 建立 `scratch/verify_conveyor_corner_flow.js`，對上述邏輯進行單元與集成測試。
+  - 執行 `npm run finalize` 完成最終代碼收尾。
+
+# 傳送帶轉角合併偏移與重疊修復計畫 (續)
+- [ ] **任務 E：建造/延伸/合併時同步更新在途物品軌跡**
+  - 在 `ConveyorSystem.js` 的 `upsertLogisticsLine` 結束前調用 `updateActiveTransfersOnLogisticsChange`，保證所有在途物品路徑隨結構變更即時重新計算，獲取最新的完整起終點 Port，使 `pathKey` 對齊，解決重疊。
+- [ ] **任務 F：在途物品重組路徑的方向對齊與去重**
+  - 在 `updateActiveTransfersOnLogisticsChange` 中，對最短路徑進行方向對齊（利用 `sourceAnchor` 或舊軌跡起點的距離檢測），必要時反轉路徑以避免反向折返，解決視覺偏離與抖動。
+- [ ] **任務 G：修正 fallback 的轉角標記錯位問題**
+  - 在 `updateActiveTransfersOnLogisticsChange` 中，若走 fallback 組裝路徑，修正其錯位的 `isCorner` 網格點標註，改用與 `annotateRoutePoints` 相同的方向拐向判定，確保拐彎排隊間距加成能正確施加。

@@ -114,9 +114,10 @@ const routePoints = [
     { x: 100, y: 0 }
 ];
 
+const gridPoints = sys.buildGridRoutePoints(routePoints);
 const segs = sys.buildLogisticsSegments(
     'group_broken', 'factory_1', null, null,
-    routePoints, 1, null, null, null
+    gridPoints, 1, null, null, null
 );
 GameEngine.state.logisticsLines.push(...segs);
 
