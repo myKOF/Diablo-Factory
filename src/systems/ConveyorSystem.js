@@ -2546,6 +2546,79 @@ export class ConveyorSystem {
                 prevQueuedDistance = queuedDistance;
             });
         });
+
+        const getPointOnPathByDistance = (points, distance) => {
+            if (!Array.isArray(points) || points.length < 2) return null;
+            let remaining = Math.max(0, Number(distance) || 0);
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                const len = Math.hypot(b.x - a.x, b.y - a.y);
+                if (len <= 0) continue;
+                if (remaining <= len || i === points.length - 2) {
+                    const t = Math.max(0, Math.min(1, remaining / len));
+                    return {
+                        x: a.x + (b.x - a.x) * t,
+                        y: a.y + (b.y - a.y) * t
+                    };
+                }
+                remaining -= len;
+            }
+            return points[points.length - 1] || null;
+        };
+        const cellKeyForDistance = (points, distance) => {
+            const point = getPointOnPathByDistance(points, distance);
+            if (!point) return null;
+            return `${Math.round(point.x / TS)},${Math.round(point.y / TS)}`;
+        };
+        const transferEntries = state.activeTransfers
+            .filter(transfer => transfer && Array.isArray(transfer.routePoints) && transfer.routePoints.length >= 2)
+            .map(transfer => {
+                const totalLength = getPathTotalLength(transfer.routePoints);
+                const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
+                return { transfer, totalLength, distance, key: pathKey(transfer) };
+            })
+            .filter(entry => entry.totalLength > 0)
+            .sort((a, b) => {
+                const diff = b.distance - a.distance;
+                if (Math.abs(diff) > 0.0001) return diff;
+                return String(a.transfer.id || "").localeCompare(String(b.transfer.id || ""));
+            });
+        const occupiedCells = new Set();
+        const occupiedBySamePath = new Set();
+        const occupiedPositions = [];
+        transferEntries.forEach(entry => {
+            let distance = entry.distance;
+            let key = cellKeyForDistance(entry.transfer.routePoints, distance);
+            let point = getPointOnPathByDistance(entry.transfer.routePoints, distance);
+            const overlapsDifferentPath = () => {
+                if (!point) return false;
+                return occupiedPositions.some(item =>
+                    item.key !== entry.key &&
+                    Math.abs(item.x - point.x) < TS * 0.95 &&
+                    Math.abs(item.y - point.y) < TS * 0.95
+                );
+            };
+            let guard = 0;
+            while (
+                key &&
+                distance > 0 &&
+                (
+                    (occupiedCells.has(key) && !occupiedBySamePath.has(`${key}|${entry.key}`)) ||
+                    overlapsDifferentPath()
+                ) &&
+                guard < 64
+            ) {
+                distance = Math.max(0, distance - Math.max(1, TS * 0.25));
+                key = cellKeyForDistance(entry.transfer.routePoints, distance);
+                point = getPointOnPathByDistance(entry.transfer.routePoints, distance);
+                guard++;
+            }
+            if (key) occupiedCells.add(key);
+            if (key) occupiedBySamePath.add(`${key}|${entry.key}`);
+            if (point) occupiedPositions.push({ key: entry.key, x: point.x, y: point.y });
+            entry.transfer.progress = Math.max(0, Math.min(1, distance / entry.totalLength));
+        });
     }
 
     recalculateLogisticsGroupEndpoints(groupId) {
