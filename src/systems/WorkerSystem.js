@@ -2447,9 +2447,11 @@ export class WorkerSystem {
                     spacing = hasCornerBetween ? cellSize * 1.4 : cellSize;
                 }
 
-                                let maxDist = totalLength;
+                let maxDist = totalLength;
                 if (j === 0) {
-                    if (desired <= dist_pn) {
+                    if (!isBreakpoint) {
+                        maxDist = totalLength;
+                    } else if (desired <= dist_pn) {
                         maxDist = dist_pn;
                     } else {
                         maxDist = totalLength;
