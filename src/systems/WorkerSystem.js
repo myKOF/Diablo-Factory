@@ -1411,6 +1411,52 @@ export class WorkerSystem {
         );
     }
 
+    getOrderedLogisticsSegmentRoutePoints(lineId, source = null, target = null) {
+        if (!lineId || !Array.isArray(this.state?.logisticsLines)) return null;
+        const TS = 20;
+        const segments = this.state.logisticsLines.filter(line =>
+            line && (line.groupId === lineId || line.id === lineId) &&
+            Array.isArray(line.routePoints) && line.routePoints.length >= 1
+        );
+        if (segments.length < 2) return null;
+
+        const ordered = [...segments].sort((a, b) => {
+            const timeA = a?.createdAt || 0;
+            const timeB = b?.createdAt || 0;
+            if (timeA !== timeB) return timeA - timeB;
+            const orderA = Number.isFinite(a?.order) ? a.order : 0;
+            const orderB = Number.isFinite(b?.order) ? b.order : 0;
+            if (orderA !== orderB) return orderA - orderB;
+            return String(a?.id || "").localeCompare(String(b?.id || ""));
+        });
+
+        const points = [];
+        const pushPoint = (point) => {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+            const last = points[points.length - 1];
+            if (!last || Math.hypot(last.x - point.x, last.y - point.y) > 0.5) {
+                points.push({ x: point.x, y: point.y });
+            }
+        };
+
+        // Keep active transfer positions aligned with the logistics position list.
+        // Segment endpoints may include construction handles past a merged corner.
+        ordered.forEach(seg => pushPoint(seg.routePoints[0]));
+
+        const lastSeg = ordered[ordered.length - 1];
+        const lastEndpoint = lastSeg?.routePoints?.[lastSeg.routePoints.length - 1];
+        if (lastEndpoint) pushPoint(lastEndpoint);
+
+        for (let i = 1; i < points.length; i++) {
+            if (Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y) > TS * 1.75) {
+                return null;
+            }
+        }
+
+        const normalizedPoints = this.normalizeTransferRoutePoints(source, target, points);
+        return Array.isArray(normalizedPoints) && normalizedPoints.length >= 2 ? normalizedPoints : null;
+    }
+
     getItemTransferRoutePoints(source, target, conn) {
         if (!source || !target || !conn?.lineId || !Array.isArray(this.state.logisticsLines)) return null;
         const TS = 20;
@@ -1530,6 +1576,11 @@ export class WorkerSystem {
         const sourceCandidates = getCandidates(source, conn.sourcePort);
         const targetCandidates = getCandidates(target, conn.targetPort);
         if (sourceCandidates.length === 0 || targetCandidates.length === 0) return null;
+
+        const orderedSegmentRoutePoints = this.getOrderedLogisticsSegmentRoutePoints(conn.lineId, source, target);
+        if (Array.isArray(orderedSegmentRoutePoints) && orderedSegmentRoutePoints.length >= 2) {
+            return orderedSegmentRoutePoints;
+        }
 
         const findPath = (startKey, endKey) => {
             const distances = new Map([[startKey, 0]]);
@@ -1660,13 +1711,18 @@ export class WorkerSystem {
         if (!source || !conn || !itemType) return null;
         const sourceId = source.id || `${source.type1}_${source.x}_${source.y}`;
         const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
-        const transferVisualRoute = target && conn.lineId
+        const orderedLineRoute = conn.lineId
+            ? this.getOrderedLogisticsSegmentRoutePoints(conn.lineId, source, target)
+            : null;
+        const transferVisualRoute = target && conn.lineId && (!Array.isArray(orderedLineRoute) || orderedLineRoute.length < 2)
             ? this.getItemTransferRoutePoints(source, target, conn)
             : null;
         const route = (!Array.isArray(transferVisualRoute) || transferVisualRoute.length < 2) && target
             ? this.getLogisticsLinePoints(source, target)
             : null;
-        const rawRoutePoints = Array.isArray(transferVisualRoute) && transferVisualRoute.length >= 2
+        const rawRoutePoints = Array.isArray(orderedLineRoute) && orderedLineRoute.length >= 2
+            ? orderedLineRoute.map(point => ({ x: point.x, y: point.y }))
+            : Array.isArray(transferVisualRoute) && transferVisualRoute.length >= 2
             ? transferVisualRoute.map(point => ({ x: point.x, y: point.y }))
             : (Array.isArray(route?.points) && route.points.length >= 2
                 ? route.points.map(point => ({ x: point.x, y: point.y }))
