@@ -235,7 +235,7 @@ const cornerRearDist = testCornerTransfers[1].progress * 80;
 
 console.log(`轉角排隊安全間距後位置：前車=${cornerFrontDist}px, 後車=${cornerRearDist}px`);
 assert(Math.abs(cornerFrontDist - 50) < 0.01, "前車 progress 不應被非預期修改");
-assert(Math.abs(cornerRearDist - 22) < 0.01, `後車應被限制在 22px (安全間距 28px)，實際位置為：${cornerRearDist}px`);
+assert(Math.abs(cornerRearDist - 30) < 0.01, `後車應被限制在 30px (安全間距 20px)，實際位置為：${cornerRearDist}px`);
 
 // --- 測試 6：updateActiveTransfersOnLogisticsChange 最短路徑尋路（排除盲端）驗證 ---
 // 建立一個包含盲端的 groupSegs

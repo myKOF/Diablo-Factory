@@ -46,6 +46,8 @@ globalThis.window = {
     UIManager: {
         getEntityId: (ent) => ent ? ent.id : null,
         updateValues: () => {},
+        resolveCurrentPortSlot: (ent, port, x, y) => port,
+        getNearestPortSlot: (building, x, y, preferredDir) => ({ x: x ?? 0, y: y ?? 0, dir: 'right' }),
         getBuildingPortSlots: (ent) => {
             if (ent && ent.id === 'factory_1') {
                 return [{ x: 0, y: 0, dir: 'right', slotIndex: 0, defIndex: 0, width: 1 }];
@@ -185,13 +187,13 @@ for (let step = 0; step < 10; step++) {
 
 // 驗證 3：堆積位置檢查
 // 總長度 = 100px, cellSize = 20px
-// 第 1 個物品 (最前端) 應該填滿斷點最後一格（100px）
-// 第 2 個物品 應該在第 1 個物品後方排隊（80px）
+// 第 1 個物品 (最前端) 應該於斷點的前一格（80px）開始向後堆積
+// 第 2 個物品 應該在第 1 個物品後方排隊（60px）
 const t1Dist = t1.progress * 100;
 const t2Dist = t2.progress * 100;
 
-assert(Math.abs(t1Dist - 100) < 0.1, `第 1 個物品應填滿斷點最後一格（100px），實際位置：${t1Dist}px`);
-assert(Math.abs(t2Dist - 80) < 0.1, `第 2 個物品應在第 1 個物品後方排隊（80px），實際位置：${t2Dist}px`);
+assert(Math.abs(t1Dist - 80) < 0.1, `第 1 個物品應於斷點的前一格堆積（80px），實際位置：${t1Dist}px`);
+assert(Math.abs(t2Dist - 60) < 0.1, `第 2 個物品應在第 1 個物品後方排隊堆積（60px），實際位置：${t2Dist}px`);
 
 // ==========================================
 // 4. 驗證物流線拆分時 activeTransfers 的元數據同步

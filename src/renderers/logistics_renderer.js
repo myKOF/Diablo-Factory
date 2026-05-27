@@ -1411,13 +1411,25 @@ export class LogisticsRenderer {
                 points.push({ x: point.x, y: point.y });
             }
         });
-        if (points.length < 2 || !source || !target) return points;
+        if (points.length < 2) return points;
+        if (!source && !target) return points;
 
         const distance = (entity, point) => Math.hypot((entity.x || 0) - point.x, (entity.y || 0) - point.y);
         const first = points[0];
         const last = points[points.length - 1];
-        const directScore = distance(source, first) + distance(target, last);
-        const reverseScore = distance(source, last) + distance(target, first);
+
+        let directScore = 0;
+        let reverseScore = 0;
+        if (source && target) {
+            directScore = distance(source, first) + distance(target, last);
+            reverseScore = distance(source, last) + distance(target, first);
+        } else if (source) {
+            directScore = distance(source, first);
+            reverseScore = distance(source, last);
+        } else if (target) {
+            directScore = distance(target, last);
+            reverseScore = distance(target, first);
+        }
         return reverseScore < directScore ? points.reverse() : points;
     }
 

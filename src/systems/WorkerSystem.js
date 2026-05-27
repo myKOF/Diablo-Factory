@@ -4,6 +4,29 @@ import { SynthesisSystem } from "./SynthesisSystem.js";
 import { BattleSystem } from "./BattleSystem.js";
 import { conveyorSystem } from "./ConveyorSystem.js";
 
+function annotateRoutePoints(points) {
+    if (!Array.isArray(points) || points.length < 3) return;
+    const getCardinalDir = (from, to) => {
+        if (!from || !to) return null;
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+        if (Math.abs(dx) >= Math.abs(dy)) return { x: Math.sign(dx) || 1, y: 0 };
+        return { x: 0, y: Math.sign(dy) || 1 };
+    };
+    for (let i = 1; i < points.length - 1; i++) {
+        const prev = points[i - 1];
+        const curr = points[i];
+        const next = points[i + 1];
+        const inDir = getCardinalDir(prev, curr);
+        const outDir = getCardinalDir(curr, next);
+        if (inDir && outDir && (inDir.x !== outDir.x || inDir.y !== outDir.y)) {
+            curr.isCorner = true;
+        }
+    }
+}
+
+
 /**
  * 工人系統 (WorkerSystem.js)
  * 核心職責：工人尋路、座標移動、狀態機切換（Idle, Move, Mining, Constructing 等）
@@ -1366,13 +1389,25 @@ export class WorkerSystem {
                 points.push({ x: point.x, y: point.y });
             }
         });
-        if (points.length < 2 || !source || !target) return points;
+        if (points.length < 2) return points;
+        if (!source && !target) return points;
 
         const distance = (entity, point) => Math.hypot((entity.x || 0) - point.x, (entity.y || 0) - point.y);
         const first = points[0];
         const last = points[points.length - 1];
-        const directScore = distance(source, first) + distance(target, last);
-        const reverseScore = distance(source, last) + distance(target, first);
+
+        let directScore = 0;
+        let reverseScore = 0;
+        if (source && target) {
+            directScore = distance(source, first) + distance(target, last);
+            reverseScore = distance(source, last) + distance(target, first);
+        } else if (source) {
+            directScore = distance(source, first);
+            reverseScore = distance(source, last);
+        } else if (target) {
+            directScore = distance(target, last);
+            reverseScore = distance(target, first);
+        }
         return reverseScore < directScore ? points.reverse() : points;
     }
 
@@ -1454,6 +1489,9 @@ export class WorkerSystem {
         }
 
         const normalizedPoints = this.normalizeTransferRoutePoints(source, target, points);
+        if (Array.isArray(normalizedPoints)) {
+            annotateRoutePoints(normalizedPoints);
+        }
         return Array.isArray(normalizedPoints) && normalizedPoints.length >= 2 ? normalizedPoints : null;
     }
 
@@ -1730,6 +1768,9 @@ export class WorkerSystem {
                     ? conn.routePoints.map(point => ({ x: point.x, y: point.y }))
                     : null));
         const routePoints = this.normalizeTransferRoutePoints(source, target, rawRoutePoints);
+        if (routePoints) {
+            annotateRoutePoints(routePoints);
+        }
         // this.logTransferRouteDebug(source, target, conn, itemType, rawRoutePoints, routePoints);
         const transferId = `transfer_${Date.now().toString(36)}_${Math.floor(Math.random() * 10000).toString(36)}`;
         
@@ -2406,24 +2447,14 @@ export class WorkerSystem {
                     continue;
                 }
 
-                // 檢查 target 是否存在
-                const target = t.targetId ? state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId) : null;
-                const isBreakpoint = !target;
+                const isBreakpoint = !t.targetId;
 
                                                                 // 計算最後一個傳送帶網格的中心距離
-                const points = t.routePoints;
-                let dist_pn = totalLength;
-                if (Array.isArray(points) && points.length >= 2) {
-                    let tempDist = 0;
-                    const limit = points.length - 2;
-                    for (let k = 0; k < limit; k++) {
-                        tempDist += Math.hypot(points[k + 1].x - points[k].x, points[k + 1].y - points[k].y);
-                    }
-                    dist_pn = tempDist;
-                }
+                const dist_pn = Math.max(0, totalLength - cellSize);
 
                 // 找出路徑中所有 corner 點的累積距離
                 const cornerDists = [];
+                const points = t.routePoints;
                 if (Array.isArray(points)) {
                     let accumulated = 0;
                     for (let k = 0; k < points.length - 1; k++) {
@@ -2440,18 +2471,10 @@ export class WorkerSystem {
 
                 let spacing = cellSize;
                 const desired = (t.progress || 0) * totalLength;
-                if (j > 0) {
-                    const frontItem = groupTransfers[j - 1];
-                    const frontDist = (frontItem.progress || 0) * getRouteLengthPixels(frontItem.routePoints);
-                    const hasCornerBetween = cornerDists.some(cd => cd > desired && cd < frontDist);
-                    spacing = hasCornerBetween ? cellSize * 1.4 : cellSize;
-                }
 
                 let maxDist = totalLength;
                 if (j === 0) {
-                    if (!isBreakpoint) {
-                        maxDist = totalLength;
-                    } else if (desired <= dist_pn) {
+                    if (isBreakpoint) {
                         maxDist = dist_pn;
                     } else {
                         maxDist = totalLength;

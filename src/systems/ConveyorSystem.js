@@ -3,6 +3,28 @@ import { GameEngine } from './game_systems.js';
 import { UI_CONFIG } from '../ui/ui_config.js';
 import { BuildingSystem } from './BuildingSystem.js';
 
+function annotateRoutePoints(points) {
+    if (!Array.isArray(points) || points.length < 3) return;
+    const getCardinalDir = (from, to) => {
+        if (!from || !to) return null;
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+        if (Math.abs(dx) >= Math.abs(dy)) return { x: Math.sign(dx) || 1, y: 0 };
+        return { x: 0, y: Math.sign(dy) || 1 };
+    };
+    for (let i = 1; i < points.length - 1; i++) {
+        const prev = points[i - 1];
+        const curr = points[i];
+        const next = points[i + 1];
+        const inDir = getCardinalDir(prev, curr);
+        const outDir = getCardinalDir(curr, next);
+        if (inDir && outDir && (inDir.x !== outDir.x || inDir.y !== outDir.y)) {
+            curr.isCorner = true;
+        }
+    }
+}
+
 class SpatialHashGrid {
     constructor(cellSize = 64) {
         this.cellSize = cellSize;
@@ -2310,50 +2332,43 @@ export class ConveyorSystem {
                         const shortest = findShortestPathBetweenPoints(groupSegs, startPt, endPt);
                         if (shortest && shortest.length >= 2) {
                             // 尋找起點與終點建築
-                            const sourceEnt = (t.sourceId || currentSeg.sourceId)
-                                ? state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === (t.sourceId || currentSeg.sourceId))
+                            const sourceEnt = currentSeg.sourceId
+                                ? state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === currentSeg.sourceId)
                                 : null;
-                            const targetEnt = (t.targetId || currentSeg.targetId)
-                                ? state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === (t.targetId || currentSeg.targetId))
+                            const targetEnt = currentSeg.targetId
+                                ? state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === currentSeg.targetId)
                                 : null;
 
-                            if (sourceEnt && targetEnt) {
-                                const first = shortest[0];
-                                const last = shortest[shortest.length - 1];
+                            const first = shortest[0];
+                            const last = shortest[shortest.length - 1];
 
+                            let sourceAnchor = null;
+                            if (sourceEnt) {
                                 const sourcePort = currentSeg.sourcePort || t.sourcePort
                                     ? window.UIManager.resolveCurrentPortSlot(sourceEnt, currentSeg.sourcePort || t.sourcePort, first?.x, first?.y)
-                                    : window.UIManager.getNearestPortSlot(sourceEnt, first?.x ?? targetEnt.x, first?.y ?? targetEnt.y);
+                                    : window.UIManager.getNearestPortSlot(sourceEnt, first?.x ?? (targetEnt ? targetEnt.x : first?.x), first?.y ?? (targetEnt ? targetEnt.y : first?.y));
+                                sourceAnchor = sourcePort ? { x: sourcePort.x, y: sourcePort.y } : { x: sourceEnt.x, y: sourceEnt.y };
+                            }
 
+                            let targetAnchor = null;
+                            if (targetEnt) {
                                 const targetPort = currentSeg.targetPort || t.targetPort
                                     ? window.UIManager.resolveCurrentPortSlot(targetEnt, currentSeg.targetPort || t.targetPort, last?.x, last?.y)
-                                    : window.UIManager.getNearestPortSlot(targetEnt, last?.x ?? sourceEnt.x, last?.y ?? sourceEnt.y);
+                                    : window.UIManager.getNearestPortSlot(targetEnt, last?.x ?? (sourceEnt ? sourceEnt.x : last?.x), last?.y ?? (sourceEnt ? sourceEnt.y : last?.y));
+                                targetAnchor = targetPort ? { x: targetPort.x, y: targetPort.y } : { x: targetEnt.x, y: targetEnt.y };
+                            }
 
-                                const sourceAnchor = sourcePort ? { x: sourcePort.x, y: sourcePort.y } : { x: sourceEnt.x, y: sourceEnt.y };
-                                const targetAnchor = targetPort ? { x: targetPort.x, y: targetPort.y } : { x: targetEnt.x, y: targetEnt.y };
-
-                                // 方向校正與對齊 (子任務 C-2)
+                            if (sourceAnchor) {
                                 const distFirstToSource = Math.hypot(shortest[0].x - sourceAnchor.x, shortest[0].y - sourceAnchor.y);
                                 const distLastToSource = Math.hypot(shortest[shortest.length - 1].x - sourceAnchor.x, shortest[shortest.length - 1].y - sourceAnchor.y);
                                 if (distLastToSource < distFirstToSource) {
                                     shortest.reverse();
                                 }
-
-                                const transferPoints = [];
-                                const pushPoint = (point) => {
-                                    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-                                    const lastPoint = transferPoints[transferPoints.length - 1];
-                                    if (!lastPoint || Math.hypot(lastPoint.x - point.x, lastPoint.y - point.y) > 1) {
-                                        transferPoints.push({ x: point.x, y: point.y });
-                                    }
-                                };
-
-                                pushPoint(sourceAnchor);
-                                shortest.forEach(pushPoint);
-                                pushPoint(targetAnchor);
-
-                                if (transferPoints.length >= 2) {
-                                    pathPoints = transferPoints;
+                            } else if (targetAnchor) {
+                                const distFirstToTarget = Math.hypot(shortest[0].x - targetAnchor.x, shortest[0].y - targetAnchor.y);
+                                const distLastToTarget = Math.hypot(shortest[shortest.length - 1].x - targetAnchor.x, shortest[shortest.length - 1].y - targetAnchor.y);
+                                if (distFirstToTarget < distLastToTarget) {
+                                    shortest.reverse();
                                 }
                             } else {
                                 // 即使無建築，也應與原路徑方向比對
@@ -2364,7 +2379,24 @@ export class ConveyorSystem {
                                         shortest.reverse();
                                     }
                                 }
-                                pathPoints = shortest;
+                            }
+
+                            const transferPoints = [];
+                            const pushPoint = (point) => {
+                                if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+                                const lastPoint = transferPoints[transferPoints.length - 1];
+                                if (!lastPoint || Math.hypot(lastPoint.x - point.x, lastPoint.y - point.y) > 1) {
+                                    transferPoints.push({ x: point.x, y: point.y });
+                                }
+                            };
+
+                            if (sourceAnchor) pushPoint(sourceAnchor);
+                            shortest.forEach(pushPoint);
+                            if (targetAnchor) pushPoint(targetAnchor);
+
+                            if (transferPoints.length >= 2) {
+                                pathPoints = transferPoints;
+                                annotateRoutePoints(pathPoints);
                             }
                         }
                     }
@@ -2472,15 +2504,7 @@ export class ConveyorSystem {
 
             // 計算最後一個傳送帶網格的中心距離
             const points = transfers[0]?.routePoints;
-            let dist_pn = totalLength;
-            if (Array.isArray(points) && points.length >= 2) {
-                let tempDist = 0;
-                const limit = points.length - 2;
-                for (let k = 0; k < limit; k++) {
-                    tempDist += Math.hypot(points[k + 1].x - points[k].x, points[k + 1].y - points[k].y);
-                }
-                dist_pn = tempDist;
-            }
+            const dist_pn = Math.max(0, totalLength - TS);
 
             // 找出路徑中所有 corner 點的累積距離
             const cornerDists = [];
@@ -2500,18 +2524,17 @@ export class ConveyorSystem {
 
             let prevQueuedDistance = totalLength;
             let prevDesired = null;
+            let prevBlocked = false;
             transfers.forEach((transfer, index) => {
                 const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
                 
                 let spacing = TS;
-                if (index > 0) {
-                    const hasCornerBetween = cornerDists.some(cd => cd > desired && cd < prevQueuedDistance);
-                    spacing = hasCornerBetween ? TS * 1.4 : TS;
-                }
+
+                const isBreakpoint = !transfer.targetId;
 
                 let maxAllowed;
                 if (index === 0) {
-                    if (desired <= dist_pn) {
+                    if (isBreakpoint) {
                         maxAllowed = dist_pn;
                     } else {
                         maxAllowed = totalLength;
@@ -2530,11 +2553,13 @@ export class ConveyorSystem {
                 }
 
                 let queuedDistance;
-                if (index > 0 && Math.abs(desired - prevDesired) < TS * 0.5) {
+                if (index > 0 && !prevBlocked && Math.abs(desired - prevDesired) < TS * 0.5) {
                     queuedDistance = Math.max(0, Math.min(desired, prevQueuedDistance));
                 } else {
                     queuedDistance = Math.max(0, Math.min(desired, maxAllowed));
                 }
+                
+                const isBlocked = queuedDistance < desired || (index > 0 && prevBlocked);
                 
                 transfer.progress = Math.max(0, Math.min(1, queuedDistance / totalLength));
                 if (transfer.targetId) {
@@ -2544,6 +2569,7 @@ export class ConveyorSystem {
                 }
                 prevDesired = desired;
                 prevQueuedDistance = queuedDistance;
+                prevBlocked = isBlocked;
             });
         });
 
