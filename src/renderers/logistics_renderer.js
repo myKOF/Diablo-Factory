@@ -35,7 +35,7 @@ export class LogisticsRenderer {
                 return;
             }
             const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
-            if (line && !line.targetId) {
+            if (line && !line.targetId && !line.suppressOpenEndpointCell) {
                 const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
                 if (endpointRect) {
                     rects.push(endpointRect);
@@ -90,7 +90,7 @@ export class LogisticsRenderer {
 
             graphics.fillStyle(parseColor(normalColor), normalAlpha);
             LogisticsRenderer.drawLogisticsCells(graphics, points, widthTiles, 1);
-            if (line && !line.targetId) {
+            if (line && !line.targetId && !line.suppressOpenEndpointCell) {
                 const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
                 if (endpointRect) {
                     graphics.fillRect(endpointRect.x, endpointRect.y, endpointRect.w, endpointRect.h);
@@ -99,37 +99,44 @@ export class LogisticsRenderer {
 
             if (isSelected) {
                 const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
-                if (line && !line.targetId) {
+                if (line && !line.targetId && !line.suppressOpenEndpointCell) {
                     const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
                     if (endpointRect) {
                         rects.push(endpointRect);
                     }
                 }
                 if (rects.length > 0) {
-                    let selectedRect = rects[0];
-                    const clickX = GameEngine.state.selectedLogisticsClickX;
-                    const clickY = GameEngine.state.selectedLogisticsClickY;
-                    if (clickX !== null && clickX !== undefined && clickY !== null && clickY !== undefined) {
-                        let minD = Infinity;
-                        for (const r of rects) {
-                            const cx = r.x + r.w / 2;
-                            const cy = r.y + r.h / 2;
-                            const d = Math.hypot(cx - clickX, cy - clickY);
-                            if (d < minD) {
-                                minD = d;
-                                selectedRect = r;
-                            }
-                        }
-                    }
                     const selColor = logCfg.selectedLineColor || "#ffff00";
                     const selAlpha = logCfg.selectedLineAlpha || 1.0;
                     graphics.fillStyle(parseColor(selColor), selAlpha);
-                    graphics.fillRect(selectedRect.x, selectedRect.y, selectedRect.w, selectedRect.h);
+                    const selectedGroupId = GameEngine.state.selectedLogisticsGroupId;
+                    const groupKey = line ? (line.groupId || line.id) : null;
+                    const isGroupSelection = !!selectedGroupId && !!groupKey && selectedGroupId === groupKey;
+                    if (isGroupSelection) {
+                        rects.forEach(rect => graphics.fillRect(rect.x, rect.y, rect.w, rect.h));
+                    } else {
+                        let selectedRect = rects[0];
+                        const clickX = GameEngine.state.selectedLogisticsClickX;
+                        const clickY = GameEngine.state.selectedLogisticsClickY;
+                        if (clickX !== null && clickX !== undefined && clickY !== null && clickY !== undefined) {
+                            let minD = Infinity;
+                            for (const r of rects) {
+                                const cx = r.x + r.w / 2;
+                                const cy = r.y + r.h / 2;
+                                const d = Math.hypot(cx - clickX, cy - clickY);
+                                if (d < minD) {
+                                    minD = d;
+                                    selectedRect = r;
+                                }
+                            }
+                        }
+                        graphics.fillRect(selectedRect.x, selectedRect.y, selectedRect.w, selectedRect.h);
+                    }
                 }
             }
 
             const arrowRects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
-            if (line && !line.targetId) {
+            if (line && !line.targetId && !line.suppressOpenEndpointCell) {
                 const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
                 if (endpointRect) arrowRects.push(endpointRect);
             }
@@ -186,7 +193,7 @@ export class LogisticsRenderer {
                     );
                 });
             }
-            if (isSelected && line) {
+            if (isSelected && line && !GameEngine.state.selectedLogisticsGroupId) {
                 drawSelectedLogisticsSegmentOutlineOnRoute(points, widthTiles, line);
             }
         };
@@ -1086,7 +1093,7 @@ export class LogisticsRenderer {
 
                     if (sortedSegs.length > 0) {
                         const lastSeg = sortedSegs[sortedSegs.length - 1];
-                        if (lastSeg && !lastSeg.targetId && lastSeg.__numberNextPoint) {
+                        if (lastSeg && !lastSeg.targetId && !lastSeg.suppressOpenEndpointCell && lastSeg.__numberNextPoint) {
                             const cx = lastSeg.__numberNextPoint.x;
                             const cy = lastSeg.__numberNextPoint.y;
                             const endTextKey = `${lastSeg.id || lastSeg.x + ',' + lastSeg.y}_endpoint`;
@@ -1705,6 +1712,11 @@ export class LogisticsRenderer {
     static getSelectedGroupDebugRoutePoints(state, groupKey, groupSegs) {
         const routes = [];
         const seen = new Set();
+        const suppressedEndpointKeys = new Set(
+            (Array.isArray(groupSegs) ? groupSegs : [])
+                .map(seg => seg?.suppressedOpenEndpointCellKey)
+                .filter(Boolean)
+        );
         const normalize = (points) => {
             if (!Array.isArray(points) || points.length < 2) return null;
             const clean = [];
@@ -1717,6 +1729,12 @@ export class LogisticsRenderer {
                     clean.push({ x, y });
                 }
             });
+            while (clean.length >= 2) {
+                const last = clean[clean.length - 1];
+                const lastKey = `${Math.round(last.x)},${Math.round(last.y)}`;
+                if (!suppressedEndpointKeys.has(lastKey)) break;
+                clean.pop();
+            }
             return clean.length >= 2 ? clean : null;
         };
         const addRoute = (points) => {

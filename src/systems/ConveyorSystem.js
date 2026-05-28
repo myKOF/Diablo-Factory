@@ -117,7 +117,7 @@ class SpatialHashGrid {
                 });
             }
         }
-        if (!line.targetId) {
+        if (!line.targetId && !line.suppressOpenEndpointCell) {
             const end = points[points.length - 1];
             const prev = points[points.length - 2];
             if (end && prev) {
@@ -1462,6 +1462,16 @@ export class ConveyorSystem {
         return `${gx},${gy}`;
     }
 
+    markDeletedGapEndpoint(segment) {
+        if (!segment) return;
+        const points = Array.isArray(segment.routePoints) ? segment.routePoints : [];
+        const end = points[points.length - 1];
+        segment.suppressOpenEndpointCell = true;
+        if (end && Number.isFinite(end.x) && Number.isFinite(end.y)) {
+            segment.suppressedOpenEndpointCellKey = `${Math.round(end.x)},${Math.round(end.y)}`;
+        }
+    }
+
     getLogisticsSegmentOccupiedKeys(line) {
         const centerKey = this.getLogisticsSegmentOccupyKey(line);
         if (!centerKey) return [];
@@ -2649,10 +2659,30 @@ export class ConveyorSystem {
                 return String(a.id || "").localeCompare(String(b.id || ""));
             });
 
-            // 計算最後一個傳送帶網格的中心距離
+            // 動態判定末端堆積限制
+            // 判斷邏輯：若末端點（pathPoints 最後一點）鄰近另一個群組的線段起始點，
+            // 表示此末端是「刪除後形成的斷點邊緣」，物品不應越界，停在倒數第二格。
+            // 若無相鄰群組（自然終點），物品正常停在最後一格。
             const points = transfers[0]?.routePoints;
-            const isBreakpoint = !transfers[0]?.targetId;
-            const dist_pn = isBreakpoint ? totalLength : Math.max(0, totalLength - TS);
+            const lineId = transfers[0]?.lineId;
+            const isBreakpointGroup = transfers.some(t => !t.targetId);
+            let dist_pn = totalLength;
+            if (isBreakpointGroup && Array.isArray(points) && points.length >= 2) {
+                const lastPt = points[points.length - 1];
+                const isGapEndpoint = (state.logisticsLines || []).some(seg => {
+                    if (!seg) return false;
+                    const segGroupId = seg.groupId || seg.id;
+                    if (segGroupId === lineId) return false; // 同群組跳過
+                    const segPts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
+                    if (segPts.length < 1) return false;
+                    const segStart = segPts[0];
+                    // 若其他群組的起始點在 1.5 格以內，確認是斷點間隙
+                    return segStart && Math.hypot(segStart.x - lastPt.x, segStart.y - lastPt.y) <= TS * 1.5;
+                });
+                if (isGapEndpoint) {
+                    dist_pn = totalLength - TS; // 停在斷點前的最後一格
+                }
+            }
 
             // 找出路徑中所有 corner 點的累積距離
             const cornerDists = [];
@@ -2979,6 +3009,9 @@ export class ConveyorSystem {
                     backSegments.forEach(seg => {
                         if (seg) seg.groupId = newGroupId;
                     });
+                    const frontTail = frontSegments
+                        .sort((a, b) => getSequenceOrder(b) - getSequenceOrder(a))[0] || null;
+                    this.markDeletedGapEndpoint(frontTail);
 
                     // 自動重新計算兩段物流線的端點及與建築物的連接關係
                     this.recalculateLogisticsGroupEndpoints(groupId);
@@ -2994,7 +3027,7 @@ export class ConveyorSystem {
                 if (line.sourceId) {
                     const sourceEnt = state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === line.sourceId);
                     if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
-                        sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId && conn.id !== line.targetId);
+                        sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId);
                     }
                 }
             }
@@ -3019,10 +3052,10 @@ export class ConveyorSystem {
         if (!segments.length) return false;
         const first = segments[0];
         state.logisticsLines = this.ensureLogisticsLineStore().filter(item => item.groupId !== groupId && item.id !== groupId);
-        if (first.sourceId && first.targetId) {
+        if (first.sourceId) {
             const sourceEnt = state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === first.sourceId);
             if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
-                sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId && conn.id !== first.targetId);
+                sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId);
             }
         }
         if (segments.some(line => this.isSelectedLogisticsLine(line))) state.selectedLogisticsLineId = null;
@@ -3070,11 +3103,12 @@ export class ConveyorSystem {
                         y: py - (isHorizontal ? (width * TS) / 2 : TS / 2),
                         w: (isHorizontal ? TS : width * TS),
                         h: (isHorizontal ? width * TS : TS),
-                        segment: line
+                        segment: line,
+                        isEndpoint: false
                     });
                 }
             }
-            if (!line.targetId) {
+            if (!line.targetId && !line.suppressOpenEndpointCell) {
                 const end = points[points.length - 1];
                 const prev = points[points.length - 2];
                 if (end && prev) {
@@ -3089,7 +3123,8 @@ export class ConveyorSystem {
                             y: end.y - (isHorizontal ? (width * TS) / 2 : TS / 2),
                             w: (isHorizontal ? TS : width * TS),
                             h: (isHorizontal ? width * TS : TS),
-                            segment: line
+                            segment: line,
+                            isEndpoint: true
                         });
                     }
                 }
@@ -3108,12 +3143,17 @@ export class ConveyorSystem {
                     const cy = rect.y + rect.h / 2;
                     hits.push({
                         line: rect.segment || line,
-                        distance: Math.hypot(worldX - cx, worldY - cy)
+                        distance: Math.hypot(worldX - cx, worldY - cy),
+                        isEndpoint: !!rect.isEndpoint
                     });
                 }
             });
         });
-        hits.sort((a, b) => a.distance - b.distance || (b.line.createdAt || 0) - (a.line.createdAt || 0));
+        hits.sort((a, b) =>
+            Number(a.isEndpoint) - Number(b.isEndpoint) ||
+            a.distance - b.distance ||
+            (b.line.createdAt || 0) - (a.line.createdAt || 0)
+        );
         return hits.map(hit => hit.line);
     }
 }

@@ -2459,8 +2459,29 @@ export class WorkerSystem {
 
                 const isBreakpoint = !t.targetId;
 
-                // 計算最後一個傳送帶網格的中心距離
-                const dist_pn = isBreakpoint ? totalLength : Math.max(0, totalLength - cellSize);
+                // 動態判定末端堆積限制：
+                // 若末端點鄰近另一群組的線段起始點（表示是刪除後形成的斷點間隙），
+                // 物品停在倒數第二格（totalLength - cellSize），否則停在自然終點（totalLength）。
+                let dist_pn = totalLength;
+                if (isBreakpoint) {
+                    const bpts = t.routePoints;
+                    if (Array.isArray(bpts) && bpts.length >= 2) {
+                        const lastPt = bpts[bpts.length - 1];
+                        const tLineId = t.lineId;
+                        const isGapEndpoint = (state.logisticsLines || []).some(seg => {
+                            if (!seg) return false;
+                            const segGroupId = seg.groupId || seg.id;
+                            if (segGroupId === tLineId) return false;
+                            const segPts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
+                            if (segPts.length < 1) return false;
+                            const segStart = segPts[0];
+                            return segStart && Math.hypot(segStart.x - lastPt.x, segStart.y - lastPt.y) <= cellSize * 1.5;
+                        });
+                        if (isGapEndpoint) {
+                            dist_pn = totalLength - cellSize;
+                        }
+                    }
+                }
 
                 // 找出路徑中所有 corner 點的累積距離
                 const cornerDists = [];
