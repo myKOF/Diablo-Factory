@@ -2459,8 +2459,8 @@ export class WorkerSystem {
 
                 const isBreakpoint = !t.targetId;
 
-                                                                // 計算最後一個傳送帶網格的中心距離
-                const dist_pn = Math.max(0, totalLength - cellSize);
+                // 計算最後一個傳送帶網格的中心距離
+                const dist_pn = isBreakpoint ? totalLength : Math.max(0, totalLength - cellSize);
 
                 // 找出路徑中所有 corner 點的累積距離
                 const cornerDists = [];

@@ -117,6 +117,25 @@ class SpatialHashGrid {
                 });
             }
         }
+        if (!line.targetId) {
+            const end = points[points.length - 1];
+            const prev = points[points.length - 2];
+            if (end && prev) {
+                const dx = end.x - prev.x;
+                const dy = end.y - prev.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist >= 0.001) {
+                    const dir = { x: dx / dist, y: dy / dist };
+                    const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
+                    rects.push({
+                        x: end.x - (isHorizontal ? TS / 2 : (width * TS) / 2),
+                        y: end.y - (isHorizontal ? (width * TS) / 2 : TS / 2),
+                        w: (isHorizontal ? TS : width * TS),
+                        h: (isHorizontal ? width * TS : TS)
+                    });
+                }
+            }
+        }
         return rects;
     }
 }
@@ -494,14 +513,7 @@ export class ConveyorSystem {
         let path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
         path = this.dedupeExtensionStart(path);
 
-        // [核心修復] 處理 N-1 渲染落差：如果是拖曳到空地，順著最後方向延伸一個虛擬節點，迫使渲染器畫滿游標當前格
-        if (!dragTarget.port && path && path.length >= 2) {
-            const last = path[path.length - 1];
-            const prev = path[path.length - 2];
-            const dx = Math.sign(last.x - prev.x);
-            const dy = Math.sign(last.y - prev.y);
-            path.push({ x: last.x + dx, y: last.y + dy, isVirtualEnd: true });
-        }
+
 
         if (path) {
             this.ghosts = this.router.processPath(path, dragTarget.building, GameEngine.state.logisticsLines || []);
@@ -2639,7 +2651,8 @@ export class ConveyorSystem {
 
             // 計算最後一個傳送帶網格的中心距離
             const points = transfers[0]?.routePoints;
-            const dist_pn = Math.max(0, totalLength - TS);
+            const isBreakpoint = !transfers[0]?.targetId;
+            const dist_pn = isBreakpoint ? totalLength : Math.max(0, totalLength - TS);
 
             // 找出路徑中所有 corner 點的累積距離
             const cornerDists = [];
@@ -3059,6 +3072,26 @@ export class ConveyorSystem {
                         h: (isHorizontal ? width * TS : TS),
                         segment: line
                     });
+                }
+            }
+            if (!line.targetId) {
+                const end = points[points.length - 1];
+                const prev = points[points.length - 2];
+                if (end && prev) {
+                    const dx = end.x - prev.x;
+                    const dy = end.y - prev.y;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist >= 0.001) {
+                        const dir = { x: dx / dist, y: dy / dist };
+                        const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
+                        rects.push({
+                            x: end.x - (isHorizontal ? TS / 2 : (width * TS) / 2),
+                            y: end.y - (isHorizontal ? (width * TS) / 2 : TS / 2),
+                            w: (isHorizontal ? TS : width * TS),
+                            h: (isHorizontal ? width * TS : TS),
+                            segment: line
+                        });
+                    }
                 }
             }
             return rects;

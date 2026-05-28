@@ -344,15 +344,38 @@ export class LogisticsUI {
 
     static getLogisticsLineDragPort(line, anchorX = null, anchorY = null) {
         const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
-        const first = points[0];
-        const second = points[1];
+        if (points.length < 2) {
+            return {
+                dir: null,
+                width: Math.max(1, Number(line?.routeWidth) || 1),
+                x: Number.isFinite(anchorX) ? anchorX : line?.x,
+                y: Number.isFinite(anchorY) ? anchorY : line?.y,
+                sourceType: "logistics_line"
+            };
+        }
+
+        const start = points[0];
+        const end = points[points.length - 1];
+        let targetSegmentStart = points[0];
+        let targetSegmentEnd = points[1];
+
+        if (Number.isFinite(anchorX) && Number.isFinite(anchorY)) {
+            const distToStart = Math.hypot(anchorX - start.x, anchorY - start.y);
+            const distToEnd = Math.hypot(anchorX - end.x, anchorY - end.y);
+            if (distToEnd < distToStart) {
+                targetSegmentStart = points[points.length - 2];
+                targetSegmentEnd = points[points.length - 1];
+            }
+        }
+
         let dir = null;
-        if (first && second) {
-            const dx = second.x - first.x;
-            const dy = second.y - first.y;
+        if (targetSegmentStart && targetSegmentEnd) {
+            const dx = targetSegmentEnd.x - targetSegmentStart.x;
+            const dy = targetSegmentEnd.y - targetSegmentStart.y;
             if (Math.abs(dx) >= Math.abs(dy)) dir = dx >= 0 ? "right" : "left";
             else dir = dy >= 0 ? "down" : "up";
         }
+
         return {
             dir,
             width: Math.max(1, Number(line?.routeWidth) || 1),

@@ -71,7 +71,17 @@ export class LogisticsRenderer {
                     : (!isConnected ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha) : logCfg.lineAlpha));
             graphics.fillStyle(parseColor(lColor), lAlpha);
             LogisticsRenderer.drawLogisticsCells(graphics, points, widthTiles, 1);
+            if (line && !line.targetId) {
+                const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
+                if (endpointRect) {
+                    graphics.fillRect(endpointRect.x, endpointRect.y, endpointRect.w, endpointRect.h);
+                }
+            }
             const arrowRects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
+            if (line && !line.targetId) {
+                const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
+                if (endpointRect) arrowRects.push(endpointRect);
+            }
 
             if (arrowRects.length > 0) {
                 const arrowColor = usePortToPortStyle
@@ -1023,6 +1033,32 @@ export class LogisticsRenderer {
                         scene.logisticsVisibleTextIds.add(textKey);
                     });
 
+                    if (sortedSegs.length > 0) {
+                        const lastSeg = sortedSegs[sortedSegs.length - 1];
+                        if (lastSeg && !lastSeg.targetId && lastSeg.__numberNextPoint) {
+                            const cx = lastSeg.__numberNextPoint.x;
+                            const cy = lastSeg.__numberNextPoint.y;
+                            const endTextKey = `${lastSeg.id || lastSeg.x + ',' + lastSeg.y}_endpoint`;
+                            const endIndexVal = sortedSegs.length;
+
+                            let txt = scene.logisticsNumberTexts.get(endTextKey);
+                            if (!txt) {
+                                txt = scene.add.text(cx, cy, String(endIndexVal), {
+                                    fontSize: '16px',
+                                    color: '#ffff00',
+                                    stroke: '#000000',
+                                    strokeThickness: 3
+                                }).setOrigin(0.5).setDepth(600000);
+                                scene.logisticsNumberTexts.set(endTextKey, txt);
+                            } else {
+                                txt.setText(String(endIndexVal));
+                                txt.setPosition(cx, cy);
+                                txt.setVisible(true);
+                            }
+                            scene.logisticsVisibleTextIds.add(endTextKey);
+                        }
+                    }
+
                     const debugRoutes = LogisticsRenderer.getSelectedGroupDebugRoutePoints(state, groupKey, sortedSegs);
                     debugRoutes.forEach(points => {
                         LogisticsRenderer.drawRoutePointsDebug(graphics, points);
@@ -1200,7 +1236,19 @@ export class LogisticsRenderer {
                 if (routePoints.length >= 2) ghostPoints = routePoints;
             }
             LogisticsRenderer.drawLogisticsCells(graphics, ghostPoints, routeWidth, 1);
+            const lastGhost = rawGhostPoints[rawGhostPoints.length - 1];
+            const isTargetPort = lastGhost?.isPortConnector;
+            if (!isTargetPort) {
+                const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(ghostPoints, routeWidth);
+                if (endpointRect) {
+                    graphics.fillRect(endpointRect.x, endpointRect.y, endpointRect.w, endpointRect.h);
+                }
+            }
             const ghostArrowRects = LogisticsRenderer.getLogisticsCellRects(ghostPoints, routeWidth, true);
+            if (!isTargetPort) {
+                const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(ghostPoints, routeWidth);
+                if (endpointRect) ghostArrowRects.push(endpointRect);
+            }
             if (ghostArrowRects.length > 0) {
                 graphics.fillStyle(ghostColor, 0.85);
                 ghostArrowRects.forEach((rect) => {
