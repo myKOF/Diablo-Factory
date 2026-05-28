@@ -1795,6 +1795,16 @@ export class WorkerSystem {
         };
     }
 
+    assignTransferSerial(state, transfer) {
+        if (!state || !transfer || transfer.serialNumber) return transfer;
+        const nextSerial = Number.isFinite(Number(state.nextTransferSerial))
+            ? Math.max(1, Math.floor(Number(state.nextTransferSerial)))
+            : 1;
+        transfer.serialNumber = nextSerial;
+        state.nextTransferSerial = nextSerial + 1;
+        return transfer;
+    }
+
     getBuildingLineExitPoint(building, from, to) {
         if (!building || !from || !to) return from;
         const fp = this.engine.getFootprint(building.type1 || building.type);
@@ -2615,6 +2625,7 @@ export class WorkerSystem {
                                 if (!canStartTransfer(transfer)) continue;
                                 if (!removeFromWarehouseStorage(ent, conn.filter, 1)) continue;
                                 if (window.UIManager) window.UIManager.updateValues(true);
+                                this.assignTransferSerial(state, transfer);
                                 state.activeTransfers.push(transfer);
                                 itemSpawned = true;
                                 const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
@@ -2629,6 +2640,7 @@ export class WorkerSystem {
                                 if (!canStartTransfer(transfer)) continue;
                                 ent.outputBuffer[resType] -= 1;
                                 if (window.UIManager) window.UIManager.updateValues(true);
+                                this.assignTransferSerial(state, transfer);
                                 state.activeTransfers.push(transfer);
                                 itemSpawned = true;
                                 const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);

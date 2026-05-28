@@ -1325,7 +1325,11 @@ export class LogisticsRenderer {
 
     static renderTransfers(graphics, state, scene) {
         graphics.clear();
-        if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
+        LogisticsRenderer.beginTransferSerialLabels(scene);
+        if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) {
+            LogisticsRenderer.endTransferSerialLabels(scene);
+            return;
+        }
 
         state.activeTransfers.forEach(t => {
             const source = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.sourceId);
@@ -1380,9 +1384,54 @@ export class LogisticsRenderer {
                 itemSize - strokeWidth,
                 itemSize - strokeWidth
             );
-            graphics.fillStyle(color, 0.8);
-            graphics.fillRect(px - 4, py - 4, 8, 8);
+            LogisticsRenderer.renderTransferSerialLabel(scene, t, px, py, itemSize);
         });
+        LogisticsRenderer.endTransferSerialLabels(scene);
+    }
+
+    static beginTransferSerialLabels(scene) {
+        if (!scene || !scene.add || !scene.add.text) return;
+        if (!scene.logisticsTransferNumberTexts) scene.logisticsTransferNumberTexts = new Map();
+        scene.logisticsVisibleTransferTextIds = new Set();
+    }
+
+    static endTransferSerialLabels(scene) {
+        if (!scene || !scene.logisticsTransferNumberTexts) return;
+        scene.logisticsTransferNumberTexts.forEach((txt, key) => {
+            if (!scene.logisticsVisibleTransferTextIds || !scene.logisticsVisibleTransferTextIds.has(key)) {
+                txt.setVisible(false);
+            }
+        });
+    }
+
+    static renderTransferSerialLabel(scene, transfer, x, y, itemSize) {
+        if (!scene || !scene.add || !scene.add.text || !transfer || !transfer.serialNumber) return;
+        if (!scene.logisticsTransferNumberTexts) scene.logisticsTransferNumberTexts = new Map();
+        if (!scene.logisticsVisibleTransferTextIds) scene.logisticsVisibleTransferTextIds = new Set();
+
+        const key = transfer.id || `transfer_${transfer.serialNumber}`;
+        const label = String(transfer.serialNumber);
+        const fontSize = Math.max(8, Math.min(12, Math.floor(itemSize * (label.length > 2 ? 0.42 : 0.52))));
+        const depth = (scene.logisticsTransferGraphics?.depth || 900000) + 1;
+        let txt = scene.logisticsTransferNumberTexts.get(key);
+        if (!txt) {
+            txt = scene.add.text(x, y, label, {
+                fontSize: `${fontSize}px`,
+                fontFamily: 'Arial, sans-serif',
+                color: '#ffffff',
+                stroke: '#000000',
+                strokeThickness: 3,
+                align: 'center'
+            }).setOrigin(0.5).setDepth(depth);
+            scene.logisticsTransferNumberTexts.set(key, txt);
+        } else {
+            if (txt.text !== label) txt.setText(label);
+            txt.setPosition(x, y);
+            txt.setDepth(depth);
+            txt.setVisible(true);
+            if (txt.setFontSize) txt.setFontSize(fontSize);
+        }
+        scene.logisticsVisibleTransferTextIds.add(key);
     }
 
     static resolveTransferRoutePoints(source, target, directConn, transfer) {

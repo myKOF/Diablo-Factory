@@ -817,6 +817,11 @@ export class MainScene extends Phaser.Scene {
                         if (txt && txt.setVisible) txt.setVisible(false);
                     });
                 }
+                if (this.logisticsTransferNumberTexts) {
+                    this.logisticsTransferNumberTexts.forEach(txt => {
+                        if (txt && txt.setVisible) txt.setVisible(false);
+                    });
+                }
             }
             this._lastLogisticsRenderSignature = "";
             return;
