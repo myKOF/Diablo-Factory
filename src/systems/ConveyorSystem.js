@@ -575,7 +575,7 @@ export class ConveyorSystem {
             this.cancelDrag();
             return;
         }
-        const buildGhosts = this.ghosts.filter(g => !g?.isVirtualEnd);
+        const buildGhosts = this.ghosts;
         if (buildGhosts.length < 2) {
             this.cancelDrag();
             return;
@@ -730,16 +730,21 @@ export class ConveyorSystem {
                 lineType: transportCfg?.model || transportCfg?.type1 || 'transport_line',
                 efficiency: Number(transportCfg?.efficiency) || 0
             });
+            let finalGroupId = createdLine?.groupId || null;
             if (
                 createdLine?.groupId &&
                 touchedTargetGroupId &&
                 this.areLogisticsGroupsTouching?.(createdLine.groupId, touchedTargetGroupId) &&
                 this.mergeLogisticsLineGroups
             ) {
-                this.mergeLogisticsLineGroups(createdLine.groupId, touchedTargetGroupId);
+                finalGroupId = this.mergeLogisticsLineGroups(createdLine.groupId, touchedTargetGroupId) || finalGroupId;
+                if (finalGroupId) {
+                    this.recalculateLogisticsGroupEndpoints(finalGroupId);
+                    this.updateActiveTransfersOnLogisticsChange(GameEngine.state);
+                }
             }
-            if (drag.sourceLine?.filter && createdLine?.groupId) {
-                this.setLogisticsGroupFilter(createdLine.groupId, drag.sourceLine.filter);
+            if (drag.sourceLine?.filter && finalGroupId) {
+                this.setLogisticsGroupFilter(finalGroupId, drag.sourceLine.filter);
             }
             const afterCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : beforeCount;
             const builtSegments = Math.max(0, afterCount - beforeCount);
@@ -2875,6 +2880,7 @@ export class ConveyorSystem {
                 };
                 sourceEnt.outputTargets.push(conn);
             }
+            sourceEnt.outputTargets = sourceEnt.outputTargets.filter(item => item === conn || item?.lineId !== groupId);
             conn.id = targetId || null;
             conn.sourcePort = sourcePort;
             conn.targetPort = targetPort;

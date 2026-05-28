@@ -1629,6 +1629,11 @@ export class LogisticsRenderer {
             routes.push(clean);
         };
 
+        if (conveyorSystem && typeof conveyorSystem.buildLogisticsGraphRoutePoints === 'function') {
+            addRoute(conveyorSystem.buildLogisticsGraphRoutePoints(groupSegs));
+        }
+        if (routes.length > 0) return routes;
+
         (state.mapEntities || []).forEach(ent => {
             (ent?.outputTargets || []).forEach(conn => {
                 if (conn?.lineId !== groupKey) return;
