@@ -1633,6 +1633,8 @@ export class UIManager {
             return;
         }
         if (clickedLine && !isDoubleClick && conveyorSystem.isSelectedLogisticsLine(clickedLine) && GameEngine.state.buildingMode === 'NONE') {
+            GameEngine.state.selectedLogisticsClickX = worldX;
+            GameEngine.state.selectedLogisticsClickY = worldY;
             LogisticsUI.beginLogisticsDragFromLine(clickedLine, worldX, worldY);
             return;
         }
@@ -1844,6 +1846,8 @@ export class UIManager {
 
         // 如果處於建造物流線模式，且點擊到了物流線，優先進行物流線的選取/雙擊全選，不被 Stamp 建造模式阻斷
         if (LogisticsUI.isTransportLinePlacementActive() && clickedLine) {
+            GameEngine.state.selectedLogisticsClickX = worldX;
+            GameEngine.state.selectedLogisticsClickY = worldY;
             const now = Date.now();
             const groupId = clickedLine.groupId || clickedLine.id;
             const isDoubleClick = (e.detail || 0) >= 2
@@ -1948,6 +1952,8 @@ export class UIManager {
 
         // [物流線實體] 點擊優先級低於建築，高於地板。
         if (clickedLine) {
+            GameEngine.state.selectedLogisticsClickX = worldX;
+            GameEngine.state.selectedLogisticsClickY = worldY;
             const now = Date.now();
             const groupId = clickedLine.groupId || clickedLine.id;
             const isDoubleClick = (e.detail || 0) >= 2
@@ -1978,6 +1984,8 @@ export class UIManager {
         GameEngine.state.selectedBuildingId = null;
         GameEngine.state.selectedLogisticsLineId = null;
         GameEngine.state.selectedLogisticsGroupId = null;
+        GameEngine.state.selectedLogisticsClickX = null;
+        GameEngine.state.selectedLogisticsClickY = null;
         this.activeLogisticsConnection = null;
         this.activeLogisticsLine = null;
     }

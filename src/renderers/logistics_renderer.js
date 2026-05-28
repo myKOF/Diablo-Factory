@@ -35,13 +35,35 @@ export class LogisticsRenderer {
                 return;
             }
             const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
-            // [核心修正] 由於傳入的是單一 segment 的路徑點，故不應再用 order 進行二次索引。
-            // 這裡永遠取第一格 rect 即可完美對齊實體。
-            const rect = rects[0];
-            if (!rect) {
+            if (line && !line.targetId) {
+                const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
+                if (endpointRect) {
+                    rects.push(endpointRect);
+                }
+            }
+            if (rects.length === 0) {
                 drawSelectedLogisticsSegmentOutline(line);
                 return;
             }
+
+            let rect = rects[0];
+            const clickX = GameEngine.state.selectedLogisticsClickX;
+            const clickY = GameEngine.state.selectedLogisticsClickY;
+            if (clickX !== null && clickX !== undefined && clickY !== null && clickY !== undefined) {
+                let minD = Infinity;
+                let bestRect = rect;
+                for (const r of rects) {
+                    const cx = r.x + r.w / 2;
+                    const cy = r.y + r.h / 2;
+                    const d = Math.hypot(cx - clickX, cy - clickY);
+                    if (d < minD) {
+                        minD = d;
+                        bestRect = r;
+                    }
+                }
+                rect = bestRect;
+            }
+
             const padding = Math.max(0, Number(logCfg.selectedSegmentOutlinePadding) || 0);
             const outlineColor = parseColor(logCfg.selectedSegmentOutlineColor || "#ff3d00ff");
             const outlineAlpha = logCfg.selectedSegmentOutlineAlpha ?? 1;
@@ -59,17 +81,14 @@ export class LogisticsRenderer {
             const baseThickness = logCfg.lineThickness || 3;
             const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE * 0.8);
             const usePortToPortStyle = !!isPortToPort && !!isConnected;
-            const lColor = isSelected
-                ? (logCfg.selectedLineColor || "#ffff00")
-                : (usePortToPortStyle
-                    ? (logCfg.portToPortLineColor || logCfg.lineColor)
-                    : (!isConnected ? (logCfg.disconnectedLineColor || "#6b6b6b") : logCfg.lineColor));
-            const lAlpha = isSelected
-                ? (logCfg.selectedLineAlpha || 1.0)
-                : (usePortToPortStyle
-                    ? (logCfg.portToPortLineAlpha ?? logCfg.lineAlpha)
-                    : (!isConnected ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha) : logCfg.lineAlpha));
-            graphics.fillStyle(parseColor(lColor), lAlpha);
+            const normalColor = usePortToPortStyle
+                ? (logCfg.portToPortLineColor || logCfg.lineColor)
+                : (!isConnected ? (logCfg.disconnectedLineColor || "#6b6b6b") : logCfg.lineColor);
+            const normalAlpha = usePortToPortStyle
+                ? (logCfg.portToPortLineAlpha ?? logCfg.lineAlpha)
+                : (!isConnected ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha) : logCfg.lineAlpha);
+
+            graphics.fillStyle(parseColor(normalColor), normalAlpha);
             LogisticsRenderer.drawLogisticsCells(graphics, points, widthTiles, 1);
             if (line && !line.targetId) {
                 const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
@@ -77,6 +96,38 @@ export class LogisticsRenderer {
                     graphics.fillRect(endpointRect.x, endpointRect.y, endpointRect.w, endpointRect.h);
                 }
             }
+
+            if (isSelected) {
+                const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
+                if (line && !line.targetId) {
+                    const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
+                    if (endpointRect) {
+                        rects.push(endpointRect);
+                    }
+                }
+                if (rects.length > 0) {
+                    let selectedRect = rects[0];
+                    const clickX = GameEngine.state.selectedLogisticsClickX;
+                    const clickY = GameEngine.state.selectedLogisticsClickY;
+                    if (clickX !== null && clickX !== undefined && clickY !== null && clickY !== undefined) {
+                        let minD = Infinity;
+                        for (const r of rects) {
+                            const cx = r.x + r.w / 2;
+                            const cy = r.y + r.h / 2;
+                            const d = Math.hypot(cx - clickX, cy - clickY);
+                            if (d < minD) {
+                                minD = d;
+                                selectedRect = r;
+                            }
+                        }
+                    }
+                    const selColor = logCfg.selectedLineColor || "#ffff00";
+                    const selAlpha = logCfg.selectedLineAlpha || 1.0;
+                    graphics.fillStyle(parseColor(selColor), selAlpha);
+                    graphics.fillRect(selectedRect.x, selectedRect.y, selectedRect.w, selectedRect.h);
+                }
+            }
+
             const arrowRects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
             if (line && !line.targetId) {
                 const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
