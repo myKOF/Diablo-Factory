@@ -1022,6 +1022,11 @@ export class LogisticsRenderer {
                         }
                         scene.logisticsVisibleTextIds.add(textKey);
                     });
+
+                    const debugRoutes = LogisticsRenderer.getSelectedGroupDebugRoutePoints(state, groupKey, sortedSegs);
+                    debugRoutes.forEach(points => {
+                        LogisticsRenderer.drawRoutePointsDebug(graphics, points);
+                    });
                 }
                 drawnCanonicalGroups.add(groupKey);
             });
@@ -1596,6 +1601,80 @@ export class LogisticsRenderer {
             const arrowSize = Math.max(size * 1.05, GameEngine.TILE_SIZE * 0.32);
             LogisticsRenderer.drawArrowhead(g, curr.x, curr.y, turnDir.x, turnDir.y, arrowSize);
         }
+    }
+
+    static getSelectedGroupDebugRoutePoints(state, groupKey, groupSegs) {
+        const routes = [];
+        const seen = new Set();
+        const normalize = (points) => {
+            if (!Array.isArray(points) || points.length < 2) return null;
+            const clean = [];
+            points.forEach(point => {
+                const x = Number(point?.x);
+                const y = Number(point?.y);
+                if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+                const prev = clean[clean.length - 1];
+                if (!prev || Math.round(prev.x) !== Math.round(x) || Math.round(prev.y) !== Math.round(y)) {
+                    clean.push({ x, y });
+                }
+            });
+            return clean.length >= 2 ? clean : null;
+        };
+        const addRoute = (points) => {
+            const clean = normalize(points);
+            if (!clean) return;
+            const key = clean.map(p => `${Math.round(p.x)},${Math.round(p.y)}`).join("|");
+            if (seen.has(key)) return;
+            seen.add(key);
+            routes.push(clean);
+        };
+
+        (state.mapEntities || []).forEach(ent => {
+            (ent?.outputTargets || []).forEach(conn => {
+                if (conn?.lineId !== groupKey) return;
+                addRoute(conn.routePoints);
+            });
+        });
+        if (routes.length > 0) return routes;
+
+        const fallback = [];
+        (Array.isArray(groupSegs) ? groupSegs : []).forEach(seg => {
+            const pts = normalize(seg?.routePoints);
+            if (!pts) return;
+            pts.forEach((point, index) => {
+                const prev = fallback[fallback.length - 1];
+                if (index > 0 || fallback.length === 0) {
+                    if (!prev || Math.round(prev.x) !== Math.round(point.x) || Math.round(prev.y) !== Math.round(point.y)) {
+                        fallback.push(point);
+                    }
+                }
+            });
+        });
+        addRoute(fallback);
+        return routes;
+    }
+
+    static drawRoutePointsDebug(g, points) {
+        if (!Array.isArray(points) || points.length < 2) return;
+        const lineColor = 0xff2222;
+        const nodeFill = 0xff2222;
+        const nodeStroke = 0xffffff;
+        const radius = Math.max(4, Math.min(7, GameEngine.TILE_SIZE * 0.12));
+
+        g.lineStyle(3, lineColor, 0.95);
+        g.beginPath();
+        g.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+            g.lineTo(points[i].x, points[i].y);
+        }
+        g.strokePath();
+
+        points.forEach(point => {
+            g.fillStyle(nodeFill, 1);
+            g.fillCircle(point.x, point.y, radius);
+            g.lineStyle(2, nodeStroke, 0.95);
+            g.strokeCircle(point.x, point.y, radius);
+        });
     }
 
     static getLogisticsGroupTurnCellKeys(segments) {

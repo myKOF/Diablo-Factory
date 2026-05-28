@@ -778,7 +778,10 @@ export class MainScene extends Phaser.Scene {
                 outputTargetCount += targets.length;
                 for (let j = 0; j < targets.length; j++) {
                     const conn = targets[j];
-                    outputTargetState += `${conn.id || ""}:${conn.lineId || ""}:${conn.filter || ""};`;
+                    const routeState = Array.isArray(conn.routePoints)
+                        ? conn.routePoints.map(p => `${Math.round(Number(p?.x) || 0)},${Math.round(Number(p?.y) || 0)}`).join(",")
+                        : "";
+                    outputTargetState += `${conn.id || ""}:${conn.lineId || ""}:${conn.filter || ""}:${routeState};`;
                 }
             }
         }

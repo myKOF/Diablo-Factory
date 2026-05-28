@@ -304,7 +304,11 @@ export class ConveyorSystem {
         while (firstOpenIndex < path.length - 1 && occupied.has(`${path[firstOpenIndex].x},${path[firstOpenIndex].y}`)) {
             firstOpenIndex++;
         }
-        return firstOpenIndex > 0 ? path.slice(firstOpenIndex) : path;
+        if (firstOpenIndex <= 0) return path;
+        // Keep the original logistics-line anchor so side extensions share a real graph node.
+        // Dropping it makes the new route start one cell outside the line, which later creates
+        // outward detours when the extension is merged into the existing routePoints.
+        return [path[0], ...path.slice(firstOpenIndex)];
     }
 
     collectLogisticsOccupiedKeys(ignoreLine = null) {
@@ -571,6 +575,11 @@ export class ConveyorSystem {
             this.cancelDrag();
             return;
         }
+        const buildGhosts = this.ghosts.filter(g => !g?.isVirtualEnd);
+        if (buildGhosts.length < 2) {
+            this.cancelDrag();
+            return;
+        }
 
         const savedLogisticsLines = Array.isArray(GameEngine.state.logisticsLines)
             ? [...GameEngine.state.logisticsLines]
@@ -585,7 +594,7 @@ export class ConveyorSystem {
         const scale = this.getRouteScale();
         const gridUnit = TS / scale;
 
-        const points = this.ghosts.map(g => ({
+        const points = buildGhosts.map(g => ({
             ...g,
             x: (g.x + offset.x * scale) * gridUnit,
             y: (g.y + offset.y * scale) * gridUnit
@@ -625,7 +634,7 @@ export class ConveyorSystem {
                 }
             }
             const beforeCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : 0;
-            const segmentCostCount = Math.max(1, this.ghosts.length - 1);
+            const segmentCostCount = Math.max(1, buildGhosts.length - 1);
             if (segmentCostCount < 2) {
                 GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
                 this.cancelDrag();
@@ -1282,6 +1291,127 @@ export class ConveyorSystem {
             if (lastDist < firstDist) points.reverse();
         }
         return points;
+    }
+
+    buildLogisticsGraphRoutePoints(segments, startRef = null, endRef = null) {
+        if (!Array.isArray(segments) || segments.length === 0) return null;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const makeKey = (point) => `${Math.round(point.x)},${Math.round(point.y)}`;
+        const nodes = new Map();
+        const edges = new Map();
+        const addNode = (point) => {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+            const key = makeKey(point);
+            if (!nodes.has(key)) nodes.set(key, { x: Math.round(point.x), y: Math.round(point.y) });
+            if (!edges.has(key)) edges.set(key, new Set());
+            return key;
+        };
+        const addEdge = (a, b) => {
+            const ak = addNode(a);
+            const bk = addNode(b);
+            if (!ak || !bk || ak === bk) return;
+            edges.get(ak).add(bk);
+            edges.get(bk).add(ak);
+        };
+        const getCardinalDir = (from, to) => {
+            if (!from || !to) return null;
+            const dx = to.x - from.x;
+            const dy = to.y - from.y;
+            if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+            if (Math.abs(dx) > 0.001 && Math.abs(dy) > 0.001) return null;
+            return Math.abs(dx) >= Math.abs(dy)
+                ? { x: Math.sign(dx) || 1, y: 0 }
+                : { x: 0, y: Math.sign(dy) || 1 };
+        };
+
+        segments.forEach(seg => {
+            const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+            if (points.length < 2) return;
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                const dir = getCardinalDir(a, b);
+                if (!dir) continue;
+                const dist = Math.hypot(b.x - a.x, b.y - a.y);
+                const steps = Math.max(1, Math.round(dist / TS));
+                let prev = null;
+                for (let step = 0; step <= steps; step++) {
+                    const point = step === steps
+                        ? b
+                        : { x: a.x + dir.x * TS * step, y: a.y + dir.y * TS * step };
+                    const key = addNode(point);
+                    if (prev && key) addEdge(nodes.get(prev), nodes.get(key));
+                    prev = key;
+                }
+            }
+        });
+        if (nodes.size < 2) return null;
+
+        const nearestKey = (ref) => {
+            if (!ref || !Number.isFinite(ref.x) || !Number.isFinite(ref.y)) return null;
+            let bestKey = null;
+            let bestDist = Infinity;
+            nodes.forEach((point, key) => {
+                const dist = Math.hypot(point.x - ref.x, point.y - ref.y);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestKey = key;
+                }
+            });
+            return bestKey;
+        };
+        const endpointKeys = [...nodes.keys()].filter(key => (edges.get(key)?.size || 0) <= 1);
+        const farthestEndpointKey = (fromKey) => {
+            const from = nodes.get(fromKey);
+            if (!from) return null;
+            let bestKey = null;
+            let bestDist = -Infinity;
+            (endpointKeys.length > 0 ? endpointKeys : [...nodes.keys()]).forEach(key => {
+                if (key === fromKey) return;
+                const point = nodes.get(key);
+                const dist = Math.hypot(point.x - from.x, point.y - from.y);
+                if (dist > bestDist) {
+                    bestDist = dist;
+                    bestKey = key;
+                }
+            });
+            return bestKey;
+        };
+        const findPath = (startKey, endKey) => {
+            if (!startKey || !endKey) return null;
+            if (startKey === endKey) return [nodes.get(startKey)];
+            const queue = [startKey];
+            const visited = new Set([startKey]);
+            const previous = new Map();
+            while (queue.length > 0) {
+                const current = queue.shift();
+                if (current === endKey) break;
+                (edges.get(current) || new Set()).forEach(nextKey => {
+                    if (visited.has(nextKey)) return;
+                    visited.add(nextKey);
+                    previous.set(nextKey, current);
+                    queue.push(nextKey);
+                });
+            }
+            if (!visited.has(endKey)) return null;
+            const keys = [];
+            let current = endKey;
+            while (current) {
+                keys.unshift(current);
+                if (current === startKey) break;
+                current = previous.get(current);
+            }
+            return keys[0] === startKey ? keys.map(key => ({ ...nodes.get(key) })) : null;
+        };
+
+        let startKey = nearestKey(startRef);
+        let endKey = nearestKey(endRef);
+        if (!startKey && endpointKeys.length > 0) startKey = endpointKeys[0];
+        if (!endKey && startKey) endKey = farthestEndpointKey(startKey);
+        const route = findPath(startKey, endKey);
+        if (!Array.isArray(route) || route.length < 2) return null;
+        annotateRoutePoints(route);
+        return route;
     }
 
     ensureLogisticsLineStore() {
@@ -2766,6 +2896,14 @@ export class ConveyorSystem {
                 }
             });
             conn.routePoints = pathPoints;
+            const graphPathPoints = this.buildLogisticsGraphRoutePoints(
+                groupSegments,
+                sourcePort || startPt,
+                targetPort || (targetEnt ? endPt : null)
+            );
+            if (Array.isArray(graphPathPoints) && graphPathPoints.length >= 2) {
+                conn.routePoints = graphPathPoints;
+            }
         }
 
         // 清除所有其他建築中對應此 groupId 的 outputTargets (如果斷線或轉移)
