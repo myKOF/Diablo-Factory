@@ -194,30 +194,52 @@ export class LogisticsRenderer {
                     ? (logCfg.portToPortArrowSize || logCfg.arrowSize || 8)
                     : (!isConnected ? (logCfg.disconnectedArrowSize || logCfg.arrowSize || 8) : (logCfg.arrowSize || 8));
                 graphics.fillStyle(parseColor(arrowColor), arrowAlpha);
-                arrowRects.forEach((rect) => {
-                    const groupKey = line?.groupId || line?.id || null;
+                const groupKeyForLine = line?.groupId || line?.id || null;
+                const getOverrideMatchKey = (override) => {
+                    if (!override) return null;
+                    const candidates = arrowRects
+                        .map((rect, index) => {
+                            const cx = rect.x + rect.w / 2;
+                            const cy = rect.y + rect.h / 2;
+                            const exact = override.cellKey === rect.cellKey;
+                            const anchorDist = Number.isFinite(override.anchorX) && Number.isFinite(override.anchorY)
+                                ? Math.hypot(cx - override.anchorX, cy - override.anchorY)
+                                : Infinity;
+                            if (!exact && anchorDist > GameEngine.TILE_SIZE * 0.75) return null;
+                            const sourceDot = Number.isFinite(override.sourceDirX) && Number.isFinite(override.sourceDirY) &&
+                                Number.isFinite(override.anchorX) && Number.isFinite(override.anchorY)
+                                ? ((cx - override.anchorX) * override.sourceDirX + (cy - override.anchorY) * override.sourceDirY)
+                                : 0;
+                            return { rect, index, exact, anchorDist, sourceDot };
+                        })
+                        .filter(Boolean);
+                    if (candidates.length === 0) return null;
+                    candidates.sort((a, b) => {
+                        if (a.exact !== b.exact) return a.exact ? -1 : 1;
+                        const aForward = a.sourceDot > 0.001;
+                        const bForward = b.sourceDot > 0.001;
+                        if (aForward !== bForward) return aForward ? -1 : 1;
+                        if (Math.abs(a.anchorDist - b.anchorDist) > 0.001) return a.anchorDist - b.anchorDist;
+                        return a.index - b.index;
+                    });
+                    return candidates[0].rect.cellKey || `idx:${candidates[0].index}`;
+                };
+                const stateOverrideForLine = (GameEngine.state.logisticsTurnArrowOverrides || []).find(item =>
+                    item &&
+                    (!item.groupId || !groupKeyForLine || item.groupId === groupKeyForLine) &&
+                    getOverrideMatchKey(item)
+                ) || null;
+                const activeOverride = line?.turnArrowOverride || stateOverrideForLine;
+                const activeOverrideMatchKey = getOverrideMatchKey(activeOverride);
+                arrowRects.forEach((rect, index) => {
+                    const lineOverride = line?.turnArrowOverride || stateOverrideForLine;
                     const rectCenterX = rect.x + rect.w / 2;
                     const rectCenterY = rect.y + rect.h / 2;
-                    const stateOverride = (GameEngine.state.logisticsTurnArrowOverrides || []).find(item =>
-                        item &&
-                        (!item.groupId || !groupKey || item.groupId === groupKey) &&
-                        (
-                            item.cellKey === rect.cellKey ||
-                            (
-                                Number.isFinite(item.anchorX) &&
-                                Number.isFinite(item.anchorY) &&
-                                Math.hypot(rectCenterX - item.anchorX, rectCenterY - item.anchorY) <= GameEngine.TILE_SIZE * 0.75
-                            )
-                        )
-                    ) || null;
-                    const lineOverride = line?.turnArrowOverride || stateOverride;
+                    const rectMatchKey = rect.cellKey || `idx:${index}`;
                     const override = lineOverride && (
-                        lineOverride.cellKey === rect.cellKey ||
-                        (
-                            Number.isFinite(lineOverride.anchorX) &&
-                            Number.isFinite(lineOverride.anchorY) &&
-                            Math.hypot(rectCenterX - lineOverride.anchorX, rectCenterY - lineOverride.anchorY) <= GameEngine.TILE_SIZE * 0.75
-                        )
+                        activeOverrideMatchKey
+                            ? rectMatchKey === activeOverrideMatchKey
+                            : lineOverride.cellKey === rect.cellKey
                     )
                         ? lineOverride
                         : null;
