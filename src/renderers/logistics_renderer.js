@@ -873,7 +873,11 @@ export class LogisticsRenderer {
                 const isOperating = isPhysicallyConnected && hasTransportFilter;
                 const isConnected = isPhysicallyConnected || isOperating;
                 const connectedCellKeys = portToPortConnectedCellKeysByGroup.get(groupKey) || new Set();
-                const connectedCellPaths = portToPortConnectedCellPathsByGroup.get(groupKey) || [];
+                const rawConnectedCellPaths = portToPortConnectedCellPathsByGroup.get(groupKey) || [];
+                const isSelfConnectedGroup = !!representative?.sourceId &&
+                    !!representative?.targetId &&
+                    representative.sourceId === representative.targetId;
+                const connectedCellPaths = isSelfConnectedGroup ? [] : rawConnectedCellPaths;
                 const pathTurnCellKeys = getPathTurnCellKeys(connectedCellPaths);
                 const turnCellKeys = pathTurnCellKeys.size > 0
                     ? pathTurnCellKeys
