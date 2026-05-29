@@ -138,7 +138,10 @@ export class LogisticsUI {
                         <div class="logistics-node-title">物流線節點</div>
                         <div class="logistics-node-status">${currentFilter ? `自動運輸：${window.UIManager.escapeHtml(window.UIManager.getIngredientDisplayName(currentFilter))}` : '尚未設定運輸材料'}</div>
                     </div>
-                    <button class="logistics-delete-btn" onclick="window.LogisticsUI.deleteLogisticsLine(event)">刪除連線 ✖</button>
+                    <div class="logistics-header-actions">
+                        ${currentFilter ? `<button class="logistics-clear-filter-btn" onclick="window.LogisticsUI.clearLogisticsFilter(event)">清除選擇物品</button>` : ''}
+                        <button class="logistics-delete-btn" onclick="window.LogisticsUI.deleteLogisticsLine(event)">刪除連線 ✖</button>
+                    </div>
                 </div>
                 <div class="logistics-node-help">${helperText}</div>
                 <div class="logistics-filter-title">自動運輸材料</div>
@@ -276,6 +279,45 @@ export class LogisticsUI {
             }
             const menu = document.getElementById('logistics_menu');
             if (menu) LogisticsUI.showLogisticsMenu(LogisticsUI.activeLogisticsConnection.source, LogisticsUI.activeLogisticsConnection.targetId, parseInt(menu.style.left) - 15, parseInt(menu.style.top) + 20);
+        }
+    }
+
+    static clearLogisticsFilter(event) {
+        if (event) event.stopPropagation();
+        const active = LogisticsUI.activeLogisticsConnection;
+        if (!active) return;
+
+        const outputTargets = Array.isArray(active.source?.outputTargets)
+            ? active.source.outputTargets
+            : [];
+        const conn = outputTargets.find(t => t.id === active.targetId) || null;
+        const groupId = conn?.lineId || active.groupId || LogisticsUI.activeLogisticsLine?.groupId || LogisticsUI.activeLogisticsLine?.id || null;
+        let changed = false;
+
+        if (conn && conn.filter) {
+            conn.filter = null;
+            changed = true;
+        }
+        if (groupId) {
+            const hadSegmentFilter = conveyorSystem.getLogisticsSegmentsByGroupId(groupId)
+                .some(line => !!line?.filter);
+            conveyorSystem.setLogisticsGroupFilter(groupId, null);
+            changed = changed || hadSegmentFilter;
+        }
+        if (LogisticsUI.activeLogisticsLine) {
+            LogisticsUI.activeLogisticsLine.filter = null;
+        }
+
+        if (changed) {
+            GameEngine.addLog(`[物流] 已清除路線搬運品項。`, 'LOGISTICS');
+            if (GameEngine.workerSystem && typeof GameEngine.workerSystem.updateWorkerAssignments === 'function') {
+                GameEngine.workerSystem.updateWorkerAssignments();
+            }
+        }
+
+        const menu = document.getElementById('logistics_menu');
+        if (menu && active.source) {
+            LogisticsUI.showLogisticsMenu(active.source, active.targetId, parseInt(menu.style.left) - 15, parseInt(menu.style.top) + 20);
         }
     }
 

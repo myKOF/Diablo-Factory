@@ -2514,6 +2514,7 @@ export class ConveyorSystem {
                                     : window.UIManager.getNearestPortSlot(targetEnt, last?.x ?? (sourceEnt ? sourceEnt.x : last?.x), last?.y ?? (sourceEnt ? sourceEnt.y : last?.y));
                                 targetAnchor = targetPort ? { x: targetPort.x, y: targetPort.y } : { x: targetEnt.x, y: targetEnt.y };
                             }
+                            const isOpenEndedLine = !targetAnchor && !currentSeg.targetId;
 
                             if (sourceAnchor) {
                                 const distFirstToSource = Math.hypot(shortest[0].x - sourceAnchor.x, shortest[0].y - sourceAnchor.y);
@@ -2547,7 +2548,7 @@ export class ConveyorSystem {
                                 }
                             };
 
-                            if (sourceAnchor) pushPoint(sourceAnchor);
+                            if (sourceAnchor && !isOpenEndedLine) pushPoint(sourceAnchor);
                             shortest.forEach(pushPoint);
                             if (targetAnchor) pushPoint(targetAnchor);
 

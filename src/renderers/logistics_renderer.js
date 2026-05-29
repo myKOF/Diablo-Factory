@@ -76,6 +76,48 @@ export class LogisticsRenderer {
                 rect.h + padding * 2
             );
         };
+        const drawSelectedLogisticsRouteOutlines = (points, widthTiles, line) => {
+            if (!line || !Array.isArray(points) || points.length < 2) {
+                drawSelectedLogisticsSegmentOutline(line);
+                return;
+            }
+            const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
+            if (line && !line.targetId && !line.suppressOpenEndpointCell) {
+                const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
+                if (endpointRect) rects.push(endpointRect);
+            }
+            if (rects.length === 0) {
+                drawSelectedLogisticsSegmentOutline(line);
+                return;
+            }
+
+            const padding = Math.max(0, Number(logCfg.selectedSegmentOutlinePadding) || 0);
+            const outlineColor = parseColor(logCfg.selectedSegmentOutlineColor || "#ff3d00ff");
+            const outlineAlpha = logCfg.selectedSegmentOutlineAlpha ?? 1;
+            const outlineWidth = Math.max(1, Number(logCfg.selectedSegmentOutlineWidth) || 2);
+            const drawn = new Set();
+            graphics.lineStyle(outlineWidth, outlineColor, outlineAlpha);
+            rects.forEach((rect) => {
+                const key = rect.cellKey || `${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.w)},${Math.round(rect.h)}`;
+                if (drawn.has(key)) return;
+                drawn.add(key);
+                graphics.strokeRect(
+                    rect.x - padding,
+                    rect.y - padding,
+                    rect.w + padding * 2,
+                    rect.h + padding * 2
+                );
+            });
+        };
+
+        const selectedLogisticsOutlineJobs = [];
+        const flushSelectedLogisticsOutlines = () => {
+            selectedLogisticsOutlineJobs.forEach(({ points, widthTiles, line, outlineAll }) => {
+                if (outlineAll) drawSelectedLogisticsRouteOutlines(points, widthTiles, line);
+                else drawSelectedLogisticsSegmentOutlineOnRoute(points, widthTiles, line);
+            });
+            selectedLogisticsOutlineJobs.length = 0;
+        };
 
         const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null) => {
             const baseThickness = logCfg.lineThickness || 3;
@@ -193,8 +235,15 @@ export class LogisticsRenderer {
                     );
                 });
             }
-            if (isSelected && line && !GameEngine.state.selectedLogisticsGroupId) {
-                drawSelectedLogisticsSegmentOutlineOnRoute(points, widthTiles, line);
+            if (isSelected && line) {
+                const selectedGroupId = GameEngine.state.selectedLogisticsGroupId;
+                const groupKey = line.groupId || line.id;
+                selectedLogisticsOutlineJobs.push({
+                    points,
+                    widthTiles,
+                    line,
+                    outlineAll: !!selectedGroupId && selectedGroupId === groupKey
+                });
             }
         };
 
@@ -1197,6 +1246,7 @@ export class LogisticsRenderer {
                 }
             });
         }
+        flushSelectedLogisticsOutlines();
         if (state.logisticsDragLine) {
             const dragPoints = Array.isArray(state.logisticsDragLine.points) && state.logisticsDragLine.points.length >= 2
                 ? state.logisticsDragLine.points
