@@ -2366,14 +2366,29 @@ export class WorkerSystem {
             const cfg = this.engine ? this.engine.getEntityConfig(line?.lineType || 'transport_line', 1) : null;
             return Math.max(0.1, Number(line?.efficiency) || Number(transfer?.efficiency) || Number(cfg?.efficiency) || 4);
         };
-        const getRouteLengthInTiles = (transfer) => {
+        const getTransferRouteMetrics = (transfer) => {
             const points = transfer?.routePoints;
-            if (!Array.isArray(points) || points.length < 2) return 1;
+            if (!Array.isArray(points) || points.length < 2) {
+                return { totalPixels: 0, totalTiles: 1 };
+            }
+            const key = points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|");
+            if (transfer._logicRouteMetricsKey === key && transfer._logicRouteMetrics) {
+                return transfer._logicRouteMetrics;
+            }
+
             let total = 0;
             for (let j = 0; j < points.length - 1; j++) {
-                total += Math.hypot(points[j + 1].x - points[j].x, points[j + 1].y - points[j].y);
+                const segLen = Math.hypot(points[j + 1].x - points[j].x, points[j + 1].y - points[j].y);
+                total += segLen;
             }
-            return Math.max(1, total / 20);
+
+            const metrics = { totalPixels: total, totalTiles: Math.max(1, total / 20) };
+            transfer._logicRouteMetricsKey = key;
+            transfer._logicRouteMetrics = metrics;
+            return metrics;
+        };
+        const getRouteLengthInTiles = (transfer) => {
+            return getTransferRouteMetrics(transfer).totalTiles;
         };
         const getStorageAmount = (ent, itemType) => {
             const key = String(itemType || '').toLowerCase();
@@ -2391,14 +2406,6 @@ export class WorkerSystem {
             }
             return true;
         };
-        const getRouteLengthPixels = (points) => {
-            if (!Array.isArray(points) || points.length < 2) return 0;
-            let total = 0;
-            for (let j = 0; j < points.length - 1; j++) {
-                total += Math.hypot(points[j + 1].x - points[j].x, points[j + 1].y - points[j].y);
-            }
-            return total;
-        };
         const getTransferPathKey = (transfer) => {
             if (transfer?.lineId) return `line:${transfer.lineId}`;
             const points = transfer?.routePoints || [];
@@ -2413,14 +2420,14 @@ export class WorkerSystem {
         const canStartTransfer = (transfer) => {
             if (!transfer || !Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) return true;
             const key = getTransferPathKey(transfer);
-            const totalLength = getRouteLengthPixels(transfer.routePoints);
+            const totalLength = getTransferRouteMetrics(transfer).totalPixels;
             if (totalLength <= 0) return true;
             const cellSize = this.engine?.TILE_SIZE || 20;
             return !state.activeTransfers.some(active => {
                 if (!active || active.id === transfer.id) return false;
                 if (!Array.isArray(active.routePoints) || active.routePoints.length < 2) return false;
                 if (getTransferPathKey(active) !== key) return false;
-                const activeTotal = getRouteLengthPixels(active.routePoints) || totalLength;
+                const activeTotal = getTransferRouteMetrics(active).totalPixels || totalLength;
                 const activeDistance = Math.max(0, Math.min(1, Number(active.progress) || 0)) * activeTotal;
                 return activeDistance < cellSize;
             });
@@ -2452,7 +2459,8 @@ export class WorkerSystem {
             let prevMaxDist = Infinity;
             for (let j = 0; j < groupTransfers.length; j++) {
                 const t = groupTransfers[j];
-                const totalLength = getRouteLengthPixels(t.routePoints);
+                const metrics = getTransferRouteMetrics(t);
+                const totalLength = metrics.totalPixels;
                 if (totalLength <= 0) {
                     t.maxAllowedProgress = 1.0;
                     continue;
@@ -2484,23 +2492,6 @@ export class WorkerSystem {
                     }
                 }
 
-                // 找出路徑中所有 corner 點的累積距離
-                const cornerDists = [];
-                const points = t.routePoints;
-                if (Array.isArray(points)) {
-                    let accumulated = 0;
-                    for (let k = 0; k < points.length - 1; k++) {
-                        const segLen = Math.hypot(points[k + 1].x - points[k].x, points[k + 1].y - points[k].y);
-                        if (points[k].isCorner) {
-                            cornerDists.push(accumulated);
-                        }
-                        accumulated += segLen;
-                    }
-                    if (points[points.length - 1]?.isCorner) {
-                        cornerDists.push(accumulated);
-                    }
-                }
-
                 let spacing = cellSize;
                 const desired = (t.progress || 0) * totalLength;
 
@@ -2513,7 +2504,7 @@ export class WorkerSystem {
                     }
                 } else {
                     const frontItem = groupTransfers[j - 1];
-                    const frontDist = (frontItem.progress || 0) * getRouteLengthPixels(frontItem.routePoints);
+                    const frontDist = (frontItem.progress || 0) * getTransferRouteMetrics(frontItem).totalPixels;
                     const physicalLimit = Math.max(0, Math.min(frontDist, prevMaxDist) - spacing);
                     if (desired <= dist_pn) {
                         if (frontDist > dist_pn || prevMaxDist > dist_pn) {

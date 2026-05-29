@@ -1518,9 +1518,15 @@ export class LogisticsRenderer {
             return;
         }
 
+        const entityById = new Map();
+        (state.mapEntities || []).forEach(ent => {
+            if (!ent) return;
+            entityById.set(ent.id || `${ent.type1}_${ent.x}_${ent.y}`, ent);
+        });
+
         state.activeTransfers.forEach(t => {
-            const source = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.sourceId);
-            const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
+            const source = entityById.get(t.sourceId);
+            const target = entityById.get(t.targetId);
             const hasStoredRoute = Array.isArray(t.routePoints) && t.routePoints.length >= 2;
             if (!source && !hasStoredRoute) return;
             if (!target && !hasStoredRoute) return;
@@ -1528,20 +1534,13 @@ export class LogisticsRenderer {
             const directConn = source && Array.isArray(source.outputTargets)
                 ? source.outputTargets.find(conn => conn && conn.id === t.targetId)
                 : null;
-            const routePoints = LogisticsRenderer.normalizeTransferRoutePoints(
-                source,
-                target,
-                LogisticsRenderer.resolveTransferRoutePoints(source, target, directConn, t)
-            );
-            if (Array.isArray(routePoints)) {
-                LogisticsRenderer.annotateRoutePoints(routePoints);
-            }
+            const routePoints = LogisticsRenderer.resolveNormalizedTransferRoutePoints(source, target, directConn, t);
 
             if (directConn?.lineId && (!Array.isArray(routePoints) || routePoints.length < 2)) return;
 
             let px, py;
             if (Array.isArray(routePoints) && routePoints.length >= 2) {
-                const pathPoint = LogisticsRenderer.getPointOnTransferPath(routePoints, t.progress, 0);
+                const pathPoint = LogisticsRenderer.getPointOnTransferPath(routePoints, t.progress, 0, t);
                 if (!pathPoint) return;
                 px = pathPoint.x;
                 py = pathPoint.y;
@@ -1623,8 +1622,9 @@ export class LogisticsRenderer {
 
     static resolveTransferRoutePoints(source, target, directConn, transfer) {
         let routePoints = Array.isArray(transfer.routePoints) && transfer.routePoints.length >= 2
-            ? transfer.routePoints.map(p => ({ x: p.x, y: p.y }))
+            ? transfer.routePoints
             : null;
+        if (routePoints) return routePoints;
         if (!directConn) return routePoints;
 
         const transferRoute = (conveyorSystem && typeof conveyorSystem.getConnectionTransferRoute === 'function')
@@ -1635,6 +1635,33 @@ export class LogisticsRenderer {
             : (!directConn.lineId && Array.isArray(directConn.routePoints) && directConn.routePoints.length >= 2
                 ? directConn.routePoints.map(p => ({ x: p.x, y: p.y }))
                 : null));
+    }
+
+    static getRoutePointsCacheKey(points, source, target) {
+        const routeKey = Array.isArray(points)
+            ? points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|")
+            : "";
+        const sourceKey = source ? (source.id || `${source.type1}_${source.x}_${source.y}`) : "";
+        const targetKey = target ? (target.id || `${target.type1}_${target.x}_${target.y}`) : "";
+        return `${sourceKey}>${targetKey}:${routeKey}`;
+    }
+
+    static resolveNormalizedTransferRoutePoints(source, target, directConn, transfer) {
+        const rawPoints = LogisticsRenderer.resolveTransferRoutePoints(source, target, directConn, transfer);
+        if (!Array.isArray(rawPoints) || rawPoints.length < 2) return rawPoints;
+
+        const cacheKey = LogisticsRenderer.getRoutePointsCacheKey(rawPoints, source, target);
+        if (transfer._renderNormalizedRouteKey === cacheKey && Array.isArray(transfer._renderNormalizedRoutePoints)) {
+            return transfer._renderNormalizedRoutePoints;
+        }
+
+        const routePoints = LogisticsRenderer.normalizeTransferRoutePoints(source, target, rawPoints);
+        if (Array.isArray(routePoints)) {
+            LogisticsRenderer.annotateRoutePoints(routePoints);
+        }
+        transfer._renderNormalizedRouteKey = cacheKey;
+        transfer._renderNormalizedRoutePoints = routePoints;
+        return routePoints;
     }
 
     static normalizeTransferRoutePoints(source, target, routePoints) {
@@ -1698,9 +1725,13 @@ export class LogisticsRenderer {
         // );
     }
 
-    static getPointOnTransferPath(points, progress, startOffset = 0) {
+    static getTransferPathMetrics(points, cacheOwner = null) {
         if (!Array.isArray(points) || points.length < 2) return null;
-        const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+        const key = points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|");
+        if (cacheOwner && cacheOwner._renderRouteMetricsKey === key && cacheOwner._renderRouteMetrics) {
+            return cacheOwner._renderRouteMetrics;
+        }
+
         const lengths = [];
         let totalLength = 0;
         for (let i = 0; i < points.length - 1; i++) {
@@ -1710,6 +1741,21 @@ export class LogisticsRenderer {
             lengths.push(length);
             totalLength += length;
         }
+
+        const metrics = { key, lengths, totalLength };
+        if (cacheOwner) {
+            cacheOwner._renderRouteMetricsKey = key;
+            cacheOwner._renderRouteMetrics = metrics;
+        }
+        return metrics;
+    }
+
+    static getPointOnTransferPath(points, progress, startOffset = 0, cacheOwner = null) {
+        if (!Array.isArray(points) || points.length < 2) return null;
+        const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+        const metrics = LogisticsRenderer.getTransferPathMetrics(points, cacheOwner);
+        const lengths = metrics?.lengths || [];
+        const totalLength = metrics?.totalLength || 0;
         if (totalLength <= 0) return { x: points[0].x, y: points[0].y };
 
         const safeStartOffset = Math.max(0, Math.min(Number(startOffset) || 0, totalLength * 0.45));

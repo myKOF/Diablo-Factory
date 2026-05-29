@@ -136,7 +136,7 @@ export class UIManager {
     }
     static logHeight = 200; // 預設日誌高度
     static isResizingLog = false;
-    static logFilters = { COMMON: false, PATH: false, INPUT: false, BATTLE: false, SYSTEM: false, TASK: false, GATHER: false, LOGISTICS: true }; // 日誌篩選器
+    static logFilters = { COMMON: false, PATH: false, INPUT: false, BATTLE: false, SYSTEM: false, TASK: false, GATHER: false, LOGISTICS: false }; // 日誌篩選器
     static startY = 0;
     static startHeight = 200;
     static leftMouseDownPos = null; // 記錄左鍵按下位置，用於過濾框選後的誤觸

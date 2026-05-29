@@ -767,7 +767,6 @@ export class MainScene extends Phaser.Scene {
 
     getLogisticsRenderSignature(state) {
         const lines = Array.isArray(state.logisticsLines) ? state.logisticsLines : [];
-        const transferCount = Array.isArray(state.activeTransfers) ? state.activeTransfers.length : 0;
         const ghostCount = Array.isArray(state.conveyorGhosts) ? state.conveyorGhosts.length : 0;
         let outputTargetCount = 0;
         let outputTargetState = "";
@@ -791,7 +790,6 @@ export class MainScene extends Phaser.Scene {
             lineState,
             outputTargetCount,
             outputTargetState,
-            transferCount,
             ghostCount,
             state.logisticsDragLine ? 1 : 0,
             state.selectedLogisticsLineId || "",
@@ -805,12 +803,13 @@ export class MainScene extends Phaser.Scene {
         const hasStaticContent =
             (Array.isArray(state.logisticsLines) && state.logisticsLines.length > 0) ||
             (Array.isArray(state.mapEntities) && state.mapEntities.some(ent => ent?.outputTargets?.length > 0));
-        const hasDynamicContent =
+        const hasStaticDynamicContent =
             !!state.logisticsDragLine ||
-            (Array.isArray(state.conveyorGhosts) && state.conveyorGhosts.length > 0) ||
-            (Array.isArray(state.activeTransfers) && state.activeTransfers.length > 0);
+            (Array.isArray(state.conveyorGhosts) && state.conveyorGhosts.length > 0);
+        const hasTransferContent =
+            Array.isArray(state.activeTransfers) && state.activeTransfers.length > 0;
 
-        if (!hasStaticContent && !hasDynamicContent) {
+        if (!hasStaticContent && !hasStaticDynamicContent && !hasTransferContent) {
             if (this._logisticsLayerWasDrawn) {
                 this.logisticsGraphics.clear();
                 this.logisticsTransferGraphics.clear();
@@ -826,16 +825,33 @@ export class MainScene extends Phaser.Scene {
                     });
                 }
             }
+            if (this._logisticsTransferLayerWasDrawn) {
+                LogisticsRenderer.renderTransfers(this.logisticsTransferGraphics, state, this);
+                this._logisticsTransferLayerWasDrawn = false;
+            }
             this._lastLogisticsRenderSignature = "";
             return;
         }
 
         const signature = this.getLogisticsRenderSignature(state);
-        if (hasDynamicContent || this._lastLogisticsRenderSignature !== signature) {
-            LogisticsRenderer.render(this.logisticsGraphics, state, this, { drawTransfers: false });
+        if (hasStaticContent || hasStaticDynamicContent) {
+            if (hasStaticDynamicContent || this._lastLogisticsRenderSignature !== signature) {
+                LogisticsRenderer.render(this.logisticsGraphics, state, this, { drawTransfers: false });
+                this._lastLogisticsRenderSignature = signature;
+                this._logisticsLayerWasDrawn = true;
+            }
+        } else if (this._logisticsLayerWasDrawn) {
+            this.logisticsGraphics.clear();
+            this._lastLogisticsRenderSignature = "";
+            this._logisticsLayerWasDrawn = false;
+        }
+
+        if (hasTransferContent) {
             LogisticsRenderer.renderTransfers(this.logisticsTransferGraphics, state, this);
-            this._lastLogisticsRenderSignature = signature;
-            this._logisticsLayerWasDrawn = true;
+            this._logisticsTransferLayerWasDrawn = true;
+        } else if (this._logisticsTransferLayerWasDrawn) {
+            LogisticsRenderer.renderTransfers(this.logisticsTransferGraphics, state, this);
+            this._logisticsTransferLayerWasDrawn = false;
         }
     }
 

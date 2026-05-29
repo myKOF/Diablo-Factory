@@ -2622,28 +2622,44 @@ export class ConveyorSystem {
     applyBlockedTransferQueues(state) {
         if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
         const TS = GameEngine.TILE_SIZE || 20;
+        const pathMetricsCache = new Map();
 
-        const getPathTotalLength = (points) => {
-            if (!Array.isArray(points) || points.length < 2) return 0;
+        const getPathMetrics = (points) => {
+            if (!Array.isArray(points) || points.length < 2) return { total: 0, segments: [] };
+            const key = points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|");
+            const cached = pathMetricsCache.get(key);
+            if (cached) return cached;
+
             let total = 0;
+            const segments = [];
             for (let i = 0; i < points.length - 1; i++) {
-                total += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+                const a = points[i];
+                const b = points[i + 1];
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const len = Math.hypot(dx, dy);
+                segments.push({ a, b, dx, dy, len, start: total });
+                total += len;
             }
-            return total;
+            const metrics = { total, segments };
+            pathMetricsCache.set(key, metrics);
+            return metrics;
+        };
+        const getPathTotalLength = (points) => {
+            return getPathMetrics(points).total;
         };
         const getPointOnPathByDistance = (points, distance) => {
             if (!Array.isArray(points) || points.length < 2) return null;
             let remaining = Math.max(0, Number(distance) || 0);
-            for (let i = 0; i < points.length - 1; i++) {
-                const a = points[i];
-                const b = points[i + 1];
-                const len = Math.hypot(b.x - a.x, b.y - a.y);
+            const segments = getPathMetrics(points).segments;
+            for (let i = 0; i < segments.length; i++) {
+                const { a, b, dx, dy, len } = segments[i];
                 if (len <= 0) continue;
-                if (remaining <= len || i === points.length - 2) {
+                if (remaining <= len || i === segments.length - 1) {
                     const t = Math.max(0, Math.min(1, remaining / len));
                     return {
-                        x: a.x + (b.x - a.x) * t,
-                        y: a.y + (b.y - a.y) * t
+                        x: a.x + dx * t,
+                        y: a.y + dy * t
                     };
                 }
                 remaining -= len;
@@ -2654,20 +2670,18 @@ export class ConveyorSystem {
             if (!Array.isArray(points) || points.length < 2 || !point) return 0;
             let bestDist = Infinity;
             let bestPathDist = 0;
-            let pathDist = 0;
-            for (let i = 0; i < points.length - 1; i++) {
-                const a = points[i];
-                const b = points[i + 1];
-                const lenSq = Math.pow(b.x - a.x, 2) + Math.pow(b.y - a.y, 2);
+            const segments = getPathMetrics(points).segments;
+            for (let i = 0; i < segments.length; i++) {
+                const { a, dx, dy, len, start } = segments[i];
+                const lenSq = dx * dx + dy * dy;
                 if (lenSq <= 0) continue;
-                const t = Math.max(0, Math.min(1, ((point.x - a.x) * (b.x - a.x) + (point.y - a.y) * (b.y - a.y)) / lenSq));
-                const proj = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+                const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
+                const proj = { x: a.x + dx * t, y: a.y + dy * t };
                 const dist = Math.hypot(point.x - proj.x, point.y - proj.y);
                 if (dist < bestDist) {
                     bestDist = dist;
-                    bestPathDist = pathDist + Math.sqrt(lenSq) * t;
+                    bestPathDist = start + len * t;
                 }
-                pathDist += Math.sqrt(lenSq);
             }
             return bestPathDist;
         };
