@@ -2621,6 +2621,7 @@ export class ConveyorSystem {
     applyBlockedTransferQueues(state) {
         if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
         const TS = GameEngine.TILE_SIZE || 20;
+
         const getPathTotalLength = (points) => {
             if (!Array.isArray(points) || points.length < 2) return 0;
             let total = 0;
@@ -2629,128 +2630,6 @@ export class ConveyorSystem {
             }
             return total;
         };
-        const pathKey = (transfer) => {
-            const points = transfer.routePoints || [];
-            const first = points[0];
-            const last = points[points.length - 1];
-            return [
-                transfer.lineId || "line",
-                first ? `${Math.round(first.x)},${Math.round(first.y)}` : "start",
-                last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"
-            ].join("|");
-        };
-
-        const groups = new Map();
-        state.activeTransfers.forEach(transfer => {
-            if (!transfer) return;
-            if (!Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) return;
-            const key = pathKey(transfer);
-            if (!groups.has(key)) groups.set(key, []);
-            groups.get(key).push(transfer);
-        });
-
-        groups.forEach(transfers => {
-            const totalLength = getPathTotalLength(transfers[0]?.routePoints);
-            if (totalLength <= 0) return;
-            transfers.sort((a, b) => {
-                const da = Math.max(0, Math.min(1, Number(a.progress) || 0)) * totalLength;
-                const db = Math.max(0, Math.min(1, Number(b.progress) || 0)) * totalLength;
-                if (Math.abs(da - db) >= TS * 0.5) return db - da;
-                return String(a.id || "").localeCompare(String(b.id || ""));
-            });
-
-            // 動態判定末端堆積限制
-            // 判斷邏輯：若末端點（pathPoints 最後一點）鄰近另一個群組的線段起始點，
-            // 表示此末端是「刪除後形成的斷點邊緣」，物品不應越界，停在倒數第二格。
-            // 若無相鄰群組（自然終點），物品正常停在最後一格。
-            const points = transfers[0]?.routePoints;
-            const lineId = transfers[0]?.lineId;
-            const isBreakpointGroup = transfers.some(t => !t.targetId);
-            let dist_pn = totalLength;
-            if (isBreakpointGroup && Array.isArray(points) && points.length >= 2) {
-                const lastPt = points[points.length - 1];
-                const isGapEndpoint = (state.logisticsLines || []).some(seg => {
-                    if (!seg) return false;
-                    const segGroupId = seg.groupId || seg.id;
-                    if (segGroupId === lineId) return false; // 同群組跳過
-                    const segPts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
-                    if (segPts.length < 1) return false;
-                    const segStart = segPts[0];
-                    // 若其他群組的起始點在 1.5 格以內，確認是斷點間隙
-                    return segStart && Math.hypot(segStart.x - lastPt.x, segStart.y - lastPt.y) <= TS * 1.5;
-                });
-                if (isGapEndpoint) {
-                    dist_pn = totalLength - TS; // 停在斷點前的最後一格
-                }
-            }
-
-            // 找出路徑中所有 corner 點的累積距離
-            const cornerDists = [];
-            if (Array.isArray(points)) {
-                let accumulated = 0;
-                for (let k = 0; k < points.length - 1; k++) {
-                    const segLen = Math.hypot(points[k + 1].x - points[k].x, points[k + 1].y - points[k].y);
-                    if (points[k].isCorner) {
-                        cornerDists.push(accumulated);
-                    }
-                    accumulated += segLen;
-                }
-                if (points[points.length - 1]?.isCorner) {
-                    cornerDists.push(accumulated);
-                }
-            }
-
-            let prevQueuedDistance = totalLength;
-            let prevDesired = null;
-            let prevBlocked = false;
-            transfers.forEach((transfer, index) => {
-                const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
-                
-                let spacing = TS;
-
-                const isBreakpoint = !transfer.targetId;
-
-                let maxAllowed;
-                if (index === 0) {
-                    if (isBreakpoint) {
-                        maxAllowed = dist_pn;
-                    } else {
-                        maxAllowed = totalLength;
-                    }
-                } else {
-                    const physicalLimit = prevQueuedDistance - spacing;
-                    if (desired <= dist_pn) {
-                        if (prevQueuedDistance > dist_pn) {
-                            maxAllowed = Math.min(dist_pn, physicalLimit);
-                        } else {
-                            maxAllowed = physicalLimit;
-                        }
-                    } else {
-                        maxAllowed = physicalLimit;
-                    }
-                }
-
-                let queuedDistance;
-                if (index > 0 && !prevBlocked && Math.abs(desired - prevDesired) < TS * 0.5) {
-                    queuedDistance = Math.max(0, Math.min(desired, prevQueuedDistance));
-                } else {
-                    queuedDistance = Math.max(0, Math.min(desired, maxAllowed));
-                }
-                
-                const isBlocked = queuedDistance < desired || (index > 0 && prevBlocked);
-                
-                transfer.progress = Math.max(0, Math.min(1, queuedDistance / totalLength));
-                if (transfer.targetId) {
-                    delete transfer.blockedOnBrokenLine;
-                } else {
-                    transfer.blockedOnBrokenLine = true;
-                }
-                prevDesired = desired;
-                prevQueuedDistance = queuedDistance;
-                prevBlocked = isBlocked;
-            });
-        });
-
         const getPointOnPathByDistance = (points, distance) => {
             if (!Array.isArray(points) || points.length < 2) return null;
             let remaining = Math.max(0, Number(distance) || 0);
@@ -2770,58 +2649,116 @@ export class ConveyorSystem {
             }
             return points[points.length - 1] || null;
         };
-        const cellKeyForDistance = (points, distance) => {
-            const point = getPointOnPathByDistance(points, distance);
-            if (!point) return null;
-            return `${Math.round(point.x / TS)},${Math.round(point.y / TS)}`;
-        };
-        const transferEntries = state.activeTransfers
-            .filter(transfer => transfer && Array.isArray(transfer.routePoints) && transfer.routePoints.length >= 2)
-            .map(transfer => {
-                const totalLength = getPathTotalLength(transfer.routePoints);
-                const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
-                return { transfer, totalLength, distance, key: pathKey(transfer) };
-            })
-            .filter(entry => entry.totalLength > 0)
-            .sort((a, b) => {
-                const diff = b.distance - a.distance;
-                if (Math.abs(diff) > 0.0001) return diff;
-                return String(a.transfer.id || "").localeCompare(String(b.transfer.id || ""));
-            });
-        const occupiedCells = new Set();
-        const occupiedBySamePath = new Set();
-        const occupiedPositions = [];
-        transferEntries.forEach(entry => {
-            let distance = entry.distance;
-            let key = cellKeyForDistance(entry.transfer.routePoints, distance);
-            let point = getPointOnPathByDistance(entry.transfer.routePoints, distance);
-            const overlapsDifferentPath = () => {
-                if (!point) return false;
-                return occupiedPositions.some(item =>
-                    item.key !== entry.key &&
-                    Math.abs(item.x - point.x) < TS * 0.95 &&
-                    Math.abs(item.y - point.y) < TS * 0.95
-                );
-            };
-            let guard = 0;
-            while (
-                key &&
-                distance > 0 &&
-                (
-                    (occupiedCells.has(key) && !occupiedBySamePath.has(`${key}|${entry.key}`)) ||
-                    overlapsDifferentPath()
-                ) &&
-                guard < 64
-            ) {
-                distance = Math.max(0, distance - Math.max(1, TS * 0.25));
-                key = cellKeyForDistance(entry.transfer.routePoints, distance);
-                point = getPointOnPathByDistance(entry.transfer.routePoints, distance);
-                guard++;
+        const getPathDistanceToPoint = (points, point) => {
+            if (!Array.isArray(points) || points.length < 2 || !point) return 0;
+            let bestDist = Infinity;
+            let bestPathDist = 0;
+            let pathDist = 0;
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                const lenSq = Math.pow(b.x - a.x, 2) + Math.pow(b.y - a.y, 2);
+                if (lenSq <= 0) continue;
+                const t = Math.max(0, Math.min(1, ((point.x - a.x) * (b.x - a.x) + (point.y - a.y) * (b.y - a.y)) / lenSq));
+                const proj = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+                const dist = Math.hypot(point.x - proj.x, point.y - proj.y);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestPathDist = pathDist + Math.sqrt(lenSq) * t;
+                }
+                pathDist += Math.sqrt(lenSq);
             }
-            if (key) occupiedCells.add(key);
-            if (key) occupiedBySamePath.add(`${key}|${entry.key}`);
-            if (point) occupiedPositions.push({ key: entry.key, x: point.x, y: point.y });
-            entry.transfer.progress = Math.max(0, Math.min(1, distance / entry.totalLength));
+            return bestPathDist;
+        };
+        const pathKey = (transfer) => {
+            if (transfer.lineId) return `line:${transfer.lineId}`;
+            const points = transfer.routePoints || [];
+            const first = points[0];
+            const last = points[points.length - 1];
+            return [
+                "route",
+                first ? `${Math.round(first.x)},${Math.round(first.y)}` : "start",
+                last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"
+            ].join("|");
+        };
+        const groups = new Map();
+        state.activeTransfers.forEach(transfer => {
+            if (!transfer) return;
+            if (!Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) return;
+            const key = pathKey(transfer);
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(transfer);
+        });
+
+        groups.forEach(transfers => {
+            const canonical = transfers.reduce((best, transfer) => {
+                const len = getPathTotalLength(transfer.routePoints);
+                return len > best.length ? { points: transfer.routePoints, length: len } : best;
+            }, { points: null, length: 0 });
+            const useCanonical = transfers.length > 1 && canonical.length > 0 && transfers.some(transfer => {
+                const points = transfer.routePoints || [];
+                const canonicalPoints = canonical.points || [];
+                if (points.length !== canonicalPoints.length) return true;
+                return points.some((point, index) => {
+                    const other = canonicalPoints[index];
+                    return !other || Math.hypot(point.x - other.x, point.y - other.y) > 0.1;
+                });
+            });
+
+            transfers.sort((a, b) => {
+                const getDistance = (transfer) => {
+                    const total = getPathTotalLength(transfer.routePoints);
+                    const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
+                    if (!useCanonical) return distance;
+                    return getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance));
+                };
+                const da = getDistance(a);
+                const db = getDistance(b);
+                if (db !== da) return db - da;
+                return String(a.id || "").localeCompare(String(b.id || ""));
+            });
+
+            let occupiedProgress = Infinity;
+            let queueBlockedBehind = false;
+            transfers.forEach(transfer => {
+                const sourceLength = getPathTotalLength(transfer.routePoints);
+                const totalLength = useCanonical ? canonical.length : sourceLength;
+                if (totalLength <= 0) return;
+
+                const sourceDistance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * sourceLength;
+                const desired = useCanonical
+                    ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, sourceDistance))
+                    : sourceDistance;
+                let maxAllowed = occupiedProgress - TS;
+                let breakpointLimit = totalLength;
+
+                if (!transfer.targetId) {
+                    breakpointLimit = Math.floor(totalLength / TS) * TS;
+                    maxAllowed = Math.min(maxAllowed, breakpointLimit);
+                } else {
+                    maxAllowed = Math.min(maxAllowed, totalLength);
+                }
+
+                let queuedDistance = Math.max(0, Math.min(desired, maxAllowed));
+                if (Math.abs(queuedDistance - desired) < 0.1) {
+                    queuedDistance = desired;
+                }
+
+                const blockedAtBreakpoint = !transfer.targetId && queuedDistance >= breakpointLimit - 0.1;
+                transfer.queueBlocked = queuedDistance < desired - 0.1 || blockedAtBreakpoint || queueBlockedBehind;
+                if (useCanonical) {
+                    transfer.routePoints = canonical.points.map(point => ({ ...point }));
+                }
+                transfer.progress = Math.max(0, Math.min(1, queuedDistance / totalLength));
+                if (transfer.targetId) {
+                    delete transfer.blockedOnBrokenLine;
+                } else {
+                    transfer.blockedOnBrokenLine = true;
+                }
+
+                occupiedProgress = queuedDistance;
+                queueBlockedBehind = transfer.queueBlocked === true;
+            });
         });
     }
 

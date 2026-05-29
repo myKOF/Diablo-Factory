@@ -2400,11 +2400,12 @@ export class WorkerSystem {
             return total;
         };
         const getTransferPathKey = (transfer) => {
+            if (transfer?.lineId) return `line:${transfer.lineId}`;
             const points = transfer?.routePoints || [];
             const first = points[0];
             const last = points[points.length - 1];
             return [
-                transfer?.lineId || "line",
+                "route",
                 first ? `${Math.round(first.x)},${Math.round(first.y)}` : "start",
                 last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"
             ].join("|");
@@ -2533,8 +2534,9 @@ export class WorkerSystem {
         for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
             let t = state.activeTransfers[i];
             const maxAllowed = t.maxAllowedProgress !== undefined ? t.maxAllowedProgress : 1.0;
+            const queueHeld = t.queueBlocked === true && t.progress >= maxAllowed - 0.0001;
             
-            if (t.progress < maxAllowed) {
+            if (!queueHeld && t.progress < maxAllowed) {
                 t.progress += deltaTime * (getTransferSpeed(t) / getRouteLengthInTiles(t));
                 if (t.progress > maxAllowed) {
                     t.progress = maxAllowed;
