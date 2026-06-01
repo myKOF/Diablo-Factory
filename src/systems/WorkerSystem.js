@@ -2371,8 +2371,12 @@ export class WorkerSystem {
             if (!Array.isArray(points) || points.length < 2) {
                 return { totalPixels: 0, totalTiles: 1 };
             }
+            if (transfer._logicRouteMetricsPoints === points && transfer._logicRouteMetrics) {
+                return transfer._logicRouteMetrics;
+            }
             const key = points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|");
             if (transfer._logicRouteMetricsKey === key && transfer._logicRouteMetrics) {
+                transfer._logicRouteMetricsPoints = points;
                 return transfer._logicRouteMetrics;
             }
 
@@ -2383,6 +2387,7 @@ export class WorkerSystem {
             }
 
             const metrics = { totalPixels: total, totalTiles: Math.max(1, total / 20) };
+            transfer._logicRouteMetricsPoints = points;
             transfer._logicRouteMetricsKey = key;
             transfer._logicRouteMetrics = metrics;
             return metrics;
@@ -2601,10 +2606,6 @@ export class WorkerSystem {
         }
 
         // 2. 讓滿足工人條件的建築自動發送物品
-        if (conveyorSystem && typeof conveyorSystem.applyBlockedTransferQueues === 'function') {
-            conveyorSystem.applyBlockedTransferQueues(state);
-        }
-
         state.mapEntities.forEach(ent => {
             if (!ent.outputTargets || ent.outputTargets.length === 0) return;
 

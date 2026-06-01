@@ -2626,8 +2626,7 @@ export class ConveyorSystem {
 
         const getPathMetrics = (points) => {
             if (!Array.isArray(points) || points.length < 2) return { total: 0, segments: [] };
-            const key = points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|");
-            const cached = pathMetricsCache.get(key);
+            const cached = pathMetricsCache.get(points);
             if (cached) return cached;
 
             let total = 0;
@@ -2642,7 +2641,7 @@ export class ConveyorSystem {
                 total += len;
             }
             const metrics = { total, segments };
-            pathMetricsCache.set(key, metrics);
+            pathMetricsCache.set(points, metrics);
             return metrics;
         };
         const getPathTotalLength = (points) => {
@@ -2720,13 +2719,18 @@ export class ConveyorSystem {
                 });
             });
 
+            const distanceCache = new Map();
+            const getDistance = (transfer) => {
+                if (distanceCache.has(transfer)) return distanceCache.get(transfer);
+                const total = getPathTotalLength(transfer.routePoints);
+                const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
+                const resolved = useCanonical
+                    ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance))
+                    : distance;
+                distanceCache.set(transfer, resolved);
+                return resolved;
+            };
             transfers.sort((a, b) => {
-                const getDistance = (transfer) => {
-                    const total = getPathTotalLength(transfer.routePoints);
-                    const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
-                    if (!useCanonical) return distance;
-                    return getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance));
-                };
                 const da = getDistance(a);
                 const db = getDistance(b);
                 if (db !== da) return db - da;

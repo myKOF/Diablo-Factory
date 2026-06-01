@@ -1512,9 +1512,16 @@ export class LogisticsRenderer {
 
     static renderTransfers(graphics, state, scene) {
         graphics.clear();
-        LogisticsRenderer.beginTransferSerialLabels(scene);
+        const useSpriteTransfers = LogisticsRenderer.canUseTransferSprites(scene);
+        if (useSpriteTransfers) {
+            LogisticsRenderer.beginTransferSprites(scene);
+            LogisticsRenderer.hideTransferSerialLabels(scene);
+        } else {
+            LogisticsRenderer.beginTransferSerialLabels(scene);
+        }
         if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) {
-            LogisticsRenderer.endTransferSerialLabels(scene);
+            if (useSpriteTransfers) LogisticsRenderer.endTransferSprites(scene);
+            else LogisticsRenderer.endTransferSerialLabels(scene);
             return;
         }
 
@@ -1523,6 +1530,15 @@ export class LogisticsRenderer {
             if (!ent) return;
             entityById.set(ent.id || `${ent.type1}_${ent.x}_${ent.y}`, ent);
         });
+        const directConnByKey = new Map();
+        const getDirectConn = (source, targetId) => {
+            if (!source || !Array.isArray(source.outputTargets)) return null;
+            const key = `${source.id || `${source.type1}_${source.x}_${source.y}`}>${targetId || ""}`;
+            if (directConnByKey.has(key)) return directConnByKey.get(key);
+            const conn = source.outputTargets.find(item => item && item.id === targetId) || null;
+            directConnByKey.set(key, conn);
+            return conn;
+        };
 
         state.activeTransfers.forEach(t => {
             const source = entityById.get(t.sourceId);
@@ -1531,9 +1547,7 @@ export class LogisticsRenderer {
             if (!source && !hasStoredRoute) return;
             if (!target && !hasStoredRoute) return;
 
-            const directConn = source && Array.isArray(source.outputTargets)
-                ? source.outputTargets.find(conn => conn && conn.id === t.targetId)
-                : null;
+            const directConn = getDirectConn(source, t.targetId);
             const routePoints = LogisticsRenderer.resolveNormalizedTransferRoutePoints(source, target, directConn, t);
 
             if (directConn?.lineId && (!Array.isArray(routePoints) || routePoints.length < 2)) return;
@@ -1550,8 +1564,6 @@ export class LogisticsRenderer {
             } else {
                 return;
             }
-            LogisticsRenderer.logTransferRenderDebug(graphics, state, scene, source, target, routePoints, t, px, py);
-
             const color = (scene && typeof scene.getResourceIconColor === 'function')
                 ? scene.getResourceIconColor(t.itemType)
                 : 0xffffff;
@@ -1561,24 +1573,172 @@ export class LogisticsRenderer {
             const strokeWidth = Math.max(2, Math.min(3, itemSize * 0.12));
             const inset = strokeWidth / 2;
 
-            graphics.fillStyle(0x222222, 1);
-            graphics.fillRect(px - half, py - half, itemSize, itemSize);
-            graphics.lineStyle(strokeWidth, color, 1);
-            graphics.strokeRect(
-                px - half + inset,
-                py - half + inset,
-                itemSize - strokeWidth,
-                itemSize - strokeWidth
-            );
-            LogisticsRenderer.renderTransferSerialLabel(scene, t, px, py, itemSize);
+            if (useSpriteTransfers) {
+                LogisticsRenderer.renderTransferSprite(scene, t, px, py, color, itemSize, strokeWidth);
+            } else {
+                graphics.fillStyle(0x222222, 1);
+                graphics.fillRect(px - half, py - half, itemSize, itemSize);
+                graphics.lineStyle(strokeWidth, color, 1);
+                graphics.strokeRect(
+                    px - half + inset,
+                    py - half + inset,
+                    itemSize - strokeWidth,
+                    itemSize - strokeWidth
+                );
+                LogisticsRenderer.renderTransferSerialLabel(scene, t, px, py, itemSize);
+            }
         });
-        LogisticsRenderer.endTransferSerialLabels(scene);
+        if (useSpriteTransfers) LogisticsRenderer.endTransferSprites(scene);
+        else LogisticsRenderer.endTransferSerialLabels(scene);
+    }
+
+    static canUseTransferSprites(scene) {
+        return !!(scene && scene.add && scene.add.image && scene.textures && scene.textures.createCanvas);
+    }
+
+    static beginTransferSprites(scene) {
+        if (!scene) return;
+        if (!scene.logisticsTransferSprites) scene.logisticsTransferSprites = new Map();
+        scene.logisticsVisibleTransferSpriteIds = new Set();
+    }
+
+    static endTransferSprites(scene) {
+        if (!scene || !scene.logisticsTransferSprites) return;
+        scene.logisticsTransferSprites.forEach((sprite, key) => {
+            if (!scene.logisticsVisibleTransferSpriteIds || !scene.logisticsVisibleTransferSpriteIds.has(key)) {
+                sprite.setVisible(false);
+            }
+        });
+    }
+
+    static getTransferAtlasKey(color, itemSize, strokeWidth) {
+        const safeColor = Math.max(0, Number(color) || 0).toString(16).padStart(6, "0");
+        return `logistics_transfer_atlas_${itemSize}_${Math.round(strokeWidth * 10)}_${safeColor}`;
+    }
+
+    static getTransferFrameName(label) {
+        return `n_${String(label || "none").replace(/[^a-zA-Z0-9_-]/g, "_") || "none"}`;
+    }
+
+    static ensureTransferTexture(scene, color, label, itemSize, strokeWidth) {
+        if (!scene || !scene.textures) return { key: null, frame: null };
+        if (!scene.logisticsTransferAtlases) scene.logisticsTransferAtlases = new Map();
+
+        const key = LogisticsRenderer.getTransferAtlasKey(color, itemSize, strokeWidth);
+        const frame = LogisticsRenderer.getTransferFrameName(label);
+        let atlas = scene.logisticsTransferAtlases.get(key);
+        if (!atlas) {
+            const maxSize = 1024;
+            const cols = Math.max(1, Math.floor(maxSize / itemSize));
+            const rows = Math.max(1, Math.floor(maxSize / itemSize));
+            const width = cols * itemSize;
+            const height = rows * itemSize;
+            const texture = scene.textures.exists(key)
+                ? scene.textures.get(key)
+                : scene.textures.createCanvas(key, width, height);
+            atlas = { texture, cols, rows, nextIndex: 0, frames: new Set() };
+            scene.logisticsTransferAtlases.set(key, atlas);
+        }
+
+        if (!atlas.texture || atlas.frames.has(frame) || (atlas.texture.has && atlas.texture.has(frame))) {
+            atlas.frames.add(frame);
+            return { key, frame };
+        }
+
+        const slot = atlas.nextIndex++;
+        if (slot >= atlas.cols * atlas.rows) {
+            return LogisticsRenderer.ensureSingleTransferTexture(scene, color, label, itemSize, strokeWidth);
+        }
+
+        const x = (slot % atlas.cols) * itemSize;
+        const y = Math.floor(slot / atlas.cols) * itemSize;
+        const texture = atlas.texture;
+        const ctx = texture.getContext();
+        LogisticsRenderer.drawTransferTextureCell(ctx, x, y, color, label, itemSize, strokeWidth);
+        if (texture.add) texture.add(frame, 0, x, y, itemSize, itemSize);
+        texture.refresh();
+        atlas.frames.add(frame);
+        return { key, frame };
+    }
+
+    static ensureSingleTransferTexture(scene, color, label, itemSize, strokeWidth) {
+        const safeColor = Math.max(0, Number(color) || 0).toString(16).padStart(6, "0");
+        const safeLabel = String(label || "").replace(/[^a-zA-Z0-9_-]/g, "_") || "none";
+        const key = `logistics_transfer_${itemSize}_${Math.round(strokeWidth * 10)}_${safeColor}_${safeLabel}`;
+        if (!scene.textures.exists(key)) {
+            const texture = scene.textures.createCanvas(key, itemSize, itemSize);
+            const ctx = texture.getContext();
+            LogisticsRenderer.drawTransferTextureCell(ctx, 0, 0, color, label, itemSize, strokeWidth);
+            texture.refresh();
+        }
+        return { key, frame: null };
+    }
+
+    static drawTransferTextureCell(ctx, x, y, color, label, itemSize, strokeWidth) {
+        const inset = strokeWidth / 2;
+        const fontSize = label
+            ? Math.max(8, Math.min(12, Math.floor(itemSize * (String(label).length > 2 ? 0.42 : 0.52))))
+            : 0;
+        const hex = `#${Math.max(0, Number(color) || 0).toString(16).padStart(6, "0").slice(-6)}`;
+
+        ctx.clearRect(x, y, itemSize, itemSize);
+        ctx.fillStyle = "#222222";
+        ctx.fillRect(x, y, itemSize, itemSize);
+        ctx.lineWidth = strokeWidth;
+        ctx.strokeStyle = hex;
+        ctx.strokeRect(x + inset, y + inset, itemSize - strokeWidth, itemSize - strokeWidth);
+
+        if (label) {
+            ctx.font = `${fontSize}px Arial, sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = "#000000";
+            ctx.fillStyle = "#ffffff";
+            ctx.strokeText(String(label), x + itemSize / 2, y + itemSize / 2);
+            ctx.fillText(String(label), x + itemSize / 2, y + itemSize / 2);
+        }
+    }
+
+    static renderTransferSprite(scene, transfer, x, y, color, itemSize, strokeWidth) {
+        if (!scene || !transfer) return;
+        if (!scene.logisticsTransferSprites) scene.logisticsTransferSprites = new Map();
+        if (!scene.logisticsVisibleTransferSpriteIds) scene.logisticsVisibleTransferSpriteIds = new Set();
+
+        const key = transfer.id || `transfer_${transfer.serialNumber || scene.logisticsTransferSprites.size}`;
+        const label = transfer.serialNumber ? String(transfer.serialNumber) : "";
+        const textureInfo = LogisticsRenderer.ensureTransferTexture(scene, color, label, itemSize, strokeWidth);
+        const textureKey = textureInfo.key;
+        const frame = textureInfo.frame;
+        if (!textureKey) return;
+
+        const depth = scene.logisticsTransferGraphics?.depth || 900000;
+        let sprite = scene.logisticsTransferSprites.get(key);
+        if (!sprite) {
+            sprite = scene.add.image(x, y, textureKey, frame || undefined).setOrigin(0.5).setDepth(depth);
+            scene.logisticsTransferSprites.set(key, sprite);
+        } else {
+            if (sprite.texture?.key !== textureKey || sprite.frame?.name !== (frame || "__BASE")) {
+                sprite.setTexture(textureKey, frame || undefined);
+            }
+            sprite.setPosition(x, y);
+            if (sprite.depth !== depth) sprite.setDepth(depth);
+            sprite.setVisible(true);
+        }
+        scene.logisticsVisibleTransferSpriteIds.add(key);
     }
 
     static beginTransferSerialLabels(scene) {
         if (!scene || !scene.add || !scene.add.text) return;
         if (!scene.logisticsTransferNumberTexts) scene.logisticsTransferNumberTexts = new Map();
         scene.logisticsVisibleTransferTextIds = new Set();
+    }
+
+    static hideTransferSerialLabels(scene) {
+        if (!scene || !scene.logisticsTransferNumberTexts) return;
+        scene.logisticsTransferNumberTexts.forEach(txt => {
+            if (txt && txt.setVisible) txt.setVisible(false);
+        });
     }
 
     static endTransferSerialLabels(scene) {
@@ -1650,8 +1810,22 @@ export class LogisticsRenderer {
         const rawPoints = LogisticsRenderer.resolveTransferRoutePoints(source, target, directConn, transfer);
         if (!Array.isArray(rawPoints) || rawPoints.length < 2) return rawPoints;
 
+        const sourceKey = source ? (source.id || `${source.type1}_${source.x}_${source.y}`) : "";
+        const targetKey = target ? (target.id || `${target.type1}_${target.x}_${target.y}`) : "";
+        if (
+            transfer._renderRawRoutePointsRef === rawPoints &&
+            transfer._renderRouteSourceKey === sourceKey &&
+            transfer._renderRouteTargetKey === targetKey &&
+            Array.isArray(transfer._renderNormalizedRoutePoints)
+        ) {
+            return transfer._renderNormalizedRoutePoints;
+        }
+
         const cacheKey = LogisticsRenderer.getRoutePointsCacheKey(rawPoints, source, target);
         if (transfer._renderNormalizedRouteKey === cacheKey && Array.isArray(transfer._renderNormalizedRoutePoints)) {
+            transfer._renderRawRoutePointsRef = rawPoints;
+            transfer._renderRouteSourceKey = sourceKey;
+            transfer._renderRouteTargetKey = targetKey;
             return transfer._renderNormalizedRoutePoints;
         }
 
@@ -1659,6 +1833,9 @@ export class LogisticsRenderer {
         if (Array.isArray(routePoints)) {
             LogisticsRenderer.annotateRoutePoints(routePoints);
         }
+        transfer._renderRawRoutePointsRef = rawPoints;
+        transfer._renderRouteSourceKey = sourceKey;
+        transfer._renderRouteTargetKey = targetKey;
         transfer._renderNormalizedRouteKey = cacheKey;
         transfer._renderNormalizedRoutePoints = routePoints;
         return routePoints;
@@ -1727,8 +1904,12 @@ export class LogisticsRenderer {
 
     static getTransferPathMetrics(points, cacheOwner = null) {
         if (!Array.isArray(points) || points.length < 2) return null;
+        if (cacheOwner && cacheOwner._renderRouteMetricsPoints === points && cacheOwner._renderRouteMetrics) {
+            return cacheOwner._renderRouteMetrics;
+        }
         const key = points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|");
         if (cacheOwner && cacheOwner._renderRouteMetricsKey === key && cacheOwner._renderRouteMetrics) {
+            cacheOwner._renderRouteMetricsPoints = points;
             return cacheOwner._renderRouteMetrics;
         }
 
@@ -1744,6 +1925,7 @@ export class LogisticsRenderer {
 
         const metrics = { key, lengths, totalLength };
         if (cacheOwner) {
+            cacheOwner._renderRouteMetricsPoints = points;
             cacheOwner._renderRouteMetricsKey = key;
             cacheOwner._renderRouteMetrics = metrics;
         }
