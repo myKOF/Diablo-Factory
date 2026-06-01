@@ -662,6 +662,7 @@ export class ConveyorSystem {
             const transportCfg = this.getTransportLineConfig();
 
             let shouldMergeWithSource = false;
+            let middleExtensionSplit = null;
             if (drag.sourceLine && (drag.sourceLine.groupId || drag.sourceLine.id)) {
                 const sourceGroupId = drag.sourceLine.groupId || drag.sourceLine.id;
                 const lines = (GameEngine.state.logisticsLines || []).filter(l => l && (l.groupId === sourceGroupId || l.id === sourceGroupId));
@@ -727,6 +728,11 @@ export class ConveyorSystem {
                         }
                     }
                 }
+
+                if (!shouldMergeWithSource) {
+                    middleExtensionSplit = this.splitSourceGroupForMiddleExtension(drag);
+                    if (middleExtensionSplit) shouldMergeWithSource = true;
+                }
             }
 
             const createdLine = this.upsertLogisticsLine({
@@ -746,7 +752,8 @@ export class ConveyorSystem {
             const submitAffectedGroupIds = new Set([
                 finalGroupId,
                 sourceGroupId,
-                touchedTargetGroupId
+                touchedTargetGroupId,
+                middleExtensionSplit?.detachedGroupId
             ].filter(Boolean));
             if (
                 createdLine?.groupId &&
@@ -859,6 +866,93 @@ export class ConveyorSystem {
                 line.turnArrowOverride = { ...turnArrowOverride };
             }
         });
+    }
+
+    splitSourceGroupForMiddleExtension(drag) {
+        const sourceLine = drag?.sourceLine || null;
+        const sourceGroupId = sourceLine?.groupId || sourceLine?.id || null;
+        if (!sourceGroupId) return null;
+
+        const groupSegments = this.getLogisticsSegmentsByGroupId(sourceGroupId);
+        if (!Array.isArray(groupSegments) || groupSegments.length < 2) return null;
+
+        const ordered = this.orderLogisticsSegmentsByDirection(groupSegments);
+        const TS = GameEngine.TILE_SIZE || 20;
+        const startPoint = { x: drag.startX, y: drag.startY };
+        const getRoute = (seg) => Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+        const firstRoute = getRoute(ordered[0]);
+        const lastRoute = getRoute(ordered[ordered.length - 1]);
+        const groupStart = firstRoute[0] || null;
+        const groupEnd = lastRoute[lastRoute.length - 1] || null;
+        if (groupStart && Math.hypot(startPoint.x - groupStart.x, startPoint.y - groupStart.y) <= TS * 0.75) return null;
+        if (groupEnd && Math.hypot(startPoint.x - groupEnd.x, startPoint.y - groupEnd.y) <= TS * 0.75) return null;
+
+        const distanceToSegment = (point, seg) => {
+            const points = getRoute(seg);
+            if (points.length < 2) return Infinity;
+            let best = Infinity;
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                if (!a || !b) continue;
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const lengthSq = dx * dx + dy * dy;
+                if (lengthSq < 0.001) continue;
+                const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq));
+                const px = a.x + dx * t;
+                const py = a.y + dy * t;
+                best = Math.min(best, Math.hypot(point.x - px, point.y - py));
+            }
+            return best;
+        };
+
+        let splitIndex = ordered.findIndex(seg =>
+            seg === sourceLine ||
+            (sourceLine.id && seg.id === sourceLine.id) ||
+            this.getLogisticsLineSelectionKey(seg) === this.getLogisticsLineSelectionKey(sourceLine)
+        );
+        if (splitIndex < 0) {
+            let bestDistance = Infinity;
+            ordered.forEach((seg, index) => {
+                const dist = distanceToSegment(startPoint, seg);
+                if (dist < bestDistance) {
+                    bestDistance = dist;
+                    splitIndex = index;
+                }
+            });
+            if (bestDistance > TS * 0.75) return null;
+        }
+
+        const frontSegments = ordered.slice(0, splitIndex + 1);
+        const backSegments = ordered.slice(splitIndex + 1);
+        if (frontSegments.length === 0 || backSegments.length === 0) return null;
+
+        const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+        const frontTail = frontSegments[frontSegments.length - 1];
+        const backHead = backSegments[0];
+        const backHeadRoute = getRoute(backHead);
+        const detachPoint = backHeadRoute[0] || getRoute(frontTail).slice(-1)[0] || null;
+        const detachKey = detachPoint ? `${Math.round(detachPoint.x)},${Math.round(detachPoint.y)}` : null;
+
+        if (frontTail) frontTail.nextId = null;
+        if (backHead) backHead.prevId = null;
+        backSegments.forEach(seg => {
+            if (!seg) return;
+            seg.groupId = newGroupId;
+            seg.sourceId = null;
+            seg.targetId = null;
+            seg.sourcePort = null;
+            seg.targetPort = null;
+            seg.targetPoint = null;
+            seg.detachedFromGroupId = sourceGroupId;
+            if (detachKey) seg.detachedAtKey = detachKey;
+            delete seg.turnArrowOverride;
+        });
+
+        this.orderLogisticsSegmentsByDirection(frontSegments);
+        this.orderLogisticsSegmentsByDirection(backSegments);
+        return { sourceGroupId, detachedGroupId: newGroupId };
     }
 
     cancelDrag() {
@@ -2011,9 +2105,19 @@ export class ConveyorSystem {
                 ? { x: Math.sign(dx) || 1, y: 0 }
                 : { x: 0, y: Math.sign(dy) || 1 };
             return [
-                { key: `${Math.round(start.x)},${Math.round(start.y)}`, dirX: dir.x, dirY: dir.y },
-                { key: `${Math.round(end.x)},${Math.round(end.y)}`, dirX: dir.x, dirY: dir.y }
+                { key: `${Math.round(start.x)},${Math.round(start.y)}`, dirX: dir.x, dirY: dir.y, line },
+                { key: `${Math.round(end.x)},${Math.round(end.y)}`, dirX: dir.x, dirY: dir.y, line }
             ];
+        };
+        const isBlockedSplitEndpointTouch = (endpoint, other) => {
+            if (!endpoint || !other || endpoint.key !== other.key) return false;
+            const endpointLine = endpoint.line || null;
+            const otherLine = other.line || null;
+            const endpointDetachedFrom = endpointLine?.detachedFromGroupId || null;
+            const otherDetachedFrom = otherLine?.detachedFromGroupId || null;
+            if (endpointDetachedFrom === secondaryGroupId && endpointLine?.detachedAtKey === endpoint.key) return true;
+            if (otherDetachedFrom === primaryGroupId && otherLine?.detachedAtKey === other.key) return true;
+            return false;
         };
 
         const secondaryEndpoints = new Map();
@@ -2027,7 +2131,10 @@ export class ConveyorSystem {
         for (const line of primaryLines) {
             for (const endpoint of getEndpointDirs(line)) {
                 const matches = secondaryEndpoints.get(endpoint.key) || [];
-                if (matches.some(other => !(other.dirX === -endpoint.dirX && other.dirY === -endpoint.dirY))) {
+                if (matches.some(other =>
+                    !isBlockedSplitEndpointTouch(endpoint, other) &&
+                    !(other.dirX === -endpoint.dirX && other.dirY === -endpoint.dirY)
+                )) {
                     return true;
                 }
             }
