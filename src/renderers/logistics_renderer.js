@@ -119,6 +119,7 @@ export class LogisticsRenderer {
             selectedLogisticsOutlineJobs.length = 0;
         };
 
+        const renderedLogisticsBaseCellKeys = new Set();
         const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null) => {
             const baseThickness = logCfg.lineThickness || 3;
             const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE * 0.8);
@@ -131,11 +132,20 @@ export class LogisticsRenderer {
                 : (!isConnected ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha) : logCfg.lineAlpha);
 
             graphics.fillStyle(parseColor(normalColor), normalAlpha);
-            LogisticsRenderer.drawLogisticsCells(graphics, points, widthTiles, 1);
+            LogisticsRenderer.getLogisticsCellRects(points, widthTiles).forEach(rect => {
+                const baseKey = rect.cellKey || `${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.w)},${Math.round(rect.h)}`;
+                if (renderedLogisticsBaseCellKeys.has(baseKey)) return;
+                renderedLogisticsBaseCellKeys.add(baseKey);
+                graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
+            });
             if (line && !line.targetId && !line.suppressOpenEndpointCell) {
                 const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
                 if (endpointRect) {
-                    graphics.fillRect(endpointRect.x, endpointRect.y, endpointRect.w, endpointRect.h);
+                    const endpointBaseKey = endpointRect.cellKey || `${Math.round(endpointRect.x)},${Math.round(endpointRect.y)},${Math.round(endpointRect.w)},${Math.round(endpointRect.h)}`;
+                    if (!renderedLogisticsBaseCellKeys.has(endpointBaseKey)) {
+                        renderedLogisticsBaseCellKeys.add(endpointBaseKey);
+                        graphics.fillRect(endpointRect.x, endpointRect.y, endpointRect.w, endpointRect.h);
+                    }
                 }
             }
 
@@ -994,7 +1004,9 @@ export class LogisticsRenderer {
                     }
                 }
                 const isGroupSelected = conveyorSystem && typeof conveyorSystem.isSelectedLogisticsLine === 'function'
-                    ? groupSegs.some(line => conveyorSystem.isSelectedLogisticsLine(line))
+                    ? (state.selectedLogisticsGroupId
+                        ? state.selectedLogisticsGroupId === groupKey
+                        : groupSegs.some(line => conveyorSystem.isSelectedLogisticsLine(line)))
                     : groupSegs.some(line => state.selectedLogisticsLineId === line.id);
 
                 if (isGroupSelected) {
@@ -1149,29 +1161,8 @@ export class LogisticsRenderer {
                         seg.__numberNextPoint  = { x: gc.endGx   * _align, y: gc.endGy   * _align };
                     });
 
-                    sortedSegs.forEach((seg, index) => {
-                        seg.order = index;
-                        const sp = seg.__numberLabelPoint || seg.routePoints?.[0] || { x: seg.x, y: seg.y };
-                        const cx = sp.x;
-                        const cy = sp.y;
-
-                        const textKey = seg.id || `${seg.x},${seg.y}`;
-                        LogisticsRenderer.renderLogisticsNumberSprite(scene, textKey, String(index), cx, cy);
-                    });
-
-                    if (sortedSegs.length > 0) {
-                        const lastSeg = sortedSegs[sortedSegs.length - 1];
-                        if (lastSeg && !lastSeg.targetId && !lastSeg.suppressOpenEndpointCell && lastSeg.__numberNextPoint) {
-                            const cx = lastSeg.__numberNextPoint.x;
-                            const cy = lastSeg.__numberNextPoint.y;
-                            const endTextKey = `${lastSeg.id || lastSeg.x + ',' + lastSeg.y}_endpoint`;
-                            const endIndexVal = sortedSegs.length;
-
-                            LogisticsRenderer.renderLogisticsNumberSprite(scene, endTextKey, String(endIndexVal), cx, cy);
-                        }
-                    }
-
-                    const debugRoutes = LogisticsRenderer.getSelectedGroupDebugRoutePoints(state, groupKey, sortedSegs);
+                    const debugRoutes = LogisticsRenderer.getSelectedGroupDebugRoutePoints(state, groupKey, groupSegs);
+                    LogisticsRenderer.renderDebugRouteNumberSprites(scene, groupKey, debugRoutes, groupSegs);
                     debugRoutes.forEach(points => {
                         LogisticsRenderer.drawRoutePointsDebug(graphics, points);
                     });
@@ -2085,6 +2076,161 @@ export class LogisticsRenderer {
         }
     }
 
+    static buildSelectedGroupDebugGraphRoutes(groupSegs) {
+        if (!Array.isArray(groupSegs) || groupSegs.length === 0) return [];
+        const TS = GameEngine.TILE_SIZE || 64;
+        const nodes = new Map();
+        const outgoing = new Map();
+        const incoming = new Map();
+        const keyOf = (point) => `${Math.round(point.x)},${Math.round(point.y)}`;
+        const edgeKey = (a, b) => `${a}>${b}`;
+        const sortKeys = (list) => [...list].sort((a, b) => {
+            const [ax, ay] = a.split(",").map(Number);
+            const [bx, by] = b.split(",").map(Number);
+            return ay - by || ax - bx || String(a).localeCompare(String(b));
+        });
+        const addNode = (point) => {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+            const key = keyOf(point);
+            if (!nodes.has(key)) nodes.set(key, { x: Math.round(point.x), y: Math.round(point.y) });
+            if (!outgoing.has(key)) outgoing.set(key, new Set());
+            if (!incoming.has(key)) incoming.set(key, new Set());
+            return key;
+        };
+        const addEdge = (a, b) => {
+            const ak = addNode(a);
+            const bk = addNode(b);
+            if (!ak || !bk || ak === bk) return;
+            outgoing.get(ak).add(bk);
+            incoming.get(bk).add(ak);
+        };
+
+        groupSegs.forEach(seg => {
+            const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+            if (points.length < 2) return;
+            const suppressedKey = seg?.suppressOpenEndpointCell ? seg.suppressedOpenEndpointCellKey : null;
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                const dir = LogisticsRenderer.getCardinalDir(a, b);
+                if (!dir) continue;
+                const dist = Math.hypot(b.x - a.x, b.y - a.y);
+                const steps = Math.max(1, Math.round(dist / TS));
+                let previous = null;
+                for (let step = 0; step <= steps; step++) {
+                    const point = step === steps
+                        ? b
+                        : { x: a.x + dir.x * TS * step, y: a.y + dir.y * TS * step };
+                    const key = keyOf(point);
+                    if (suppressedKey && key === suppressedKey && step === steps) continue;
+                    addNode(point);
+                    if (previous) addEdge(nodes.get(previous), point);
+                    previous = key;
+                }
+            }
+        });
+
+        if (nodes.size < 2) return [];
+
+        const routes = [];
+        const visitedEdges = new Set();
+        const walk = (startKey, nextKey) => {
+            const path = [nodes.get(startKey)];
+            let previousKey = startKey;
+            let currentKey = nextKey;
+            while (currentKey && nodes.has(currentKey)) {
+                visitedEdges.add(edgeKey(previousKey, currentKey));
+                path.push(nodes.get(currentKey));
+                const nextKeys = sortKeys(outgoing.get(currentKey) || []);
+                const unvisitedNext = nextKeys.find(key => !visitedEdges.has(edgeKey(currentKey, key)));
+                const inDegree = incoming.get(currentKey)?.size || 0;
+                const outDegree = outgoing.get(currentKey)?.size || 0;
+                if (inDegree !== 1 || outDegree !== 1 || !unvisitedNext) break;
+                previousKey = currentKey;
+                currentKey = unvisitedNext;
+            }
+            if (path.length >= 2) routes.push(path.map(point => ({ x: point.x, y: point.y })));
+        };
+
+        const allKeys = sortKeys(nodes.keys());
+        allKeys
+            .filter(key => (incoming.get(key)?.size || 0) === 0)
+            .forEach(key => {
+                sortKeys(outgoing.get(key) || []).forEach(nextKey => {
+                    const ek = edgeKey(key, nextKey);
+                    if (!visitedEdges.has(ek)) walk(key, nextKey);
+                });
+            });
+
+        allKeys.forEach(key => {
+            const inDegree = incoming.get(key)?.size || 0;
+            const outDegree = outgoing.get(key)?.size || 0;
+            if (inDegree === 1 && outDegree === 1) return;
+            sortKeys(outgoing.get(key) || []).forEach(nextKey => {
+                const ek = edgeKey(key, nextKey);
+                if (!visitedEdges.has(ek)) walk(key, nextKey);
+            });
+        });
+
+        return routes;
+    }
+
+    static getDebugLabelCellKeys(groupSegs) {
+        const keys = new Set();
+        if (!Array.isArray(groupSegs)) return keys;
+        const TS = GameEngine.TILE_SIZE || 64;
+        const keyOf = (point) => `${Math.round(point.x)},${Math.round(point.y)}`;
+        const startKeys = new Set();
+        const terminalCandidates = [];
+        groupSegs.forEach(seg => {
+            const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+            if (points.length < 2) return;
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                const dir = LogisticsRenderer.getCardinalDir(a, b);
+                if (!dir) continue;
+                const dist = Math.hypot(b.x - a.x, b.y - a.y);
+                const steps = Math.max(1, Math.round(dist / TS));
+                for (let step = 0; step < steps; step++) {
+                    keys.add(keyOf({ x: a.x + dir.x * TS * step, y: a.y + dir.y * TS * step }));
+                }
+                startKeys.add(keyOf(a));
+                if (i === points.length - 2 && !seg.targetId && !seg.suppressOpenEndpointCell) {
+                    terminalCandidates.push(keyOf(b));
+                }
+            }
+        });
+        terminalCandidates.forEach(key => {
+            if (!startKeys.has(key)) keys.add(key);
+        });
+        return keys;
+    }
+
+    static renderDebugRouteNumberSprites(scene, groupKey, routes, groupSegs = null) {
+        if (!Array.isArray(routes) || routes.length === 0) return;
+        const seen = new Set();
+        const labelKeys = LogisticsRenderer.getDebugLabelCellKeys(groupSegs);
+        let labelIndex = 0;
+        routes.forEach((points, routeIndex) => {
+            if (!Array.isArray(points)) return;
+            points.forEach(point => {
+                if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+                const key = `${Math.round(point.x)},${Math.round(point.y)}`;
+                if (labelKeys.size > 0 && !labelKeys.has(key)) return;
+                if (seen.has(key)) return;
+                seen.add(key);
+                LogisticsRenderer.renderLogisticsNumberSprite(
+                    scene,
+                    `${groupKey || "group"}_debug_${routeIndex}_${key}`,
+                    String(labelIndex++),
+                    point.x,
+                    point.y
+                );
+            });
+        });
+    }
+
     static getSelectedGroupDebugRoutePoints(state, groupKey, groupSegs) {
         const routes = [];
         const seen = new Set();
@@ -2122,9 +2268,7 @@ export class LogisticsRenderer {
             routes.push(clean);
         };
 
-        if (conveyorSystem && typeof conveyorSystem.buildLogisticsGraphRoutePoints === 'function') {
-            addRoute(conveyorSystem.buildLogisticsGraphRoutePoints(groupSegs));
-        }
+        LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(groupSegs).forEach(addRoute);
         if (routes.length > 0) return routes;
 
         (state.mapEntities || []).forEach(ent => {
@@ -2139,14 +2283,7 @@ export class LogisticsRenderer {
         (Array.isArray(groupSegs) ? groupSegs : []).forEach(seg => {
             const pts = normalize(seg?.routePoints);
             if (!pts) return;
-            pts.forEach((point, index) => {
-                const prev = fallback[fallback.length - 1];
-                if (index > 0 || fallback.length === 0) {
-                    if (!prev || Math.round(prev.x) !== Math.round(point.x) || Math.round(prev.y) !== Math.round(point.y)) {
-                        fallback.push(point);
-                    }
-                }
-            });
+            addRoute(pts);
         });
         addRoute(fallback);
         return routes;

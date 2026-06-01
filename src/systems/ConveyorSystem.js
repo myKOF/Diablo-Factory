@@ -706,6 +706,25 @@ export class ConveyorSystem {
                 });
                 
                 let isTrueEnd = isNearEndpoint;
+                if (isTrueEnd) {
+                    const sourceLineKey = this.getLogisticsLineSelectionKey(drag.sourceLine);
+                    const terminalSourceEndpoints = [];
+                    lines.forEach(line => {
+                        if (!line || this.getLogisticsLineSelectionKey(line) !== sourceLineKey) return;
+                        const pts = Array.isArray(line.routePoints) ? line.routePoints : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
+                        if (pts.length < 2) return;
+                        const p1 = this.toGrid(pts[0].x, pts[0].y);
+                        const p2 = this.toGrid(pts[pts.length - 1].x, pts[pts.length - 1].y);
+                        const k1 = `${p1.x},${p1.y}`;
+                        const k2 = `${p2.x},${p2.y}`;
+                        if (gridCounts.get(k1) === 1 || lines.length === 1) terminalSourceEndpoints.push(p1);
+                        if (gridCounts.get(k2) === 1 || lines.length === 1) terminalSourceEndpoints.push(p2);
+                    });
+                    isTrueEnd = terminalSourceEndpoints.some(ep => {
+                        const dist = Math.max(Math.abs(ep.x - startGrid.x), Math.abs(ep.y - startGrid.y));
+                        return dist <= this.getRouteScale();
+                    });
+                }
 
                 if (isTrueEnd) {
                     shouldMergeWithSource = true;
@@ -731,12 +750,17 @@ export class ConveyorSystem {
 
                 if (!shouldMergeWithSource) {
                     middleExtensionSplit = this.splitSourceGroupForMiddleExtension(drag);
-                    if (middleExtensionSplit) shouldMergeWithSource = true;
+                    if (middleExtensionSplit) {
+                        shouldMergeWithSource = true;
+                        if (middleExtensionSplit.attachPoint && points.length > 0) {
+                            points[0] = { ...middleExtensionSplit.attachPoint };
+                        }
+                    }
                 }
             }
 
             const createdLine = this.upsertLogisticsLine({
-                lineId: shouldMergeWithSource ? (drag.sourceLine.groupId || drag.sourceLine.id) : null,
+                lineId: shouldMergeWithSource ? (middleExtensionSplit?.sourceGroupId || sourceGroupId || drag.sourceLine.groupId || drag.sourceLine.id) : null,
                 sourceEnt: sourceEntity,
                 targetEnt: targetBuilding,
                 targetPoint: targetPort || points[points.length - 1],
@@ -778,6 +802,24 @@ export class ConveyorSystem {
                 GameEngine.state.logisticsTurnArrowOverrides = savedTurnArrowOverrides;
                 this.cancelDrag();
                 return;
+            }
+            if (drag.isLineExtension && finalGroupId && GameEngine.state) {
+                const finalSegments = this.getLogisticsSegmentsByGroupId(finalGroupId);
+                const activeSegment = finalSegments
+                    .slice()
+                    .sort((a, b) =>
+                        (Number(a?.createdAt) || 0) - (Number(b?.createdAt) || 0) ||
+                        (Number(a?.order) || 0) - (Number(b?.order) || 0)
+                    )
+                    .pop() || this.getLogisticsLineById(finalGroupId);
+                GameEngine.state.selectedLogisticsGroupId = finalGroupId;
+                GameEngine.state.selectedLogisticsLineId = activeSegment
+                    ? this.getLogisticsLineSelectionKey(activeSegment)
+                    : null;
+                if (window.UIManager) {
+                    window.UIManager.activeLogisticsLine = activeSegment || null;
+                    window.UIManager.activeLogisticsConnection = null;
+                }
             }
             GameEngine.addLog(`[物流] 傳送帶建造完成，共 ${builtSegments} 節。`, 'LOGISTICS');
         }
@@ -876,10 +918,18 @@ export class ConveyorSystem {
         const groupSegments = this.getLogisticsSegmentsByGroupId(sourceGroupId);
         if (!Array.isArray(groupSegments) || groupSegments.length < 2) return null;
 
-        const ordered = this.orderLogisticsSegmentsByDirection(groupSegments);
         const TS = GameEngine.TILE_SIZE || 20;
         const startPoint = { x: drag.startX, y: drag.startY };
         const getRoute = (seg) => Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+        const getSegmentKey = (seg) => this.getLogisticsLineSelectionKey(seg) || seg?.id || `${seg?.x},${seg?.y}`;
+        const getPointKey = (point) => point ? `${Math.round(point.x)},${Math.round(point.y)}` : null;
+        const getStartPoint = (seg) => getRoute(seg)[0] || null;
+        const getEndPoint = (seg) => {
+            const route = getRoute(seg);
+            return route[route.length - 1] || null;
+        };
+        const getSourceLineMatchKey = () => this.getLogisticsLineSelectionKey(sourceLine) || sourceLine?.id || null;
+        const ordered = this.orderLogisticsSegmentsByDirection(groupSegments);
         const firstRoute = getRoute(ordered[0]);
         const lastRoute = getRoute(ordered[ordered.length - 1]);
         const groupStart = firstRoute[0] || null;
@@ -907,32 +957,151 @@ export class ConveyorSystem {
             return best;
         };
 
-        let splitIndex = ordered.findIndex(seg =>
+        const sourceLineMatchKey = getSourceLineMatchKey();
+        let splitSegment = ordered.find(seg =>
             seg === sourceLine ||
             (sourceLine.id && seg.id === sourceLine.id) ||
-            this.getLogisticsLineSelectionKey(seg) === this.getLogisticsLineSelectionKey(sourceLine)
-        );
-        if (splitIndex < 0) {
+            this.getLogisticsLineSelectionKey(seg) === sourceLineMatchKey
+        ) || null;
+        if (!splitSegment) {
             let bestDistance = Infinity;
-            ordered.forEach((seg, index) => {
+            ordered.forEach((seg) => {
                 const dist = distanceToSegment(startPoint, seg);
                 if (dist < bestDistance) {
                     bestDistance = dist;
-                    splitIndex = index;
+                    splitSegment = seg;
                 }
             });
             if (bestDistance > TS * 0.75) return null;
         }
 
-        const frontSegments = ordered.slice(0, splitIndex + 1);
-        const backSegments = ordered.slice(splitIndex + 1);
+        const graph = new Map();
+        const edgeToSegments = new Map();
+        const addNode = (key) => {
+            if (!key) return;
+            if (!graph.has(key)) graph.set(key, new Set());
+        };
+        const getEdgeKey = (a, b) => a < b ? `${a}|${b}` : `${b}|${a}`;
+        ordered.forEach(seg => {
+            const segKey = getSegmentKey(seg);
+            const route = getRoute(seg);
+            for (let i = 0; i < route.length - 1; i++) {
+                const a = route[i];
+                const b = route[i + 1];
+                if (!a || !b) continue;
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist < 0.001) continue;
+                const dirX = dx / dist;
+                const dirY = dy / dist;
+                const steps = Math.max(1, Math.round(dist / TS));
+                let previousKey = getPointKey(a);
+                addNode(previousKey);
+                for (let step = 1; step <= steps; step++) {
+                    const point = step === steps
+                        ? b
+                        : { x: a.x + dirX * TS * step, y: a.y + dirY * TS * step };
+                    const key = getPointKey(point);
+                    addNode(key);
+                    graph.get(previousKey).add(key);
+                    graph.get(key).add(previousKey);
+                    const edgeKey = getEdgeKey(previousKey, key);
+                    if (!edgeToSegments.has(edgeKey)) edgeToSegments.set(edgeKey, new Set());
+                    edgeToSegments.get(edgeKey).add(segKey);
+                    previousKey = key;
+                }
+            }
+        });
+
+        const nearestNodeKey = (point) => {
+            if (!point || graph.size === 0) return null;
+            let bestKey = null;
+            let bestDistance = Infinity;
+            graph.forEach((_, key) => {
+                const [x, y] = key.split(",").map(Number);
+                const dist = Math.hypot(x - point.x, y - point.y);
+                if (dist < bestDistance) {
+                    bestDistance = dist;
+                    bestKey = key;
+                }
+            });
+            return bestKey;
+        };
+        const findNodePath = (startKey, endKey) => {
+            if (!startKey || !endKey) return null;
+            const queue = [startKey];
+            const visited = new Set([startKey]);
+            const previous = new Map();
+            while (queue.length > 0) {
+                const current = queue.shift();
+                if (current === endKey) break;
+                (graph.get(current) || new Set()).forEach(next => {
+                    if (visited.has(next)) return;
+                    visited.add(next);
+                    previous.set(next, current);
+                    queue.push(next);
+                });
+            }
+            if (!visited.has(endKey)) return null;
+            const path = [];
+            let current = endKey;
+            while (current) {
+                path.unshift(current);
+                if (current === startKey) break;
+                current = previous.get(current);
+            }
+            return path[0] === startKey ? path : null;
+        };
+
+        const sourcePort = ordered.find(seg => seg?.sourcePort)?.sourcePort || null;
+        const sequenceStart = getStartPoint(ordered[0]);
+        const sourceKey = nearestNodeKey(sourcePort || sequenceStart);
+        const splitStartPoint = getStartPoint(splitSegment);
+        const branchKey = getPointKey(splitStartPoint) || nearestNodeKey(startPoint);
+        const sourceToBranchPath = findNodePath(sourceKey, branchKey);
+        const keepSegmentKeys = new Set();
+        const sourceSegmentKey = getSegmentKey(splitSegment);
+        if (sourceToBranchPath && sourceToBranchPath.length >= 2) {
+            for (let i = 0; i < sourceToBranchPath.length - 1; i++) {
+                const edgeKey = getEdgeKey(sourceToBranchPath[i], sourceToBranchPath[i + 1]);
+                (edgeToSegments.get(edgeKey) || new Set()).forEach(segKey => keepSegmentKeys.add(segKey));
+            }
+        }
+        if (sourceSegmentKey) keepSegmentKeys.delete(sourceSegmentKey);
+
+        let frontSegments = [];
+        let backSegments = [];
+        if (keepSegmentKeys.size > 0) {
+            frontSegments = ordered.filter(seg => keepSegmentKeys.has(getSegmentKey(seg)));
+            backSegments = ordered.filter(seg => !keepSegmentKeys.has(getSegmentKey(seg)));
+        } else {
+            const byStartKey = new Map();
+            ordered.forEach(seg => {
+                const key = getPointKey(getStartPoint(seg));
+                if (!key) return;
+                if (!byStartKey.has(key)) byStartKey.set(key, []);
+                byStartKey.get(key).push(seg);
+            });
+            const downstream = new Set();
+            const queue = [splitSegment, ...(byStartKey.get(getPointKey(getEndPoint(splitSegment))) || [])];
+            while (queue.length > 0) {
+                const seg = queue.shift();
+                if (!seg) continue;
+                const segKey = getSegmentKey(seg);
+                if (!segKey || downstream.has(segKey)) continue;
+                downstream.add(segKey);
+                (byStartKey.get(getPointKey(getEndPoint(seg))) || []).forEach(next => queue.push(next));
+            }
+            frontSegments = ordered.filter(seg => !downstream.has(getSegmentKey(seg)));
+            backSegments = ordered.filter(seg => downstream.has(getSegmentKey(seg)));
+        }
         if (frontSegments.length === 0 || backSegments.length === 0) return null;
 
         const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-        const frontTail = frontSegments[frontSegments.length - 1];
+        const frontTail = frontSegments[frontSegments.length - 1] || null;
         const backHead = backSegments[0];
-        const backHeadRoute = getRoute(backHead);
-        const detachPoint = backHeadRoute[0] || getRoute(frontTail).slice(-1)[0] || null;
+        const detachPoint = getStartPoint(splitSegment) || getEndPoint(frontTail) || getStartPoint(backHead) || null;
         const detachKey = detachPoint ? `${Math.round(detachPoint.x)},${Math.round(detachPoint.y)}` : null;
 
         if (frontTail) frontTail.nextId = null;
@@ -952,7 +1121,11 @@ export class ConveyorSystem {
 
         this.orderLogisticsSegmentsByDirection(frontSegments);
         this.orderLogisticsSegmentsByDirection(backSegments);
-        return { sourceGroupId, detachedGroupId: newGroupId };
+        return {
+            sourceGroupId,
+            detachedGroupId: newGroupId,
+            attachPoint: detachPoint ? { x: detachPoint.x, y: detachPoint.y } : null
+        };
     }
 
     cancelDrag() {
@@ -1851,6 +2024,7 @@ export class ConveyorSystem {
                 if (key && !occupied.has(key)) occupied.set(key, item);
             });
             getSegmentTileKeys(item).forEach(key => {
+                if (item?.detachedFromGroupId === groupId && item?.detachedAtKey === key) return;
                 if (!occupiedTileCenters.has(key)) occupiedTileCenters.set(key, []);
                 occupiedTileCenters.get(key).push(item);
             });
@@ -2093,7 +2267,6 @@ export class ConveyorSystem {
         const primaryLines = this.getLogisticsSegmentsByGroupId(primaryGroupId);
         const secondaryLines = this.getLogisticsSegmentsByGroupId(secondaryGroupId);
         if (!primaryLines.length || !secondaryLines.length) return false;
-
         const getEndpointDirs = (line) => {
             const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
             if (points.length < 2) return [];
