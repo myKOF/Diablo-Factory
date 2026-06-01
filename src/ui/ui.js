@@ -1597,6 +1597,7 @@ export class UIManager {
 
         // 僅處理左鍵
         if (e.button !== 0) return;
+        if (this.isLogisticsDragging && GameEngine.state.logisticsDragLine) return;
 
         this.leftMouseDownPos = { x: e.clientX, y: e.clientY };
         const world = this.getWorldPoint(e.clientX, e.clientY);
@@ -1620,8 +1621,18 @@ export class UIManager {
             }
         }
 
-        const clickedLine = conveyorSystem.getLogisticsLineAt(worldX, worldY);
+        const clickedLines = typeof conveyorSystem.getLogisticsLinesAt === 'function'
+            ? conveyorSystem.getLogisticsLinesAt(worldX, worldY)
+            : [];
+        const clickedSelectedLine = clickedLines.find(line => conveyorSystem.isSelectedLogisticsLine(line)) || null;
+        const clickedLine = clickedSelectedLine || clickedLines[0] || conveyorSystem.getLogisticsLineAt(worldX, worldY);
         const isDoubleClick = (e.detail || 0) >= 2;
+        if (clickedSelectedLine) {
+            GameEngine.state.selectedLogisticsClickX = worldX;
+            GameEngine.state.selectedLogisticsClickY = worldY;
+            LogisticsUI.beginLogisticsDragFromLine(clickedSelectedLine, worldX, worldY);
+            return;
+        }
         if (LogisticsUI.isTransportLinePlacementActive() && GameEngine.state.buildingMode === 'STAMP') {
             this.potentialTransportLineBuildDrag = {
                 startX: e.clientX,
@@ -1630,12 +1641,6 @@ export class UIManager {
                 worldY,
                 clickedLine: clickedLine || null
             };
-            return;
-        }
-        if (clickedLine && !isDoubleClick && conveyorSystem.isSelectedLogisticsLine(clickedLine) && GameEngine.state.buildingMode === 'NONE') {
-            GameEngine.state.selectedLogisticsClickX = worldX;
-            GameEngine.state.selectedLogisticsClickY = worldY;
-            LogisticsUI.beginLogisticsDragFromLine(clickedLine, worldX, worldY);
             return;
         }
 

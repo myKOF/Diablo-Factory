@@ -435,6 +435,12 @@ export class LogisticsUI {
         LogisticsUI.isLogisticsDragging = true;
         LogisticsUI.activeLogisticsLine = line;
         LogisticsUI.activeLogisticsConnection = null;
+        GameEngine.state.buildingMode = 'NONE';
+        GameEngine.state.placingType = null;
+        GameEngine.state.activeTransportLineType = null;
+        GameEngine.state.lineStartPos = null;
+        GameEngine.state.linePreviewEntities = [];
+        GameEngine.state.previewPos = null;
         GameEngine.state.selectedLogisticsLineId = conveyorSystem.getLogisticsLineSelectionKey(line);
         GameEngine.state.selectedLogisticsGroupId = null;
         GameEngine.state.logisticsDragLine = { active: true };

@@ -7,6 +7,8 @@ import { LogisticsRenderer } from "../renderers/logistics_renderer.js";
 import { BuildingRenderer } from "../renderers/building_renderer.js";
 import { HUDRenderer } from "../renderers/hud_renderer.js";
 import { InputSystem } from "../systems/InputSystem.js";
+import { conveyorSystem } from "../systems/ConveyorSystem.js";
+import { LogisticsUI } from "../ui/LogisticsUI.js";
 
 export class MainScene extends Phaser.Scene {
     constructor() {
@@ -144,6 +146,11 @@ export class MainScene extends Phaser.Scene {
             this.logisticsTransferGraphics = this.add.graphics();
             const logCfg = UI_CONFIG.LogisticsSystem || { transferItemDepth: 900000 };
             this.logisticsTransferGraphics.setDepth(logCfg.transferItemDepth || 900000);
+        }
+        if (!this.logisticsPreviewGraphics) {
+            this.logisticsPreviewGraphics = this.add.graphics();
+            const logCfg = UI_CONFIG.LogisticsSystem || { transferItemDepth: 900000 };
+            this.logisticsPreviewGraphics.setDepth((logCfg.transferItemDepth || 900000) - 1);
         }
 
         // 相機控制
@@ -419,9 +426,24 @@ export class MainScene extends Phaser.Scene {
             const isMiddleDrag = pointer.middleButtonDown();
             const isRightDrag = pointer.rightButtonDown();
 
-            if (pointer.leftButtonDown() && !isPlacement && !isMiddleDrag) {
-                this.selectionStartPos = this.screenToWorldPoint(pointer.x, pointer.y);
-                this.mouseDownScreenPos = { x: pointer.x, y: pointer.y };
+            if (pointer.leftButtonDown() && !isMiddleDrag) {
+                const worldPoint = this.screenToWorldPoint(pointer.x, pointer.y);
+                const clickedLines = typeof conveyorSystem.getLogisticsLinesAt === 'function'
+                    ? conveyorSystem.getLogisticsLinesAt(worldPoint.x, worldPoint.y)
+                    : [];
+                const clickedSelectedLine = clickedLines.find(line => conveyorSystem.isSelectedLogisticsLine(line)) || null;
+                if (clickedSelectedLine) {
+                    GameEngine.state.selectedLogisticsClickX = worldPoint.x;
+                    GameEngine.state.selectedLogisticsClickY = worldPoint.y;
+                    LogisticsUI.beginLogisticsDragFromLine(clickedSelectedLine, worldPoint.x, worldPoint.y);
+                    if (pointer.event?.preventDefault) pointer.event.preventDefault();
+                    if (pointer.event?.stopPropagation) pointer.event.stopPropagation();
+                    return;
+                }
+                if (!isPlacement) {
+                    this.selectionStartPos = worldPoint;
+                    this.mouseDownScreenPos = { x: pointer.x, y: pointer.y };
+                }
             }
 
             if (isMiddleDrag) {
@@ -767,7 +789,6 @@ export class MainScene extends Phaser.Scene {
 
     getLogisticsRenderSignature(state) {
         const lines = Array.isArray(state.logisticsLines) ? state.logisticsLines : [];
-        const ghostCount = Array.isArray(state.conveyorGhosts) ? state.conveyorGhosts.length : 0;
         let outputTargetCount = 0;
         let outputTargetState = "";
         if (Array.isArray(state.mapEntities)) {
@@ -790,8 +811,6 @@ export class MainScene extends Phaser.Scene {
             lineState,
             outputTargetCount,
             outputTargetState,
-            ghostCount,
-            state.logisticsDragLine ? 1 : 0,
             state.selectedLogisticsLineId || "",
             state.selectedLogisticsGroupId || ""
         ].join("|");
@@ -803,20 +822,26 @@ export class MainScene extends Phaser.Scene {
         const hasStaticContent =
             (Array.isArray(state.logisticsLines) && state.logisticsLines.length > 0) ||
             (Array.isArray(state.mapEntities) && state.mapEntities.some(ent => ent?.outputTargets?.length > 0));
-        const hasStaticDynamicContent =
+        const hasPreviewContent =
             !!state.logisticsDragLine ||
             (Array.isArray(state.conveyorGhosts) && state.conveyorGhosts.length > 0);
         const hasTransferContent =
             Array.isArray(state.activeTransfers) && state.activeTransfers.length > 0;
 
-        if (!hasStaticContent && !hasStaticDynamicContent && !hasTransferContent) {
+        if (!hasStaticContent && !hasPreviewContent && !hasTransferContent) {
             if (this._logisticsLayerWasDrawn) {
                 this.logisticsGraphics.clear();
+                if (this.logisticsPreviewGraphics) this.logisticsPreviewGraphics.clear();
                 this.logisticsTransferGraphics.clear();
                 this._logisticsLayerWasDrawn = false;
                 if (this.logisticsNumberTexts) {
                     this.logisticsNumberTexts.forEach(txt => {
                         if (txt && txt.setVisible) txt.setVisible(false);
+                    });
+                }
+                if (this.logisticsNumberSprites) {
+                    this.logisticsNumberSprites.forEach(sprite => {
+                        if (sprite && sprite.setVisible) sprite.setVisible(false);
                     });
                 }
                 if (this.logisticsTransferNumberTexts) {
@@ -834,9 +859,9 @@ export class MainScene extends Phaser.Scene {
         }
 
         const signature = this.getLogisticsRenderSignature(state);
-        if (hasStaticContent || hasStaticDynamicContent) {
-            if (hasStaticDynamicContent || this._lastLogisticsRenderSignature !== signature) {
-                LogisticsRenderer.render(this.logisticsGraphics, state, this, { drawTransfers: false });
+        if (hasStaticContent) {
+            if (this._lastLogisticsRenderSignature !== signature) {
+                LogisticsRenderer.render(this.logisticsGraphics, state, this, { drawTransfers: false, drawBuildPreview: false });
                 this._lastLogisticsRenderSignature = signature;
                 this._logisticsLayerWasDrawn = true;
             }
@@ -844,6 +869,16 @@ export class MainScene extends Phaser.Scene {
             this.logisticsGraphics.clear();
             this._lastLogisticsRenderSignature = "";
             this._logisticsLayerWasDrawn = false;
+        }
+
+        if (this.logisticsPreviewGraphics) {
+            if (hasPreviewContent) {
+                LogisticsRenderer.renderBuildPreview(this.logisticsPreviewGraphics, state, this);
+                this._logisticsPreviewLayerWasDrawn = true;
+            } else if (this._logisticsPreviewLayerWasDrawn) {
+                this.logisticsPreviewGraphics.clear();
+                this._logisticsPreviewLayerWasDrawn = false;
+            }
         }
 
         if (hasTransferContent) {
@@ -2569,6 +2604,8 @@ export class MainScene extends Phaser.Scene {
      */
     handleSelectionMove(e) {
         if (window.GAME_STATE && window.GAME_STATE.logisticsDragLine) {
+            this.selectionStartPos = null;
+            this.mouseDownScreenPos = null;
             if (this.marqueeGraphics) this.marqueeGraphics.visible = false;
             return;
         }
@@ -2611,7 +2648,12 @@ export class MainScene extends Phaser.Scene {
      * [核心修補] 全域框選結束處理：解決鼠標移出視窗後鎖死的問題
      */
     handleSelectionEnd(e) {
-        if (window.GAME_STATE && window.GAME_STATE.logisticsDragLine) return;
+        if (window.GAME_STATE && window.GAME_STATE.logisticsDragLine) {
+            this.selectionStartPos = null;
+            this.mouseDownScreenPos = null;
+            if (this.marqueeGraphics) this.marqueeGraphics.clear();
+            return;
+        }
         if (!this.selectionStartPos) return;
 
         const isPhaserPointer = !!e.worldX;

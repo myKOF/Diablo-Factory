@@ -582,7 +582,12 @@ export class BuildingSystem {
             }
         });
         if (state.selectedLogisticsLineId) {
-            const selectedExists = Array.isArray(state.logisticsLines) && state.logisticsLines.some(line => line.id === state.selectedLogisticsLineId);
+            const selectedExists = Array.isArray(state.logisticsLines) && state.logisticsLines.some(line => {
+                const gx = line.gridX !== undefined ? line.gridX : Math.round((line.x || 0) / (engine.TILE_SIZE / 2));
+                const gy = line.gridY !== undefined ? line.gridY : Math.round((line.y || 0) / (engine.TILE_SIZE / 2));
+                const selectionKey = `${line.id || line.groupId || 'logistics'}@${gx},${gy}`;
+                return line.id === state.selectedLogisticsLineId || selectionKey === state.selectedLogisticsLineId;
+            });
             if (!selectedExists) state.selectedLogisticsLineId = null;
         }
         if (state.selectedLogisticsGroupId) {

@@ -269,7 +269,7 @@ export class LogisticsRenderer {
             }
         };
 
-        const drawConnectedCellOverlay = (points, widthTiles, connectedCellKeys, isPortToPort = true, skipArrowCellKeys = null) => {
+        const drawConnectedCellOverlay = (points, widthTiles, connectedCellKeys, isPortToPort = true, skipArrowCellKeys = null, drawBase = true) => {
             if (!connectedCellKeys || connectedCellKeys.size === 0) return;
             const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true)
                 .filter(rect => rect.cellKey && connectedCellKeys.has(rect.cellKey));
@@ -289,8 +289,10 @@ export class LogisticsRenderer {
             const lineAlpha = isPortToPort
                 ? (logCfg.portToPortLineAlpha ?? logCfg.lineAlpha)
                 : logCfg.lineAlpha;
-            graphics.fillStyle(parseColor(lineColor), lineAlpha);
-            rects.forEach(rect => graphics.fillRect(rect.x, rect.y, rect.w, rect.h));
+            if (drawBase) {
+                graphics.fillStyle(parseColor(lineColor), lineAlpha);
+                rects.forEach(rect => graphics.fillRect(rect.x, rect.y, rect.w, rect.h));
+            }
 
             const arrowColor = isPortToPort
                 ? (logCfg.portToPortArrowColor || logCfg.arrowColor)
@@ -962,9 +964,9 @@ export class LogisticsRenderer {
                         : state.selectedLogisticsLineId === line.id;
                     drawLogisticsRoute(route.points, route.width || widthTiles, isLineSelected, isConnected, line, useConnectedIdleStyle, turnCellKeys);
                 });
-                if (isPortToPortCandidate && isPhysicallyConnected) {
+                if (isPortToPortCandidate && useConnectedIdleStyle) {
                     segmentRoutes.forEach(({ route }) => {
-                        drawConnectedCellOverlay(route.points, route.width || widthTiles, connectedCellKeys, useConnectedIdleStyle, turnCellKeys);
+                        drawConnectedCellOverlay(route.points, route.width || widthTiles, connectedCellKeys, useConnectedIdleStyle, turnCellKeys, useConnectedIdleStyle);
                     });
                 }
                 {
@@ -1000,8 +1002,13 @@ export class LogisticsRenderer {
                     // 紅色方框繪製已經被移至 drawLogisticsRoute 內部 (只針對被選中的單獨 line 繪製)。
 
                     // 顯示格子順序數字 (群組內有任何線段被選中時就顯示整個群組的編號)
-                    if (!scene.logisticsNumberTexts) scene.logisticsNumberTexts = new Map();
-                    if (!scene.logisticsVisibleTextIds) scene.logisticsVisibleTextIds = new Set();
+                    if (scene.logisticsNumberTexts) {
+                        scene.logisticsNumberTexts.forEach(txt => {
+                            if (txt && txt.setVisible) txt.setVisible(false);
+                        });
+                    }
+                    if (!scene.logisticsNumberSprites) scene.logisticsNumberSprites = new Map();
+                    if (!scene.logisticsVisibleNumberSpriteIds) scene.logisticsVisibleNumberSpriteIds = new Set();
                     
                     // ── 純整數半格座標 Map + 有向鏈式排序（O(n)，支援 8 方向，零浮點） ──
                     // startGx/startGy：segment 起點的半格整數座標（優先讀 seg.startGx）
@@ -1149,21 +1156,7 @@ export class LogisticsRenderer {
                         const cy = sp.y;
 
                         const textKey = seg.id || `${seg.x},${seg.y}`;
-                        let txt = scene.logisticsNumberTexts.get(textKey);
-                        if (!txt) {
-                            txt = scene.add.text(cx, cy, String(index), {
-                                fontSize: '16px',
-                                color: '#ffff00',
-                                stroke: '#000000',
-                                strokeThickness: 3
-                            }).setOrigin(0.5).setDepth(600000);
-                            scene.logisticsNumberTexts.set(textKey, txt);
-                        } else {
-                            txt.setText(String(index));
-                            txt.setPosition(cx, cy);
-                            txt.setVisible(true);
-                        }
-                        scene.logisticsVisibleTextIds.add(textKey);
+                        LogisticsRenderer.renderLogisticsNumberSprite(scene, textKey, String(index), cx, cy);
                     });
 
                     if (sortedSegs.length > 0) {
@@ -1174,21 +1167,7 @@ export class LogisticsRenderer {
                             const endTextKey = `${lastSeg.id || lastSeg.x + ',' + lastSeg.y}_endpoint`;
                             const endIndexVal = sortedSegs.length;
 
-                            let txt = scene.logisticsNumberTexts.get(endTextKey);
-                            if (!txt) {
-                                txt = scene.add.text(cx, cy, String(endIndexVal), {
-                                    fontSize: '16px',
-                                    color: '#ffff00',
-                                    stroke: '#000000',
-                                    strokeThickness: 3
-                                }).setOrigin(0.5).setDepth(600000);
-                                scene.logisticsNumberTexts.set(endTextKey, txt);
-                            } else {
-                                txt.setText(String(endIndexVal));
-                                txt.setPosition(cx, cy);
-                                txt.setVisible(true);
-                            }
-                            scene.logisticsVisibleTextIds.add(endTextKey);
+                            LogisticsRenderer.renderLogisticsNumberSprite(scene, endTextKey, String(endIndexVal), cx, cy);
                         }
                     }
 
@@ -1210,6 +1189,7 @@ export class LogisticsRenderer {
             });
             if (scene.logisticsVisibleTextIds) scene.logisticsVisibleTextIds.clear();
         }
+        LogisticsRenderer.endLogisticsNumberSprites(scene);
 
         // 用整個群組拓撲畫轉角箭頭，避免單段 route（通常只有兩點）看不到轉彎。
         const drawnTurnGroups = new Set();
@@ -1269,148 +1249,8 @@ export class LogisticsRenderer {
             });
         }
         flushSelectedLogisticsOutlines();
-        if (state.logisticsDragLine) {
-            const dragPoints = Array.isArray(state.logisticsDragLine.points) && state.logisticsDragLine.points.length >= 2
-                ? state.logisticsDragLine.points
-                : [
-                    { x: state.logisticsDragLine.startX, y: state.logisticsDragLine.startY },
-                    { x: state.logisticsDragLine.endX, y: state.logisticsDragLine.endY }
-                ];
-            const dragColor = parseColor(logCfg.dragLineColor);
-            const dragWidthTiles = Math.max(1, Number(state.logisticsDragLine.lineWidth) || 1);
-            const dragThickness = Math.max(
-                logCfg.dragLineThickness || logCfg.lineThickness || 3,
-                dragWidthTiles * GameEngine.TILE_SIZE * 0.8
-            );
-
-            graphics.lineStyle(dragThickness, dragColor, logCfg.dragLineAlpha);
-            LogisticsRenderer.strokePolyline(graphics, dragPoints);
-        }
-
-        // [New] Conveyor Ghost Rendering
-        if (Array.isArray(state.conveyorGhosts) && state.conveyorGhosts.length > 0) {
-            const TS = GameEngine.TILE_SIZE;
-            const offset = state.mapOffset || { x: 0, y: 0 };
-            const isValid = state.conveyorValid;
-
-            const buildCfg = UI_CONFIG.ConveyorBuild || {};
-            const ghostColor = isValid ? (buildCfg.ghostValidColor ?? 0x00ff00) : (buildCfg.ghostInvalidColor ?? 0xff0000);
-            const ghostAlpha = buildCfg.ghostAlpha ?? 0.5;
-
-            graphics.fillStyle(ghostColor, ghostAlpha);
-            graphics.lineStyle(2, ghostColor, 0.8);
-
-            const alignUnit = Math.max(0.5, Math.min(1, Number(buildCfg.alignmentUnit) || 0.5));
-            const gridUnit = TS * alignUnit;
-            const offsetScale = TS / gridUnit;
-            const routeWidth = Math.max(1, Math.round(Number(state.conveyorRouteWidth) || 1));
-            const previewSegments = [];
-            const pushPreviewSegment = (start, next, targetEnd) => {
-                if (!start || !next) return;
-                const dirX = Math.sign(next.x - start.x);
-                const dirY = Math.sign(next.y - start.y);
-                const canUseTargetEnd = targetEnd &&
-                    Math.sign(targetEnd.x - next.x) === dirX &&
-                    Math.sign(targetEnd.y - next.y) === dirY;
-                let end = canUseTargetEnd ? targetEnd : next;
-                const dx = end.x - start.x;
-                const dy = end.y - start.y;
-                if (Math.hypot(dx, dy) < offsetScale - 0.001) {
-                    end = {
-                        x: start.x + dirX * offsetScale,
-                        y: start.y + dirY * offsetScale
-                    };
-                }
-                if (start.x === end.x && start.y === end.y) return;
-                previewSegments.push({
-                    x: (start.x + end.x) / 2,
-                    y: (start.y + end.y) / 2,
-                    dirOut: {
-                        x: Math.sign(end.x - start.x),
-                        y: Math.sign(end.y - start.y)
-                    },
-                    isMerger: !!(targetEnd && targetEnd.isMerger)
-                });
-            };
-
-            for (let i = 0; i < state.conveyorGhosts.length - 1; i += offsetScale) {
-                pushPreviewSegment(
-                    state.conveyorGhosts[i],
-                    state.conveyorGhosts[Math.min(i + 1, state.conveyorGhosts.length - 1)],
-                    state.conveyorGhosts[Math.min(i + offsetScale, state.conveyorGhosts.length - 1)]
-                );
-            }
-
-            const rawGhostPoints = state.conveyorGhosts.map(point => ({
-                x: (point.x + offset.x * offsetScale) * gridUnit,
-                y: (point.y + offset.y * offsetScale) * gridUnit,
-                isPortConnector: point.isPortConnector
-            }));
-            let ghostPoints = rawGhostPoints;
-            if (conveyorSystem && typeof conveyorSystem.buildGridRoutePoints === 'function' && typeof conveyorSystem.buildLogisticsSegments === 'function') {
-                const gridPoints = conveyorSystem.buildGridRoutePoints(rawGhostPoints);
-                const segments = conveyorSystem.buildLogisticsSegments(
-                    '__preview__',
-                    null,
-                    null,
-                    null,
-                    gridPoints,
-                    routeWidth,
-                    null,
-                    null,
-                    null
-                );
-                const routePoints = [];
-                segments.forEach((segment, index) => {
-                    const segPoints = Array.isArray(segment.routePoints) ? segment.routePoints : [];
-                    if (segPoints.length < 2) return;
-                    if (index === 0) routePoints.push({ x: segPoints[0].x, y: segPoints[0].y });
-                    routePoints.push({ x: segPoints[1].x, y: segPoints[1].y });
-                });
-                if (routePoints.length >= 2) ghostPoints = routePoints;
-            }
-            LogisticsRenderer.drawLogisticsCells(graphics, ghostPoints, routeWidth, 1);
-            const lastGhost = rawGhostPoints[rawGhostPoints.length - 1];
-            const isTargetPort = lastGhost?.isPortConnector;
-            if (!isTargetPort) {
-                const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(ghostPoints, routeWidth);
-                if (endpointRect) {
-                    graphics.fillRect(endpointRect.x, endpointRect.y, endpointRect.w, endpointRect.h);
-                }
-            }
-            const ghostArrowRects = LogisticsRenderer.getLogisticsCellRects(ghostPoints, routeWidth, true);
-            if (!isTargetPort) {
-                const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(ghostPoints, routeWidth);
-                if (endpointRect) ghostArrowRects.push(endpointRect);
-            }
-            if (ghostArrowRects.length > 0) {
-                graphics.fillStyle(ghostColor, 0.85);
-                ghostArrowRects.forEach((rect) => {
-                    const adx = rect.dirX !== undefined ? rect.dirX : 0;
-                    const ady = rect.dirY !== undefined ? rect.dirY : 0;
-                    const len = Math.hypot(adx, ady) || 1;
-                    LogisticsRenderer.drawArrowhead(
-                        graphics,
-                        rect.x + rect.w / 2,
-                        rect.y + rect.h / 2,
-                        adx / len,
-                        ady / len,
-                        5
-                    );
-                });
-            }
-
-            previewSegments.forEach((ghost, ghostIndex) => {
-                const wx = (ghost.x + offset.x * offsetScale) * gridUnit;
-                const wy = (ghost.y + offset.y * offsetScale) * gridUnit;
-
-                // Special marker for mergers
-                if (ghost.isMerger) {
-                    graphics.lineStyle(3, 0xffff00, 1);
-                    graphics.strokeCircle(wx, wy, TS / 3);
-                    graphics.lineStyle(2, ghostColor, 0.8);
-                }
-            });
+        if (options.drawBuildPreview !== false) {
+            LogisticsRenderer.renderBuildPreview(graphics, state, scene, false);
         }
 
         // 繪製自動傳輸線上的動態物品
@@ -1590,6 +1430,238 @@ export class LogisticsRenderer {
         });
         if (useSpriteTransfers) LogisticsRenderer.endTransferSprites(scene);
         else LogisticsRenderer.endTransferSerialLabels(scene);
+    }
+
+    static renderBuildPreview(graphics, state, scene, clear = true) {
+        if (!graphics || !state || !scene) return;
+        if (clear) graphics.clear();
+
+        const logCfg = UI_CONFIG.LogisticsSystem || {
+            lineThickness: 3,
+            dragLineColor: "#8bc34a",
+            dragLineAlpha: 0.8
+        };
+        const parseColor = (c) => scene.hexOrRgba(c).color;
+
+        if (state.logisticsDragLine) {
+            const dragPoints = Array.isArray(state.logisticsDragLine.points) && state.logisticsDragLine.points.length >= 2
+                ? state.logisticsDragLine.points
+                : [
+                    { x: state.logisticsDragLine.startX, y: state.logisticsDragLine.startY },
+                    { x: state.logisticsDragLine.endX, y: state.logisticsDragLine.endY }
+                ];
+            const dragColor = parseColor(logCfg.dragLineColor);
+            const dragWidthTiles = Math.max(1, Number(state.logisticsDragLine.lineWidth) || 1);
+            const dragThickness = Math.max(
+                logCfg.dragLineThickness || logCfg.lineThickness || 3,
+                dragWidthTiles * GameEngine.TILE_SIZE * 0.8
+            );
+
+            graphics.lineStyle(dragThickness, dragColor, logCfg.dragLineAlpha);
+            LogisticsRenderer.strokePolyline(graphics, dragPoints);
+        }
+
+        if (!Array.isArray(state.conveyorGhosts) || state.conveyorGhosts.length === 0) return;
+
+        const TS = GameEngine.TILE_SIZE;
+        const offset = state.mapOffset || { x: 0, y: 0 };
+        const isValid = state.conveyorValid;
+        const buildCfg = UI_CONFIG.ConveyorBuild || {};
+        const ghostColor = isValid ? (buildCfg.ghostValidColor ?? 0x00ff00) : (buildCfg.ghostInvalidColor ?? 0xff0000);
+        const ghostAlpha = buildCfg.ghostAlpha ?? 0.5;
+
+        graphics.fillStyle(ghostColor, ghostAlpha);
+        graphics.lineStyle(2, ghostColor, 0.8);
+
+        const alignUnit = Math.max(0.5, Math.min(1, Number(buildCfg.alignmentUnit) || 0.5));
+        const gridUnit = TS * alignUnit;
+        const offsetScale = TS / gridUnit;
+        const routeWidth = Math.max(1, Math.round(Number(state.conveyorRouteWidth) || 1));
+        const previewSegments = [];
+        const pushPreviewSegment = (start, next, targetEnd) => {
+            if (!start || !next) return;
+            const dirX = Math.sign(next.x - start.x);
+            const dirY = Math.sign(next.y - start.y);
+            const canUseTargetEnd = targetEnd &&
+                Math.sign(targetEnd.x - next.x) === dirX &&
+                Math.sign(targetEnd.y - next.y) === dirY;
+            let end = canUseTargetEnd ? targetEnd : next;
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            if (Math.hypot(dx, dy) < offsetScale - 0.001) {
+                end = {
+                    x: start.x + dirX * offsetScale,
+                    y: start.y + dirY * offsetScale
+                };
+            }
+            if (start.x === end.x && start.y === end.y) return;
+            previewSegments.push({
+                x: (start.x + end.x) / 2,
+                y: (start.y + end.y) / 2,
+                isMerger: !!(targetEnd && targetEnd.isMerger)
+            });
+        };
+
+        for (let i = 0; i < state.conveyorGhosts.length - 1; i += offsetScale) {
+            pushPreviewSegment(
+                state.conveyorGhosts[i],
+                state.conveyorGhosts[Math.min(i + 1, state.conveyorGhosts.length - 1)],
+                state.conveyorGhosts[Math.min(i + offsetScale, state.conveyorGhosts.length - 1)]
+            );
+        }
+
+        const rawGhostPoints = state.conveyorGhosts.map(point => ({
+            x: (point.x + offset.x * offsetScale) * gridUnit,
+            y: (point.y + offset.y * offsetScale) * gridUnit,
+            isPortConnector: point.isPortConnector
+        }));
+        let ghostPoints = rawGhostPoints;
+        if (conveyorSystem && typeof conveyorSystem.buildGridRoutePoints === 'function' && typeof conveyorSystem.buildLogisticsSegments === 'function') {
+            const gridPoints = conveyorSystem.buildGridRoutePoints(rawGhostPoints);
+            const segments = conveyorSystem.buildLogisticsSegments(
+                '__preview__',
+                null,
+                null,
+                null,
+                gridPoints,
+                routeWidth,
+                null,
+                null,
+                null
+            );
+            const routePoints = [];
+            segments.forEach((segment, index) => {
+                const segPoints = Array.isArray(segment.routePoints) ? segment.routePoints : [];
+                if (segPoints.length < 2) return;
+                if (index === 0) routePoints.push({ x: segPoints[0].x, y: segPoints[0].y });
+                routePoints.push({ x: segPoints[1].x, y: segPoints[1].y });
+            });
+            if (routePoints.length >= 2) ghostPoints = routePoints;
+        }
+
+        LogisticsRenderer.drawLogisticsCells(graphics, ghostPoints, routeWidth, 1);
+        const lastGhost = rawGhostPoints[rawGhostPoints.length - 1];
+        const isTargetPort = lastGhost?.isPortConnector;
+        if (!isTargetPort) {
+            const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(ghostPoints, routeWidth);
+            if (endpointRect) {
+                graphics.fillRect(endpointRect.x, endpointRect.y, endpointRect.w, endpointRect.h);
+            }
+        }
+        const ghostArrowRects = LogisticsRenderer.getLogisticsCellRects(ghostPoints, routeWidth, true);
+        if (!isTargetPort) {
+            const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(ghostPoints, routeWidth);
+            if (endpointRect) ghostArrowRects.push(endpointRect);
+        }
+        if (ghostArrowRects.length > 0) {
+            graphics.fillStyle(ghostColor, 0.85);
+            ghostArrowRects.forEach((rect) => {
+                const adx = rect.dirX !== undefined ? rect.dirX : 0;
+                const ady = rect.dirY !== undefined ? rect.dirY : 0;
+                const len = Math.hypot(adx, ady) || 1;
+                LogisticsRenderer.drawArrowhead(
+                    graphics,
+                    rect.x + rect.w / 2,
+                    rect.y + rect.h / 2,
+                    adx / len,
+                    ady / len,
+                    5
+                );
+            });
+        }
+
+        previewSegments.forEach((ghost) => {
+            const wx = (ghost.x + offset.x * offsetScale) * gridUnit;
+            const wy = (ghost.y + offset.y * offsetScale) * gridUnit;
+            if (ghost.isMerger) {
+                graphics.lineStyle(3, 0xffff00, 1);
+                graphics.strokeCircle(wx, wy, TS / 3);
+                graphics.lineStyle(2, ghostColor, 0.8);
+            }
+        });
+    }
+
+    static getLogisticsNumberAtlasKey() {
+        return "logistics_number_labels_40x24_yellow";
+    }
+
+    static getLogisticsNumberFrameName(label) {
+        return `n_${String(label || "0").replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+    }
+
+    static ensureLogisticsNumberTexture(scene, label) {
+        if (!scene || !scene.textures) return { key: null, frame: null };
+        const key = LogisticsRenderer.getLogisticsNumberAtlasKey();
+        const frame = LogisticsRenderer.getLogisticsNumberFrameName(label);
+        if (!scene.logisticsNumberAtlas) {
+            const frameW = 40;
+            const frameH = 24;
+            const cols = 25;
+            const rows = 25;
+            const texture = scene.textures.exists(key)
+                ? scene.textures.get(key)
+                : scene.textures.createCanvas(key, cols * frameW, rows * frameH);
+            scene.logisticsNumberAtlas = { texture, frameW, frameH, cols, rows, nextIndex: 0, frames: new Set() };
+        }
+
+        const atlas = scene.logisticsNumberAtlas;
+        if (!atlas.texture || atlas.frames.has(frame) || (atlas.texture.has && atlas.texture.has(frame))) {
+            atlas.frames.add(frame);
+            return { key, frame };
+        }
+
+        const slot = atlas.nextIndex++;
+        if (slot >= atlas.cols * atlas.rows) return { key: null, frame: null };
+
+        const x = (slot % atlas.cols) * atlas.frameW;
+        const y = Math.floor(slot / atlas.cols) * atlas.frameH;
+        const ctx = atlas.texture.getContext();
+        ctx.clearRect(x, y, atlas.frameW, atlas.frameH);
+        ctx.font = "16px Arial, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#000000";
+        ctx.fillStyle = "#ffff00";
+        ctx.strokeText(String(label), x + atlas.frameW / 2, y + atlas.frameH / 2);
+        ctx.fillText(String(label), x + atlas.frameW / 2, y + atlas.frameH / 2);
+        if (atlas.texture.add) atlas.texture.add(frame, 0, x, y, atlas.frameW, atlas.frameH);
+        atlas.texture.refresh();
+        atlas.frames.add(frame);
+        return { key, frame };
+    }
+
+    static renderLogisticsNumberSprite(scene, id, label, x, y) {
+        if (!scene || !scene.add || !scene.add.image) return;
+        if (!scene.logisticsNumberSprites) scene.logisticsNumberSprites = new Map();
+        if (!scene.logisticsVisibleNumberSpriteIds) scene.logisticsVisibleNumberSpriteIds = new Set();
+
+        const textureInfo = LogisticsRenderer.ensureLogisticsNumberTexture(scene, label);
+        if (!textureInfo.key) return;
+
+        let sprite = scene.logisticsNumberSprites.get(id);
+        if (!sprite) {
+            sprite = scene.add.image(x, y, textureInfo.key, textureInfo.frame).setOrigin(0.5).setDepth(600000);
+            scene.logisticsNumberSprites.set(id, sprite);
+        } else {
+            if (sprite.texture?.key !== textureInfo.key || sprite.frame?.name !== textureInfo.frame) {
+                sprite.setTexture(textureInfo.key, textureInfo.frame);
+            }
+            sprite.setPosition(x, y);
+            if (sprite.depth !== 600000) sprite.setDepth(600000);
+            sprite.setVisible(true);
+        }
+        scene.logisticsVisibleNumberSpriteIds.add(id);
+    }
+
+    static endLogisticsNumberSprites(scene) {
+        if (!scene || !scene.logisticsNumberSprites) return;
+        scene.logisticsNumberSprites.forEach((sprite, key) => {
+            if (!scene.logisticsVisibleNumberSpriteIds || !scene.logisticsVisibleNumberSpriteIds.has(key)) {
+                sprite.setVisible(false);
+            }
+        });
+        if (scene.logisticsVisibleNumberSpriteIds) scene.logisticsVisibleNumberSpriteIds.clear();
     }
 
     static canUseTransferSprites(scene) {
