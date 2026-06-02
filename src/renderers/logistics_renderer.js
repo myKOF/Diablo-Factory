@@ -163,7 +163,10 @@ export class LogisticsRenderer {
                     graphics.fillStyle(parseColor(selColor), selAlpha);
                     const selectedGroupId = GameEngine.state.selectedLogisticsGroupId;
                     const groupKey = line ? (line.groupId || line.id) : null;
-                    const isGroupSelection = !!selectedGroupId && !!groupKey && selectedGroupId === groupKey;
+                    const selectedGroupIds = selectedGroupId && conveyorSystem?.getLogisticsMergeConnectedGroupIds
+                        ? conveyorSystem.getLogisticsMergeConnectedGroupIds(selectedGroupId, state)
+                        : new Set(selectedGroupId ? [selectedGroupId] : []);
+                    const isGroupSelection = !!groupKey && selectedGroupIds.has(groupKey);
                     if (isGroupSelection) {
                         rects.forEach(rect => graphics.fillRect(rect.x, rect.y, rect.w, rect.h));
                     } else {
@@ -271,11 +274,14 @@ export class LogisticsRenderer {
             if (isSelected && line) {
                 const selectedGroupId = GameEngine.state.selectedLogisticsGroupId;
                 const groupKey = line.groupId || line.id;
+                const selectedGroupIds = selectedGroupId && conveyorSystem?.getLogisticsMergeConnectedGroupIds
+                    ? conveyorSystem.getLogisticsMergeConnectedGroupIds(selectedGroupId, state)
+                    : new Set(selectedGroupId ? [selectedGroupId] : []);
                 selectedLogisticsOutlineJobs.push({
                     points,
                     widthTiles,
                     line,
-                    outlineAll: !!selectedGroupId && selectedGroupId === groupKey
+                    outlineAll: selectedGroupIds.has(groupKey)
                 });
             }
         };
@@ -901,6 +907,13 @@ export class LogisticsRenderer {
             if (connected) portToPortConnectedGroupIds.add(groupKey);
         });
 
+        if (conveyorSystem && typeof conveyorSystem.getLogisticsGroupsConnectedThroughMergeNodes === 'function') {
+            const propagatedConnectedGroups = conveyorSystem.getLogisticsGroupsConnectedThroughMergeNodes(portToPortConnectedGroupIds, state);
+            propagatedConnectedGroups.forEach(groupKey => {
+                if (groupKey) portToPortConnectedGroupIds.add(groupKey);
+            });
+        }
+
         const groupTurnCellKeys = new Map();
         groupSegments.forEach((groupSegs, groupKey) => {
             groupTurnCellKeys.set(groupKey, LogisticsRenderer.getLogisticsGroupTurnCellKeys(groupSegs));
@@ -1007,7 +1020,7 @@ export class LogisticsRenderer {
                 }
                 const isGroupSelected = conveyorSystem && typeof conveyorSystem.isSelectedLogisticsLine === 'function'
                     ? (state.selectedLogisticsGroupId
-                        ? state.selectedLogisticsGroupId === groupKey
+                        ? (conveyorSystem.getLogisticsMergeConnectedGroupIds?.(state.selectedLogisticsGroupId, state) || new Set([state.selectedLogisticsGroupId])).has(groupKey)
                         : groupSegs.some(line => conveyorSystem.isSelectedLogisticsLine(line)))
                     : groupSegs.some(line => state.selectedLogisticsLineId === line.id);
 
@@ -1165,8 +1178,9 @@ export class LogisticsRenderer {
 
                     const debugRoutes = LogisticsRenderer.getSelectedGroupDebugRoutePoints(state, groupKey, groupSegs);
                     LogisticsRenderer.renderDebugRouteNumberSprites(scene, groupKey, debugRoutes, groupSegs);
+                    const debugLabelCellKeys = LogisticsRenderer.getDebugLabelCellKeys(groupSegs);
                     debugRoutes.forEach(points => {
-                        LogisticsRenderer.drawRoutePointsDebug(graphics, points);
+                        LogisticsRenderer.drawRoutePointsDebug(graphics, points, debugLabelCellKeys);
                     });
                 }
                 drawnCanonicalGroups.add(groupKey);
@@ -1285,6 +1299,35 @@ export class LogisticsRenderer {
                 }
             });
         }
+    }
+
+    static renderSourcePortCells(graphics, state, scene) {
+        if (!graphics) return;
+        graphics.clear();
+        const logCfg = UI_CONFIG.LogisticsSystem || {};
+        const parseColor = (c) => scene.hexOrRgba(c).color;
+        const fillColor = parseColor(logCfg.sourcePortCellColor || "#00ff44ff");
+        const strokeColor = parseColor(logCfg.sourcePortCellStrokeColor || "#ffff00ff");
+        const alpha = logCfg.sourcePortCellAlpha ?? 0.85;
+        const strokeAlpha = logCfg.sourcePortCellStrokeAlpha ?? 1;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const drawn = new Set();
+
+        (state.logisticsLines || []).forEach(line => {
+            const info = conveyorSystem?.getLogisticsSourcePortCellInfo?.(line);
+            if (!info) return;
+
+            const key = `${Math.round(info.point.x)},${Math.round(info.point.y)}:${line.groupId || line.id}`;
+            if (drawn.has(key)) return;
+            drawn.add(key);
+
+            const rect = info.rect;
+
+            graphics.fillStyle(fillColor, alpha);
+            graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
+            graphics.lineStyle(Math.max(2, Math.round(TS * 0.12)), strokeColor, strokeAlpha);
+            graphics.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        });
     }
 
     static drawArrowhead(g, x, y, ux, uy, size) {
@@ -2316,22 +2359,41 @@ export class LogisticsRenderer {
         return routes;
     }
 
-    static drawRoutePointsDebug(g, points) {
+    static drawRoutePointsDebug(g, points, allowedCellKeys = null) {
         if (!Array.isArray(points) || points.length < 2) return;
         const lineColor = 0xff2222;
         const nodeFill = 0xff2222;
         const nodeStroke = 0xffffff;
         const radius = Math.max(4, Math.min(7, GameEngine.TILE_SIZE * 0.12));
+        const isAllowed = (point) => {
+            if (!allowedCellKeys || allowedCellKeys.size === 0) return true;
+            const key = `${Math.round(point.x)},${Math.round(point.y)}`;
+            return allowedCellKeys.has(key);
+        };
 
         g.lineStyle(3, lineColor, 0.95);
-        g.beginPath();
-        g.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) {
-            g.lineTo(points[i].x, points[i].y);
+        let drawing = false;
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            if (!isAllowed(a) || !isAllowed(b)) {
+                if (drawing) {
+                    g.strokePath();
+                    drawing = false;
+                }
+                continue;
+            }
+            if (!drawing) {
+                g.beginPath();
+                g.moveTo(a.x, a.y);
+                drawing = true;
+            }
+            g.lineTo(b.x, b.y);
         }
-        g.strokePath();
+        if (drawing) g.strokePath();
 
         points.forEach(point => {
+            if (!isAllowed(point)) return;
             g.fillStyle(nodeFill, 1);
             g.fillCircle(point.x, point.y, radius);
             g.lineStyle(2, nodeStroke, 0.95);

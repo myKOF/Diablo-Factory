@@ -618,12 +618,7 @@ export class ConveyorSystem {
         const targetBuilding = dragTarget.building || drag.targetBuilding;
         const targetPort = dragTarget.port || drag.targetPort || (targetBuilding ? window.UIManager?.getNearestPortSlot(targetBuilding, points[points.length - 2]?.x || points[0].x, points[points.length - 2]?.y || points[0].y) : null);
         const sourceGroupId = drag.sourceLine?.groupId || drag.sourceLine?.id || null;
-        const touchedTargetLine = sourceGroupId && window.UIManager?.getLogisticsLinesAt
-            ? window.UIManager.getLogisticsLinesAt(lastPoint.x, lastPoint.y).find(line => {
-                const groupId = line?.groupId || line?.id || null;
-                return groupId && groupId !== sourceGroupId;
-            })
-            : null;
+        const touchedTargetLine = this.findTouchedLogisticsLineAt(lastPoint, sourceGroupId);
         const touchedTargetGroupId = touchedTargetLine ? (touchedTargetLine.groupId || touchedTargetLine.id) : null;
 
         if (window.UIManager) {
@@ -638,11 +633,10 @@ export class ConveyorSystem {
                 if (!Array.isArray(sourceEntity.outputTargets)) sourceEntity.outputTargets = [];
                 conn = sourceEntity.outputTargets.find(item => item.id === targetId || (drag.sourceLine?.groupId && item.lineId === drag.sourceLine.groupId));
                 if (!conn) {
-                    conn = { id: targetId, filter: drag.sourceLine?.filter || null };
+                    conn = { id: targetId, filter: null };
                     sourceEntity.outputTargets.push(conn);
                 } else {
                     conn.id = targetId;
-                    if (!conn.filter && drag.sourceLine?.filter) conn.filter = drag.sourceLine.filter;
                 }
             }
             const beforeCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : 0;
@@ -770,7 +764,8 @@ export class ConveyorSystem {
                 targetPort: targetPort,
                 conn,
                 lineType: transportCfg?.model || transportCfg?.type1 || 'transport_line',
-                efficiency: Number(transportCfg?.efficiency) || 0
+                efficiency: Number(transportCfg?.efficiency) || 0,
+                allowGroupMerge: !touchedTargetGroupId
             });
             let finalGroupId = createdLine?.groupId || null;
             const submitAffectedGroupIds = new Set([
@@ -779,21 +774,15 @@ export class ConveyorSystem {
                 touchedTargetGroupId,
                 middleExtensionSplit?.detachedGroupId
             ].filter(Boolean));
-            if (
-                createdLine?.groupId &&
-                touchedTargetGroupId &&
-                this.areLogisticsGroupsTouching?.(createdLine.groupId, touchedTargetGroupId) &&
-                this.mergeLogisticsLineGroups
-            ) {
-                finalGroupId = this.mergeLogisticsLineGroups(createdLine.groupId, touchedTargetGroupId) || finalGroupId;
-                submitAffectedGroupIds.add(finalGroupId);
-                if (finalGroupId) {
-                    this.recalculateLogisticsGroupEndpoints(finalGroupId);
-                    this.updateActiveTransfersOnLogisticsChange(GameEngine.state, submitAffectedGroupIds);
-                }
-            }
-            if (drag.sourceLine?.filter && finalGroupId) {
-                this.setLogisticsGroupFilter(finalGroupId, drag.sourceLine.filter);
+            if (createdLine?.groupId && touchedTargetGroupId) {
+                this.registerLogisticsMergeNode({
+                    inputGroupId: createdLine.groupId,
+                    outputGroupId: touchedTargetGroupId,
+                    point: lastPoint,
+                    inputLine: createdLine,
+                    outputLine: touchedTargetLine
+                });
+                submitAffectedGroupIds.add(touchedTargetGroupId);
             }
             const afterCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : beforeCount;
             const builtSegments = Math.max(0, afterCount - beforeCount);
@@ -1710,6 +1699,288 @@ export class ConveyorSystem {
         return state.logisticsLines;
     }
 
+    ensureLogisticsMergeNodeStore(state = GameEngine.state) {
+        if (!state) return [];
+        if (!Array.isArray(state.logisticsMergeNodes)) state.logisticsMergeNodes = [];
+        return state.logisticsMergeNodes;
+    }
+
+    areLogisticsGroupsLinkedByMergeNode(groupA, groupB, state = GameEngine.state) {
+        if (!groupA || !groupB || groupA === groupB) return false;
+        return this.ensureLogisticsMergeNodeStore(state).some(node => {
+            if (!node || !Array.isArray(node.inputGroupIds) || !node.outputGroupId) return false;
+            const aInputs = node.inputGroupIds.includes(groupA);
+            const bInputs = node.inputGroupIds.includes(groupB);
+            return (node.outputGroupId === groupA && bInputs) ||
+                (node.outputGroupId === groupB && aInputs) ||
+                (aInputs && bInputs);
+        });
+    }
+
+    getLogisticsGroupsConnectedThroughMergeNodes(baseConnectedGroupIds, state = GameEngine.state) {
+        const connected = new Set(baseConnectedGroupIds || []);
+        let changed = true;
+        while (changed) {
+            changed = false;
+            Array.from(connected).forEach(groupId => {
+                this.getLogisticsMergeConnectedGroupIds(groupId, state).forEach(connectedGroupId => {
+                    if (!connectedGroupId || connected.has(connectedGroupId)) return;
+                    connected.add(connectedGroupId);
+                    changed = true;
+                });
+            });
+        }
+        return connected;
+    }
+
+    getLogisticsMergeConnectedGroupIds(groupId, state = GameEngine.state) {
+        const connected = new Set();
+        if (!groupId) return connected;
+        connected.add(groupId);
+        const nodes = this.ensureLogisticsMergeNodeStore(state);
+        let changed = true;
+        while (changed) {
+            changed = false;
+            nodes.forEach(node => {
+                if (!node || !node.outputGroupId || !Array.isArray(node.inputGroupIds)) return;
+                const members = [node.outputGroupId, ...node.inputGroupIds].filter(Boolean);
+                if (!members.some(id => connected.has(id))) return;
+                members.forEach(id => {
+                    if (connected.has(id)) return;
+                    connected.add(id);
+                    changed = true;
+                });
+            });
+        }
+        return connected;
+    }
+
+    getCardinalDirection(from, to) {
+        if (!from || !to) return null;
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+        return Math.abs(dx) >= Math.abs(dy)
+            ? { x: Math.sign(dx) || 1, y: 0 }
+            : { x: 0, y: Math.sign(dy) || 1 };
+    }
+
+    isPointOnSegment(point, start, end, tolerance = 1) {
+        if (!point || !start || !end) return false;
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const lengthSq = dx * dx + dy * dy;
+        if (lengthSq < 0.001) return Math.hypot(point.x - start.x, point.y - start.y) <= tolerance;
+        const t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSq;
+        if (t < -0.001 || t > 1.001) return false;
+        const projX = start.x + dx * t;
+        const projY = start.y + dy * t;
+        return Math.hypot(point.x - projX, point.y - projY) <= tolerance;
+    }
+
+    getLogisticsLineDirectionAtPoint(line, point) {
+        const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+        for (let i = 0; i < points.length - 1; i++) {
+            const start = points[i];
+            const end = points[i + 1];
+            if (this.isPointOnSegment(point, start, end, GameEngine.TILE_SIZE * 0.25)) {
+                return this.getCardinalDirection(start, end);
+            }
+        }
+        if (points.length >= 2) return this.getCardinalDirection(points[0], points[points.length - 1]);
+        return null;
+    }
+
+    findTouchedLogisticsLineAt(point, excludedGroupId = null, tolerance = null) {
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const tol = Number.isFinite(tolerance) ? tolerance : TS * 0.55;
+        const groupOf = (line) => line?.groupId || line?.id || null;
+        const isCandidate = (line) => {
+            const groupId = groupOf(line);
+            return !!groupId && groupId !== excludedGroupId;
+        };
+
+        const directHits = typeof this.getLogisticsLinesAt === 'function'
+            ? this.getLogisticsLinesAt(point.x, point.y).filter(isCandidate)
+            : [];
+        if (directHits.length > 0) return directHits[0];
+
+        const snapped = this.snapPointToGridCenter(point);
+        const probes = [{ x: point.x, y: point.y }];
+        if (Math.hypot(snapped.x - point.x, snapped.y - point.y) > 0.1) {
+            probes.push(snapped);
+        }
+        let bestLine = null;
+        let bestDist = Infinity;
+        this.ensureLogisticsLineStore().forEach(line => {
+            if (!isCandidate(line)) return;
+            const points = Array.isArray(line.routePoints) ? line.routePoints : [];
+            for (let i = 0; i < points.length - 1; i++) {
+                const start = points[i];
+                const end = points[i + 1];
+                probes.forEach(probe => {
+                    if (!this.isPointOnSegment(probe, start, end, tol)) return;
+                    const dist = Math.min(
+                        Math.hypot(probe.x - start.x, probe.y - start.y),
+                        Math.hypot(probe.x - end.x, probe.y - end.y)
+                    );
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestLine = line;
+                    }
+                });
+            }
+        });
+        return bestLine;
+    }
+
+    registerLogisticsMergeNode({ inputGroupId, outputGroupId, point, inputLine = null, outputLine = null }) {
+        if (!inputGroupId || !outputGroupId || inputGroupId === outputGroupId || !point) return null;
+        const nodes = this.ensureLogisticsMergeNodeStore();
+        const snapped = this.snapPointToGridCenter(point);
+        const cellKey = `${Math.round(snapped.x)},${Math.round(snapped.y)}`;
+        let node = nodes.find(item => item && item.outputGroupId === outputGroupId && item.cellKey === cellKey);
+        if (!node) {
+            node = {
+                id: `merge_${cellKey}_${outputGroupId}`,
+                nodeId: `merge_${cellKey}_${outputGroupId}`,
+                type: 'logistics_merge',
+                cellKey,
+                x: snapped.x,
+                y: snapped.y,
+                point: { x: snapped.x, y: snapped.y },
+                inputGroupIds: [],
+                outputGroupId,
+                roundRobinIndex: 0
+            };
+            nodes.push(node);
+        }
+        if (!node.inputGroupIds.includes(inputGroupId)) {
+            node.inputGroupIds.push(inputGroupId);
+        }
+
+        const inputDir = this.getLogisticsLineDirectionAtPoint(inputLine, snapped);
+        const outputDir = this.getLogisticsLineDirectionAtPoint(outputLine, snapped);
+        if (inputDir) {
+            node.inputDirections = node.inputDirections || {};
+            node.inputDirections[inputGroupId] = inputDir;
+        }
+        if (outputDir) node.outputDir = outputDir;
+        return node;
+    }
+
+    getLogisticsMergeNodeOutputRoute(node) {
+        if (!node?.outputGroupId) return null;
+        const point = node.point || { x: node.x, y: node.y };
+        const segments = this.getLogisticsSegmentsByGroupId(node.outputGroupId);
+        if (!segments.length || !point) return null;
+
+        const ordered = this.orderLogisticsSegmentsByDirection(segments);
+        let startIndex = -1;
+        let startPoint = null;
+        for (let i = 0; i < ordered.length; i++) {
+            const points = Array.isArray(ordered[i]?.routePoints) ? ordered[i].routePoints : [];
+            for (let p = 0; p < points.length - 1; p++) {
+                if (this.isPointOnSegment(point, points[p], points[p + 1], GameEngine.TILE_SIZE * 0.35)) {
+                    startIndex = i;
+                    startPoint = { x: point.x, y: point.y };
+                    break;
+                }
+            }
+            if (startIndex >= 0) break;
+        }
+
+        if (startIndex < 0) {
+            const fallback = this.getLogisticsGroupRoutePoints(node.outputGroupId);
+            return Array.isArray(fallback) && fallback.length >= 2 ? fallback : null;
+        }
+
+        const route = [];
+        const pushPoint = (p) => {
+            if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
+            const last = route[route.length - 1];
+            if (!last || Math.hypot(last.x - p.x, last.y - p.y) > 0.1) {
+                route.push({ x: p.x, y: p.y });
+            }
+        };
+
+        for (let i = startIndex; i < ordered.length; i++) {
+            const points = Array.isArray(ordered[i]?.routePoints) ? ordered[i].routePoints : [];
+            if (points.length < 2) continue;
+            if (i === startIndex) {
+                const segStart = points[0];
+                const segEnd = points[points.length - 1];
+                const distToStart = Math.hypot(point.x - segStart.x, point.y - segStart.y);
+                const distToEnd = Math.hypot(point.x - segEnd.x, point.y - segEnd.y);
+                if (distToEnd < 1 && i < ordered.length - 1) {
+                    pushPoint(segEnd);
+                } else if (distToStart < 1) {
+                    points.forEach(pushPoint);
+                } else {
+                    pushPoint(startPoint);
+                    pushPoint(segEnd);
+                }
+            } else {
+                points.forEach(pushPoint);
+            }
+        }
+
+        if (route.length < 2) return null;
+        return route;
+    }
+
+    getLogisticsMergeNodeForInputTransfer(transfer, state = GameEngine.state) {
+        const lineId = transfer?.lineId || null;
+        if (!lineId) return null;
+        const route = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
+        const endPoint = route[route.length - 1] || null;
+        const TS = GameEngine.TILE_SIZE || 20;
+        return this.ensureLogisticsMergeNodeStore(state).find(node => {
+            if (!node || !Array.isArray(node.inputGroupIds) || !node.inputGroupIds.includes(lineId)) return false;
+            if (!node.outputGroupId) return false;
+            if (!endPoint) return true;
+            const p = node.point || { x: node.x, y: node.y };
+            return p && Math.hypot(endPoint.x - p.x, endPoint.y - p.y) <= TS * 0.75;
+        }) || null;
+    }
+
+    isLogisticsMergeInputTransfer(transfer, state = GameEngine.state) {
+        return !!this.getLogisticsMergeNodeForInputTransfer(transfer, state);
+    }
+
+    applyLogisticsMergeNodes(state = GameEngine.state) {
+        const nodes = this.ensureLogisticsMergeNodeStore(state).filter(node =>
+            node && Array.isArray(node.inputGroupIds) && node.inputGroupIds.length > 0 && node.outputGroupId
+        );
+        if (!nodes.length || !Array.isArray(state?.activeTransfers) || state.activeTransfers.length === 0) return false;
+
+        let changed = false;
+        const findNodeForTransfer = (transfer) => {
+            if (Number(transfer?.progress) < 0.999) return null;
+            return this.getLogisticsMergeNodeForInputTransfer(transfer, state);
+        };
+
+        state.activeTransfers.forEach(transfer => {
+            const node = findNodeForTransfer(transfer);
+            if (!node) return;
+            const route = this.getLogisticsMergeNodeOutputRoute(node);
+            if (!Array.isArray(route) || route.length < 2) return;
+            const outputSeg = this.getLogisticsSegmentsByGroupId(node.outputGroupId)[0] || null;
+            transfer.lineId = node.outputGroupId;
+            transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
+            transfer.progress = 0;
+            transfer.sourceId = outputSeg?.sourceId || transfer.sourceId || null;
+            transfer.targetId = outputSeg?.targetId || null;
+            transfer.efficiency = Number(outputSeg?.efficiency) || Number(transfer.efficiency) || 0;
+            delete transfer.blockedOnBrokenLine;
+            delete transfer.queueBlocked;
+            changed = true;
+        });
+
+        return changed;
+    }
+
     snapPointToGridCenter(point) {
         const TS = GameEngine.TILE_SIZE;
         const align = TS;
@@ -1857,6 +2128,11 @@ export class ConveyorSystem {
             const tDirSignY = Math.sign(next.y - start.y);
             const rawAngle = Math.atan2(tDirSignY, tDirSignX) * 180 / Math.PI;
             const dir = Math.round(((rawAngle % 360) + 360) % 360);
+            const isSourcePortCell = segments.length === 0 &&
+                sourcePort &&
+                Number.isFinite(sourcePort.x) &&
+                Number.isFinite(sourcePort.y) &&
+                Math.hypot(start.x - sourcePort.x, start.y - sourcePort.y) <= (GameEngine.TILE_SIZE || 20) * 1.1;
             segments.push({
                 id: `${groupId}_seg_${gx}_${gy}_${i}`,
                 groupId,
@@ -1881,6 +2157,8 @@ export class ConveyorSystem {
                 sourcePort,
                 targetPort,
                 filter: filter || null,
+                isSourcePortCell,
+                sourcePortCellKey: isSourcePortCell ? `${Math.round(start.x)},${Math.round(start.y)}` : null,
                 prevId: null,
                 nextId: null,
                 order: i,
@@ -1901,7 +2179,7 @@ export class ConveyorSystem {
         return segments;
     }
 
-    upsertLogisticsLine({ lineId = null, sourceEnt, targetEnt = null, targetPoint = null, points = [], routeWidth = 1, sourcePort = null, targetPort = null, conn = null, lineType = 'transport_line', efficiency = 0 }) {
+    upsertLogisticsLine({ lineId = null, sourceEnt, targetEnt = null, targetPoint = null, points = [], routeWidth = 1, sourcePort = null, targetPort = null, conn = null, lineType = 'transport_line', efficiency = 0, allowGroupMerge = true }) {
         if (this.isProcessingMerge) return null;
         const lines = this.ensureLogisticsLineStore();
         const sourceId = window.UIManager.getEntityId(sourceEnt);
@@ -1969,7 +2247,7 @@ export class ConveyorSystem {
         let cleanSourcePort = sourcePort?.sourceType === "logistics_line" ? null : clonePort(sourcePort);
         if (!hasPortPosition(cleanSourcePort)) cleanSourcePort = fallbackSourcePort();
         const cleanTargetPort = clonePort(targetPort);
-        const filter = conn ? (conn.filter || null) : (previous?.filter || null);
+        const filter = conn ? null : (previous?.filter || null);
         const segments = this.buildLogisticsSegments(groupId, sourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter, lineType, efficiency);
         const existingGroupSegments = lines.filter(line => line && (line.groupId === groupId || line.id === groupId));
         const extendsSplitSequence = existingGroupSegments.some(line => Number.isFinite(line?.splitSequenceOrder));
@@ -2107,7 +2385,8 @@ export class ConveyorSystem {
             seg.efficiency = Number(efficiency) || Number(seg.efficiency) || 0;
             if (cleanSourcePort) seg.sourcePort = cleanSourcePort;
             if (cleanTargetPort) seg.targetPort = cleanTargetPort;
-            seg.filter = filter || null;
+            if (!conn) seg.filter = filter || null;
+            else if (seg.isSourcePortCell || seg.sourcePortCellKey) seg.filter = null;
         });
 
         GameEngine.state.logisticsLines = mergedLines;
@@ -2127,15 +2406,22 @@ export class ConveyorSystem {
         const previousAffectedGroupIds = this._affectedLogisticsGroupIds;
         this._affectedLogisticsGroupIds = affectedGroupIds;
         try {
-            overlapMergeGroupIds.forEach(otherGroupId => {
-                if (!otherGroupId || otherGroupId === mergedGroupId) return;
-                if (blockedOverlapGroupIds.has(otherGroupId)) return;
-                affectedGroupIds.add(otherGroupId);
-                mergedGroupId = this.mergeLogisticsLineGroups(mergedGroupId, otherGroupId) || mergedGroupId;
+            if (allowGroupMerge) {
+                overlapMergeGroupIds.forEach(otherGroupId => {
+                    if (!otherGroupId || otherGroupId === mergedGroupId) return;
+                    if (blockedOverlapGroupIds.has(otherGroupId)) return;
+                    if (this.areLogisticsGroupsLinkedByMergeNode(mergedGroupId, otherGroupId)) return;
+                    affectedGroupIds.add(otherGroupId);
+                    mergedGroupId = this.mergeLogisticsLineGroups(mergedGroupId, otherGroupId) || mergedGroupId;
+                    affectedGroupIds.add(mergedGroupId);
+                });
+                mergedGroupId = this.mergeConnectedLogisticsGroups(mergedGroupId) || mergedGroupId;
                 affectedGroupIds.add(mergedGroupId);
-            });
-            mergedGroupId = this.mergeConnectedLogisticsGroups(mergedGroupId) || mergedGroupId;
-            affectedGroupIds.add(mergedGroupId);
+            } else {
+                overlapMergeGroupIds.forEach(otherGroupId => {
+                    if (otherGroupId) affectedGroupIds.add(otherGroupId);
+                });
+            }
         } finally {
             this._affectedLogisticsGroupIds = previousAffectedGroupIds;
         }
@@ -2350,6 +2636,7 @@ export class ConveyorSystem {
 
             for (const otherGroupId of otherGroupIds) {
                 if (!this.areLogisticsGroupsTouching(activeGroupId, otherGroupId)) continue;
+                if (this.areLogisticsGroupsLinkedByMergeNode(activeGroupId, otherGroupId)) continue;
                 activeGroupId = this.mergeLogisticsLineGroups(activeGroupId, otherGroupId);
                 merged = true;
                 break;
@@ -2363,6 +2650,7 @@ export class ConveyorSystem {
             return primaryGroupId;
         }
         if (!primaryGroupId || !secondaryGroupId || primaryGroupId === secondaryGroupId) return primaryGroupId || secondaryGroupId || null;
+        if (this.areLogisticsGroupsLinkedByMergeNode(primaryGroupId, secondaryGroupId)) return primaryGroupId;
         if (this._affectedLogisticsGroupIds) {
             this._affectedLogisticsGroupIds.add(primaryGroupId);
             this._affectedLogisticsGroupIds.add(secondaryGroupId);
@@ -2467,7 +2755,10 @@ export class ConveyorSystem {
         const selectedId = GameEngine.state.selectedLogisticsLineId;
         const selectedGroupId = GameEngine.state.selectedLogisticsGroupId;
         if (!line) return false;
-        if (selectedGroupId && (line.groupId === selectedGroupId || line.id === selectedGroupId)) return true;
+        if (selectedGroupId) {
+            const lineGroupId = line.groupId || line.id || null;
+            if (lineGroupId && this.getLogisticsMergeConnectedGroupIds(selectedGroupId).has(lineGroupId)) return true;
+        }
         if (!selectedId) return false;
         return this.getLogisticsLineSelectionKey(line) === selectedId;
     }
@@ -3010,6 +3301,7 @@ export class ConveyorSystem {
             t.efficiency = Number(currentSeg.efficiency) || 0;
         }
 
+        this.applyLogisticsMergeNodes(state);
         this.applyBlockedTransferQueues(state);
     }
 
@@ -3144,8 +3436,9 @@ export class ConveyorSystem {
                     : sourceDistance;
                 let maxAllowed = occupiedProgress - TS;
                 let breakpointLimit = totalLength;
+                const isMergeInput = this.isLogisticsMergeInputTransfer(transfer, state);
 
-                if (!transfer.targetId) {
+                if (!transfer.targetId && !isMergeInput) {
                     breakpointLimit = Math.floor(totalLength / TS) * TS;
                     maxAllowed = Math.min(maxAllowed, breakpointLimit);
                 } else {
@@ -3157,13 +3450,13 @@ export class ConveyorSystem {
                     queuedDistance = desired;
                 }
 
-                const blockedAtBreakpoint = !transfer.targetId && queuedDistance >= breakpointLimit - 0.1;
+                const blockedAtBreakpoint = !transfer.targetId && !isMergeInput && queuedDistance >= breakpointLimit - 0.1;
                 transfer.queueBlocked = queuedDistance < desired - 0.1 || blockedAtBreakpoint || queueBlockedBehind;
                 if (useCanonical) {
                     transfer.routePoints = canonical.points.map(point => ({ ...point }));
                 }
                 transfer.progress = Math.max(0, Math.min(1, queuedDistance / totalLength));
-                if (transfer.targetId) {
+                if (transfer.targetId || isMergeInput) {
                     delete transfer.blockedOnBrokenLine;
                 } else {
                     transfer.blockedOnBrokenLine = true;
@@ -3196,7 +3489,7 @@ export class ConveyorSystem {
         let targetPort = null;
 
         const TS = GameEngine.TILE_SIZE || 64;
-        const matchThreshold = TS * 0.9; // 允許鄰近一個網格以內的距離
+        const matchThreshold = TS * 1.1; // 允許端口第一格距離端口中心一個網格
         let bestSourceDist = matchThreshold;
         let bestTargetDist = matchThreshold;
 
@@ -3280,7 +3573,7 @@ export class ConveyorSystem {
             conn.routeWidth = firstSeg.routeWidth || 1;
             conn.lineType = firstSeg.lineType || 'transport_line';
             conn.efficiency = firstSeg.efficiency || 0;
-            conn.filter = firstSeg.filter || null;
+            if (!conn.filter && firstSeg.filter) conn.filter = firstSeg.filter;
 
             // 合併產生一份完整的排序好的路徑點，讓 UIManager/WorkerSystem 可以完美載入
             const pathPoints = [];
@@ -3418,6 +3711,95 @@ export class ConveyorSystem {
         return true;
     }
 
+    getLogisticsSourcePortConnection(line) {
+        if (!line) return null;
+        const groupId = line.groupId || line.id || null;
+        const sourceId = line.sourceId || null;
+        if (!groupId || !sourceId) return null;
+        const sourceEnt = (GameEngine.state.mapEntities || []).find(ent =>
+            ent && window.UIManager?.getEntityId?.(ent) === sourceId
+        );
+        if (!sourceEnt || !Array.isArray(sourceEnt.outputTargets)) return null;
+        const linePort = line.sourcePort || null;
+        const samePort = (conn) => {
+            if (!linePort || !conn?.sourcePort) return true;
+            if (Number.isFinite(linePort.x) && Number.isFinite(linePort.y) &&
+                Number.isFinite(conn.sourcePort.x) && Number.isFinite(conn.sourcePort.y)) {
+                return Math.hypot(linePort.x - conn.sourcePort.x, linePort.y - conn.sourcePort.y) <= (GameEngine.TILE_SIZE || 20) * 0.75;
+            }
+            return (linePort.dir || null) === (conn.sourcePort.dir || null) &&
+                (linePort.slotIndex ?? linePort.defIndex ?? null) === (conn.sourcePort.slotIndex ?? conn.sourcePort.defIndex ?? null);
+        };
+        const conn = sourceEnt.outputTargets.find(item =>
+            item && item.lineId === groupId && samePort(item)
+        ) || null;
+        return conn ? { source: sourceEnt, conn } : null;
+    }
+
+    getLogisticsSourcePortCellInfo(line) {
+        if (!line || !this.getLogisticsSourcePortConnection(line)) return null;
+        const points = Array.isArray(line.routePoints) ? line.routePoints : [];
+        if (points.length < 2) return null;
+        const sourcePort = line.sourcePort || null;
+        if (!sourcePort || !Number.isFinite(sourcePort.x) || !Number.isFinite(sourcePort.y)) return null;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const endpoints = [
+            { point: points[0], neighbor: points[1] },
+            { point: points[points.length - 1], neighbor: points[points.length - 2] }
+        ].filter(item => item.point && item.neighbor);
+        let portCell = null;
+        let bestDist = Infinity;
+        endpoints.forEach(item => {
+            const dist = Math.hypot(item.point.x - sourcePort.x, item.point.y - sourcePort.y);
+            if (dist <= TS * 1.1 && dist < bestDist) {
+                bestDist = dist;
+                portCell = item;
+            }
+        });
+        if (!portCell) return null;
+
+        const width = Math.max(1, Math.round(Number(line.routeWidth) || 1));
+        const rect = {
+            x: portCell.point.x - (TS * width) / 2,
+            y: portCell.point.y - TS / 2,
+            w: TS * width,
+            h: TS
+        };
+        const next = portCell.neighbor;
+        const horizontal = Math.abs((next?.x || portCell.point.x) - portCell.point.x) >= Math.abs((next?.y || portCell.point.y) - portCell.point.y);
+        if (!horizontal) {
+            rect.x = portCell.point.x - TS / 2;
+            rect.y = portCell.point.y - (TS * width) / 2;
+            rect.w = TS;
+            rect.h = TS * width;
+        }
+        return {
+            point: { x: portCell.point.x, y: portCell.point.y },
+            neighbor: { x: next.x, y: next.y },
+            sourcePort,
+            rect,
+            horizontal
+        };
+    }
+
+    isLogisticsSourcePortCell(line, worldX, worldY) {
+        const info = this.getLogisticsSourcePortCellInfo(line);
+        if (!info) return false;
+        const rect = info.rect;
+        return worldX >= rect.x && worldX <= rect.x + rect.w &&
+            worldY >= rect.y && worldY <= rect.y + rect.h;
+    }
+
+    getLogisticsSourcePortHitAt(worldX, worldY) {
+        const line = this.getLogisticsLinesAt(worldX, worldY).find(hit =>
+            this.isLogisticsSourcePortCell(hit, worldX, worldY)
+        );
+        if (!line) return null;
+        const portConn = this.getLogisticsSourcePortConnection(line);
+        if (!portConn) return null;
+        return { line, source: portConn.source, conn: portConn.conn };
+    }
+
     getLogisticsLineAt(worldX, worldY) {
         return this.getLogisticsLinesAt(worldX, worldY)[0] || null;
     }
@@ -3494,12 +3876,14 @@ export class ConveyorSystem {
                     hits.push({
                         line: rect.segment || line,
                         distance: Math.hypot(worldX - cx, worldY - cy),
-                        isEndpoint: !!rect.isEndpoint
+                        isEndpoint: !!rect.isEndpoint,
+                        isSourcePortCell: this.isLogisticsSourcePortCell(rect.segment || line, worldX, worldY)
                     });
                 }
             });
         });
         hits.sort((a, b) =>
+            Number(b.isSourcePortCell) - Number(a.isSourcePortCell) ||
             Number(a.isEndpoint) - Number(b.isEndpoint) ||
             a.distance - b.distance ||
             (b.line.createdAt || 0) - (a.line.createdAt || 0)

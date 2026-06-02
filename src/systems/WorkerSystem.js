@@ -2471,7 +2471,14 @@ export class WorkerSystem {
                     continue;
                 }
 
-                const isBreakpoint = !t.targetId;
+                const isMergeInput = conveyorSystem &&
+                    typeof conveyorSystem.isLogisticsMergeInputTransfer === 'function' &&
+                    conveyorSystem.isLogisticsMergeInputTransfer(t, state);
+                const isBreakpoint = !t.targetId && !isMergeInput;
+                if (isMergeInput) {
+                    delete t.queueBlocked;
+                    delete t.blockedOnBrokenLine;
+                }
 
                 // 動態判定末端堆積限制：
                 // 若末端點鄰近另一群組的線段起始點（表示是刪除後形成的斷點間隙），
@@ -2577,6 +2584,15 @@ export class WorkerSystem {
                         t.lastSegment = currentSegment;
                     }
                 }
+            }
+
+            if (
+                t.progress >= 1 &&
+                conveyorSystem &&
+                typeof conveyorSystem.applyLogisticsMergeNodes === 'function' &&
+                conveyorSystem.applyLogisticsMergeNodes(state)
+            ) {
+                t = state.activeTransfers[i];
             }
 
             if (t.progress >= 1) {

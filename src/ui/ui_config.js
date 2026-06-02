@@ -797,6 +797,10 @@ export const UI_CONFIG = {
         // --- 其它 ---
         portSnapRangeTiles: 0.5,         // 物流拖曳時端口磁吸半徑（單位：格）
         depth: 150,                      // 渲染深度 (位於地面之上，單位之下)
+        sourcePortCellColor: "#00ff44ff",
+        sourcePortCellStrokeColor: "#ffff00ff",
+        sourcePortCellAlpha: 0.85,
+        sourcePortCellStrokeAlpha: 1,
         transferItemDepth: 900000        // 運輸中物品層深度 (高於建築/單位，低於大多數標籤)
     },
 

@@ -66,16 +66,20 @@ export class LogisticsUI {
         if (tip) tip.style.display = "none";
     }
 
-    static showLogisticsMenu(sourceEnt, targetId, mouseX, mouseY, lineId = null) {
+    static showLogisticsMenu(sourceEnt, targetId, mouseX, mouseY, lineId = null, connHint = null) {
         window.UIManager.hideContextMenu();
         if (!sourceEnt) return;
         const outputTargets = Array.isArray(sourceEnt?.outputTargets) ? sourceEnt.outputTargets : [];
-        const connForLine = outputTargets.find(t => t.id === targetId) || null;
         const hintedSegment = lineId ? conveyorSystem.getLogisticsLineById(lineId) : null;
+        const hintedGroupId = hintedSegment?.groupId || hintedSegment?.id || null;
+        const connForLine = connHint ||
+            outputTargets.find(t => t.id === targetId && (!hintedGroupId || t.lineId === hintedGroupId)) ||
+            outputTargets.find(t => hintedGroupId && t.lineId === hintedGroupId) ||
+            null;
         const groupId = connForLine?.lineId || hintedSegment?.groupId || null;
         const selectedSegment = lineId ? conveyorSystem.getLogisticsLineById(lineId) : (groupId ? conveyorSystem.getLogisticsLineById(groupId) : null);
         const selectedLineId = selectedSegment ? conveyorSystem.getLogisticsLineSelectionKey(selectedSegment) : null;
-        LogisticsUI.activeLogisticsConnection = { source: sourceEnt, targetId: targetId, lineId: selectedLineId, groupId };
+        LogisticsUI.activeLogisticsConnection = { source: sourceEnt, targetId: connForLine?.id ?? targetId, lineId: selectedLineId, groupId, conn: connForLine };
         LogisticsUI.activeLogisticsLine = selectedSegment;
         GameEngine.state.selectedLogisticsLineId = selectedLineId;
         let menu = document.getElementById("logistics_menu");
@@ -118,12 +122,9 @@ export class LogisticsUI {
             if (sourceEnt.outputBuffer) availableItems = [...new Set([...availableItems, ...Object.keys(sourceEnt.outputBuffer)])];
         }
         availableItems = [...new Set(availableItems)];
-        const conn = outputTargets.find(t => t.id === targetId) || null;
+        const conn = connForLine || null;
         if (conn && conn.filter && availableItems.length > 0 && !availableItems.includes(conn.filter)) {
             conn.filter = null;
-            if (conn.lineId) {
-                conveyorSystem.setLogisticsGroupFilter(conn.lineId, null);
-            }
         }
         const currentFilter = conn ? conn.filter : (selectedSegment?.filter || null);
         const helperText = isProcessingPlantSource
@@ -186,11 +187,6 @@ export class LogisticsUI {
 
     static showLogisticsLineMenu(line, mouseX, mouseY) {
         if (!line) return;
-        const sourceEnt = conveyorSystem.getLogisticsLineSourceEntity(line);
-        if (sourceEnt) {
-            LogisticsUI.showLogisticsMenu(sourceEnt, line.targetId || null, mouseX, mouseY, line.id);
-            return;
-        }
         window.UIManager.hideContextMenu();
         LogisticsUI.activeLogisticsLine = line;
         LogisticsUI.activeLogisticsConnection = null;
@@ -260,17 +256,19 @@ export class LogisticsUI {
             const outputTargets = Array.isArray(LogisticsUI.activeLogisticsConnection.source?.outputTargets)
                 ? LogisticsUI.activeLogisticsConnection.source.outputTargets
                 : [];
-            const conn = outputTargets.find(t => t.id === LogisticsUI.activeLogisticsConnection.targetId);
+            const conn = LogisticsUI.activeLogisticsConnection.conn ||
+                outputTargets.find(t =>
+                    t.id === LogisticsUI.activeLogisticsConnection.targetId &&
+                    (!LogisticsUI.activeLogisticsConnection.groupId || t.lineId === LogisticsUI.activeLogisticsConnection.groupId)
+                ) ||
+                outputTargets.find(t =>
+                    LogisticsUI.activeLogisticsConnection.groupId && t.lineId === LogisticsUI.activeLogisticsConnection.groupId
+                ) ||
+                null;
             if (conn) {
                 conn.filter = filterItem;
-                if (conn.lineId) {
-                    conveyorSystem.setLogisticsGroupFilter(conn.lineId, filterItem);
-                }
-            } else if (LogisticsUI.activeLogisticsConnection.groupId) {
-                conveyorSystem.setLogisticsGroupFilter(LogisticsUI.activeLogisticsConnection.groupId, filterItem);
-                if (LogisticsUI.activeLogisticsLine) LogisticsUI.activeLogisticsLine.filter = filterItem;
             }
-            if (conn || LogisticsUI.activeLogisticsConnection.groupId) {
+            if (conn) {
                 const filterName = window.UIManager.getIngredientDisplayName(filterItem);
                 GameEngine.addLog(`[物流] 路線搬運品項已更新：${filterName}。`, 'LOGISTICS');
                 if (GameEngine.workerSystem && typeof GameEngine.workerSystem.updateWorkerAssignments === 'function') {
@@ -278,7 +276,7 @@ export class LogisticsUI {
                 }
             }
             const menu = document.getElementById('logistics_menu');
-            if (menu) LogisticsUI.showLogisticsMenu(LogisticsUI.activeLogisticsConnection.source, LogisticsUI.activeLogisticsConnection.targetId, parseInt(menu.style.left) - 15, parseInt(menu.style.top) + 20);
+            if (menu) LogisticsUI.showLogisticsMenu(LogisticsUI.activeLogisticsConnection.source, LogisticsUI.activeLogisticsConnection.targetId, parseInt(menu.style.left) - 15, parseInt(menu.style.top) + 20, LogisticsUI.activeLogisticsConnection.lineId, conn);
         }
     }
 
@@ -290,24 +288,16 @@ export class LogisticsUI {
         const outputTargets = Array.isArray(active.source?.outputTargets)
             ? active.source.outputTargets
             : [];
-        const conn = outputTargets.find(t => t.id === active.targetId) || null;
-        const groupId = conn?.lineId || active.groupId || LogisticsUI.activeLogisticsLine?.groupId || LogisticsUI.activeLogisticsLine?.id || null;
+        const conn = active.conn ||
+            outputTargets.find(t => t.id === active.targetId && (!active.groupId || t.lineId === active.groupId)) ||
+            outputTargets.find(t => active.groupId && t.lineId === active.groupId) ||
+            null;
         let changed = false;
 
         if (conn && conn.filter) {
             conn.filter = null;
             changed = true;
         }
-        if (groupId) {
-            const hadSegmentFilter = conveyorSystem.getLogisticsSegmentsByGroupId(groupId)
-                .some(line => !!line?.filter);
-            conveyorSystem.setLogisticsGroupFilter(groupId, null);
-            changed = changed || hadSegmentFilter;
-        }
-        if (LogisticsUI.activeLogisticsLine) {
-            LogisticsUI.activeLogisticsLine.filter = null;
-        }
-
         if (changed) {
             GameEngine.addLog(`[物流] 已清除路線搬運品項。`, 'LOGISTICS');
             if (GameEngine.workerSystem && typeof GameEngine.workerSystem.updateWorkerAssignments === 'function') {
@@ -317,7 +307,7 @@ export class LogisticsUI {
 
         const menu = document.getElementById('logistics_menu');
         if (menu && active.source) {
-            LogisticsUI.showLogisticsMenu(active.source, active.targetId, parseInt(menu.style.left) - 15, parseInt(menu.style.top) + 20);
+            LogisticsUI.showLogisticsMenu(active.source, active.targetId, parseInt(menu.style.left) - 15, parseInt(menu.style.top) + 20, active.lineId, conn);
         }
     }
 
@@ -358,8 +348,9 @@ export class LogisticsUI {
 
         if (selectGroup && GameEngine.state.logisticsLines) {
             const groupId = line.groupId || line.id;
+            const selectedGroupIds = conveyorSystem.getLogisticsMergeConnectedGroupIds?.(groupId) || new Set([groupId]);
             const groupLines = conveyorSystem.ensureLogisticsLineStore()
-                .filter(l => l.groupId === groupId || l.id === groupId)
+                .filter(l => selectedGroupIds.has(l.groupId || l.id))
                 .sort((a, b) => {
                     const timeA = a.createdAt || 0;
                     const timeB = b.createdAt || 0;

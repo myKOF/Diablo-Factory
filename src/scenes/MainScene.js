@@ -152,6 +152,11 @@ export class MainScene extends Phaser.Scene {
             const logCfg = UI_CONFIG.LogisticsSystem || { transferItemDepth: 900000 };
             this.logisticsPreviewGraphics.setDepth((logCfg.transferItemDepth || 900000) - 1);
         }
+        if (!this.logisticsPortGraphics) {
+            this.logisticsPortGraphics = this.add.graphics();
+            const logCfg = UI_CONFIG.LogisticsSystem || { transferItemDepth: 900000 };
+            this.logisticsPortGraphics.setDepth((logCfg.transferItemDepth || 900000) - 2);
+        }
 
         // 相機控制
         this.lastCamX = -9999;
@@ -832,6 +837,7 @@ export class MainScene extends Phaser.Scene {
             if (this._logisticsLayerWasDrawn) {
                 this.logisticsGraphics.clear();
                 if (this.logisticsPreviewGraphics) this.logisticsPreviewGraphics.clear();
+                if (this.logisticsPortGraphics) this.logisticsPortGraphics.clear();
                 this.logisticsTransferGraphics.clear();
                 this._logisticsLayerWasDrawn = false;
                 if (this.logisticsNumberTexts) {
@@ -862,13 +868,19 @@ export class MainScene extends Phaser.Scene {
         if (hasStaticContent) {
             if (this._lastLogisticsRenderSignature !== signature) {
                 LogisticsRenderer.render(this.logisticsGraphics, state, this, { drawTransfers: false, drawBuildPreview: false });
+                if (this.logisticsPortGraphics && typeof LogisticsRenderer.renderSourcePortCells === 'function') {
+                    LogisticsRenderer.renderSourcePortCells(this.logisticsPortGraphics, state, this);
+                    this._logisticsPortLayerWasDrawn = true;
+                }
                 this._lastLogisticsRenderSignature = signature;
                 this._logisticsLayerWasDrawn = true;
             }
         } else if (this._logisticsLayerWasDrawn) {
             this.logisticsGraphics.clear();
+            if (this.logisticsPortGraphics) this.logisticsPortGraphics.clear();
             this._lastLogisticsRenderSignature = "";
             this._logisticsLayerWasDrawn = false;
+            this._logisticsPortLayerWasDrawn = false;
         }
 
         if (this.logisticsPreviewGraphics) {

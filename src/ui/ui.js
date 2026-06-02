@@ -1848,6 +1848,29 @@ export class UIManager {
         const worldX = world.x;
         const worldY = world.y;
         const clickedLine = conveyorSystem.getLogisticsLineAt(worldX, worldY);
+        const clickedSourcePort = typeof conveyorSystem.getLogisticsSourcePortHitAt === 'function'
+            ? conveyorSystem.getLogisticsSourcePortHitAt(worldX, worldY)
+            : null;
+
+        if (clickedSourcePort) {
+            GameEngine.state.selectedLogisticsClickX = worldX;
+            GameEngine.state.selectedLogisticsClickY = worldY;
+            GameEngine.state.selectedUnitIds = [];
+            GameEngine.state.selectedBuildingIds = [];
+            GameEngine.state.selectedBuildingId = null;
+            GameEngine.state.selectedResourceId = null;
+            LogisticsUI.selectLogisticsLine(clickedSourcePort.line, false);
+            LogisticsUI.showLogisticsMenu(
+                clickedSourcePort.source,
+                clickedSourcePort.conn?.id || null,
+                e.clientX,
+                e.clientY,
+                conveyorSystem.getLogisticsLineSelectionKey(clickedSourcePort.line),
+                clickedSourcePort.conn
+            );
+            this.updateValues(true);
+            return;
+        }
 
         // 如果處於建造物流線模式，且點擊到了物流線，優先進行物流線的選取/雙擊全選，不被 Stamp 建造模式阻斷
         if (LogisticsUI.isTransportLinePlacementActive() && clickedLine) {
@@ -1865,15 +1888,13 @@ export class UIManager {
             GameEngine.state.lastSelectionTime = now;
             GameEngine.state.lastSelectedLogisticsGroupId = groupId;
             if (isDoubleClick) {
-                const groupCount = conveyorSystem.getLogisticsSegmentsByGroupId(groupId).length;
+                const selectedGroupIds = conveyorSystem.getLogisticsMergeConnectedGroupIds?.(groupId) || new Set([groupId]);
+                const groupCount = conveyorSystem.ensureLogisticsLineStore()
+                    .filter(line => selectedGroupIds.has(line.groupId || line.id))
+                    .length;
                 GameEngine.addLog(`[物流] 已選取同群組物流線 ${groupCount} 段。`, 'LOGISTICS');
             }
-            const source = GameEngine.state.mapEntities.find(ent => this.getEntityId(ent) === clickedLine.sourceId);
-            if (source && clickedLine.targetId) {
-                LogisticsUI.showLogisticsMenu(source, clickedLine.targetId, e.clientX, e.clientY, conveyorSystem.getLogisticsLineSelectionKey(clickedLine));
-            } else {
-                LogisticsUI.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
-            }
+            LogisticsUI.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
             this.updateValues(true);
             return;
         }
@@ -1971,15 +1992,13 @@ export class UIManager {
             GameEngine.state.lastSelectionTime = now;
             GameEngine.state.lastSelectedLogisticsGroupId = groupId;
             if (isDoubleClick) {
-                const groupCount = conveyorSystem.getLogisticsSegmentsByGroupId(groupId).length;
+                const selectedGroupIds = conveyorSystem.getLogisticsMergeConnectedGroupIds?.(groupId) || new Set([groupId]);
+                const groupCount = conveyorSystem.ensureLogisticsLineStore()
+                    .filter(line => selectedGroupIds.has(line.groupId || line.id))
+                    .length;
                 GameEngine.addLog(`[物流] 已選取同群組物流線 ${groupCount} 段。`, 'LOGISTICS');
             }
-            const source = GameEngine.state.mapEntities.find(ent => this.getEntityId(ent) === clickedLine.sourceId);
-            if (source && clickedLine.targetId) {
-                LogisticsUI.showLogisticsMenu(source, clickedLine.targetId, e.clientX, e.clientY, conveyorSystem.getLogisticsLineSelectionKey(clickedLine));
-            } else {
-                LogisticsUI.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
-            }
+            LogisticsUI.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
             this.updateValues(true);
             return;
         }
