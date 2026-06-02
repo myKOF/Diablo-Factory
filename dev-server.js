@@ -68,11 +68,49 @@ function injectLiveReload(content) {
     return `${html}\n${LIVE_RELOAD_SNIPPET}`;
 }
 
+const mtimeCache = new Map();
+const ALLOWED_EXTENSIONS = new Set([
+    '.html', '.css', '.js', '.json', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.csv'
+]);
+
+let reloadTimeout = null;
 function broadcastReload(changedPath) {
-    console.log(`[dev-server] 偵測到檔案變更，重新整理頁面：${changedPath}`);
-    clients.forEach((res) => {
-        res.write(`data: reload\n\n`);
-    });
+    if (reloadTimeout) clearTimeout(reloadTimeout);
+    reloadTimeout = setTimeout(() => {
+        console.log(`[dev-server] 偵測到檔案變更，重新整理頁面：${changedPath}`);
+        clients.forEach((res) => {
+            res.write(`data: reload\n\n`);
+        });
+    }, 100);
+}
+
+function handleFileChange(dirName, filename) {
+    if (!filename) return;
+
+    const ext = path.extname(filename).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.has(ext)) return;
+
+    const fullPath = path.join(ROOT_DIR, dirName, filename);
+
+    try {
+        if (!fs.existsSync(fullPath)) {
+            broadcastReload(path.join(dirName, filename));
+            return;
+        }
+
+        const stat = fs.statSync(fullPath);
+        if (!stat.isFile()) return;
+
+        const lastMtime = mtimeCache.get(fullPath);
+        const currentMtime = stat.mtimeMs;
+
+        if (lastMtime === undefined || currentMtime > lastMtime) {
+            mtimeCache.set(fullPath, currentMtime);
+            broadcastReload(path.join(dirName, filename));
+        }
+    } catch (err) {
+        // Ignore read stat failures
+    }
 }
 
 function watchDirectory(dirName) {
@@ -80,8 +118,7 @@ function watchDirectory(dirName) {
     if (!fs.existsSync(fullPath)) return;
 
     fs.watch(fullPath, { recursive: true }, (_, filename) => {
-        if (!filename) return;
-        broadcastReload(path.join(dirName, filename));
+        handleFileChange(dirName, filename);
     });
 }
 
@@ -90,7 +127,7 @@ function watchFile(fileName) {
     if (!fs.existsSync(fullPath)) return;
 
     fs.watch(fullPath, (_, filename) => {
-        broadcastReload(filename || fileName);
+        handleFileChange('', filename || fileName);
     });
 }
 
