@@ -7,6 +7,7 @@ const ROOT_DIR = __dirname;
 const WATCH_DIRS = ['src', 'config', 'assets'];
 const WATCH_FILES = ['index.html', 'style.css'];
 const clients = new Set();
+const serverStartTime = Date.now().toString();
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -25,15 +26,18 @@ const LIVE_RELOAD_SNIPPET = `
 <script>
 (() => {
     const protocol = location.protocol === 'https:' ? 'https:' : 'http:';
+    let currentSessionId = null;
     const source = new EventSource(protocol + '//' + location.host + '/__livereload');
     source.onmessage = (event) => {
         if (event.data === 'reload') {
             location.reload();
+        } else if (event.data.startsWith('init:')) {
+            const sessionId = event.data.substring(5);
+            if (currentSessionId !== null && currentSessionId !== sessionId) {
+                location.reload();
+            }
+            currentSessionId = sessionId;
         }
-    };
-    source.onerror = () => {
-        source.close();
-        setTimeout(() => location.reload(), 1000);
     };
 })();
 </script>
@@ -97,7 +101,7 @@ const server = http.createServer((req, res) => {
             'Cache-Control': 'no-cache',
             Connection: 'keep-alive'
         });
-        res.write('\n');
+        res.write(`retry: 3000\ndata: init:${serverStartTime}\n\n`);
         clients.add(res);
         req.on('close', () => clients.delete(res));
         return;
@@ -138,6 +142,13 @@ const server = http.createServer((req, res) => {
 
 WATCH_DIRS.forEach(watchDirectory);
 WATCH_FILES.forEach(watchFile);
+
+// 每 15 秒發送一次心跳包，防止 TCP 連線逾時導致瀏覽器觸發錯誤
+setInterval(() => {
+    clients.forEach((res) => {
+        res.write(': ping\n\n');
+    });
+}, 15000);
 
 server.listen(PORT, () => {
     console.log(`[dev-server] Live reload server 已啟動：http://localhost:${PORT}/`);

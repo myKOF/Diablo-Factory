@@ -254,6 +254,7 @@ export class LogisticsRenderer {
                         ? lineOverride
                         : null;
                     if (!override && skipArrowCellKeys?.has(rect.cellKey)) return;
+                    if (!override && LogisticsRenderer.isDetachedSplitCell(line, rect.cellKey)) return;
                     const adx = override ? override.dirX : (rect.dirX !== undefined ? rect.dirX : 0);
                     const ady = override ? override.dirY : (rect.dirY !== undefined ? rect.dirY : 0);
                     const len = Math.hypot(adx, ady) || 1;
@@ -966,6 +967,7 @@ export class LogisticsRenderer {
                     ? pathTurnCellKeys
                     : (groupTurnCellKeys.get(groupKey) || null);
                 const useConnectedIdleStyle = isPhysicallyConnected && !isOperating;
+                const detachedSplitArrowCellKeys = LogisticsRenderer.getDetachedSplitArrowCellKeys(groupSegs);
 
                 segmentRoutes.forEach(({ line, route }) => {
                     // [核心修正] 單擊時僅高亮被點擊的那一段，而不是用 some 讓整個群組都高亮
@@ -1000,7 +1002,7 @@ export class LogisticsRenderer {
                             LogisticsRenderer.drawLogisticsPathTurnArrows(graphics, path, arrowColor, arrowAlpha, arrowSize);
                         });
                     } else {
-                        LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, arrowColor, arrowAlpha, arrowSize);
+                        LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, arrowColor, arrowAlpha, arrowSize, null, detachedSplitArrowCellKeys);
                     }
                 }
                 const isGroupSelected = conveyorSystem && typeof conveyorSystem.isSelectedLogisticsLine === 'function'
@@ -1205,12 +1207,12 @@ export class LogisticsRenderer {
                 const disconnectedColor = parseColor(logCfg.disconnectedArrowColor || logCfg.disconnectedLineColor || "#9a9a9a");
                 const disconnectedAlpha = logCfg.disconnectedArrowAlpha ?? 0.85;
                 const disconnectedSize = logCfg.disconnectedArrowSize || logCfg.arrowSize || 10;
-                LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, disconnectedColor, disconnectedAlpha, disconnectedSize);
+                LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, disconnectedColor, disconnectedAlpha, disconnectedSize, null, LogisticsRenderer.getDetachedSplitArrowCellKeys(groupSegs));
                 connectedCellPaths.forEach((path) => {
                     LogisticsRenderer.drawLogisticsPathTurnArrows(graphics, path, color, alpha, size);
                 });
             } else {
-                LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, color, alpha, size);
+                LogisticsRenderer.drawLogisticsGroupTurnArrows(graphics, groupSegs, widthTiles, color, alpha, size, null, LogisticsRenderer.getDetachedSplitArrowCellKeys(groupSegs));
             }
             drawnTurnGroups.add(groupKey);
         });
@@ -2037,14 +2039,33 @@ export class LogisticsRenderer {
         }
     }
 
-    static drawLogisticsGroupTurnArrows(g, segments, widthTiles, color, alpha, size, onlyCellKeys = null) {
+    static isDetachedSplitCell(line, cellKey) {
+        return !!line?.detachedFromGroupId &&
+            !!line?.detachedAtKey &&
+            !!cellKey &&
+            line.detachedAtKey === cellKey;
+    }
+
+    static getDetachedSplitArrowCellKeys(segments) {
+        const keys = new Set();
+        if (!Array.isArray(segments)) return keys;
+        segments.forEach((seg) => {
+            if (seg?.detachedFromGroupId && seg?.detachedAtKey) {
+                keys.add(seg.detachedAtKey);
+            }
+        });
+        return keys;
+    }
+
+    static drawLogisticsGroupTurnArrows(g, segments, widthTiles, color, alpha, size, onlyCellKeys = null, skipCellKeys = null) {
         if (!Array.isArray(segments) || segments.length === 0) return;
         const TS = GameEngine.TILE_SIZE;
         const keyOf = (x, y) => `${Math.round(x)},${Math.round(y)}`;
         const turns = LogisticsRenderer.getLogisticsGroupTurnCells(segments);
         turns.forEach(({ x, y, inDir, outDir }) => {
+            const centerKey = keyOf(x, y);
+            if (skipCellKeys?.has(centerKey)) return;
             if (onlyCellKeys) {
-                const centerKey = keyOf(x, y);
                 const inKey = keyOf(x - inDir.x * TS, y - inDir.y * TS);
                 const outKey = keyOf(x + outDir.x * TS, y + outDir.y * TS);
                 if (!onlyCellKeys.has(centerKey) || !onlyCellKeys.has(inKey) || !onlyCellKeys.has(outKey)) return;

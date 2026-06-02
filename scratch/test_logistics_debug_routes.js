@@ -71,4 +71,20 @@ if (!labelKeys.has('200,200') || !labelKeys.has('220,200')) {
     throw new Error('Debug labels should include the occupied cell and open terminal endpoint.');
 }
 
+const detachedSplitLine = {
+    ...makeSeg('detached_split', [[300, 300], [320, 300]]),
+    detachedFromGroupId: 'source_group',
+    detachedAtKey: '300,300'
+};
+if (!globalThis.LogisticsRenderer.isDetachedSplitCell(detachedSplitLine, '300,300')) {
+    throw new Error('Detached split cell should be recognized for arrow suppression.');
+}
+if (globalThis.LogisticsRenderer.isDetachedSplitCell(detachedSplitLine, '320,300')) {
+    throw new Error('Only the detached split cell should suppress arrows.');
+}
+const detachedArrowSkipKeys = globalThis.LogisticsRenderer.getDetachedSplitArrowCellKeys([detachedSplitLine]);
+if (!detachedArrowSkipKeys.has('300,300')) {
+    throw new Error('Detached split arrow skip keys should include detachedAtKey.');
+}
+
 console.log('Logistics debug route rendering test passed.');
