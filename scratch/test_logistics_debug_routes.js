@@ -86,5 +86,23 @@ const detachedArrowSkipKeys = globalThis.LogisticsRenderer.getDetachedSplitArrow
 if (!detachedArrowSkipKeys.has('300,300')) {
     throw new Error('Detached split arrow skip keys should include detachedAtKey.');
 }
+const detachedLabelKeys = globalThis.LogisticsRenderer.getDebugLabelCellKeys([detachedSplitLine]);
+if (detachedLabelKeys.has('300,300')) {
+    throw new Error('Detached split cell should not receive a debug label.');
+}
+if (!detachedLabelKeys.has('320,300')) {
+    throw new Error('Detached line should still label the first visible cell after the split.');
+}
+const detachedDebugRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRoutePoints(
+    { mapEntities: [] },
+    'debug_group',
+    [
+        detachedSplitLine,
+        makeSeg('detached_after_split', [[320, 300], [340, 300]])
+    ]
+);
+if (detachedDebugRoutes.some(route => route.some(point => point.x === 300 && point.y === 300))) {
+    throw new Error('Detached split cell should not be included in debug routes.');
+}
 
 console.log('Logistics debug route rendering test passed.');

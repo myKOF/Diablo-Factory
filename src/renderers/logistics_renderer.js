@@ -2130,6 +2130,7 @@ export class LogisticsRenderer {
             const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
             if (points.length < 2) return;
             const suppressedKey = seg?.suppressOpenEndpointCell ? seg.suppressedOpenEndpointCellKey : null;
+            const detachedSplitKey = seg?.detachedFromGroupId ? seg.detachedAtKey : null;
             for (let i = 0; i < points.length - 1; i++) {
                 const a = points[i];
                 const b = points[i + 1];
@@ -2144,6 +2145,7 @@ export class LogisticsRenderer {
                         : { x: a.x + dir.x * TS * step, y: a.y + dir.y * TS * step };
                     const key = keyOf(point);
                     if (suppressedKey && key === suppressedKey && step === steps) continue;
+                    if (detachedSplitKey && key === detachedSplitKey) continue;
                     addNode(point);
                     if (previous) addEdge(nodes.get(previous), point);
                     previous = key;
@@ -2203,6 +2205,7 @@ export class LogisticsRenderer {
         const keyOf = (point) => `${Math.round(point.x)},${Math.round(point.y)}`;
         const startKeys = new Set();
         const terminalCandidates = [];
+        const suppressedKeys = LogisticsRenderer.getDetachedSplitArrowCellKeys(groupSegs);
         groupSegs.forEach(seg => {
             const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
             if (points.length < 2) return;
@@ -2214,11 +2217,14 @@ export class LogisticsRenderer {
                 const dist = Math.hypot(b.x - a.x, b.y - a.y);
                 const steps = Math.max(1, Math.round(dist / TS));
                 for (let step = 0; step < steps; step++) {
-                    keys.add(keyOf({ x: a.x + dir.x * TS * step, y: a.y + dir.y * TS * step }));
+                    const key = keyOf({ x: a.x + dir.x * TS * step, y: a.y + dir.y * TS * step });
+                    if (!suppressedKeys.has(key)) keys.add(key);
                 }
-                startKeys.add(keyOf(a));
+                const startKey = keyOf(a);
+                if (!suppressedKeys.has(startKey)) startKeys.add(startKey);
                 if (i === points.length - 2 && !seg.targetId && !seg.suppressOpenEndpointCell) {
-                    terminalCandidates.push(keyOf(b));
+                    const terminalKey = keyOf(b);
+                    if (!suppressedKeys.has(terminalKey)) terminalCandidates.push(terminalKey);
                 }
             }
         });
