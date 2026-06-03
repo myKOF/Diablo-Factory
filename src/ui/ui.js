@@ -332,6 +332,15 @@ export class UIManager {
             }
         });
         window.addEventListener("keydown", (e) => {
+            const key = String(e.key || "").toLowerCase();
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && key === "z") {
+                if (this.isTextInputEvent(e)) return;
+                if (conveyorSystem.undoLastLogisticsBuild()) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+            }
             if (e.key === "Escape") {
                 if (this.cancelActiveConstructionPreview()) {
                     e.preventDefault();

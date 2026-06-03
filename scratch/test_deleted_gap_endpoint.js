@@ -61,6 +61,17 @@ if (!frontTail?.suppressOpenEndpointCell) {
     throw new Error('front split tail should suppress the artificial open endpoint cell');
 }
 
+const downstream = GameEngine.state.logisticsLines.find(seg => seg.id === 'seg_2');
+if (!downstream || downstream.groupId === 'g') {
+    throw new Error('deleted middle segment should move downstream segments into a new group');
+}
+if (downstream.detachedFromGroupId !== 'g' || downstream.detachedAtKey !== '0,20') {
+    throw new Error('deleted middle segment should tag downstream segments as a continuation of the original group');
+}
+if (downstream.detachedByDeletedGap !== true) {
+    throw new Error('deleted middle segment should distinguish downstream continuation from normal split branches');
+}
+
 sys.rebuildSpatialHashGrid();
 const endpointHits = sys.getLogisticsLinesAt(0, 20).filter(seg => seg.id === 'seg_0');
 if (endpointHits.length > 0) {

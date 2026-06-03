@@ -152,7 +152,129 @@ export class ConveyorSystem {
         this.logisticsOccupiedKeys = new Set();
         // [合併鎖定] 防止拆分後立刻被自動合併覆蓋，由 deleteLogisticsLineById 啟用
         this.isProcessingMerge = false;
+        this.logisticsBuildUndoStack = [];
+        this.maxLogisticsBuildUndoSteps = 5;
         this.spatialGrid = new SpatialHashGrid(64);
+    }
+
+    cloneLogisticsUndoValue(value) {
+        if (value === undefined) return undefined;
+        if (value === null) return null;
+        return JSON.parse(JSON.stringify(value));
+    }
+
+    captureLogisticsBuildUndoSnapshot(state = GameEngine.state) {
+        const ui = window.UIManager || null;
+        const getEntityId = (ent) => {
+            if (!ent) return null;
+            if (ui && typeof ui.getEntityId === 'function') return ui.getEntityId(ent);
+            return ent.id || null;
+        };
+        const activeLine = ui?.activeLogisticsLine || null;
+        const activeConnection = ui?.activeLogisticsConnection || null;
+        return {
+            logisticsLines: this.cloneLogisticsUndoValue(state.logisticsLines || []),
+            logisticsMergeNodes: this.cloneLogisticsUndoValue(state.logisticsMergeNodes || []),
+            logisticsTurnArrowOverrides: this.cloneLogisticsUndoValue(state.logisticsTurnArrowOverrides || []),
+            resources: this.cloneLogisticsUndoValue(state.resources || {}),
+            selectedLogisticsLineId: state.selectedLogisticsLineId || null,
+            selectedLogisticsGroupId: state.selectedLogisticsGroupId || null,
+            selectedLogisticsClickX: state.selectedLogisticsClickX ?? null,
+            selectedLogisticsClickY: state.selectedLogisticsClickY ?? null,
+            activeLogisticsLineKey: activeLine ? (this.getLogisticsLineSelectionKey(activeLine) || activeLine.id || null) : null,
+            activeLogisticsConnection: activeConnection ? {
+                sourceId: getEntityId(activeConnection.source),
+                targetId: activeConnection.targetId ?? null,
+                lineId: activeConnection.lineId ?? null,
+                groupId: activeConnection.groupId ?? null
+            } : null,
+            mapEntityOutputTargets: (state.mapEntities || []).map((ent, index) => ({
+                index,
+                id: getEntityId(ent),
+                hadOutputTargets: Object.prototype.hasOwnProperty.call(ent, 'outputTargets'),
+                outputTargets: this.cloneLogisticsUndoValue(ent?.outputTargets || [])
+            }))
+        };
+    }
+
+    recordLogisticsBuildUndoSnapshot(snapshot = null, state = GameEngine.state) {
+        const entry = snapshot || this.captureLogisticsBuildUndoSnapshot(state);
+        if (!entry) return false;
+        this.logisticsBuildUndoStack.push(entry);
+        while (this.logisticsBuildUndoStack.length > this.maxLogisticsBuildUndoSteps) {
+            this.logisticsBuildUndoStack.shift();
+        }
+        return true;
+    }
+
+    restoreLogisticsBuildUndoSnapshot(snapshot, state = GameEngine.state) {
+        if (!snapshot || !state) return false;
+        const ui = window.UIManager || null;
+        const getEntityId = (ent) => {
+            if (!ent) return null;
+            if (ui && typeof ui.getEntityId === 'function') return ui.getEntityId(ent);
+            return ent.id || null;
+        };
+
+        state.logisticsLines = this.cloneLogisticsUndoValue(snapshot.logisticsLines || []);
+        state.logisticsMergeNodes = this.cloneLogisticsUndoValue(snapshot.logisticsMergeNodes || []);
+        state.logisticsTurnArrowOverrides = this.cloneLogisticsUndoValue(snapshot.logisticsTurnArrowOverrides || []);
+        state.resources = this.cloneLogisticsUndoValue(snapshot.resources || {});
+        state.selectedLogisticsLineId = snapshot.selectedLogisticsLineId || null;
+        state.selectedLogisticsGroupId = snapshot.selectedLogisticsGroupId || null;
+        state.selectedLogisticsClickX = snapshot.selectedLogisticsClickX ?? null;
+        state.selectedLogisticsClickY = snapshot.selectedLogisticsClickY ?? null;
+
+        const entities = Array.isArray(state.mapEntities) ? state.mapEntities : [];
+        (snapshot.mapEntityOutputTargets || []).forEach(saved => {
+            const ent = entities.find(item => saved.id && getEntityId(item) === saved.id) || entities[saved.index] || null;
+            if (!ent) return;
+            if (saved.hadOutputTargets) {
+                ent.outputTargets = this.cloneLogisticsUndoValue(saved.outputTargets || []);
+            } else {
+                delete ent.outputTargets;
+            }
+        });
+
+        if (ui) {
+            ui.activeLogisticsLine = snapshot.activeLogisticsLineKey
+                ? this.getLogisticsLineById(snapshot.activeLogisticsLineKey)
+                : null;
+            const active = snapshot.activeLogisticsConnection || null;
+            if (active) {
+                const source = entities.find(ent => active.sourceId && getEntityId(ent) === active.sourceId) || null;
+                const outputTargets = Array.isArray(source?.outputTargets) ? source.outputTargets : [];
+                const conn = outputTargets.find(item =>
+                    item &&
+                    ((active.lineId && item.lineId === active.lineId) ||
+                        (active.groupId && item.lineId === active.groupId) ||
+                        (active.targetId && item.id === active.targetId))
+                ) || null;
+                ui.activeLogisticsConnection = {
+                    source,
+                    targetId: active.targetId,
+                    lineId: active.lineId,
+                    groupId: active.groupId,
+                    conn
+                };
+            } else {
+                ui.activeLogisticsConnection = null;
+            }
+        }
+
+        this.rebuildSpatialHashGrid();
+        return true;
+    }
+
+    undoLastLogisticsBuild(state = GameEngine.state) {
+        if (this.activeDrag) return false;
+        const snapshot = this.logisticsBuildUndoStack.pop();
+        if (!snapshot) return false;
+        const restored = this.restoreLogisticsBuildUndoSnapshot(snapshot, state);
+        if (restored) {
+            GameEngine.addLog(`[物流] 已復原上一筆物流線建造。`, 'LOGISTICS');
+        }
+        return restored;
     }
 
     startDrag(startX, startY, sourceEntity = null, sourcePort = null, sourceLine = null) {
@@ -593,12 +715,7 @@ export class ConveyorSystem {
             return;
         }
 
-        const savedLogisticsLines = Array.isArray(GameEngine.state.logisticsLines)
-            ? [...GameEngine.state.logisticsLines]
-            : [];
-        const savedTurnArrowOverrides = Array.isArray(GameEngine.state.logisticsTurnArrowOverrides)
-            ? [...GameEngine.state.logisticsTurnArrowOverrides]
-            : [];
+        const buildUndoSnapshot = this.captureLogisticsBuildUndoSnapshot(GameEngine.state);
 
         const drag = this.activeDrag;
         const TS = GameEngine.TILE_SIZE;
@@ -787,11 +904,11 @@ export class ConveyorSystem {
             const afterCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : beforeCount;
             const builtSegments = Math.max(0, afterCount - beforeCount);
             if (!BuildingSystem.spendResources(GameEngine.state, this.getTransportLineCost(builtSegments))) {
-                GameEngine.state.logisticsLines = savedLogisticsLines;
-                GameEngine.state.logisticsTurnArrowOverrides = savedTurnArrowOverrides;
+                this.restoreLogisticsBuildUndoSnapshot(buildUndoSnapshot, GameEngine.state);
                 this.cancelDrag();
                 return;
             }
+            this.recordLogisticsBuildUndoSnapshot(buildUndoSnapshot, GameEngine.state);
             if (drag.isLineExtension && finalGroupId && GameEngine.state) {
                 const finalSegments = this.getLogisticsSegmentsByGroupId(finalGroupId);
                 const activeSegment = finalSegments
@@ -1105,6 +1222,7 @@ export class ConveyorSystem {
             seg.targetPoint = null;
             seg.detachedFromGroupId = sourceGroupId;
             if (detachKey) seg.detachedAtKey = detachKey;
+            delete seg.detachedByDeletedGap;
             delete seg.turnArrowOverride;
         });
 
@@ -1722,15 +1840,60 @@ export class ConveyorSystem {
         let changed = true;
         while (changed) {
             changed = false;
-            Array.from(connected).forEach(groupId => {
-                this.getLogisticsMergeConnectedGroupIds(groupId, state).forEach(connectedGroupId => {
-                    if (!connectedGroupId || connected.has(connectedGroupId)) return;
-                    connected.add(connectedGroupId);
+            this.ensureLogisticsMergeNodeStore(state).forEach(node => {
+                if (!node || !node.outputGroupId || !Array.isArray(node.inputGroupIds)) return;
+                if (!connected.has(node.outputGroupId)) return;
+                node.inputGroupIds.forEach(inputGroupId => {
+                    if (!inputGroupId || connected.has(inputGroupId)) return;
+                    if (!this.isLogisticsMergeNodeInputConnectionIntact(node, inputGroupId, state)) return;
+                    connected.add(inputGroupId);
                     changed = true;
                 });
             });
         }
         return connected;
+    }
+
+    getLogisticsLinesForState(state = GameEngine.state) {
+        return Array.isArray(state?.logisticsLines) ? state.logisticsLines : this.ensureLogisticsLineStore();
+    }
+
+    getLogisticsConnectionPointKey(point) {
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+        return `${Math.round(point.x)},${Math.round(point.y)}`;
+    }
+
+    doesLogisticsLineContainConnectionPoint(line, point, tolerance = 1, blockedKey = null) {
+        if (!line || !point) return false;
+        const pointKey = blockedKey || this.getLogisticsConnectionPointKey(point);
+        if (pointKey && line.suppressedOpenEndpointCellKey === pointKey) return false;
+        const points = Array.isArray(line.routePoints) ? line.routePoints : [];
+        for (let i = 0; i < points.length - 1; i++) {
+            if (this.isPointOnSegment(point, points[i], points[i + 1], tolerance)) return true;
+        }
+        return points.some(p =>
+            Number.isFinite(p?.x) && Number.isFinite(p?.y) &&
+            Math.hypot(p.x - point.x, p.y - point.y) <= tolerance
+        );
+    }
+
+    doesLogisticsGroupContainConnectionPoint(groupId, point, tolerance = 1, state = GameEngine.state, blockedKey = null) {
+        if (!groupId || !point) return false;
+        return this.getLogisticsLinesForState(state).some(line =>
+            (line?.groupId || line?.id || null) === groupId &&
+            this.doesLogisticsLineContainConnectionPoint(line, point, tolerance, blockedKey)
+        );
+    }
+
+    isLogisticsMergeNodeInputConnectionIntact(node, inputGroupId, state = GameEngine.state) {
+        if (!node || !inputGroupId || !node.outputGroupId) return false;
+        if (!Array.isArray(node.inputGroupIds) || !node.inputGroupIds.includes(inputGroupId)) return false;
+        const point = node.point || (Number.isFinite(node.x) && Number.isFinite(node.y) ? { x: node.x, y: node.y } : null);
+        if (!point) return false;
+        const tolerance = Math.max(1, (GameEngine.TILE_SIZE || 20) * 0.75);
+        const key = node.cellKey || this.getLogisticsConnectionPointKey(point);
+        return this.doesLogisticsGroupContainConnectionPoint(node.outputGroupId, point, tolerance, state, key) &&
+            this.doesLogisticsGroupContainConnectionPoint(inputGroupId, point, tolerance, state, key);
     }
 
     getLogisticsMergeConnectedGroupIds(groupId, state = GameEngine.state) {
@@ -1750,6 +1913,150 @@ export class ConveyorSystem {
                     connected.add(id);
                     changed = true;
                 });
+            });
+        }
+        return connected;
+    }
+
+    isLogisticsDetachedDisplayConnectionIntact(groupId, detachedFromGroupId, detachedAtKey, state = GameEngine.state) {
+        if (!groupId || !detachedFromGroupId || !detachedAtKey) return false;
+        const [x, y] = String(detachedAtKey).split(',').map(Number);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+        const point = { x, y };
+        const tolerance = Math.max(1, (GameEngine.TILE_SIZE || 20) * 0.05);
+        return this.doesLogisticsGroupContainConnectionPoint(groupId, point, tolerance, state, detachedAtKey) &&
+            this.doesLogisticsGroupContainConnectionPoint(detachedFromGroupId, point, tolerance, state, detachedAtKey);
+    }
+
+    isDeletedGapContinuationLine(line) {
+        return line?.detachedByDeletedGap === true;
+    }
+
+    getLogisticsPhysicalGroupGraph(state = GameEngine.state) {
+        const groupIds = [...new Set(this.getLogisticsLinesForState(state)
+            .map(line => line?.groupId || line?.id || null)
+            .filter(Boolean))];
+        const adjacency = new Map(groupIds.map(groupId => [groupId, new Set()]));
+
+        for (let i = 0; i < groupIds.length; i++) {
+            for (let j = i + 1; j < groupIds.length; j++) {
+                const a = groupIds[i];
+                const b = groupIds[j];
+                if (!this.areLogisticsGroupsTouching(a, b)) continue;
+                adjacency.get(a).add(b);
+                adjacency.get(b).add(a);
+            }
+        }
+
+        return { groupIds, adjacency };
+    }
+
+    getLogisticsPhysicalGroupComponents(state = GameEngine.state) {
+        const { groupIds, adjacency } = this.getLogisticsPhysicalGroupGraph(state);
+        const visited = new Set();
+        const components = [];
+        groupIds.forEach(groupId => {
+            if (visited.has(groupId)) return;
+            const queue = [groupId];
+            const members = new Set([groupId]);
+            visited.add(groupId);
+            while (queue.length > 0) {
+                const current = queue.shift();
+                (adjacency.get(current) || new Set()).forEach(next => {
+                    if (visited.has(next)) return;
+                    visited.add(next);
+                    members.add(next);
+                    queue.push(next);
+                });
+            }
+            components.push(members);
+        });
+        return components;
+    }
+
+    findLogisticsPhysicalGroupPath(startGroupId, endGroupId, state = GameEngine.state) {
+        if (!startGroupId || !endGroupId) return null;
+        const { adjacency } = this.getLogisticsPhysicalGroupGraph(state);
+        if (!adjacency.has(startGroupId) || !adjacency.has(endGroupId)) return null;
+        if (startGroupId === endGroupId) return [startGroupId];
+
+        const queue = [startGroupId];
+        const visited = new Set([startGroupId]);
+        const previous = new Map();
+        while (queue.length > 0) {
+            const current = queue.shift();
+            const nextGroups = adjacency.get(current) || new Set();
+            for (const next of nextGroups) {
+                if (visited.has(next)) continue;
+                visited.add(next);
+                previous.set(next, current);
+                if (next === endGroupId) {
+                    const path = [endGroupId];
+                    let step = endGroupId;
+                    while (previous.has(step)) {
+                        step = previous.get(step);
+                        path.push(step);
+                    }
+                    return path.reverse();
+                }
+                queue.push(next);
+            }
+        }
+        return null;
+    }
+
+    getLogisticsPortConnectedPhysicalGroupIds(state = GameEngine.state) {
+        const connected = new Set();
+        const lines = this.getLogisticsLinesForState(state);
+        const groupHasSource = new Set();
+        lines.forEach(line => {
+            const groupId = line?.groupId || line?.id || null;
+            if (groupId && line.sourceId) groupHasSource.add(groupId);
+        });
+
+        lines.forEach(line => {
+            const targetGroupId = line?.groupId || line?.id || null;
+            if (!targetGroupId || !line.targetId) return;
+            if (line.sourceId) {
+                connected.add(targetGroupId);
+                return;
+            }
+
+            const sourceGroupId = line.detachedFromGroupId || null;
+            if (!sourceGroupId || !this.isDeletedGapContinuationLine(line) || !groupHasSource.has(sourceGroupId)) return;
+            const path = this.findLogisticsPhysicalGroupPath(sourceGroupId, targetGroupId, state);
+            if (!Array.isArray(path) || path.length === 0) return;
+            path.forEach(groupId => connected.add(groupId));
+        });
+        return connected;
+    }
+
+    getLogisticsDisplayConnectedGroupIds(baseConnectedGroupIds, state = GameEngine.state) {
+        const connected = new Set(baseConnectedGroupIds || []);
+        this.getLogisticsPortConnectedPhysicalGroupIds(state).forEach(groupId => connected.add(groupId));
+        let changed = true;
+        while (changed) {
+            changed = false;
+            this.getLogisticsGroupsConnectedThroughMergeNodes(connected, state).forEach(groupId => {
+                if (!groupId || connected.has(groupId)) return;
+                connected.add(groupId);
+                changed = true;
+            });
+            const lines = this.getLogisticsLinesForState(state);
+            lines.forEach(line => {
+                const groupId = line?.groupId || line?.id || null;
+                const detachedFromGroupId = line?.detachedFromGroupId || null;
+                if (!groupId || !detachedFromGroupId) return;
+                if (!this.isDeletedGapContinuationLine(line)) return;
+                if (!this.isLogisticsDetachedDisplayConnectionIntact(groupId, detachedFromGroupId, line?.detachedAtKey, state)) return;
+                if (connected.has(groupId) && !connected.has(detachedFromGroupId)) {
+                    connected.add(detachedFromGroupId);
+                    changed = true;
+                }
+                if (connected.has(detachedFromGroupId) && !connected.has(groupId)) {
+                    connected.add(groupId);
+                    changed = true;
+                }
             });
         }
         return connected;
@@ -1939,6 +2246,7 @@ export class ConveyorSystem {
         return this.ensureLogisticsMergeNodeStore(state).find(node => {
             if (!node || !Array.isArray(node.inputGroupIds) || !node.inputGroupIds.includes(lineId)) return false;
             if (!node.outputGroupId) return false;
+            if (!this.isLogisticsMergeNodeInputConnectionIntact(node, lineId, state)) return false;
             if (!endPoint) return true;
             const p = node.point || { x: node.x, y: node.y };
             return p && Math.hypot(endPoint.x - p.x, endPoint.y - p.y) <= TS * 0.75;
@@ -2574,6 +2882,8 @@ export class ConveyorSystem {
             const otherLine = other.line || null;
             const endpointDetachedFrom = endpointLine?.detachedFromGroupId || null;
             const otherDetachedFrom = otherLine?.detachedFromGroupId || null;
+            if (endpointLine?.suppressedOpenEndpointCellKey === endpoint.key) return true;
+            if (otherLine?.suppressedOpenEndpointCellKey === other.key) return true;
             if (endpointDetachedFrom === secondaryGroupId && endpointLine?.detachedAtKey === endpoint.key) return true;
             if (otherDetachedFrom === primaryGroupId && otherLine?.detachedAtKey === other.key) return true;
             return false;
@@ -3649,12 +3959,17 @@ export class ConveyorSystem {
 
                 if (frontSegments.length > 0 && backSegments.length > 0) {
                     const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
-                    backSegments.forEach(seg => {
-                        if (seg) seg.groupId = newGroupId;
-                    });
                     const frontTail = frontSegments
                         .sort((a, b) => getSequenceOrder(b) - getSequenceOrder(a))[0] || null;
                     this.markDeletedGapEndpoint(frontTail);
+                    const detachKey = frontTail?.suppressedOpenEndpointCellKey || null;
+                    backSegments.forEach(seg => {
+                        if (!seg) return;
+                        seg.groupId = newGroupId;
+                        seg.detachedFromGroupId = groupId;
+                        if (detachKey) seg.detachedAtKey = detachKey;
+                        seg.detachedByDeletedGap = true;
+                    });
 
                     // 自動重新計算兩段物流線的端點及與建築物的連接關係
                     this.recalculateLogisticsGroupEndpoints(groupId);

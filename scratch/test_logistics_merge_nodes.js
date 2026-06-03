@@ -141,7 +141,7 @@ if (typeof sys.registerLogisticsMergeNode === 'function') {
             id: 'upper_0',
             groupId: 'gUpper',
             sourceId: 'warehouse_merge_ports',
-            routePoints: [{ x: 200, y: 200 }, { x: 260, y: 200 }, { x: 260, y: 260 }],
+            routePoints: [{ x: 200, y: 200 }, { x: 260, y: 200 }, { x: 260, y: 260 }, { x: 260, y: 300 }],
             sourcePort: { x: 200, y: 200, dir: 'right', width: 1 },
             routeWidth: 1,
             order: 0
@@ -152,6 +152,15 @@ if (typeof sys.registerLogisticsMergeNode === 'function') {
             sourceId: 'warehouse_merge_ports',
             routePoints: [{ x: 200, y: 220 }, { x: 260, y: 220 }, { x: 260, y: 260 }],
             sourcePort: { x: 200, y: 220, dir: 'down', width: 1 },
+            routeWidth: 1,
+            order: 0
+        },
+        {
+            id: 'middle_0',
+            groupId: 'gMiddle',
+            sourceId: 'warehouse_merge_ports',
+            routePoints: [{ x: 200, y: 240 }, { x: 260, y: 240 }, { x: 260, y: 260 }],
+            sourcePort: { x: 200, y: 240, dir: 'right', width: 1 },
             routeWidth: 1,
             order: 0
         }
@@ -165,20 +174,105 @@ if (typeof sys.registerLogisticsMergeNode === 'function') {
         inputLine: GameEngine.state.logisticsLines[1],
         outputLine: GameEngine.state.logisticsLines[0]
     });
+    sys.registerLogisticsMergeNode({
+        inputGroupId: 'gMiddle',
+        outputGroupId: 'gUpper',
+        point: { x: 260, y: 260 },
+        inputLine: GameEngine.state.logisticsLines[2],
+        outputLine: GameEngine.state.logisticsLines[0]
+    });
     const groupsAfterPortMerge = [...new Set(GameEngine.state.logisticsLines.map(line => line.groupId))].sort();
-    assert(groupsAfterPortMerge.join(',') === 'gLower,gUpper', 'port merge keeps separate input and output group ids');
+    assert(groupsAfterPortMerge.join(',') === 'gLower,gMiddle,gUpper', 'port merge keeps separate input and output group ids');
     assert(sameSource.outputTargets.some(conn => conn.lineId === 'gUpper'), 'upper source port connection remains after merge registration');
     assert(sameSource.outputTargets.some(conn => conn.lineId === 'gLower'), 'lower source port connection remains after merge registration');
     sys.mergeConnectedLogisticsGroups('gUpper');
     const groupsAfterDownstreamExtensionMergeCheck = [...new Set(GameEngine.state.logisticsLines.map(line => line.groupId))].sort();
-    assert(groupsAfterDownstreamExtensionMergeCheck.join(',') === 'gLower,gUpper', 'groups linked by a merge node are not auto-merged during later extension recalculation');
+    assert(groupsAfterDownstreamExtensionMergeCheck.join(',') === 'gLower,gMiddle,gUpper', 'groups linked by a merge node are not auto-merged during later extension recalculation');
     assert(sameSource.outputTargets.some(conn => conn.lineId === 'gUpper'), 'upper source port connection remains after later extension merge check');
     assert(sameSource.outputTargets.some(conn => conn.lineId === 'gLower'), 'lower source port connection remains after later extension merge check');
 
     const propagated = sys.getLogisticsGroupsConnectedThroughMergeNodes(new Set(['gUpper']));
-    assert(propagated.has('gUpper') && propagated.has('gLower'), 'merge input group is treated as connected when its output group is connected');
-    const reversePropagated = sys.getLogisticsGroupsConnectedThroughMergeNodes(new Set(['gLower']));
-    assert(reversePropagated.has('gUpper') && reversePropagated.has('gLower'), 'connected state propagates across merge groups even if the stored merge direction is reversed');
+    assert(propagated.has('gUpper') && propagated.has('gLower') && propagated.has('gMiddle'), 'all merge input groups are treated as connected when their output group is connected');
+    const inputOnlyDisplay = sys.getLogisticsDisplayConnectedGroupIds(new Set(['gLower']));
+    assert(inputOnlyDisplay.has('gLower') && !inputOnlyDisplay.has('gUpper') && !inputOnlyDisplay.has('gMiddle'), 'merge input connected state does not mark the final output path as connected');
+    const lowerLine = GameEngine.state.logisticsLines.find(line => line.groupId === 'gLower');
+    const lowerRoute = lowerLine.routePoints.map(point => ({ ...point }));
+    lowerLine.routePoints = [{ x: 200, y: 220 }, { x: 220, y: 220 }];
+    const propagatedAfterBrokenMerge = sys.getLogisticsGroupsConnectedThroughMergeNodes(new Set(['gUpper']));
+    assert(!propagatedAfterBrokenMerge.has('gLower') && propagatedAfterBrokenMerge.has('gMiddle'), 'stale merge node stops propagating connected state only for the physically disconnected input');
+    const selectionGroupAfterBrokenInput = sys.getLogisticsMergeConnectedGroupIds('gUpper');
+    assert(selectionGroupAfterBrokenInput.has('gUpper') && selectionGroupAfterBrokenInput.has('gLower') && selectionGroupAfterBrokenInput.has('gMiddle'), 'merge selection membership remains intact when one input becomes a breakpoint');
+    lowerLine.routePoints = lowerRoute;
+    GameEngine.state.logisticsLines.push({
+        id: 'detached_blue_path',
+        groupId: 'gDetachedBlue',
+        detachedFromGroupId: 'gUpper',
+        detachedAtKey: '260,300',
+        detachedByDeletedGap: true,
+        targetId: 'town_center',
+        routePoints: [{ x: 260, y: 300 }, { x: 260, y: 320 }],
+        routeWidth: 1,
+        order: 0
+    });
+    const displayConnected = sys.getLogisticsDisplayConnectedGroupIds(new Set(['gUpper']));
+    assert(displayConnected.has('gDetachedBlue'), 'detached downstream continuation keeps connected display state from its original group');
+    const upperLine = GameEngine.state.logisticsLines.find(line => line.groupId === 'gUpper');
+    const upperRoute = upperLine.routePoints.map(point => ({ ...point }));
+    upperLine.suppressedOpenEndpointCellKey = '260,300';
+    const displayConnectedAfterGap = sys.getLogisticsDisplayConnectedGroupIds(new Set(['gUpper']));
+    assert(!displayConnectedAfterGap.has('gDetachedBlue'), 'detached downstream continuation stops inheriting connected display state across a deleted gap endpoint');
+    delete upperLine.suppressedOpenEndpointCellKey;
+    upperLine.routePoints = [{ x: 200, y: 200 }, { x: 260, y: 200 }, { x: 260, y: 260 }];
+    const displayConnectedAfterPhysicalBreak = sys.getLogisticsDisplayConnectedGroupIds(new Set(['gUpper']));
+    assert(!displayConnectedAfterPhysicalBreak.has('gDetachedBlue'), 'detached downstream continuation stops inheriting connected display state when the split point is no longer physically connected');
+    const displayConnectedAfterMainBreak = sys.getLogisticsDisplayConnectedGroupIds(new Set());
+    assert(!displayConnectedAfterMainBreak.has('gLower') && !displayConnectedAfterMainBreak.has('gMiddle'), 'merge branches are disconnected when the main output path is broken');
+    upperLine.suppressedOpenEndpointCellKey = '260,260';
+    lowerLine.routePoints = [{ x: 200, y: 220 }, { x: 220, y: 220 }];
+    GameEngine.state.logisticsLines.push({
+        id: 'reconnected_gap_bridge',
+        groupId: 'gReconnectBridge',
+        routePoints: [{ x: 260, y: 260 }, { x: 260, y: 300 }],
+        routeWidth: 1,
+        order: 0
+    });
+    GameEngine.state.logisticsLines.push({
+        id: 'side_split_spur',
+        groupId: 'gSideSplit',
+        targetId: 'side_town_port',
+        routePoints: [{ x: 260, y: 260 }, { x: 240, y: 260 }],
+        routeWidth: 1,
+        order: 0
+    });
+    const displayConnectedAfterBridgeReconnect = sys.getLogisticsDisplayConnectedGroupIds(new Set());
+    assert(
+        displayConnectedAfterBridgeReconnect.has('gUpper') &&
+        displayConnectedAfterBridgeReconnect.has('gReconnectBridge') &&
+        displayConnectedAfterBridgeReconnect.has('gDetachedBlue') &&
+        !displayConnectedAfterBridgeReconnect.has('gLower') &&
+        displayConnectedAfterBridgeReconnect.has('gMiddle'),
+        'reconnecting a deleted output gap restores connected display state only for branches still attached to the main line'
+    );
+    assert(!displayConnectedAfterBridgeReconnect.has('gSideSplit'), 'side split pulled from the main line does not become connected just because the main line is connected');
+    GameEngine.state.logisticsLines = GameEngine.state.logisticsLines.filter(line =>
+        line.id !== 'reconnected_gap_bridge' && line.id !== 'side_split_spur'
+    );
+    lowerLine.routePoints = lowerRoute;
+    delete upperLine.suppressedOpenEndpointCellKey;
+    upperLine.routePoints = upperRoute;
+    GameEngine.state.logisticsLines.push({
+        id: 'middle_split_target_branch',
+        groupId: 'gMiddleSplitTarget',
+        detachedFromGroupId: 'gUpper',
+        detachedAtKey: '260,260',
+        targetId: 'side_target_port',
+        routePoints: [{ x: 260, y: 260 }, { x: 240, y: 260 }],
+        routeWidth: 1,
+        order: 0
+    });
+    const displayConnectedAfterMiddleSplit = sys.getLogisticsDisplayConnectedGroupIds(new Set(['gUpper']));
+    assert(!displayConnectedAfterMiddleSplit.has('gMiddleSplitTarget'), 'middle split target branch does not become main-line connected just because it touches the main line');
+    GameEngine.state.logisticsLines = GameEngine.state.logisticsLines.filter(line => line.id !== 'middle_split_target_branch');
     const selectionGroup = sys.getLogisticsMergeConnectedGroupIds('gUpper');
     assert(selectionGroup.has('gUpper') && selectionGroup.has('gLower'), 'selecting one merged logistics group includes all merge-connected groups');
     GameEngine.state.selectedLogisticsGroupId = 'gUpper';

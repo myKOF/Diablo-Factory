@@ -907,7 +907,12 @@ export class LogisticsRenderer {
             if (connected) portToPortConnectedGroupIds.add(groupKey);
         });
 
-        if (conveyorSystem && typeof conveyorSystem.getLogisticsGroupsConnectedThroughMergeNodes === 'function') {
+        if (conveyorSystem && typeof conveyorSystem.getLogisticsDisplayConnectedGroupIds === 'function') {
+            const propagatedConnectedGroups = conveyorSystem.getLogisticsDisplayConnectedGroupIds(portToPortConnectedGroupIds, state);
+            propagatedConnectedGroups.forEach(groupKey => {
+                if (groupKey) portToPortConnectedGroupIds.add(groupKey);
+            });
+        } else if (conveyorSystem && typeof conveyorSystem.getLogisticsGroupsConnectedThroughMergeNodes === 'function') {
             const propagatedConnectedGroups = conveyorSystem.getLogisticsGroupsConnectedThroughMergeNodes(portToPortConnectedGroupIds, state);
             propagatedConnectedGroups.forEach(groupKey => {
                 if (groupKey) portToPortConnectedGroupIds.add(groupKey);
