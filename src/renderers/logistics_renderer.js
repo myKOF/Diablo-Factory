@@ -121,7 +121,8 @@ export class LogisticsRenderer {
 
         const renderedLogisticsBaseCellKeys = new Set();
         const isDetachedSplitCell = (line, cellKey) =>
-            !!line?.detachedFromGroupId && !!line?.detachedAtKey && line.detachedAtKey === cellKey;
+            (!!line?.detachedFromGroupId && !!line?.detachedAtKey && line.detachedAtKey === cellKey) ||
+            (Array.isArray(line?.suppressedConnectionCellKeys) && line.suppressedConnectionCellKeys.includes(cellKey));
         const getRenderableLogisticsCellRects = (points, widthTiles, perStep, line) =>
             LogisticsRenderer.getLogisticsCellRects(points, widthTiles, perStep)
                 .filter(rect => !isDetachedSplitCell(line, rect.cellKey));
@@ -2100,10 +2101,11 @@ export class LogisticsRenderer {
     }
 
     static isDetachedSplitCell(line, cellKey) {
-        return !!line?.detachedFromGroupId &&
+        return (!!line?.detachedFromGroupId &&
             !!line?.detachedAtKey &&
             !!cellKey &&
-            line.detachedAtKey === cellKey;
+            line.detachedAtKey === cellKey) ||
+            (Array.isArray(line?.suppressedConnectionCellKeys) && line.suppressedConnectionCellKeys.includes(cellKey));
     }
 
     static getDetachedSplitArrowCellKeys(segments) {
@@ -2112,6 +2114,11 @@ export class LogisticsRenderer {
         segments.forEach((seg) => {
             if (seg?.detachedFromGroupId && seg?.detachedAtKey) {
                 keys.add(seg.detachedAtKey);
+            }
+            if (Array.isArray(seg?.suppressedConnectionCellKeys)) {
+                seg.suppressedConnectionCellKeys.forEach(key => {
+                    if (key) keys.add(key);
+                });
             }
         });
         return keys;
@@ -2189,8 +2196,14 @@ export class LogisticsRenderer {
         groupSegs.forEach(seg => {
             const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
             if (points.length < 2) return;
-            const suppressedKey = seg?.suppressOpenEndpointCell ? seg.suppressedOpenEndpointCellKey : null;
-            const detachedSplitKey = seg?.detachedFromGroupId ? seg.detachedAtKey : null;
+            const suppressedKeys = new Set();
+            if (seg?.suppressOpenEndpointCell && seg.suppressedOpenEndpointCellKey) suppressedKeys.add(seg.suppressedOpenEndpointCellKey);
+            if (seg?.detachedFromGroupId && seg.detachedAtKey) suppressedKeys.add(seg.detachedAtKey);
+            if (Array.isArray(seg?.suppressedConnectionCellKeys)) {
+                seg.suppressedConnectionCellKeys.forEach(key => {
+                    if (key) suppressedKeys.add(key);
+                });
+            }
             for (let i = 0; i < points.length - 1; i++) {
                 const a = points[i];
                 const b = points[i + 1];
@@ -2204,8 +2217,7 @@ export class LogisticsRenderer {
                         ? b
                         : { x: a.x + dir.x * TS * step, y: a.y + dir.y * TS * step };
                     const key = keyOf(point);
-                    if (suppressedKey && key === suppressedKey && step === steps) continue;
-                    if (detachedSplitKey && key === detachedSplitKey) continue;
+                    if (suppressedKeys.has(key)) continue;
                     addNode(point);
                     if (previous) addEdge(nodes.get(previous), point);
                     previous = key;
@@ -2323,7 +2335,10 @@ export class LogisticsRenderer {
         const seen = new Set();
         const suppressedEndpointKeys = new Set(
             (Array.isArray(groupSegs) ? groupSegs : [])
-                .map(seg => seg?.suppressedOpenEndpointCellKey)
+                .flatMap(seg => [
+                    seg?.suppressedOpenEndpointCellKey,
+                    ...(Array.isArray(seg?.suppressedConnectionCellKeys) ? seg.suppressedConnectionCellKeys : [])
+                ])
                 .filter(Boolean)
         );
         const normalize = (points) => {

@@ -183,5 +183,86 @@ GameEngine.state.logisticsLines = [reversedRightLine, GameEngine.state.logistics
 conveyorSystem.rebuildSpatialHashGrid();
 assert(conveyorSystem.isLogisticsSourcePortCell(reversedRightLine, 200, 200), 'source port remains identifiable when a segment is reordered away from the building');
 
+const mergeSource = {
+    id: 'warehouse_merge_same_point',
+    type1: 'warehouse',
+    x: 300,
+    y: 300,
+    outputTargets: [
+        { id: null, lineId: 'gTop', sourcePort: { x: 300, y: 280, dir: 'up', width: 1, slotIndex: 0, defIndex: 0 } },
+        { id: null, lineId: 'gMid', sourcePort: { x: 320, y: 300, dir: 'right', width: 1, slotIndex: 1, defIndex: 1 } },
+        { id: null, lineId: 'gBottom', sourcePort: { x: 300, y: 320, dir: 'down', width: 1, slotIndex: 2, defIndex: 2 } }
+    ]
+};
+const mergeTarget = { id: 'town_merge_target', type1: 'town', x: 420, y: 360 };
+GameEngine.state.mapEntities = [mergeSource, mergeTarget];
+window.UIManager.getBuildingPortSlots = (ent) => {
+    if (ent?.id === 'warehouse_merge_same_point') {
+        return [
+            { x: 300, y: 280, dir: 'up', width: 1, slotIndex: 0, defIndex: 0 },
+            { x: 320, y: 300, dir: 'right', width: 1, slotIndex: 1, defIndex: 1 },
+            { x: 300, y: 320, dir: 'down', width: 1, slotIndex: 2, defIndex: 2 }
+        ];
+    }
+    if (ent?.id === 'town_merge_target') {
+        return [{ x: 420, y: 360, dir: 'left', width: 1, slotIndex: 0, defIndex: 0 }];
+    }
+    return [];
+};
+GameEngine.state.logisticsLines = [
+    {
+        id: 'top_before_extend',
+        groupId: 'gTop',
+        sourceId: 'warehouse_merge_same_point',
+        sourcePort: { x: 300, y: 280, dir: 'up', width: 1, slotIndex: 0, defIndex: 0 },
+        routePoints: [{ x: 300, y: 280 }, { x: 300, y: 260 }],
+        routeWidth: 1,
+        order: 0
+    },
+    {
+        id: 'mid_before_extend',
+        groupId: 'gMid',
+        sourceId: 'warehouse_merge_same_point',
+        sourcePort: { x: 320, y: 300, dir: 'right', width: 1, slotIndex: 1, defIndex: 1 },
+        routePoints: [{ x: 320, y: 300 }, { x: 360, y: 300 }],
+        routeWidth: 1,
+        order: 0
+    },
+    {
+        id: 'bottom_before_extend',
+        groupId: 'gBottom',
+        sourceId: 'warehouse_merge_same_point',
+        sourcePort: { x: 300, y: 320, dir: 'down', width: 1, slotIndex: 2, defIndex: 2 },
+        routePoints: [{ x: 300, y: 320 }, { x: 360, y: 320 }],
+        routeWidth: 1,
+        order: 0
+    }
+];
+conveyorSystem.upsertLogisticsLine({
+    lineId: 'gTop',
+    sourceEnt: null,
+    targetEnt: null,
+    targetPoint: { x: 400, y: 260 },
+    points: [{ x: 300, y: 260 }, { x: 400, y: 260 }],
+    routeWidth: 1
+});
+const extendedTopLine = conveyorSystem.getLogisticsSegmentsByGroupId('gTop').find(line => line.sourcePort?.slotIndex === 0) ||
+    conveyorSystem.getLogisticsSegmentsByGroupId('gTop')[0];
+assert(extendedTopLine?.sourceId === 'warehouse_merge_same_point', 'extending an existing main line preserves its source entity');
+assert(conveyorSystem.isLogisticsSourcePortCell(extendedTopLine, 300, 280), 'extending a same-point merge main line keeps the top source port cell visible');
+assert(mergeSource.outputTargets.some(conn => conn.lineId === 'gTop' && conn.sourcePort?.slotIndex === 0), 'extending a same-point merge main line keeps the original top output target');
+
+conveyorSystem.upsertLogisticsLine({
+    lineId: 'gTop',
+    sourceEnt: null,
+    targetEnt: mergeTarget,
+    targetPoint: { x: 420, y: 360 },
+    points: [{ x: 400, y: 260 }, { x: 420, y: 360 }],
+    routeWidth: 1,
+    targetPort: { x: 420, y: 360, dir: 'left', width: 1, slotIndex: 0, defIndex: 0 }
+});
+const connectedTop = conveyorSystem.getLogisticsSegmentsByGroupId('gTop');
+assert(connectedTop.some(line => line.sourceId === 'warehouse_merge_same_point') && connectedTop.some(line => line.targetId === 'town_merge_target'), 'connecting an extended same-point merge main line preserves source and writes target metadata');
+
 if (!passed) process.exit(1);
 console.log('logistics port filter tests passed');

@@ -1842,6 +1842,11 @@ export class ConveyorSystem {
         });
     }
 
+    areLogisticsGroupsInSameMergeComponent(groupA, groupB, state = GameEngine.state) {
+        if (!groupA || !groupB || groupA === groupB) return false;
+        return this.getLogisticsMergeConnectedGroupIds(groupA, state).has(groupB);
+    }
+
     getLogisticsGroupsConnectedThroughMergeNodes(baseConnectedGroupIds, state = GameEngine.state) {
         const connected = new Set(baseConnectedGroupIds || []);
         let changed = true;
@@ -2031,6 +2036,11 @@ export class ConveyorSystem {
 
             const sourceGroupId = line.detachedFromGroupId || null;
             if (!sourceGroupId || !this.isDeletedGapContinuationLine(line) || !groupHasSource.has(sourceGroupId)) return;
+            if (this.isLogisticsDetachedDisplayConnectionIntact(targetGroupId, sourceGroupId, line?.detachedAtKey, state)) {
+                connected.add(sourceGroupId);
+                connected.add(targetGroupId);
+                return;
+            }
             const path = this.findLogisticsPhysicalGroupPath(sourceGroupId, targetGroupId, state);
             if (!Array.isArray(path) || path.length === 0) return;
             path.forEach(groupId => connected.add(groupId));
@@ -2181,7 +2191,27 @@ export class ConveyorSystem {
             node.inputDirections[inputGroupId] = inputDir;
         }
         if (outputDir) node.outputDir = outputDir;
+        this.getLogisticsSegmentsByGroupId(inputGroupId).forEach(line => this.clearSuppressedLogisticsConnectionCell(line, snapped));
+        this.getLogisticsSegmentsByGroupId(outputGroupId).forEach(line => this.clearSuppressedLogisticsConnectionCell(line, snapped));
+        this.reassignDeletedGapContinuationToMergeInput(inputGroupId, outputGroupId, snapped);
         return node;
+    }
+
+    reassignDeletedGapContinuationToMergeInput(inputGroupId, outputGroupId, point) {
+        if (!inputGroupId || !outputGroupId || !point) return false;
+        const inputHasSource = this.getLogisticsSegmentsByGroupId(inputGroupId).some(line => !!line?.sourceId);
+        if (!inputHasSource) return false;
+        const outputLines = this.getLogisticsSegmentsByGroupId(outputGroupId);
+        const continuationLines = outputLines.filter(line => line?.detachedByDeletedGap === true && line?.targetId && !line?.sourceId);
+        if (continuationLines.length === 0) return false;
+        const connectionKey = `${Math.round(point.x)},${Math.round(point.y)}`;
+        let changed = false;
+        continuationLines.forEach(line => {
+            line.detachedFromGroupId = inputGroupId;
+            line.detachedAtKey = connectionKey;
+            changed = true;
+        });
+        return changed;
     }
 
     getLogisticsMergeNodeOutputRoute(node) {
@@ -2331,8 +2361,100 @@ export class ConveyorSystem {
         }
     }
 
+    getLogisticsLineEndpointNearPoint(line, point, tolerance = (GameEngine.TILE_SIZE || 20) * 0.8) {
+        if (!line || !point) return null;
+        const points = Array.isArray(line.routePoints) ? line.routePoints : [];
+        if (points.length < 2) return null;
+        const endpoints = [
+            { point: points[0], side: 'start' },
+            { point: points[points.length - 1], side: 'end' }
+        ];
+        return endpoints.find(endpoint =>
+            endpoint.point &&
+            Number.isFinite(endpoint.point.x) &&
+            Number.isFinite(endpoint.point.y) &&
+            Math.hypot(endpoint.point.x - point.x, endpoint.point.y - point.y) <= tolerance
+        ) || null;
+    }
+
+    markSuppressedLogisticsConnectionCell(line, point) {
+        const endpoint = this.getLogisticsLineEndpointNearPoint(line, point);
+        if (!endpoint) return false;
+        const key = `${Math.round(endpoint.point.x)},${Math.round(endpoint.point.y)}`;
+        const keys = Array.isArray(line.suppressedConnectionCellKeys)
+            ? line.suppressedConnectionCellKeys.slice()
+            : [];
+        if (!keys.includes(key)) keys.push(key);
+        line.suppressedConnectionCellKeys = keys;
+        if (endpoint.side === 'end') {
+            line.suppressOpenEndpointCell = true;
+            line.suppressedOpenEndpointCellKey = key;
+        }
+        return true;
+    }
+
+    clearSuppressedLogisticsConnectionCell(line, point) {
+        if (!line || !point) return false;
+        const endpoint = this.getLogisticsLineEndpointNearPoint(line, point);
+        if (!endpoint) return false;
+        const key = `${Math.round(endpoint.point.x)},${Math.round(endpoint.point.y)}`;
+        let changed = false;
+        if (Array.isArray(line.suppressedConnectionCellKeys)) {
+            const nextKeys = line.suppressedConnectionCellKeys.filter(item => item !== key);
+            changed = nextKeys.length !== line.suppressedConnectionCellKeys.length;
+            if (nextKeys.length > 0) line.suppressedConnectionCellKeys = nextKeys;
+            else delete line.suppressedConnectionCellKeys;
+        }
+        if (line.suppressedOpenEndpointCellKey === key) {
+            delete line.suppressOpenEndpointCell;
+            delete line.suppressedOpenEndpointCellKey;
+            changed = true;
+        }
+        return changed;
+    }
+
+    cleanupLogisticsMergeNodesForDeletedLine(deletedLine) {
+        const state = GameEngine.state;
+        const points = Array.isArray(deletedLine?.routePoints) ? deletedLine.routePoints : [];
+        if (points.length === 0) return new Set();
+        const TS = GameEngine.TILE_SIZE || 20;
+        const tolerance = TS * 0.8;
+        const nodes = this.ensureLogisticsMergeNodeStore(state);
+        const removedNodes = nodes.filter(node => {
+            const point = node?.point || (Number.isFinite(node?.x) && Number.isFinite(node?.y) ? { x: node.x, y: node.y } : null);
+            if (!point) return false;
+            return points.some(routePoint =>
+                routePoint &&
+                Number.isFinite(routePoint.x) &&
+                Number.isFinite(routePoint.y) &&
+                Math.hypot(routePoint.x - point.x, routePoint.y - point.y) <= tolerance
+            );
+        });
+        if (removedNodes.length === 0) return new Set();
+
+        const affectedGroupIds = new Set();
+        const removedPoints = [];
+        removedNodes.forEach(node => {
+            if (node.outputGroupId) affectedGroupIds.add(node.outputGroupId);
+            (node.inputGroupIds || []).forEach(groupId => {
+                if (groupId) affectedGroupIds.add(groupId);
+            });
+            const point = node.point || { x: node.x, y: node.y };
+            if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) removedPoints.push(point);
+        });
+        state.logisticsMergeNodes = nodes.filter(node => !removedNodes.includes(node));
+
+        this.ensureLogisticsLineStore().forEach(line => {
+            const groupId = line?.groupId || line?.id || null;
+            if (!groupId || !affectedGroupIds.has(groupId)) return;
+            removedPoints.forEach(point => this.markSuppressedLogisticsConnectionCell(line, point));
+        });
+        return affectedGroupIds;
+    }
+
     isLogisticsDetachedSplitCell(line, cellKey) {
-        return !!line?.detachedFromGroupId && !!line?.detachedAtKey && line.detachedAtKey === cellKey;
+        return (!!line?.detachedFromGroupId && !!line?.detachedAtKey && line.detachedAtKey === cellKey) ||
+            (Array.isArray(line?.suppressedConnectionCellKeys) && line.suppressedConnectionCellKeys.includes(cellKey));
     }
 
     getLogisticsSegmentOccupiedKeys(line) {
@@ -2507,6 +2629,7 @@ export class ConveyorSystem {
         const cleanTargetPoint = (targetId || !targetPoint) ? null : this.snapPointToGridCenter(targetPoint);
         const gridPoints = this.buildGridRoutePoints(points);
         const previous = lines.find(item => item.groupId === groupId || item.id === groupId);
+        const existingGroupSegments = lines.filter(line => line && (line.groupId === groupId || line.id === groupId));
         const clonePort = (port) => {
             if (!port) return null;
             const cloned = {
@@ -2520,6 +2643,26 @@ export class ConveyorSystem {
             return cloned;
         };
         const hasPortPosition = (port) => port && Number.isFinite(port.x) && Number.isFinite(port.y);
+        const findExistingSourceConnection = () => {
+            const entities = GameEngine.state?.mapEntities || [];
+            for (const ent of entities) {
+                const outputTargets = Array.isArray(ent?.outputTargets) ? ent.outputTargets : [];
+                const match = outputTargets.find(output => output && output.lineId === groupId);
+                if (match) {
+                    return {
+                        sourceId: window.UIManager.getEntityId(ent),
+                        sourcePort: match.sourcePort || null
+                    };
+                }
+            }
+            return null;
+        };
+        const existingSourceConnection = findExistingSourceConnection();
+        const previousSourceId = previous?.sourceId ||
+            existingGroupSegments.find(line => line?.sourceId)?.sourceId ||
+            existingSourceConnection?.sourceId ||
+            null;
+        const canonicalSourceId = sourceId || previousSourceId || null;
         const findNearestSourceEntityPort = () => {
             if (!sourceEnt || typeof window.UIManager.getBuildingPortSlots !== 'function') return null;
             const slots = window.UIManager.getBuildingPortSlots(sourceEnt);
@@ -2555,10 +2698,9 @@ export class ConveyorSystem {
         const fallbackSourcePort = () => {
             const candidates = [
                 conn?.sourcePort,
+                existingSourceConnection?.sourcePort,
                 previous?.sourcePort,
-                ...lines
-                    .filter(line => line && (line.groupId === groupId || line.id === groupId))
-                    .map(line => line.sourcePort)
+                ...existingGroupSegments.map(line => line.sourcePort)
             ];
             const stored = candidates.find(hasPortPosition);
             return stored ? clonePort(stored) : findNearestSourceEntityPort();
@@ -2567,8 +2709,7 @@ export class ConveyorSystem {
         if (!hasPortPosition(cleanSourcePort)) cleanSourcePort = fallbackSourcePort();
         const cleanTargetPort = clonePort(targetPort);
         const filter = conn ? null : (previous?.filter || null);
-        const segments = this.buildLogisticsSegments(groupId, sourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter, lineType, efficiency);
-        const existingGroupSegments = lines.filter(line => line && (line.groupId === groupId || line.id === groupId));
+        const segments = this.buildLogisticsSegments(groupId, canonicalSourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter, lineType, efficiency);
         const extendsSplitSequence = existingGroupSegments.some(line => Number.isFinite(line?.splitSequenceOrder));
         const splitSequenceStart = extendsSplitSequence
             ? Math.max(...existingGroupSegments.map(line => Number.isFinite(line?.splitSequenceOrder) ? line.splitSequenceOrder : (Number(line?.order) || 0))) + 1
@@ -2696,7 +2837,7 @@ export class ConveyorSystem {
             const sameGroup = (seg.groupId === groupId) || (seg.id === groupId);
             if (!sameGroup) return;
             seg.groupId = groupId;
-            seg.sourceId = sourceId;
+            seg.sourceId = canonicalSourceId;
             seg.targetId = targetId;
             seg.targetPoint = targetId ? null : cleanTargetPoint;
             seg.routeWidth = Math.max(1, Number(routeWidth) || 1);
@@ -2729,7 +2870,7 @@ export class ConveyorSystem {
                 overlapMergeGroupIds.forEach(otherGroupId => {
                     if (!otherGroupId || otherGroupId === mergedGroupId) return;
                     if (blockedOverlapGroupIds.has(otherGroupId)) return;
-                    if (this.areLogisticsGroupsLinkedByMergeNode(mergedGroupId, otherGroupId)) return;
+                    if (this.areLogisticsGroupsInSameMergeComponent(mergedGroupId, otherGroupId)) return;
                     affectedGroupIds.add(otherGroupId);
                     mergedGroupId = this.mergeLogisticsLineGroups(mergedGroupId, otherGroupId) || mergedGroupId;
                     affectedGroupIds.add(mergedGroupId);
@@ -2957,7 +3098,7 @@ export class ConveyorSystem {
 
             for (const otherGroupId of otherGroupIds) {
                 if (!this.areLogisticsGroupsTouching(activeGroupId, otherGroupId)) continue;
-                if (this.areLogisticsGroupsLinkedByMergeNode(activeGroupId, otherGroupId)) continue;
+                if (this.areLogisticsGroupsInSameMergeComponent(activeGroupId, otherGroupId)) continue;
                 activeGroupId = this.mergeLogisticsLineGroups(activeGroupId, otherGroupId);
                 merged = true;
                 break;
@@ -3032,7 +3173,7 @@ export class ConveyorSystem {
             return primaryGroupId;
         }
         if (!primaryGroupId || !secondaryGroupId || primaryGroupId === secondaryGroupId) return primaryGroupId || secondaryGroupId || null;
-        if (this.areLogisticsGroupsLinkedByMergeNode(primaryGroupId, secondaryGroupId)) return primaryGroupId;
+        if (this.areLogisticsGroupsInSameMergeComponent(primaryGroupId, secondaryGroupId)) return primaryGroupId;
         if (this._affectedLogisticsGroupIds) {
             this._affectedLogisticsGroupIds.add(primaryGroupId);
             this._affectedLogisticsGroupIds.add(secondaryGroupId);
@@ -3921,6 +4062,52 @@ export class ConveyorSystem {
             });
         });
 
+        const hasPortPosition = (port) => port && Number.isFinite(port.x) && Number.isFinite(port.y);
+        const clonePort = (port) => {
+            if (!port) return null;
+            const cloned = {
+                dir: port.dir,
+                slotIndex: port.slotIndex,
+                defIndex: port.defIndex,
+                width: Math.max(1, Number(port.width) || 1)
+            };
+            if (Number.isFinite(port.x)) cloned.x = port.x;
+            if (Number.isFinite(port.y)) cloned.y = port.y;
+            return cloned;
+        };
+        const findEntityById = (id) => {
+            if (!id) return null;
+            return (state.mapEntities || []).find(ent => (window.UIManager?.getEntityId(ent) || ent?.id) === id) || null;
+        };
+        const storedConnection = (state.mapEntities || [])
+            .flatMap(ent => (Array.isArray(ent.outputTargets) ? ent.outputTargets : []).map(conn => ({ ent, conn })))
+            .find(item => item.conn?.lineId === groupId) || null;
+        const existingMeta = groupSegments.find(seg => seg && (seg.sourceId || seg.targetId || seg.sourcePort || seg.targetPort)) || null;
+
+        if (!sourceEnt) {
+            const storedSourcePort = clonePort(storedConnection?.conn?.sourcePort);
+            const existingSourcePort = clonePort(existingMeta?.sourcePort);
+            const preservedSourcePort = [storedSourcePort, existingSourcePort].find(hasPortPosition) || null;
+            const preservedSourceId = (storedConnection?.ent ? (window.UIManager?.getEntityId(storedConnection.ent) || storedConnection.ent.id) : null) ||
+                existingMeta?.sourceId ||
+                null;
+            if (preservedSourceId && preservedSourcePort && this.doesLogisticsGroupContainConnectionPoint(groupId, preservedSourcePort, TS * 0.75, state)) {
+                sourceEnt = findEntityById(preservedSourceId);
+                sourcePort = preservedSourcePort;
+            }
+        }
+
+        if (!targetEnt) {
+            const storedTargetPort = clonePort(storedConnection?.conn?.targetPort);
+            const existingTargetPort = clonePort(existingMeta?.targetPort);
+            const preservedTargetPort = [storedTargetPort, existingTargetPort].find(hasPortPosition) || null;
+            const preservedTargetId = storedConnection?.conn?.id || existingMeta?.targetId || null;
+            if (preservedTargetId && preservedTargetPort && this.doesLogisticsGroupContainConnectionPoint(groupId, preservedTargetPort, TS * 0.75, state)) {
+                targetEnt = findEntityById(preservedTargetId);
+                targetPort = preservedTargetPort;
+            }
+        }
+
         const sourceId = sourceEnt ? (window.UIManager?.getEntityId(sourceEnt) || sourceEnt.id) : null;
         const targetId = targetEnt ? (window.UIManager?.getEntityId(targetEnt) || targetEnt.id) : null;
 
@@ -4016,6 +4203,7 @@ export class ConveyorSystem {
                 return !isTarget && !isDuplicate;
             });
             this.cleanupDeletedLinePreviousTurnOverride(line, groupId);
+            const mergeCleanupAffectedGroupIds = this.cleanupLogisticsMergeNodesForDeletedLine(line);
 
             // [核心修正 v3] 使用「order 值直接分割」取代不可靠的 BFS 端點連通判定。
             const getSequenceOrder = (seg) =>
@@ -4047,13 +4235,13 @@ export class ConveyorSystem {
                     // 自動重新計算兩段物流線的端點及與建築物的連接關係
                     this.recalculateLogisticsGroupEndpoints(groupId);
                     this.recalculateLogisticsGroupEndpoints(newGroupId);
-                    this.updateActiveTransfersOnLogisticsChange(state, new Set([groupId, newGroupId]));
+                    this.updateActiveTransfersOnLogisticsChange(state, new Set([groupId, newGroupId, ...mergeCleanupAffectedGroupIds]));
 
                     GameEngine.addLog(`[物流] 線段中斷，物流線已拆分為獨立路線。`, 'LOGISTICS');
                 } else {
                     // 只有前半或只有後半（從端點刪除），只需重新計算該群組即可
                     this.recalculateLogisticsGroupEndpoints(groupId);
-                    this.updateActiveTransfersOnLogisticsChange(state, new Set([groupId]));
+                    this.updateActiveTransfersOnLogisticsChange(state, new Set([groupId, ...mergeCleanupAffectedGroupIds]));
                 }
             } else {
                 // 如果這個群組已經沒有任何線段，清除 sourceEnt 的輸出紀錄
@@ -4062,6 +4250,9 @@ export class ConveyorSystem {
                     if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
                         sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId);
                     }
+                }
+                if (mergeCleanupAffectedGroupIds.size > 0) {
+                    this.updateActiveTransfersOnLogisticsChange(state, mergeCleanupAffectedGroupIds);
                 }
             }
 

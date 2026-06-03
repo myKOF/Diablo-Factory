@@ -191,6 +191,160 @@ if (typeof sys.registerLogisticsMergeNode === 'function') {
     assert(sameSource.outputTargets.some(conn => conn.lineId === 'gUpper'), 'upper source port connection remains after later extension merge check');
     assert(sameSource.outputTargets.some(conn => conn.lineId === 'gLower'), 'lower source port connection remains after later extension merge check');
 
+    GameEngine.state.logisticsMergeNodes = [];
+    GameEngine.state.logisticsLines = [
+        {
+            id: 'same_point_main_0',
+            groupId: 'gSameMain',
+            sourceId: 'warehouse_merge_ports',
+            sourcePort: { x: 200, y: 240, dir: 'right', width: 1 },
+            routePoints: [{ x: 200, y: 240 }, { x: 260, y: 240 }, { x: 260, y: 260 }],
+            routeWidth: 1,
+            order: 0
+        },
+        {
+            id: 'same_point_branch_0',
+            groupId: 'gSameBranch',
+            sourceId: 'warehouse_merge_ports',
+            sourcePort: { x: 200, y: 220, dir: 'right', width: 1 },
+            routePoints: [{ x: 200, y: 220 }, { x: 260, y: 220 }, { x: 260, y: 260 }],
+            routeWidth: 1,
+            order: 0
+        },
+        {
+            id: 'same_point_last_0',
+            groupId: 'gSameLast',
+            sourceId: 'warehouse_merge_ports',
+            sourcePort: { x: 200, y: 200, dir: 'right', width: 1 },
+            routePoints: [{ x: 200, y: 200 }, { x: 260, y: 200 }, { x: 260, y: 260 }],
+            routeWidth: 1,
+            order: 0
+        }
+    ];
+    sameSource.outputTargets = [
+        { id: null, lineId: 'gSameMain', sourcePort: { x: 200, y: 240, dir: 'right', width: 1 } },
+        { id: null, lineId: 'gSameBranch', sourcePort: { x: 200, y: 220, dir: 'right', width: 1 } },
+        { id: null, lineId: 'gSameLast', sourcePort: { x: 200, y: 200, dir: 'right', width: 1 } }
+    ];
+    sys.registerLogisticsMergeNode({
+        inputGroupId: 'gSameLast',
+        outputGroupId: 'gSameBranch',
+        point: { x: 260, y: 260 },
+        inputLine: GameEngine.state.logisticsLines[2],
+        outputLine: GameEngine.state.logisticsLines[1]
+    });
+    sys.registerLogisticsMergeNode({
+        inputGroupId: 'gSameBranch',
+        outputGroupId: 'gSameMain',
+        point: { x: 260, y: 260 },
+        inputLine: GameEngine.state.logisticsLines[1],
+        outputLine: GameEngine.state.logisticsLines[0]
+    });
+    sys.upsertLogisticsLine({
+        lineId: 'gSameMain',
+        sourceEnt: null,
+        targetEnt: null,
+        targetPoint: { x: 260, y: 320 },
+        points: [{ x: 260, y: 260 }, { x: 260, y: 320 }],
+        routeWidth: 1
+    });
+    const samePointGroupsAfterExtension = [...new Set(GameEngine.state.logisticsLines.map(line => line.groupId))].sort();
+    assert(samePointGroupsAfterExtension.join(',') === 'gSameBranch,gSameLast,gSameMain', 'same-point merge component stays as separate groups after extending the main line');
+    assert(GameEngine.state.logisticsLines.filter(line => line.groupId === 'gSameLast').every(line => line.order === 0), 'same-point branch keeps its original numbering after main extension');
+
+    const samePointTarget = { id: 'same_point_target', type1: 'town', x: 260, y: 340 };
+    GameEngine.state.mapEntities = [sameSource, samePointTarget];
+    sys.upsertLogisticsLine({
+        lineId: 'gSameMain',
+        sourceEnt: null,
+        targetEnt: samePointTarget,
+        targetPoint: { x: 260, y: 340 },
+        points: [{ x: 260, y: 320 }, { x: 260, y: 340 }],
+        routeWidth: 1,
+        targetPort: { x: 260, y: 340, dir: 'up', width: 1 }
+    });
+    const connectedSamePointGroups = sys.getLogisticsDisplayConnectedGroupIds(sys.getLogisticsPortConnectedPhysicalGroupIds());
+    assert(connectedSamePointGroups.has('gSameMain') && connectedSamePointGroups.has('gSameBranch') && connectedSamePointGroups.has('gSameLast'), 'connecting the extended same-point main line marks the whole merge component connected');
+    const deletedSamePointLine = sys.getLogisticsLineAt(270, 270);
+    assert(!!deletedSamePointLine, 'same-point merge junction can be selected for deletion');
+    sys.deleteLogisticsLineById(deletedSamePointLine.id);
+    assert(!GameEngine.state.logisticsMergeNodes.some(node => node?.cellKey === '270,270'), 'deleting a same-point merge junction removes stale merge nodes at that cell');
+    const samePointHitsAfterDelete = sys.getLogisticsLinesAt(270, 270);
+    assert(samePointHitsAfterDelete.length === 0, 'deleting a same-point merge junction removes the visible orphan cell from all remaining branches');
+    const samePointSelectionAfterDelete = sys.getLogisticsMergeConnectedGroupIds('gSameMain');
+    assert(!samePointSelectionAfterDelete.has('gSameBranch') && !samePointSelectionAfterDelete.has('gSameLast'), 'deleting a same-point merge junction breaks merge selection membership');
+    const samePointTailAfterDelete = GameEngine.state.logisticsLines.find(line => line?.detachedByDeletedGap === true);
+    sys.upsertLogisticsLine({
+        lineId: 'gSameBranch',
+        sourceEnt: null,
+        targetEnt: null,
+        targetPoint: { x: 270, y: 290 },
+        points: [{ x: 260, y: 260 }, { x: 270, y: 290 }],
+        routeWidth: 1,
+        allowGroupMerge: false
+    });
+    sys.registerLogisticsMergeNode({
+        inputGroupId: 'gSameBranch',
+        outputGroupId: samePointTailAfterDelete.groupId,
+        point: { x: 270, y: 290 },
+        inputLine: GameEngine.state.logisticsLines.find(line => line.groupId === 'gSameBranch' && line.id !== 'same_point_branch_0'),
+        outputLine: samePointTailAfterDelete
+    });
+    const connectedAfterMiddleReconnect = sys.getLogisticsDisplayConnectedGroupIds(sys.getLogisticsPortConnectedPhysicalGroupIds());
+    assert(connectedAfterMiddleReconnect.has('gSameBranch'), 'reconnecting the middle same-point branch to the downstream target marks that branch connected');
+    assert(!connectedAfterMiddleReconnect.has('gSameMain') && !connectedAfterMiddleReconnect.has('gSameLast'), 'reconnecting the middle same-point branch does not reconnect unrelated same-point branches');
+
+    GameEngine.state.mapEntities = [sameSource];
+    GameEngine.state.logisticsMergeNodes = [];
+    sameSource.outputTargets = [
+        { id: null, lineId: 'gUpper', sourcePort: { x: 200, y: 200, dir: 'right', width: 1 } },
+        { id: null, lineId: 'gLower', sourcePort: { x: 200, y: 220, dir: 'down', width: 1 } },
+        { id: null, lineId: 'gMiddle', sourcePort: { x: 200, y: 240, dir: 'right', width: 1 } }
+    ];
+    GameEngine.state.logisticsLines = [
+        {
+            id: 'upper_0',
+            groupId: 'gUpper',
+            sourceId: 'warehouse_merge_ports',
+            routePoints: [{ x: 200, y: 200 }, { x: 260, y: 200 }, { x: 260, y: 260 }, { x: 260, y: 300 }],
+            sourcePort: { x: 200, y: 200, dir: 'right', width: 1 },
+            routeWidth: 1,
+            order: 0
+        },
+        {
+            id: 'lower_0',
+            groupId: 'gLower',
+            sourceId: 'warehouse_merge_ports',
+            routePoints: [{ x: 200, y: 220 }, { x: 260, y: 220 }, { x: 260, y: 260 }],
+            sourcePort: { x: 200, y: 220, dir: 'down', width: 1 },
+            routeWidth: 1,
+            order: 0
+        },
+        {
+            id: 'middle_0',
+            groupId: 'gMiddle',
+            sourceId: 'warehouse_merge_ports',
+            routePoints: [{ x: 200, y: 240 }, { x: 260, y: 240 }, { x: 260, y: 260 }],
+            sourcePort: { x: 200, y: 240, dir: 'right', width: 1 },
+            routeWidth: 1,
+            order: 0
+        }
+    ];
+    sys.registerLogisticsMergeNode({
+        inputGroupId: 'gLower',
+        outputGroupId: 'gUpper',
+        point: { x: 260, y: 260 },
+        inputLine: GameEngine.state.logisticsLines[1],
+        outputLine: GameEngine.state.logisticsLines[0]
+    });
+    sys.registerLogisticsMergeNode({
+        inputGroupId: 'gMiddle',
+        outputGroupId: 'gUpper',
+        point: { x: 260, y: 260 },
+        inputLine: GameEngine.state.logisticsLines[2],
+        outputLine: GameEngine.state.logisticsLines[0]
+    });
+
     const propagated = sys.getLogisticsGroupsConnectedThroughMergeNodes(new Set(['gUpper']));
     assert(propagated.has('gUpper') && propagated.has('gLower') && propagated.has('gMiddle'), 'all merge input groups are treated as connected when their output group is connected');
     const inputOnlyDisplay = sys.getLogisticsDisplayConnectedGroupIds(new Set(['gLower']));
