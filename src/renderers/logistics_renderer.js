@@ -34,8 +34,8 @@ export class LogisticsRenderer {
                 drawSelectedLogisticsSegmentOutline(line);
                 return;
             }
-            const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
-            if (line && !line.targetId && !line.suppressOpenEndpointCell) {
+            const rects = getRenderableLogisticsCellRects(points, widthTiles, true, line);
+            if (shouldDrawOpenEndpointCell(line, points)) {
                 const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
                 if (endpointRect) {
                     rects.push(endpointRect);
@@ -81,8 +81,8 @@ export class LogisticsRenderer {
                 drawSelectedLogisticsSegmentOutline(line);
                 return;
             }
-            const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
-            if (line && !line.targetId && !line.suppressOpenEndpointCell) {
+            const rects = getRenderableLogisticsCellRects(points, widthTiles, true, line);
+            if (shouldDrawOpenEndpointCell(line, points)) {
                 const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
                 if (endpointRect) rects.push(endpointRect);
             }
@@ -120,6 +120,18 @@ export class LogisticsRenderer {
         };
 
         const renderedLogisticsBaseCellKeys = new Set();
+        const isDetachedSplitCell = (line, cellKey) =>
+            !!line?.detachedFromGroupId && !!line?.detachedAtKey && line.detachedAtKey === cellKey;
+        const getRenderableLogisticsCellRects = (points, widthTiles, perStep, line) =>
+            LogisticsRenderer.getLogisticsCellRects(points, widthTiles, perStep)
+                .filter(rect => !isDetachedSplitCell(line, rect.cellKey));
+        const shouldDrawOpenEndpointCell = (line, points) => {
+            if (!line || line.targetId || line.suppressOpenEndpointCell) return false;
+            if (!Array.isArray(points) || points.length < 2) return false;
+            const end = points[points.length - 1];
+            const endpointKey = end ? `${Math.round(end.x)},${Math.round(end.y)}` : null;
+            return !!endpointKey && !isDetachedSplitCell(line, endpointKey);
+        };
         const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null) => {
             const baseThickness = logCfg.lineThickness || 3;
             const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE * 0.8);
@@ -132,13 +144,13 @@ export class LogisticsRenderer {
                 : (!isConnected ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha) : logCfg.lineAlpha);
 
             graphics.fillStyle(parseColor(normalColor), normalAlpha);
-            LogisticsRenderer.getLogisticsCellRects(points, widthTiles).forEach(rect => {
+            getRenderableLogisticsCellRects(points, widthTiles, false, line).forEach(rect => {
                 const baseKey = rect.cellKey || `${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.w)},${Math.round(rect.h)}`;
                 if (renderedLogisticsBaseCellKeys.has(baseKey)) return;
                 renderedLogisticsBaseCellKeys.add(baseKey);
                 graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
             });
-            if (line && !line.targetId && !line.suppressOpenEndpointCell) {
+            if (shouldDrawOpenEndpointCell(line, points)) {
                 const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
                 if (endpointRect) {
                     const endpointBaseKey = endpointRect.cellKey || `${Math.round(endpointRect.x)},${Math.round(endpointRect.y)},${Math.round(endpointRect.w)},${Math.round(endpointRect.h)}`;
@@ -150,8 +162,8 @@ export class LogisticsRenderer {
             }
 
             if (isSelected) {
-                const rects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
-                if (line && !line.targetId && !line.suppressOpenEndpointCell) {
+                const rects = getRenderableLogisticsCellRects(points, widthTiles, true, line);
+                if (shouldDrawOpenEndpointCell(line, points)) {
                     const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
                     if (endpointRect) {
                         rects.push(endpointRect);
@@ -190,8 +202,8 @@ export class LogisticsRenderer {
                 }
             }
 
-            const arrowRects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
-            if (line && !line.targetId && !line.suppressOpenEndpointCell) {
+            const arrowRects = getRenderableLogisticsCellRects(points, widthTiles, true, line);
+            if (shouldDrawOpenEndpointCell(line, points)) {
                 const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
                 if (endpointRect) arrowRects.push(endpointRect);
             }

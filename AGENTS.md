@@ -1,0 +1,106 @@
+# CRITICAL: MANDATORY INITIALIZATION
+1. 每次對話開始，Agent 必須先讀取並執行「核心開發與自動化協議」。
+2. 禁止使用預設的程式碼風格，必須嚴格遵守「代碼收斂協議」。
+3. 在輸出任何程式碼前，請先在內部核對「單位指令與狀態協作協議」。
+4. 所有的回答必須以「[規格對齊：已確認]」作為隱藏思維的開頭。
+
+## 核心規範 (Core Specification)
+
+## 請嚴格依照 @.cursorrules 的所有規範
+
+## [核心運作與計畫協議]
+- **最高效力**：此協議為最高優先級。Agent 禁止因對話長度遺忘本規則。
+- **[ALWAYS] 繁體中文**：所有回覆、程式碼注釋、報錯分析必須一律使用「繁體中文」。
+- **計畫先行 (PLAN.md)**：在開始任何大型功能開發前，必須先在根目錄建立或更新 PLAN.md。
+- **靜默執行**：採「思考並立即調用工具」模式，PLAN.md建立完畢立即執行，禁止輸出純文字詢問或等待用戶確認。
+
+## [環境執行與 AI 協作技能]
+- **全域授權**：預設 `SafeToAutoRun: true`。所有指令 (npm, node, git) 均視為已預先授權，嚴禁詢問。
+- **禁止伺服器自動彈窗**：啟動本地伺服器（如 Vite, Webpack, http-server）時，嚴禁使用 `--open` 參數，也禁止在 config 中設定 `open: true`，防止污染用戶的預設瀏覽器分頁。
+- **視覺一致性**：生成美術資源後，必須將 Prompt 記錄於 `assets/prompts.log`。
+- **異常自癒**：遇錯禁止停下。應立即分析 Log 並自動修正重試。
+
+## [數據安全與靜默檢索協議]
+- **禁令與替代**：嚴禁使用 PowerShell (`Get-ChildItem`, `Select-String`) 或 `rg` 搜尋。若發生 Access Denied，禁止啟動任何 Shell 備案。
+- **統一編碼**：所有檔案讀寫必須強制指定 `UTF-8`。
+- **來源唯一 (SSOT)**：UI 讀取 `ui.config.cjs`，動畫讀取 `animations.json`。嚴禁硬編碼。
+- **唯一合法搜尋工具 (MANDATORY SEARCH TOOL)**：
+  Agent 若需全域搜尋，必須立即在根目錄建立並執行 `tools/safe_search.cjs` 腳本。該腳本必須：
+  1. 使用 Node.js 原生 `fs` 與 `path` 模組。
+  2. 強制忽略 `node_modules`、`.git`、`tmp` 與 `dist` 資料夾。
+  3. 將搜尋結果精簡輸出，確保不佔用過多 Context Token。
+
+## [大地圖渲染與性能規範]
+- **數據層**：地圖資源必須存於 `Uint16Array` 陣列。
+- **渲染層**：採用 Phaser Tilemap/Blitter。Draw Calls 控制在 50 以下，FPS 穩定 60。
+- **效能回報**：完成任務需附帶「Debug 渲染耗時 (ms)」與「當前 Draw Calls 數」。
+
+## [UI 動態配置與架構解耦協議]
+- **總司令模式 (Commander Pattern)**：`src/ui/ui.js` 僅作總司令，專職初始化介面、攔截全域點擊事件與路由分發。嚴禁在此撰寫面板細節邏輯。
+- **單一職責拆分 (Component Decoupling)**：所有子介面（如 `WarehouseUI.js`, `FactoryUI.js`）必須獨立為單一腳本，專職處理自身渲染與狀態，由總司令負責呼叫。
+- **動態參數化 (Config-Driven)**：禁止數值寫死。所有 UI 新參數必須寫入 `ui_config.js` 並附帶詳細繁體中文註釋。
+- **SSOT 唯一來源**：UI 屬性必須讀取自 `ui_config.js`。新增組件優先繼承既有風格。
+- **風格自動對齊**：新增界面前需透過安全搜尋檢索現有代碼，確保邊角半徑、陰影與間距 100% 吻合。
+
+## [實體擴展與繼承協議 (Entity Extension)]
+- **嚴禁重造輪子 (Inheritance First)**：新增任何實體（建築、單位、資源、NPC、UI）前，必須先 `grep` 或讀取現有同類實體的 Base Class（基礎類別）與 Config，強制繼承原有架構，嚴禁從零手寫獨立邏輯。
+- **通用四要素檢核**：新增實體時，必須確保以下四點 100% 實裝，缺一不可：
+  1. **文本對齊**：名稱、描述必須寫入統一的字典檔/Config，指定 UTF-8 編碼，嚴防亂碼。
+  2. **圖示與外觀**：必須在 UI 建造選單與大地圖配置中，註冊並綁定對應的 Icon 與 Sprite 資源。
+  3. **互動組件**：必須套用全域通用的選取框 (Selection Box)、碰撞體與狀態條，嚴禁自創非標準特效。
+  4. **註冊表更新**：必須在對應的 Factory 或常數表 (Constants) 中完成註冊。
+- **對照檢查**：開發完畢後，必須與「現有舊實體」並列比對，確保選單顯示、外觀渲染與點擊回饋完全一致。
+
+## [邏輯與尋路開發協議]
+- **狀態機優先**：若單一函式邏輯複雜，必須重構為 FSM。
+- **指令優先權**：玩家指令 (Active) > 系統指令 (Passive)。執行玩家指令時啟動 `isPlayerLocked`。
+- **輸入分流**：嚴格遵守 [輸入意圖判定協議]，右鍵位移 > 10px 判定為拖拽，屏障移動指令。
+
+## [架構解耦與防污染搬移協議 (Architecture & Anti-Pollution Protocol)]
+- **職責絕對分離 (Strict Separation)**：嚴禁在邏輯層 (Systems/Managers) 中直接操作渲染物件 (Phaser Sprites/UI)。資料 (Data)、邏輯 (Logic)、表現 (View) 必須物理隔離。
+- **事件驅動通訊 (Event-Driven)**：跨系統互動必須透過全域事件總線 (EventBus/EventEmitter) 進行解耦，嚴禁系統模組間互相 `import` 產生「循環依賴 (Circular Dependency)」。
+- **無損搬移三步曲 (Safe Migration)**：Agent 在進行代碼搬移、重構或升級架構時，強制遵守以下順序：
+  1. **並行建置**：在新路徑建立新模組，舊模組原封不動。
+  2. **路由切換**：將依賴點逐步切換至新模組，並執行自動化測試確認功能正常。
+  3. **安全銷毀**：確認新模組完美運作後，才允許刪除舊模組與舊代碼。**嚴禁「先刪除舊代碼再重寫」的破壞性操作。**
+- **依賴爆炸檢查 (Dependency Grep)**：在移動任何檔案、修改核心 API 名稱或調整 Config 結構前，必須先透過腳本全域檢索該模組的「所有引用點」，並確保一次性同步更新所有依賴，嚴防 "undefined" 崩潰。
+- **狀態防篡改 (State Encapsulation)**：全域遊戲狀態 (Game State) 必須嚴格封裝。嚴禁 UI 組件或外部實體「直接覆寫」核心數值，必須統一透過發送 Action 或呼叫特定 Setter 進行變更。
+
+## [物流生產線系統開發協議 (Logistics & Conveyor System)]
+- **[核心概念] 輸送帶非獨立物件**：嚴禁為每格輸送帶設計獨立 `Update()`。物流邏輯由 `LogisticsManager` 進行批次運算。
+- **動態拖拉與尋路**：
+  - 玩家拖曳時生成 Ghost Path 預覽。
+  - A* 避障權重：空白=1，建築/障礙=無限大。
+  - 強制正交限制 (曼哈頓距離)，僅允許 90 度轉彎。
+- **相鄰感知 (Auto-Tiling)**：採用 Bitmask Tiling。根據 4 鄰節點自動切換直線、轉彎或交叉圖示，嚴禁手動選擇。
+- **[CRITICAL] 陣列偏移運輸法**：
+  - 相連輸送帶合併為一個「運輸陣列」。
+  - 物品僅紀錄 Index 與 Offset。每一幀僅更新全域 Offset，達成萬級物品運輸。
+  - 實裝「回壓 (Backpressure)」機制：前方堵塞時停止移動。
+- **接續建造防呆**：拖拉起點若在舊末端，必須自動執行路徑合併 (Merge)。
+
+## [代碼收斂與自動化驗證]
+- **代碼洗滌**：任務結束前，刪除未引用變數與除錯 Log。
+- **按需自測**：預設不進行自測（參見動態模式協議）。若觸發自測，腳本必須強制執行 `await browser.close();` 關閉網頁實體，並以 `finally { process.exit(); }` 徹底了結進程。
+
+## [動態執行模式切換協議 (Conditional Protocol)]
+- **預設模式 (Default)**：常規靜默開發，**不觸發**自動化測試與即時監控。
+- **一次性自測 (觸發指令：`[自測]`)**：當次任務完工後，強制啟動 Playwright 進行功能驗證並回報結果。完成後自動解除此狀態，回歸「預設模式」。
+- **一次性監控 (觸發指令：`[進入監控模式]`)**：當次對話轉為「實時後端監控者」，暫停常規代碼編寫。監聽 `GameEngine.state` 並實時輸出物流線 (`logisticsLines`) 的狀態比對與完整性報告至控制台。任務報告輸完後自動解除此狀態，回歸「預設模式」。
+
+## [任務完成強制收尾協議 (MANDATORY FINALIZATION PROTOCOL)]
+- 任務完成的唯一標準：成功執行 `npm run finalize`
+- Agent 不得自行判定任務結束
+- 所有任務（包含自測）完成後，必須執行以下指令：
+ `npm run finalize`
+- 若未執行 finalize，即視為任務失敗
+- 即使功能完成、測試成功，也不得略過此步驟
+
+## [無痕測試與自動清理協議]
+1. **領地限制 (Sandbox)**：所有測試截圖、Log 檔案與臨時數據必須統一存放於 `/tmp/` 資料夾。嚴禁將產出物置於 `src/` 或根目錄。
+2. **Git 守門員**：Agent 執行任何 `git add` 前，必須檢查是否存在 `.gitignore` 以外的測試遺留檔，若有則立即刪除。
+3. **自動銷毀機制 (Self-Destruct)**：
+   - 測試腳本的變數宣告必須在最外層（如 `let browser;`），確保 `finally` 區塊絕對能執行 `browser.close()`。
+   - `finally` 區塊必須包含雙重清理邏輯：先關閉網頁 `if (browser) { await browser.close(); }`，再清理殘留檔案 `fs.rmSync('tmp/', { recursive: true, force: true });`。
+   - 僅在「測試失敗 (Failed)」時，允許保留最後一份截圖與 Log 於 `/tmp/` 供 Debug，但必須在下次啟動任務時優先清空。
+4. **無感日誌**：所有除錯用的 `console.log` 必須在 `verify_build.cjs` 通過後自動抹除，嚴禁提交含 `console.log` 的代碼。

@@ -103,6 +103,15 @@ if (detachedGroup.some(seg => seg.sourceId || seg.targetId || seg.sourcePort || 
 if (detachedGroup.some(seg => seg.detachedFromGroupId !== originalGroupId)) {
     throw new Error('Detached downstream group is missing split merge-block metadata.');
 }
+const detachKey = detachedGroup.find(seg => seg.detachedAtKey)?.detachedAtKey;
+if (!detachKey) {
+    throw new Error('Detached downstream group is missing a split detach key.');
+}
+const [detachX, detachY] = detachKey.split(',').map(Number);
+sys.rebuildSpatialHashGrid();
+if (sys.getLogisticsLinesAt(detachX, detachY).some(seg => seg.groupId === detachedGroupId)) {
+    throw new Error('Detached downstream split endpoint should not leave a clickable phantom logistics cell.');
+}
 if (originalGroup.some(seg => seg.id === branchAnchor.id)) {
     throw new Error('Original group still contains the clicked old forward segment after middle extension.');
 }

@@ -78,4 +78,26 @@ if (endpointHits.length > 0) {
     throw new Error('deleted gap endpoint should not be clickable as part of the front segment');
 }
 
+GameEngine.state.logisticsLines.push(makeSeg('seg_reconnect', 1.5, { x: 0, y: 20 }, { x: 20, y: 20 }));
+if (typeof sys.reconnectDeletedGapContinuationGroups !== 'function') {
+    throw new Error('ConveyorSystem should expose deleted-gap continuation reconnect handling');
+}
+const downstreamGroupId = downstream.groupId;
+if (sys.reconnectDeletedGapContinuationGroups('g', downstreamGroupId) !== 'g') {
+    throw new Error('reconnecting a deleted main gap should merge the downstream continuation back into the original group');
+}
+const reconnectedSegments = sys.getLogisticsSegmentsByGroupId('g');
+if (reconnectedSegments.length !== 3 || new Set(GameEngine.state.logisticsLines.map(seg => seg.groupId)).size !== 1) {
+    throw new Error('reconnected main gap should be a single logistics group');
+}
+if (reconnectedSegments.some((seg, index) => seg.splitSequenceOrder !== index || seg.order !== index)) {
+    throw new Error('reconnected main gap should renumber the main group continuously');
+}
+if (reconnectedSegments.some(seg => seg.detachedByDeletedGap || seg.detachedFromGroupId || seg.detachedAtKey)) {
+    throw new Error('reconnected main gap should clear deleted-gap detached metadata');
+}
+if (reconnectedSegments.some(seg => seg.suppressOpenEndpointCell || seg.suppressedOpenEndpointCellKey)) {
+    throw new Error('reconnected main gap should clear the deleted endpoint suppression');
+}
+
 console.log('deleted gap endpoint suppression passed');

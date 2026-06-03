@@ -109,4 +109,52 @@ for (let expected = 5; expected >= 1; expected--) {
 }
 assert(sys.undoLastLogisticsBuild() === false, 'undo stack should keep only the latest five build snapshots');
 
+GameEngine.state.logisticsLines = [
+    {
+        id: 'delete_front',
+        groupId: 'g_delete',
+        routePoints: [{ x: 0, y: 0 }, { x: 20, y: 0 }],
+        gridX: 1,
+        gridY: 0,
+        x: 10,
+        y: 0,
+        routeWidth: 1,
+        order: 0,
+        splitSequenceOrder: 0
+    },
+    {
+        id: 'delete_target',
+        groupId: 'g_delete',
+        routePoints: [{ x: 20, y: 0 }, { x: 40, y: 0 }],
+        gridX: 3,
+        gridY: 0,
+        x: 30,
+        y: 0,
+        routeWidth: 1,
+        order: 1,
+        splitSequenceOrder: 1
+    },
+    {
+        id: 'delete_back',
+        groupId: 'g_delete',
+        routePoints: [{ x: 40, y: 0 }, { x: 60, y: 0 }],
+        gridX: 5,
+        gridY: 0,
+        x: 50,
+        y: 0,
+        routeWidth: 1,
+        order: 2,
+        splitSequenceOrder: 2
+    }
+];
+sys.logisticsBuildUndoStack = [];
+assert(sys.deleteLogisticsLineById('delete_target') === true, 'delete should succeed');
+assert(GameEngine.state.logisticsLines.length === 2, 'delete removes the selected logistics segment');
+assert(sys.undoLastLogisticsBuild() === true, 'ctrl+z should restore the delete itself instead of skipping to the previous build');
+assert(
+    GameEngine.state.logisticsLines.length === 3 &&
+    GameEngine.state.logisticsLines.some(seg => seg.id === 'delete_target'),
+    'undo after delete restores the immediately previous logistics state'
+);
+
 console.log('logistics build undo tests passed');

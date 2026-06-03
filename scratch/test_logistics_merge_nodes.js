@@ -202,6 +202,29 @@ if (typeof sys.registerLogisticsMergeNode === 'function') {
     assert(!propagatedAfterBrokenMerge.has('gLower') && propagatedAfterBrokenMerge.has('gMiddle'), 'stale merge node stops propagating connected state only for the physically disconnected input');
     const selectionGroupAfterBrokenInput = sys.getLogisticsMergeConnectedGroupIds('gUpper');
     assert(selectionGroupAfterBrokenInput.has('gUpper') && selectionGroupAfterBrokenInput.has('gLower') && selectionGroupAfterBrokenInput.has('gMiddle'), 'merge selection membership remains intact when one input becomes a breakpoint');
+    GameEngine.state.logisticsLines.push({
+        id: 'lower_reconnect_bridge',
+        groupId: 'gLower',
+        routePoints: [{ x: 220, y: 220 }, { x: 240, y: 220 }],
+        routeWidth: 1,
+        order: 1
+    });
+    GameEngine.state.logisticsLines.push({
+        id: 'lower_deleted_gap_tail',
+        groupId: 'gLowerTail',
+        detachedFromGroupId: 'gLower',
+        detachedAtKey: '220,220',
+        detachedByDeletedGap: true,
+        routePoints: [{ x: 240, y: 220 }, { x: 260, y: 220 }, { x: 260, y: 260 }],
+        routeWidth: 1,
+        order: 2
+    });
+    assert(sys.reconnectDeletedGapContinuationGroups('gLower', 'gLowerTail') === 'gLower', 'reconnecting a broken merge branch restores the original branch group');
+    const propagatedAfterBranchReconnect = sys.getLogisticsGroupsConnectedThroughMergeNodes(new Set(['gUpper']));
+    assert(propagatedAfterBranchReconnect.has('gLower'), 'reconnected merge branch inherits connected state from the main output again');
+    GameEngine.state.logisticsLines = GameEngine.state.logisticsLines.filter(line =>
+        line.id !== 'lower_reconnect_bridge' && line.id !== 'lower_deleted_gap_tail'
+    );
     lowerLine.routePoints = lowerRoute;
     GameEngine.state.logisticsLines.push({
         id: 'detached_blue_path',

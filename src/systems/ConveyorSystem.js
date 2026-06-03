@@ -892,14 +892,21 @@ export class ConveyorSystem {
                 middleExtensionSplit?.detachedGroupId
             ].filter(Boolean));
             if (createdLine?.groupId && touchedTargetGroupId) {
-                this.registerLogisticsMergeNode({
-                    inputGroupId: createdLine.groupId,
-                    outputGroupId: touchedTargetGroupId,
-                    point: lastPoint,
-                    inputLine: createdLine,
-                    outputLine: touchedTargetLine
-                });
-                submitAffectedGroupIds.add(touchedTargetGroupId);
+                const reconnectedGroupId = this.reconnectDeletedGapContinuationGroups(createdLine.groupId, touchedTargetGroupId, GameEngine.state);
+                if (reconnectedGroupId) {
+                    finalGroupId = reconnectedGroupId;
+                    submitAffectedGroupIds.add(reconnectedGroupId);
+                    submitAffectedGroupIds.add(touchedTargetGroupId);
+                } else {
+                    this.registerLogisticsMergeNode({
+                        inputGroupId: createdLine.groupId,
+                        outputGroupId: touchedTargetGroupId,
+                        point: lastPoint,
+                        inputLine: createdLine,
+                        outputLine: touchedTargetLine
+                    });
+                    submitAffectedGroupIds.add(touchedTargetGroupId);
+                }
             }
             const afterCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : beforeCount;
             const builtSegments = Math.max(0, afterCount - beforeCount);
@@ -2324,6 +2331,10 @@ export class ConveyorSystem {
         }
     }
 
+    isLogisticsDetachedSplitCell(line, cellKey) {
+        return !!line?.detachedFromGroupId && !!line?.detachedAtKey && line.detachedAtKey === cellKey;
+    }
+
     getLogisticsSegmentOccupiedKeys(line) {
         const centerKey = this.getLogisticsSegmentOccupyKey(line);
         if (!centerKey) return [];
@@ -2953,6 +2964,67 @@ export class ConveyorSystem {
             }
         }
         return activeGroupId;
+    }
+
+    getDeletedGapContinuationRelation(groupAId, groupBId, state = GameEngine.state) {
+        if (!groupAId || !groupBId || groupAId === groupBId) return null;
+        const lines = this.getLogisticsLinesForState(state);
+        const groupALines = lines.filter(line => line && (line.groupId || line.id) === groupAId);
+        const groupBLines = lines.filter(line => line && (line.groupId || line.id) === groupBId);
+        const findRelation = (canonicalGroupId, continuationGroupId, continuationLines) => {
+            const continuation = continuationLines.filter(line =>
+                line?.detachedByDeletedGap === true &&
+                line?.detachedFromGroupId === canonicalGroupId
+            );
+            if (continuation.length === 0) return null;
+            return {
+                canonicalGroupId,
+                continuationGroupId,
+                detachKeys: [...new Set(continuation.map(line => line.detachedAtKey).filter(Boolean))]
+            };
+        };
+        return findRelation(groupAId, groupBId, groupBLines) ||
+            findRelation(groupBId, groupAId, groupALines);
+    }
+
+    reconnectDeletedGapContinuationGroups(groupAId, groupBId, state = GameEngine.state) {
+        const relation = this.getDeletedGapContinuationRelation(groupAId, groupBId, state);
+        if (!relation) return null;
+        const { canonicalGroupId, continuationGroupId, detachKeys } = relation;
+        const detachKeySet = new Set(detachKeys);
+        const mergedGroupId = this.mergeLogisticsLineGroups(canonicalGroupId, continuationGroupId) || canonicalGroupId;
+
+        this.getLogisticsSegmentsByGroupId(mergedGroupId).forEach(line => {
+            if (detachKeySet.has(line?.suppressedOpenEndpointCellKey)) {
+                delete line.suppressOpenEndpointCell;
+                delete line.suppressedOpenEndpointCellKey;
+            }
+            if (line?.detachedByDeletedGap === true &&
+                (line.detachedFromGroupId === canonicalGroupId || line.detachedFromGroupId === mergedGroupId)) {
+                delete line.detachedByDeletedGap;
+                delete line.detachedFromGroupId;
+                delete line.detachedAtKey;
+            }
+        });
+
+        const nodes = this.ensureLogisticsMergeNodeStore(state);
+        nodes.forEach(node => {
+            if (!node) return;
+            if (node.outputGroupId === continuationGroupId) node.outputGroupId = mergedGroupId;
+            if (node.outputGroupId === canonicalGroupId) node.outputGroupId = mergedGroupId;
+            if (Array.isArray(node.inputGroupIds)) {
+                node.inputGroupIds = [...new Set(node.inputGroupIds
+                    .map(id => id === continuationGroupId || id === canonicalGroupId ? mergedGroupId : id)
+                    .filter(id => id && id !== node.outputGroupId))];
+            }
+        });
+        state.logisticsMergeNodes = nodes.filter(node =>
+            node && node.outputGroupId && Array.isArray(node.inputGroupIds) && node.inputGroupIds.length > 0
+        );
+
+        this.orderLogisticsSegmentsByDirection(this.getLogisticsSegmentsByGroupId(mergedGroupId));
+        this.recalculateLogisticsGroupEndpoints(mergedGroupId);
+        return mergedGroupId;
     }
 
     mergeLogisticsLineGroups(primaryGroupId, secondaryGroupId) {
@@ -3924,6 +3996,7 @@ export class ConveyorSystem {
             const state = GameEngine.state;
             const line = this.getLogisticsLineById(lineId);
             if (!line) return false;
+            const deleteUndoSnapshot = this.captureLogisticsBuildUndoSnapshot(state);
             const lineKey = this.getLogisticsLineSelectionKey(line);
             const groupId = line.groupId || line.id;
 
@@ -3996,6 +4069,7 @@ export class ConveyorSystem {
             if (state.selectedLogisticsGroupId === line.groupId || state.selectedLogisticsGroupId === line.id) state.selectedLogisticsGroupId = null;
             if (window.UIManager.activeLogisticsLine && this.getLogisticsLineSelectionKey(window.UIManager.activeLogisticsLine) === lineKey) window.UIManager.activeLogisticsLine = null;
             if (window.UIManager.activeLogisticsConnection?.lineId === lineKey) window.UIManager.activeLogisticsConnection = null;
+            this.recordLogisticsBuildUndoSnapshot(deleteUndoSnapshot, state);
             GameEngine.addLog(`[物流] 物流線段已刪除`, 'LOGISTICS');
             return true;
         } finally {
@@ -4143,6 +4217,8 @@ export class ConveyorSystem {
                 for (let step = 0; step < steps; step++) {
                     const px = a.x + dir.x * stepSize * step;
                     const py = a.y + dir.y * stepSize * step;
+                    const cellKey = `${Math.round(px)},${Math.round(py)}`;
+                    if (this.isLogisticsDetachedSplitCell(line, cellKey)) continue;
 
                     const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
                     rects.push({
@@ -4159,6 +4235,8 @@ export class ConveyorSystem {
                 const end = points[points.length - 1];
                 const prev = points[points.length - 2];
                 if (end && prev) {
+                    const endpointKey = `${Math.round(end.x)},${Math.round(end.y)}`;
+                    if (this.isLogisticsDetachedSplitCell(line, endpointKey)) return rects;
                     const dx = end.x - prev.x;
                     const dy = end.y - prev.y;
                     const dist = Math.hypot(dx, dy);
