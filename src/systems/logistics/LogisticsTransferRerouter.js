@@ -138,6 +138,40 @@ export class LogisticsTransferRerouter {
             return [];
         };
 
+        const findDirectedShortestPath = (nodes, startPt, endPt) => {
+            if (!startPt || !endPt || !Array.isArray(nodes) || nodes.length === 0) return [];
+            let startNode = null; let startDist = Infinity;
+            let endNode = null; let endDist = Infinity;
+
+            nodes.forEach(n => {
+                const ds = Math.hypot(n.x - startPt.x, n.y - startPt.y);
+                if (ds < startDist) { startDist = ds; startNode = n; }
+                const dt = Math.hypot(n.x - endPt.x, n.y - endPt.y);
+                if (dt < endDist) { endDist = dt; endNode = n; }
+            });
+
+            if (startNode && endNode) {
+                const queue = [[startNode]];
+                const visited = new Set([startNode]);
+                while (queue.length > 0) {
+                    const path = queue.shift();
+                    const curr = path[path.length - 1];
+
+                    if (curr === endNode) {
+                        return path.map(n => ({ x: n.x, y: n.y }));
+                    }
+
+                    (curr.outEdges || []).forEach(neighbor => {
+                        if (!visited.has(neighbor)) {
+                            visited.add(neighbor);
+                            queue.push([...path, neighbor]);
+                        }
+                    });
+                }
+            }
+            return [];
+        };
+
         const getPointOnPath = (points, progress) => {
             if (!Array.isArray(points) || points.length === 0) return { x: 0, y: 0 };
             if (points.length === 1) return { x: points[0].x, y: points[0].y };
@@ -268,55 +302,197 @@ export class LogisticsTransferRerouter {
 
             let routeCache = groupRouteCache.get(newGroupId);
             if (!routeCache) {
+                const ordered = system.orderLogisticsSegmentsByDirection(groupSegs);
+                const nodes = [];
+                groupSegs.forEach(seg => {
+                    if (Array.isArray(seg.routePoints) && seg.routePoints.length >= 2) {
+                        for (let i = 0; i < seg.routePoints.length - 1; i++) {
+                            const p1 = seg.routePoints[i];
+                            const p2 = seg.routePoints[i + 1];
+                            let n1 = nodes.find(n => Math.hypot(n.x - p1.x, n.y - p1.y) < 2);
+                            if (!n1) { n1 = { x: p1.x, y: p1.y, outEdges: [], inEdges: [], edges: [] }; nodes.push(n1); }
+                            let n2 = nodes.find(n => Math.hypot(n.x - p2.x, n.y - p2.y) < 2);
+                            if (!n2) { n2 = { x: p2.x, y: p2.y, outEdges: [], inEdges: [], edges: [] }; nodes.push(n2); }
+
+                            if (!n1.outEdges.includes(n2)) n1.outEdges.push(n2);
+                            if (!n2.inEdges.includes(n1)) n2.inEdges.push(n1);
+
+                            if (!n1.edges.includes(n2)) n1.edges.push(n2);
+                            if (!n2.edges.includes(n1)) n2.edges.push(n1);
+                        }
+                    }
+                });
+
+                const sources = nodes.filter(n => n.inEdges.length === 0);
+                const sinks = nodes.filter(n => n.outEdges.length === 0);
+
                 routeCache = {
-                    ordered: system.orderLogisticsSegmentsByDirection(groupSegs),
+                    ordered,
+                    nodes,
+                    sources,
+                    sinks,
                     shortestPaths: new Map()
                 };
                 groupRouteCache.set(newGroupId, routeCache);
             }
             const ordered = routeCache.ordered;
             if (ordered.length > 0) {
-                const firstSeg = ordered[0];
-                const lastSeg = ordered[ordered.length - 1];
-                if (firstSeg && lastSeg && Array.isArray(firstSeg.routePoints) && Array.isArray(lastSeg.routePoints)) {
-                    const startPt = firstSeg.routePoints[0];
-                    const endPt = lastSeg.routePoints[lastSeg.routePoints.length - 1];
-                    if (startPt && endPt) {
-                        const endpointKey = `${Math.round(startPt.x)},${Math.round(startPt.y)}>${Math.round(endPt.x)},${Math.round(endPt.y)}`;
-                        let shortest = routeCache.shortestPaths.get(endpointKey);
-                        if (!shortest) {
-                            shortest = findShortestPathBetweenPoints(groupSegs, startPt, endPt);
-                            routeCache.shortestPaths.set(endpointKey, shortest);
+                let currNode = null;
+                let minDist = Infinity;
+                routeCache.nodes.forEach(n => {
+                    const d = Math.hypot(n.x - currentPos.x, n.y - currentPos.y);
+                    if (d < minDist) {
+                        minDist = d;
+                        currNode = n;
+                    }
+                });
+
+                const getReachableSources = (startNode) => {
+                    const reachable = [];
+                    const queue = [startNode];
+                    const visited = new Set([startNode]);
+                    while (queue.length > 0) {
+                        const curr = queue.shift();
+                        if (routeCache.sources.includes(curr)) {
+                            reachable.push(curr);
                         }
-                        shortest = Array.isArray(shortest) ? shortest.map(point => ({ ...point })) : shortest;
-                        if (shortest && shortest.length >= 2) {
-                            const sourceEnt = currentSeg.sourceId
-                                ? entityById.get(currentSeg.sourceId)
-                                : null;
-                            const targetEnt = currentSeg.targetId
-                                ? entityById.get(currentSeg.targetId)
-                                : null;
-
-                            const first = shortest[0];
-                            const last = shortest[shortest.length - 1];
-
-                            let sourceAnchor = null;
-                            if (sourceEnt) {
-                                const sourcePort = currentSeg.sourcePort || t.sourcePort
-                                    ? window.UIManager.resolveCurrentPortSlot(sourceEnt, currentSeg.sourcePort || t.sourcePort, first?.x, first?.y)
-                                    : window.UIManager.getNearestPortSlot(sourceEnt, first?.x ?? (targetEnt ? targetEnt.x : first?.x), first?.y ?? (targetEnt ? targetEnt.y : first?.y));
-                                sourceAnchor = sourcePort ? { x: sourcePort.x, y: sourcePort.y } : { x: sourceEnt.x, y: sourceEnt.y };
+                        curr.inEdges.forEach(neighbor => {
+                            if (!visited.has(neighbor)) {
+                                visited.add(neighbor);
+                                queue.push(neighbor);
                             }
+                        });
+                    }
+                    return reachable;
+                };
 
-                            let targetAnchor = null;
-                            if (targetEnt) {
-                                const targetPort = currentSeg.targetPort || t.targetPort
-                                    ? window.UIManager.resolveCurrentPortSlot(targetEnt, currentSeg.targetPort || t.targetPort, last?.x, last?.y)
-                                    : window.UIManager.getNearestPortSlot(targetEnt, last?.x ?? (sourceEnt ? sourceEnt.x : last?.x), last?.y ?? (sourceEnt ? sourceEnt.y : last?.y));
-                                targetAnchor = targetPort ? { x: targetPort.x, y: targetPort.y } : { x: targetEnt.x, y: targetEnt.y };
+                const getReachableSinks = (startNode) => {
+                    const reachable = [];
+                    const queue = [startNode];
+                    const visited = new Set([startNode]);
+                    while (queue.length > 0) {
+                        const curr = queue.shift();
+                        if (routeCache.sinks.includes(curr)) {
+                            reachable.push(curr);
+                        }
+                        curr.outEdges.forEach(neighbor => {
+                            if (!visited.has(neighbor)) {
+                                visited.add(neighbor);
+                                queue.push(neighbor);
                             }
-                            const isOpenEndedLine = !targetAnchor && !currentSeg.targetId;
+                        });
+                    }
+                    return reachable;
+                };
 
+                let startPt = null;
+                let endPt = null;
+
+                if (currNode) {
+                    const reachableSources = getReachableSources(currNode);
+                    const reachableSinks = getReachableSinks(currNode);
+
+                    if (reachableSources.length > 0) {
+                        if (reachableSources.length === 1) {
+                            startPt = reachableSources[0];
+                        } else if (Array.isArray(t.routePoints) && t.routePoints.length > 0) {
+                            const oldStart = t.routePoints[0];
+                            let bestDist = Infinity;
+                            reachableSources.forEach(s => {
+                                const d = Math.hypot(s.x - oldStart.x, s.y - oldStart.y);
+                                if (d < bestDist) {
+                                    bestDist = d;
+                                    startPt = s;
+                                }
+                            });
+                        } else {
+                            startPt = reachableSources[0];
+                        }
+                    }
+
+                    if (reachableSinks.length > 0) {
+                        if (reachableSinks.length === 1) {
+                            endPt = reachableSinks[0];
+                        } else if (Array.isArray(t.routePoints) && t.routePoints.length > 0) {
+                            const oldEnd = t.routePoints[t.routePoints.length - 1];
+                            let bestDist = Infinity;
+                            reachableSinks.forEach(s => {
+                                const d = Math.hypot(s.x - oldEnd.x, s.y - oldEnd.y);
+                                if (d < bestDist) {
+                                    bestDist = d;
+                                    endPt = s;
+                                }
+                            });
+                        } else {
+                            endPt = reachableSinks[0];
+                        }
+                    }
+                }
+
+                if (!startPt && ordered[0] && Array.isArray(ordered[0].routePoints)) {
+                    startPt = ordered[0].routePoints[0];
+                }
+                if (!endPt && ordered[ordered.length - 1] && Array.isArray(ordered[ordered.length - 1].routePoints)) {
+                    const lastSeg = ordered[ordered.length - 1];
+                    endPt = lastSeg.routePoints[lastSeg.routePoints.length - 1];
+                }
+
+                if (startPt && endPt) {
+                    const endpointKey = `${Math.round(startPt.x)},${Math.round(startPt.y)}>${Math.round(endPt.x)},${Math.round(endPt.y)}`;
+                    let shortest = routeCache.shortestPaths.get(endpointKey);
+                    if (!shortest) {
+                        shortest = findDirectedShortestPath(routeCache.nodes, startPt, endPt);
+                        if (!shortest || shortest.length === 0) {
+                            shortest = findShortestPathBetweenPoints(groupSegs, startPt, endPt);
+                            routeCache.shortestPaths.set(endpointKey + '_fallback', true);
+                        }
+                        routeCache.shortestPaths.set(endpointKey, shortest);
+                    }
+                    shortest = Array.isArray(shortest) ? shortest.map(point => ({ ...point })) : shortest;
+                    if (shortest && shortest.length >= 2) {
+                        const isFallback = routeCache.shortestPaths.get(endpointKey + '_fallback') === true;
+                        let sourceEnt = null;
+                        let targetEnt = null;
+
+                        if (startPt) {
+                            sourceEnt = (state.mapEntities || []).find(ent => {
+                                if (ent.isUnderConstruction) return false;
+                                const ports = window.UIManager?.getBuildingPortSlots(ent) || [];
+                                return ports.some(port => Math.hypot(port.x - startPt.x, port.y - startPt.y) < TS * 1.5);
+                            });
+                        }
+                        if (endPt) {
+                            targetEnt = (state.mapEntities || []).find(ent => {
+                                if (ent.isUnderConstruction) return false;
+                                const ports = window.UIManager?.getBuildingPortSlots(ent) || [];
+                                return ports.some(port => Math.hypot(port.x - endPt.x, port.y - endPt.y) < TS * 1.5);
+                            });
+                        }
+
+                        if (!sourceEnt && currentSeg.sourceId) sourceEnt = entityById.get(currentSeg.sourceId);
+                        if (!targetEnt && currentSeg.targetId) targetEnt = entityById.get(currentSeg.targetId);
+
+                        const first = shortest[0];
+                        const last = shortest[shortest.length - 1];
+
+                        let sourceAnchor = null;
+                        if (sourceEnt) {
+                            const sourcePort = currentSeg.sourcePort || t.sourcePort
+                                ? window.UIManager.resolveCurrentPortSlot(sourceEnt, currentSeg.sourcePort || t.sourcePort, first?.x, first?.y)
+                                : window.UIManager.getNearestPortSlot(sourceEnt, first?.x ?? (targetEnt ? targetEnt.x : first?.x), first?.y ?? (targetEnt ? targetEnt.y : first?.y));
+                            sourceAnchor = sourcePort ? { x: sourcePort.x, y: sourcePort.y } : { x: sourceEnt.x, y: sourceEnt.y };
+                        }
+
+                        let targetAnchor = null;
+                        if (targetEnt) {
+                            const targetPort = currentSeg.targetPort || t.targetPort
+                                ? window.UIManager.resolveCurrentPortSlot(targetEnt, currentSeg.targetPort || t.targetPort, last?.x, last?.y)
+                                : window.UIManager.getNearestPortSlot(targetEnt, last?.x ?? (sourceEnt ? sourceEnt.x : last?.x), last?.y ?? (sourceEnt ? sourceEnt.y : last?.y));
+                            targetAnchor = targetPort ? { x: targetPort.x, y: targetPort.y } : { x: targetEnt.x, y: targetEnt.y };
+                        }
+                        const isOpenEndedLine = !targetAnchor && !currentSeg.targetId;
+
+                        if (isFallback) {
                             if (sourceAnchor) {
                                 const distFirstToSource = Math.hypot(shortest[0].x - sourceAnchor.x, shortest[0].y - sourceAnchor.y);
                                 const distLastToSource = Math.hypot(shortest[shortest.length - 1].x - sourceAnchor.x, shortest[shortest.length - 1].y - sourceAnchor.y);
@@ -338,6 +514,7 @@ export class LogisticsTransferRerouter {
                                     }
                                 }
                             }
+                        }
 
                             const transferPoints = [];
                             const pushPoint = (point) => {
@@ -359,7 +536,6 @@ export class LogisticsTransferRerouter {
                         }
                     }
                 }
-            }
 
             if (!pathPoints) {
                 pathPoints = [];
