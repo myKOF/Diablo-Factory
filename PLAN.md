@@ -1,3 +1,37 @@
+# 2026-06-03 物流系統模組化拆分計畫
+
+## 核心目標
+1. 保留 `ConveyorSystem.js` 對外 facade 與 `conveyorSystem` 單例，避免破壞 `ui.js`、`LogisticsUI.js`、`WorkerSystem.js`、`logistics_renderer.js` 既有引用。
+2. 維持 `ConveyorRouter.js` 作為 pathfinding、footprint、occupancy 的 SSOT，不建立第二套路由足跡判定。
+3. 依低風險到高風險順序拆分 `ConveyorSystem.js`：先搬無狀態/低耦合工具，再搬 state store、routing grid、drag/build、group graph、transfer updater。
+4. 每階段保留同名公開方法，讓外部呼叫不需要一次性改動。
+
+## 實施步驟
+- [x] 步驟 1：重新讀取 `.cursorrules` 與物流空間邏輯技能，使用 `tools/safe_search.cjs` 檢查 `conveyorSystem` / `ConveyorRouter` 引用。
+- [x] 步驟 2：抽離 `SpatialHashGrid` 與物流幾何工具，降低 `ConveyorSystem.js` 命中偵測職責。
+- [x] 步驟 3：抽離物流建造 Undo store，讓建造流程不混入 snapshot 細節。
+- [x] 步驟 4：抽離 `LogisticsLineStore` 與 routing grid builder，集中 state 存取與路由格建立。
+- [x] 步驟 4.5：抽離 `LogisticsSegmentBuilder`，集中 snap、物流線 ID、路徑展開與 segment 建立。
+- [x] 步驟 4.6：抽離 `LogisticsPortUtils` 與 `LogisticsLineBuildContext`，集中 `upsertLogisticsLine` 的 port clone 與建造上下文正規化。
+- [x] 步驟 4.7：抽離 `LogisticsLinePlacement`，集中 `upsertLogisticsLine` 的 occupied map、同路由去重、同向重疊合併與 additions 建立。
+- [x] 步驟 4.8：抽離 `LogisticsLineMetadata`，集中 `splitSequenceOrder`、同群組 metadata 同步與 connection 回寫。
+- [x] 步驟 4.9：抽離 `LogisticsLineMergeCoordinator`，集中 overlap group merge、blocked overlap 與 affected group 暫存範圍。
+- [x] 步驟 4.10：抽離 `LogisticsLineFinalizer`，集中建造後排序、端點重算、spatial hash 重建、transfer 更新與回傳線段選擇。
+- [x] 步驟 4.11：抽離 `LogisticsLineQuery`，集中物流線 route clone、節點取樣、點在線上判斷與有向 cell 查詢。
+- [x] 步驟 4.12：抽離 `LogisticsLineHitTester`，集中物流線 spatial grid 命中偵測與可點擊矩形排序。
+- [x] 步驟 4.13：抽離 `LogisticsSourcePortQuery`，集中 source-port connection、port cell info、port cell hit 與 source-port hit 查詢。
+- [x] 步驟 4.14：抽離 `LogisticsGroupConnectivity`，集中物流群組 endpoint/cell 接觸判定。
+- [x] 步驟 4.15：擴充 `LogisticsLineMergeCoordinator`，集中連通群組掃描與 `mergeConnectedLogisticsGroups` 委派。
+- [x] 步驟 4.16：擴充 `LogisticsLineMergeCoordinator`，集中 `mergeLogisticsLineGroups` 的群組 metadata 合併、排序與端點重算。
+- [x] 步驟 4.17：擴充 `LogisticsLineMergeCoordinator`，集中 deleted-gap continuation 關係判定與重接。
+- [x] 步驟 4.18：抽離 `LogisticsLineOrdering`，集中物流線段方向排序、prev/next 指標與 splitSequenceOrder 重整。
+- [x] 步驟 4.19：完成步驟 4 收斂盤點；剩餘大型方法歸入步驟 5 的拖曳、建造、群組拓撲與 transfer 更新，不在本階段再拆。
+- [ ] 步驟 5：保留 facade API，逐步委派拖曳、建造、群組拓撲與 transfer 更新到子模組。
+- [x] 步驟 5.1：抽離 `LogisticsTransferQueues`，集中阻塞 transfer queue 排序、回壓與 broken-line breakpoint 限制。
+- [x] 步驟 5.2：抽離 `LogisticsMergeNodeRuntime`，集中 merge-node transfer 切換與 output route 接續。
+- [x] 步驟 5.3：抽離 `LogisticsTransferRerouter`，集中 active transfer 在物流線變更後的重路由與 progress 投影。
+- [ ] 步驟 6：執行語法檢查與 `npm run finalize`，回報 Debug 渲染耗時與 Draw Calls 可用性。
+
 # ConveyorSystem 核心重構計畫 (四階段方案)
 
 ## 核心目標與實施步驟

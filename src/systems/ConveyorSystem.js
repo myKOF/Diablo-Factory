@@ -2,143 +2,26 @@ import { ConveyorRouter } from './ConveyorRouter.js';
 import { GameEngine } from './game_systems.js';
 import { UI_CONFIG } from '../ui/ui_config.js';
 import { BuildingSystem } from './BuildingSystem.js';
-
-function annotateRoutePoints(points) {
-    if (!Array.isArray(points) || points.length < 3) return;
-    const getCardinalDir = (from, to) => {
-        if (!from || !to) return null;
-        const dx = to.x - from.x;
-        const dy = to.y - from.y;
-        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
-        if (Math.abs(dx) >= Math.abs(dy)) return { x: Math.sign(dx) || 1, y: 0 };
-        return { x: 0, y: Math.sign(dy) || 1 };
-    };
-    for (let i = 1; i < points.length - 1; i++) {
-        const prev = points[i - 1];
-        const curr = points[i];
-        const next = points[i + 1];
-        const inDir = getCardinalDir(prev, curr);
-        const outDir = getCardinalDir(curr, next);
-        if (inDir && outDir && (inDir.x !== outDir.x || inDir.y !== outDir.y)) {
-            curr.isCorner = true;
-        }
-    }
-}
-
-class SpatialHashGrid {
-    constructor(cellSize = 64) {
-        this.cellSize = cellSize;
-        this.grid = new Map();
-    }
-
-    clear() {
-        this.grid.clear();
-    }
-
-    _getBucket(x, y) {
-        const cx = Math.floor(x / this.cellSize);
-        const cy = Math.floor(y / this.cellSize);
-        return `${cx},${cy}`;
-    }
-
-    insert(segment) {
-        if (!segment) return;
-        const rects = this._getSegmentRects(segment);
-        rects.forEach(rect => {
-            const minX = rect.x;
-            const maxX = rect.x + rect.w;
-            const minY = rect.y;
-            const maxY = rect.y + rect.h;
-
-            const startCx = Math.floor(minX / this.cellSize);
-            const endCx = Math.floor(maxX / this.cellSize);
-            const startCy = Math.floor(minY / this.cellSize);
-            const endCy = Math.floor(maxY / this.cellSize);
-
-            for (let cx = startCx; cx <= endCx; cx++) {
-                for (let cy = startCy; cy <= endCy; cy++) {
-                    const key = `${cx},${cy}`;
-                    if (!this.grid.has(key)) {
-                        this.grid.set(key, new Set());
-                    }
-                    this.grid.get(key).add(segment);
-                }
-            }
-        });
-    }
-
-    getNearby(worldX, worldY) {
-        const cx = Math.floor(worldX / this.cellSize);
-        const cy = Math.floor(worldY / this.cellSize);
-        const results = new Set();
-        
-        for (let dx = -1; dx <= 1; dx++) {
-            for (let dy = -1; dy <= 1; dy++) {
-                const key = `${cx + dx},${cy + dy}`;
-                const bucket = this.grid.get(key);
-                if (bucket) {
-                    bucket.forEach(item => results.add(item));
-                }
-            }
-        }
-        return results;
-    }
-
-    _getSegmentRects(line) {
-        const TS = GameEngine.TILE_SIZE || 20;
-        const points = Array.isArray(line.routePoints)
-            ? line.routePoints.map(p => ({ x: p.x, y: p.y }))
-            : [];
-        if (points.length < 2) return [];
-        const width = Math.max(1, Math.round(Number(line.routeWidth) || 1));
-        const rects = [];
-        for (let i = 0; i < points.length - 1; i++) {
-            const a = points[i];
-            const b = points[i + 1];
-            const dx = b.x - a.x;
-            const dy = b.y - a.y;
-            const dist = Math.hypot(dx, dy);
-            if (dist < 0.001) continue;
-
-            const dir = { x: dx / dist, y: dy / dist };
-            const steps = Math.max(1, Math.round(dist / TS));
-            const stepSize = dist / steps;
-
-            for (let step = 0; step < steps; step++) {
-                const px = a.x + dir.x * stepSize * step;
-                const py = a.y + dir.y * stepSize * step;
-
-                const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
-                rects.push({
-                    x: px - (isHorizontal ? TS / 2 : (width * TS) / 2),
-                    y: py - (isHorizontal ? (width * TS) / 2 : TS / 2),
-                    w: (isHorizontal ? TS : width * TS),
-                    h: (isHorizontal ? width * TS : TS)
-                });
-            }
-        }
-        if (!line.targetId && !line.suppressOpenEndpointCell) {
-            const end = points[points.length - 1];
-            const prev = points[points.length - 2];
-            if (end && prev) {
-                const dx = end.x - prev.x;
-                const dy = end.y - prev.y;
-                const dist = Math.hypot(dx, dy);
-                if (dist >= 0.001) {
-                    const dir = { x: dx / dist, y: dy / dist };
-                    const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
-                    rects.push({
-                        x: end.x - (isHorizontal ? TS / 2 : (width * TS) / 2),
-                        y: end.y - (isHorizontal ? (width * TS) / 2 : TS / 2),
-                        w: (isHorizontal ? TS : width * TS),
-                        h: (isHorizontal ? width * TS : TS)
-                    });
-                }
-            }
-        }
-        return rects;
-    }
-}
+import { SpatialHashGrid } from './logistics/SpatialHashGrid.js';
+import { annotateRoutePoints } from './logistics/LogisticsGeometry.js';
+import { LogisticsUndoStore } from './logistics/LogisticsUndoStore.js';
+import { LogisticsLineStore } from './logistics/LogisticsLineStore.js';
+import { RoutingGridBuilder } from './logistics/RoutingGridBuilder.js';
+import { LogisticsSegmentBuilder } from './logistics/LogisticsSegmentBuilder.js';
+import { cloneLogisticsPort, hasLogisticsPortPosition } from './logistics/LogisticsPortUtils.js';
+import { LogisticsLineBuildContext } from './logistics/LogisticsLineBuildContext.js';
+import { LogisticsLinePlacement } from './logistics/LogisticsLinePlacement.js';
+import { LogisticsLineMetadata } from './logistics/LogisticsLineMetadata.js';
+import { LogisticsLineMergeCoordinator } from './logistics/LogisticsLineMergeCoordinator.js';
+import { LogisticsLineFinalizer } from './logistics/LogisticsLineFinalizer.js';
+import { LogisticsLineQuery } from './logistics/LogisticsLineQuery.js';
+import { LogisticsLineHitTester } from './logistics/LogisticsLineHitTester.js';
+import { LogisticsSourcePortQuery } from './logistics/LogisticsSourcePortQuery.js';
+import { LogisticsGroupConnectivity } from './logistics/LogisticsGroupConnectivity.js';
+import { LogisticsLineOrdering } from './logistics/LogisticsLineOrdering.js';
+import { LogisticsTransferQueues } from './logistics/LogisticsTransferQueues.js';
+import { LogisticsMergeNodeRuntime } from './logistics/LogisticsMergeNodeRuntime.js';
+import { LogisticsTransferRerouter } from './logistics/LogisticsTransferRerouter.js';
 
 export class ConveyorSystem {
     constructor() {
@@ -154,127 +37,44 @@ export class ConveyorSystem {
         this.isProcessingMerge = false;
         this.logisticsBuildUndoStack = [];
         this.maxLogisticsBuildUndoSteps = 5;
-        this.spatialGrid = new SpatialHashGrid(64);
+        this.lineStore = new LogisticsLineStore(this, () => GameEngine);
+        this.undoStore = new LogisticsUndoStore(this, () => GameEngine);
+        this.routingGridBuilder = new RoutingGridBuilder(this, () => GameEngine);
+        this.segmentBuilder = new LogisticsSegmentBuilder(() => GameEngine);
+        this.lineBuildContext = new LogisticsLineBuildContext(this, () => GameEngine);
+        this.linePlacement = new LogisticsLinePlacement(this, () => GameEngine);
+        this.lineMetadata = new LogisticsLineMetadata();
+        this.lineMergeCoordinator = new LogisticsLineMergeCoordinator(this, () => GameEngine);
+        this.lineFinalizer = new LogisticsLineFinalizer(this, () => GameEngine);
+        this.lineQuery = new LogisticsLineQuery(this, () => GameEngine);
+        this.sourcePortQuery = new LogisticsSourcePortQuery(this, () => GameEngine);
+        this.lineHitTester = new LogisticsLineHitTester(this, () => GameEngine);
+        this.groupConnectivity = new LogisticsGroupConnectivity(this);
+        this.lineOrdering = new LogisticsLineOrdering(() => GameEngine);
+        this.transferQueues = new LogisticsTransferQueues(this, () => GameEngine);
+        this.mergeNodeRuntime = new LogisticsMergeNodeRuntime(this, () => GameEngine);
+        this.transferRerouter = new LogisticsTransferRerouter(this, () => GameEngine);
+        this.spatialGrid = new SpatialHashGrid(64, () => GameEngine.TILE_SIZE || 20);
     }
 
     cloneLogisticsUndoValue(value) {
-        if (value === undefined) return undefined;
-        if (value === null) return null;
-        return JSON.parse(JSON.stringify(value));
+        return this.undoStore.cloneValue(value);
     }
 
     captureLogisticsBuildUndoSnapshot(state = GameEngine.state) {
-        const ui = window.UIManager || null;
-        const getEntityId = (ent) => {
-            if (!ent) return null;
-            if (ui && typeof ui.getEntityId === 'function') return ui.getEntityId(ent);
-            return ent.id || null;
-        };
-        const activeLine = ui?.activeLogisticsLine || null;
-        const activeConnection = ui?.activeLogisticsConnection || null;
-        return {
-            logisticsLines: this.cloneLogisticsUndoValue(state.logisticsLines || []),
-            logisticsMergeNodes: this.cloneLogisticsUndoValue(state.logisticsMergeNodes || []),
-            logisticsTurnArrowOverrides: this.cloneLogisticsUndoValue(state.logisticsTurnArrowOverrides || []),
-            resources: this.cloneLogisticsUndoValue(state.resources || {}),
-            selectedLogisticsLineId: state.selectedLogisticsLineId || null,
-            selectedLogisticsGroupId: state.selectedLogisticsGroupId || null,
-            selectedLogisticsClickX: state.selectedLogisticsClickX ?? null,
-            selectedLogisticsClickY: state.selectedLogisticsClickY ?? null,
-            activeLogisticsLineKey: activeLine ? (this.getLogisticsLineSelectionKey(activeLine) || activeLine.id || null) : null,
-            activeLogisticsConnection: activeConnection ? {
-                sourceId: getEntityId(activeConnection.source),
-                targetId: activeConnection.targetId ?? null,
-                lineId: activeConnection.lineId ?? null,
-                groupId: activeConnection.groupId ?? null
-            } : null,
-            mapEntityOutputTargets: (state.mapEntities || []).map((ent, index) => ({
-                index,
-                id: getEntityId(ent),
-                hadOutputTargets: Object.prototype.hasOwnProperty.call(ent, 'outputTargets'),
-                outputTargets: this.cloneLogisticsUndoValue(ent?.outputTargets || [])
-            }))
-        };
+        return this.undoStore.capture(state);
     }
 
     recordLogisticsBuildUndoSnapshot(snapshot = null, state = GameEngine.state) {
-        const entry = snapshot || this.captureLogisticsBuildUndoSnapshot(state);
-        if (!entry) return false;
-        this.logisticsBuildUndoStack.push(entry);
-        while (this.logisticsBuildUndoStack.length > this.maxLogisticsBuildUndoSteps) {
-            this.logisticsBuildUndoStack.shift();
-        }
-        return true;
+        return this.undoStore.record(snapshot, state);
     }
 
     restoreLogisticsBuildUndoSnapshot(snapshot, state = GameEngine.state) {
-        if (!snapshot || !state) return false;
-        const ui = window.UIManager || null;
-        const getEntityId = (ent) => {
-            if (!ent) return null;
-            if (ui && typeof ui.getEntityId === 'function') return ui.getEntityId(ent);
-            return ent.id || null;
-        };
-
-        state.logisticsLines = this.cloneLogisticsUndoValue(snapshot.logisticsLines || []);
-        state.logisticsMergeNodes = this.cloneLogisticsUndoValue(snapshot.logisticsMergeNodes || []);
-        state.logisticsTurnArrowOverrides = this.cloneLogisticsUndoValue(snapshot.logisticsTurnArrowOverrides || []);
-        state.resources = this.cloneLogisticsUndoValue(snapshot.resources || {});
-        state.selectedLogisticsLineId = snapshot.selectedLogisticsLineId || null;
-        state.selectedLogisticsGroupId = snapshot.selectedLogisticsGroupId || null;
-        state.selectedLogisticsClickX = snapshot.selectedLogisticsClickX ?? null;
-        state.selectedLogisticsClickY = snapshot.selectedLogisticsClickY ?? null;
-
-        const entities = Array.isArray(state.mapEntities) ? state.mapEntities : [];
-        (snapshot.mapEntityOutputTargets || []).forEach(saved => {
-            const ent = entities.find(item => saved.id && getEntityId(item) === saved.id) || entities[saved.index] || null;
-            if (!ent) return;
-            if (saved.hadOutputTargets) {
-                ent.outputTargets = this.cloneLogisticsUndoValue(saved.outputTargets || []);
-            } else {
-                delete ent.outputTargets;
-            }
-        });
-
-        if (ui) {
-            ui.activeLogisticsLine = snapshot.activeLogisticsLineKey
-                ? this.getLogisticsLineById(snapshot.activeLogisticsLineKey)
-                : null;
-            const active = snapshot.activeLogisticsConnection || null;
-            if (active) {
-                const source = entities.find(ent => active.sourceId && getEntityId(ent) === active.sourceId) || null;
-                const outputTargets = Array.isArray(source?.outputTargets) ? source.outputTargets : [];
-                const conn = outputTargets.find(item =>
-                    item &&
-                    ((active.lineId && item.lineId === active.lineId) ||
-                        (active.groupId && item.lineId === active.groupId) ||
-                        (active.targetId && item.id === active.targetId))
-                ) || null;
-                ui.activeLogisticsConnection = {
-                    source,
-                    targetId: active.targetId,
-                    lineId: active.lineId,
-                    groupId: active.groupId,
-                    conn
-                };
-            } else {
-                ui.activeLogisticsConnection = null;
-            }
-        }
-
-        this.rebuildSpatialHashGrid();
-        return true;
+        return this.undoStore.restore(snapshot, state);
     }
 
     undoLastLogisticsBuild(state = GameEngine.state) {
-        if (this.activeDrag) return false;
-        const snapshot = this.logisticsBuildUndoStack.pop();
-        if (!snapshot) return false;
-        const restored = this.restoreLogisticsBuildUndoSnapshot(snapshot, state);
-        if (restored) {
-            GameEngine.addLog(`[物流] 已復原上一筆物流線建造。`, 'LOGISTICS');
-        }
-        return restored;
+        return this.undoStore.undoLast(state);
     }
 
     startDrag(startX, startY, sourceEntity = null, sourcePort = null, sourceLine = null) {
@@ -453,86 +253,15 @@ export class ConveyorSystem {
     }
 
     collectLogisticsOccupiedKeys(ignoreLine = null) {
-        const keys = new Set();
-        const lines = GameEngine.state.logisticsLines || [];
-        const addKey = (x, y) => keys.add(`${x},${y}`);
-        lines.forEach(line => {
-            if (ignoreLine && (line.id === ignoreLine.id || line.groupId === ignoreLine.groupId)) return;
-            const width = Math.max(1, Number(line.routeWidth) || 1);
-            const points = Array.isArray(line.routePoints) && line.routePoints.length >= 2
-                ? line.routePoints
-                : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
-            for (let i = 0; i < points.length - 1; i++) {
-                const a = this.toGrid(points[i].x, points[i].y);
-                const b = this.toGrid(points[i + 1].x, points[i + 1].y);
-                const dx = Math.sign(b.x - a.x);
-                const dy = Math.sign(b.y - a.y);
-                const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y), 1);
-                const ghosts = [];
-                for (let step = 0; step <= steps; step++) {
-                    ghosts.push({
-                        x: a.x + dx * step,
-                        y: a.y + dy * step,
-                        dirOut: { x: dx, y: dy },
-                        dirIn: { x: dx, y: dy }
-                    });
-                }
-                this.router.getGhostOccupiedCells(ghosts, width).forEach(cell => addKey(cell.x, cell.y));
-            }
-        });
-        return keys;
+        return this.routingGridBuilder.collectLogisticsOccupiedKeys(ignoreLine);
     }
 
     markLineOnGrid(routeGrid, line) {
-        if (!routeGrid || !line) return;
-        const width = Math.max(1, Number(line.routeWidth) || 1);
-        const mark = (x, y) => {
-            if (y < 0 || y >= routeGrid.length || x < 0 || x >= routeGrid[y].length) return;
-            routeGrid[y][x] = 1;
-        };
-        const points = Array.isArray(line.routePoints) && line.routePoints.length >= 2
-            ? line.routePoints
-            : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
-
-        for (let i = 0; i < points.length - 1; i++) {
-            const a = this.toGrid(points[i].x, points[i].y);
-            const b = this.toGrid(points[i + 1].x, points[i + 1].y);
-            const dx = Math.sign(b.x - a.x);
-            const dy = Math.sign(b.y - a.y);
-            const steps = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y), 1);
-            const ghosts = [];
-            for (let step = 0; step <= steps; step++) {
-                ghosts.push({
-                    x: a.x + dx * step,
-                    y: a.y + dy * step,
-                    dirOut: { x: dx, y: dy },
-                    dirIn: { x: dx, y: dy }
-                });
-            }
-            // [核心優化] 使用 Router 的足跡佔用計算法
-            this.router.getGhostOccupiedCells(ghosts, width).forEach(cell => mark(cell.x, cell.y));
-        }
+        return this.routingGridBuilder.markLineOnGrid(routeGrid, line);
     }
 
     createRoutingGrid(grid, ignoreLine = null) {
-        const expanded = [];
-        const routeScale = this.getRouteScale();
-        for (let y = 0; y < grid.length; y++) {
-            const sourceRows = [];
-            for (let row = 0; row < routeScale; row++) sourceRows.push([]);
-            for (let x = 0; x < grid[y].length; x++) {
-                const values = Array(routeScale).fill(grid[y][x]);
-                sourceRows.forEach(row => row.push(...values));
-            }
-            expanded.push(...sourceRows);
-        }
-        const routeGrid = expanded.map(row => row.slice());
-
-        (GameEngine.state.logisticsLines || []).forEach(line => {
-            if (ignoreLine && (line.id === ignoreLine.id || line.groupId === ignoreLine.groupId)) return;
-            this.markLineOnGrid(routeGrid, line);
-        });
-        return routeGrid;
+        return this.routingGridBuilder.createRoutingGrid(grid, ignoreLine);
     }
 
     updateDrag(currentX, currentY) {
@@ -1819,9 +1548,7 @@ export class ConveyorSystem {
     }
 
     ensureLogisticsLineStore() {
-        const state = GameEngine.state;
-        if (!Array.isArray(state.logisticsLines)) state.logisticsLines = [];
-        return state.logisticsLines;
+        return this.lineStore.ensure();
     }
 
     ensureLogisticsMergeNodeStore(state = GameEngine.state) {
@@ -1867,7 +1594,7 @@ export class ConveyorSystem {
     }
 
     getLogisticsLinesForState(state = GameEngine.state) {
-        return Array.isArray(state?.logisticsLines) ? state.logisticsLines : this.ensureLogisticsLineStore();
+        return this.lineStore.getForState(state);
     }
 
     getLogisticsConnectionPointKey(point) {
@@ -2295,49 +2022,15 @@ export class ConveyorSystem {
     }
 
     applyLogisticsMergeNodes(state = GameEngine.state) {
-        const nodes = this.ensureLogisticsMergeNodeStore(state).filter(node =>
-            node && Array.isArray(node.inputGroupIds) && node.inputGroupIds.length > 0 && node.outputGroupId
-        );
-        if (!nodes.length || !Array.isArray(state?.activeTransfers) || state.activeTransfers.length === 0) return false;
-
-        let changed = false;
-        const findNodeForTransfer = (transfer) => {
-            if (Number(transfer?.progress) < 0.999) return null;
-            return this.getLogisticsMergeNodeForInputTransfer(transfer, state);
-        };
-
-        state.activeTransfers.forEach(transfer => {
-            const node = findNodeForTransfer(transfer);
-            if (!node) return;
-            const route = this.getLogisticsMergeNodeOutputRoute(node);
-            if (!Array.isArray(route) || route.length < 2) return;
-            const outputSeg = this.getLogisticsSegmentsByGroupId(node.outputGroupId)[0] || null;
-            transfer.lineId = node.outputGroupId;
-            transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
-            transfer.progress = 0;
-            transfer.sourceId = outputSeg?.sourceId || transfer.sourceId || null;
-            transfer.targetId = outputSeg?.targetId || null;
-            transfer.efficiency = Number(outputSeg?.efficiency) || Number(transfer.efficiency) || 0;
-            delete transfer.blockedOnBrokenLine;
-            delete transfer.queueBlocked;
-            changed = true;
-        });
-
-        return changed;
+        return this.mergeNodeRuntime.apply(state);
     }
 
     snapPointToGridCenter(point) {
-        const TS = GameEngine.TILE_SIZE;
-        const align = TS;
-        return {
-            x: Math.floor(point.x / align) * align + align / 2,
-            y: Math.floor(point.y / align) * align + align / 2
-        };
+        return this.segmentBuilder.snapPointToGridCenter(point);
     }
 
     makeLogisticsLineId(sourceId, targetId = null, targetPoint = null) {
-        const targetKey = targetId || `${Math.round(targetPoint?.x || 0)}_${Math.round(targetPoint?.y || 0)}`;
-        return `logistics_${sourceId}_${targetKey}_${Date.now().toString(36)}_${Math.floor(Math.random() * 10000).toString(36)}`;
+        return this.segmentBuilder.makeLogisticsLineId(sourceId, targetId, targetPoint);
     }
 
     getLogisticsSegmentOccupyKey(line) {
@@ -2476,454 +2169,95 @@ export class ConveyorSystem {
     }
 
     buildGridRoutePoints(points) {
-        if (!Array.isArray(points) || points.length < 2) return [];
-        const TS = GameEngine.TILE_SIZE;
-        const align = TS / 2;
-        const snapped = points.map(p => this.snapPointToGridCenter(p));
-        const route = [];
-        const push = (p) => {
-            const last = route[route.length - 1];
-            if (!last || last.x !== p.x || last.y !== p.y) route.push({ x: p.x, y: p.y });
-        };
-
-        push(snapped[0]);
-        for (let i = 1; i < snapped.length; i++) {
-            const last = route[route.length - 1];
-            const next = snapped[i];
-            if (!last || (last.x === next.x && last.y === next.y)) continue;
-            if (last.x !== next.x && last.y !== next.y) {
-                push({ x: next.x, y: last.y });
-            }
-            push(next);
-        }
-
-        const expanded = [];
-        const pushExpanded = (p) => {
-            const last = expanded[expanded.length - 1];
-            if (!last || last.x !== p.x || last.y !== p.y) expanded.push({ x: p.x, y: p.y });
-        };
-        pushExpanded(route[0]);
-        for (let i = 1; i < route.length; i++) {
-            const a = expanded[expanded.length - 1];
-            const b = route[i];
-            const dx = b.x - a.x;
-            const dy = b.y - a.y;
-            const steps = Math.max(Math.abs(dx), Math.abs(dy)) / align;
-            const sx = Math.sign(dx) * align;
-            const sy = Math.sign(dy) * align;
-            for (let step = 1; step <= steps; step++) {
-                pushExpanded({ x: a.x + sx * step, y: a.y + sy * step });
-            }
-        }
-        return expanded;
+        return this.segmentBuilder.buildGridRoutePoints(points);
     }
 
     buildLogisticsSegments(groupId, sourceId, targetId, targetPoint, gridPoints, routeWidth, sourcePort, targetPort, filter, lineType = 'transport_line', efficiency = 0) {
-        if (!Array.isArray(gridPoints) || gridPoints.length < 2) return [];
-        const TS = GameEngine.TILE_SIZE;
-        const align = TS / 2;
-        const segments = [];
-        let i = 0;
-        while (i < gridPoints.length - 1) {
-            const start = gridPoints[i];
-            const next = gridPoints[Math.min(i + 1, gridPoints.length - 1)];
-            const targetEnd = gridPoints[Math.min(i + 2, gridPoints.length - 1)];
-            const dirX = Math.sign(next.x - start.x);
-            const dirY = Math.sign(next.y - start.y);
-            const nextDirX = Math.sign(targetEnd.x - next.x);
-            const nextDirY = Math.sign(targetEnd.y - next.y);
-            const canUseTargetEnd = i + 2 < gridPoints.length &&
-                dirX === nextDirX &&
-                dirY === nextDirY;
-            const segmentEnd = canUseTargetEnd ? targetEnd : next;
-            const dx = segmentEnd.x - start.x;
-            const dy = segmentEnd.y - start.y;
-            let end = segmentEnd;
-            if (canUseTargetEnd && Math.hypot(dx, dy) < TS - 0.001) {
-                end = {
-                    x: start.x + dirX * TS,
-                    y: start.y + dirY * TS
-                };
-            }
-            if (start.x === end.x && start.y === end.y) {
-                i += 1;
-                continue;
-            }
-            const centerX = (start.x + end.x) / 2;
-            const centerY = (start.y + end.y) / 2;
-            const gx = Math.round(centerX / align);
-            const gy = Math.round(centerY / align);
-            // ── 方向屬性（整數半格座標 + 離散角度）──────────────────────────────
-            // startGx/startGy：routePoints[0]（起點）的半格整數座標
-            // endGx/endGy：targetEnd（邏輯終點）的半格整數座標
-            //   ★ 鍵點：必須用 targetEnd 而非合成終點(end)，否則轉角處會對不上下一段的 startGx
-            // dir：方向角度（0=右, 45=右下, 90=下, 135=左下, 180=左, 225=左上, 270=上, 315=右上）
-            const startGx = Math.round(start.x / align);
-            const startGy = Math.round(start.y / align);
-            const endGx = Math.round(end.x / align);  // 用邏輯終點，不用合成終點
-            const endGy = Math.round(end.y / align);
-            // [方向修正] dir 使用實際路徑向量 (next - start) 計算，確保與物流「流動方向」一致
-            // 舊邏輯使用 targetEnd - start（跨 2 格的向量），在轉角段會產生斜向誤判。
-            // 改用 next（gridPoints[i+1]）與 start（gridPoints[i]）的差值，即每段的實際走向。
-            const tDirSignX = Math.sign(next.x - start.x);
-            const tDirSignY = Math.sign(next.y - start.y);
-            const rawAngle = Math.atan2(tDirSignY, tDirSignX) * 180 / Math.PI;
-            const dir = Math.round(((rawAngle % 360) + 360) % 360);
-            const isSourcePortCell = segments.length === 0 &&
-                sourcePort &&
-                Number.isFinite(sourcePort.x) &&
-                Number.isFinite(sourcePort.y) &&
-                Math.hypot(start.x - sourcePort.x, start.y - sourcePort.y) <= (GameEngine.TILE_SIZE || 20) * 1.1;
-            segments.push({
-                id: `${groupId}_seg_${gx}_${gy}_${i}`,
-                groupId,
-                type: 'logistics_segment',
-                sourceId,
-                targetId,
-                targetPoint: targetId ? null : targetPoint,
-                gridX: gx,
-                gridY: gy,
-                startGx,
-                startGy,
-                endGx,
-                endGy,
-                dir,
-                alignUnit: 0.5,
-                x: centerX,
-                y: centerY,
-                routePoints: [{ x: start.x, y: start.y }, { x: end.x, y: end.y }],
-                routeWidth: Math.max(1, Number(routeWidth) || 1),
-                lineType,
-                efficiency: Number(efficiency) || 0,
-                sourcePort,
-                targetPort,
-                filter: filter || null,
-                isSourcePortCell,
-                sourcePortCellKey: isSourcePortCell ? `${Math.round(start.x)},${Math.round(start.y)}` : null,
-                prevId: null,
-                nextId: null,
-                order: i,
-                createdAt: Date.now()
-            });
-            i += canUseTargetEnd ? 2 : 1;
-        }
-        for (let i = 0; i < segments.length; i++) {
-            segments[i].prevId = i > 0 ? segments[i - 1].id : null;
-            segments[i].nextId = i < segments.length - 1 ? segments[i + 1].id : null;
-            
-            const prevSeg = i > 0 ? segments[i - 1] : null;
-            const nextSeg = i < segments.length - 1 ? segments[i + 1] : null;
-            const isCorner = (prevSeg && prevSeg.dir !== segments[i].dir) || 
-                             (nextSeg && nextSeg.dir !== segments[i].dir);
-            segments[i].isCorner = !!isCorner;
-        }
-        return segments;
+        return this.segmentBuilder.buildLogisticsSegments(groupId, sourceId, targetId, targetPoint, gridPoints, routeWidth, sourcePort, targetPort, filter, lineType, efficiency);
     }
 
     upsertLogisticsLine({ lineId = null, sourceEnt, targetEnt = null, targetPoint = null, points = [], routeWidth = 1, sourcePort = null, targetPort = null, conn = null, lineType = 'transport_line', efficiency = 0, allowGroupMerge = true }) {
         if (this.isProcessingMerge) return null;
-        const lines = this.ensureLogisticsLineStore();
-        const sourceId = window.UIManager.getEntityId(sourceEnt);
-        const targetId = targetEnt ? window.UIManager.getEntityId(targetEnt) : null;
-        const groupId = lineId || conn?.lineId || this.makeLogisticsLineId(sourceId, targetId, targetPoint);
-        const cleanTargetPoint = (targetId || !targetPoint) ? null : this.snapPointToGridCenter(targetPoint);
-        const gridPoints = this.buildGridRoutePoints(points);
-        const previous = lines.find(item => item.groupId === groupId || item.id === groupId);
-        const existingGroupSegments = lines.filter(line => line && (line.groupId === groupId || line.id === groupId));
-        const clonePort = (port) => {
-            if (!port) return null;
-            const cloned = {
-                dir: port.dir,
-                slotIndex: port.slotIndex,
-                defIndex: port.defIndex,
-                width: Math.max(1, Number(port.width) || 1)
-            };
-            if (Number.isFinite(port.x)) cloned.x = port.x;
-            if (Number.isFinite(port.y)) cloned.y = port.y;
-            return cloned;
-        };
-        const hasPortPosition = (port) => port && Number.isFinite(port.x) && Number.isFinite(port.y);
-        const findExistingSourceConnection = () => {
-            const entities = GameEngine.state?.mapEntities || [];
-            for (const ent of entities) {
-                const outputTargets = Array.isArray(ent?.outputTargets) ? ent.outputTargets : [];
-                const match = outputTargets.find(output => output && output.lineId === groupId);
-                if (match) {
-                    return {
-                        sourceId: window.UIManager.getEntityId(ent),
-                        sourcePort: match.sourcePort || null
-                    };
-                }
-            }
-            return null;
-        };
-        const existingSourceConnection = findExistingSourceConnection();
-        const previousSourceId = previous?.sourceId ||
-            existingGroupSegments.find(line => line?.sourceId)?.sourceId ||
-            existingSourceConnection?.sourceId ||
-            null;
-        const canonicalSourceId = sourceId || previousSourceId || null;
-        const findNearestSourceEntityPort = () => {
-            if (!sourceEnt || typeof window.UIManager.getBuildingPortSlots !== 'function') return null;
-            const slots = window.UIManager.getBuildingPortSlots(sourceEnt);
-            if (!Array.isArray(slots) || slots.length === 0) return null;
-
-            const refs = [];
-            lines.forEach(line => {
-                if (!line || (line.groupId !== groupId && line.id !== groupId)) return;
-                (line.routePoints || []).forEach(point => {
-                    if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) refs.push(point);
-                });
-            });
-            gridPoints.forEach(point => {
-                if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) refs.push(point);
-            });
-            if (targetEnt) refs.push({ x: targetEnt.x, y: targetEnt.y });
-            if (targetPoint) refs.push(targetPoint);
-            if (refs.length === 0) return null;
-
-            let best = null;
-            let bestScore = Infinity;
-            slots.forEach(slot => {
-                refs.forEach(ref => {
-                    const score = Math.hypot(slot.x - ref.x, slot.y - ref.y);
-                    if (score < bestScore) {
-                        bestScore = score;
-                        best = slot;
-                    }
-                });
-            });
-            return clonePort(best);
-        };
-        const fallbackSourcePort = () => {
-            const candidates = [
-                conn?.sourcePort,
-                existingSourceConnection?.sourcePort,
-                previous?.sourcePort,
-                ...existingGroupSegments.map(line => line.sourcePort)
-            ];
-            const stored = candidates.find(hasPortPosition);
-            return stored ? clonePort(stored) : findNearestSourceEntityPort();
-        };
-        let cleanSourcePort = sourcePort?.sourceType === "logistics_line" ? null : clonePort(sourcePort);
-        if (!hasPortPosition(cleanSourcePort)) cleanSourcePort = fallbackSourcePort();
-        const cleanTargetPort = clonePort(targetPort);
-        const filter = conn ? null : (previous?.filter || null);
+        const {
+            lines,
+            targetId,
+            groupId,
+            cleanTargetPoint,
+            gridPoints,
+            previous,
+            existingGroupSegments,
+            canonicalSourceId,
+            cleanSourcePort,
+            cleanTargetPort,
+            filter
+        } = this.lineBuildContext.create({
+            lineId,
+            sourceEnt,
+            targetEnt,
+            targetPoint,
+            points,
+            sourcePort,
+            targetPort,
+            conn
+        });
         const segments = this.buildLogisticsSegments(groupId, canonicalSourceId, targetId, cleanTargetPoint, gridPoints, routeWidth, cleanSourcePort, cleanTargetPort, filter, lineType, efficiency);
-        const extendsSplitSequence = existingGroupSegments.some(line => Number.isFinite(line?.splitSequenceOrder));
-        const splitSequenceStart = extendsSplitSequence
-            ? Math.max(...existingGroupSegments.map(line => Number.isFinite(line?.splitSequenceOrder) ? line.splitSequenceOrder : (Number(line?.order) || 0))) + 1
-            : null;
-        if (Number.isFinite(splitSequenceStart)) {
-            segments.forEach((segment, index) => {
-                segment.splitSequenceOrder = splitSequenceStart + index;
-            });
-        }
-        const occupied = new Map();
-        const occupiedTileCenters = new Map();
-        const sameGroup = (seg) => !!seg && ((seg.groupId === groupId) || (seg.id === groupId));
-        const sameRoute = (a, b) => {
-            const ap = Array.isArray(a?.routePoints) ? a.routePoints : [];
-            const bp = Array.isArray(b?.routePoints) ? b.routePoints : [];
-            if (ap.length < 2 || bp.length < 2) return false;
-            return (ap[0].x === bp[0].x && ap[0].y === bp[0].y && ap[1].x === bp[1].x && ap[1].y === bp[1].y)
-                || (ap[0].x === bp[1].x && ap[0].y === bp[1].y && ap[1].x === bp[0].x && ap[1].y === bp[0].y);
-        };
-        const getSegmentTileKeys = (seg) => {
-            const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
-            if (points.length < 2) return [];
-            const TS = GameEngine.TILE_SIZE;
-            const eps = 0.001;
-            const keys = new Set();
-            for (let i = 0; i < points.length - 1; i++) {
-                const a = points[i];
-                const b = points[i + 1];
-                if (!a || !b) continue;
-                const dx = b.x - a.x;
-                const dy = b.y - a.y;
-                const dist = Math.hypot(dx, dy);
-                if (dist < eps) continue;
-                const dirX = dx / dist;
-                const dirY = dy / dist;
-                const steps = Math.max(1, Math.round(dist / TS));
-                const stepSize = dist / steps;
-                for (let step = 0; step < steps; step++) {
-                    const px = a.x + dirX * stepSize * step;
-                    const py = a.y + dirY * stepSize * step;
-                    const snapped = this.snapPointToGridCenter({ x: px, y: py });
-                    keys.add(`${snapped.x},${snapped.y}`);
-                }
-            }
-            return Array.from(keys);
-        };
-        // 使用完整的 lines（含本群組舊段）建立佔用索引，確保延伸時不會蓋掉自身已有線段
-        lines.forEach(item => {
-            this.getLogisticsSegmentOccupiedKeys(item).forEach(key => {
-                if (key && !occupied.has(key)) occupied.set(key, item);
-            });
-            getSegmentTileKeys(item).forEach(key => {
-                if (item?.detachedFromGroupId === groupId && item?.detachedAtKey === key) return;
-                if (!occupiedTileCenters.has(key)) occupiedTileCenters.set(key, []);
-                occupiedTileCenters.get(key).push(item);
-            });
-        });
-        const additions = [];
-        const overlapMergeGroupIds = new Set();
-        const blockedOverlapGroupIds = new Set();
-        const getLineGroupId = (line) => line?.groupId || line?.id || null;
-        const collectSameDirectionOverlapGroups = (segment) => {
-            const groupIds = new Set();
-            this.getLogisticsLineDirectedCells(segment).forEach(cell => {
-                const hits = occupiedTileCenters.get(cell.key) || [];
-                hits.forEach(hit => {
-                    const hitGroupId = getLineGroupId(hit);
-                    if (!hitGroupId || hitGroupId === groupId) return;
-                    // [嚴格化合併檢查] 若目前處於合併處理中，禁止合併
-                    if (this.isProcessingMerge === true) {
-                        blockedOverlapGroupIds.add(hitGroupId);
-                        return;
-                    }
-                    const hitCells = this.getLogisticsLineDirectedCells(hit).filter(hitCell => hitCell.key === cell.key);
-                    const hasOppositeDirection = hitCells.some(hitCell =>
-                        hitCell.dirX === -cell.dirX &&
-                        hitCell.dirY === -cell.dirY
-                    );
-                    if (hasOppositeDirection) {
-                        blockedOverlapGroupIds.add(hitGroupId);
-                        groupIds.delete(hitGroupId);
-                        return;
-                    }
-                    const matchesDirection = hitCells.some(hitCell => hitCell.dirX === cell.dirX && hitCell.dirY === cell.dirY);
-                    if (matchesDirection) groupIds.add(hitGroupId);
-                });
-            });
-            return groupIds;
-        };
-        segments.forEach(segment => {
-            const keys = this.getLogisticsSegmentOccupiedKeys(segment);
-            const segmentTileKeys = getSegmentTileKeys(segment);
-            if (!keys.length) return;
-            // 使用完整 lines 比對同路由（確保延伸不會重複追加完全相同的段）
-            const alreadySameRoute = lines.some(item => sameGroup(item) && sameRoute(item, segment));
-            if (alreadySameRoute) return;
-            const sameDirectionOverlapGroupIds = collectSameDirectionOverlapGroups(segment);
-            const overlapsOccupiedLine = keys.some((key) => !!occupied.get(key));
-            if (overlapsOccupiedLine) {
-                sameDirectionOverlapGroupIds.forEach(id => overlapMergeGroupIds.add(id));
-                return;
-            }
-            const centerBlockedByOccupiedLine = segmentTileKeys.some((key) => {
-                const hits = occupiedTileCenters.get(key) || [];
-                return hits.length > 0;
-            });
-            if (centerBlockedByOccupiedLine) {
-                sameDirectionOverlapGroupIds.forEach(id => overlapMergeGroupIds.add(id));
-                return;
-            }
-            keys.forEach(key => occupied.set(key, segment));
-            segmentTileKeys.forEach(key => {
-                if (!occupiedTileCenters.has(key)) occupiedTileCenters.set(key, []);
-                occupiedTileCenters.get(key).push(segment);
-            });
-            additions.push(segment);
-        });
-        // 在原始 lines 基礎上追加新生成的 additions（延伸模式的正確行為）
-        const mergedLines = lines.concat(additions);
+        this.lineMetadata.applySplitSequenceStart(segments, existingGroupSegments);
+        const {
+            additions,
+            occupied,
+            mergedLines,
+            overlapMergeGroupIds,
+            blockedOverlapGroupIds
+        } = this.linePlacement.placeSegments({ lines, segments, groupId });
 
         // [物流延伸修正] 同一群組在多次延伸後，舊段也必須同步最新端點/連線資訊，
         // 否則渲染端在判定 port-to-port 接通時會讀到過期 metadata，導致誤顯示為未接通。
-        mergedLines.forEach((seg) => {
-            if (!seg) return;
-            const sameGroup = (seg.groupId === groupId) || (seg.id === groupId);
-            if (!sameGroup) return;
-            seg.groupId = groupId;
-            seg.sourceId = canonicalSourceId;
-            seg.targetId = targetId;
-            seg.targetPoint = targetId ? null : cleanTargetPoint;
-            seg.routeWidth = Math.max(1, Number(routeWidth) || 1);
-            seg.lineType = lineType || seg.lineType || 'transport_line';
-            seg.efficiency = Number(efficiency) || Number(seg.efficiency) || 0;
-            if (cleanSourcePort) seg.sourcePort = cleanSourcePort;
-            if (cleanTargetPort) seg.targetPort = cleanTargetPort;
-            if (!conn) seg.filter = filter || null;
-            else if (seg.isSourcePortCell || seg.sourcePortCellKey) seg.filter = null;
+        this.lineMetadata.syncGroupSegments({
+            mergedLines,
+            groupId,
+            canonicalSourceId,
+            targetId,
+            cleanTargetPoint,
+            routeWidth,
+            lineType,
+            efficiency,
+            cleanSourcePort,
+            cleanTargetPort,
+            conn,
+            filter
         });
 
         GameEngine.state.logisticsLines = mergedLines;
+        this.lineMetadata.syncConnection({ conn, groupId, gridPoints, routeWidth, lineType, efficiency, cleanSourcePort, cleanTargetPort });
 
-        if (conn) {
-            conn.lineId = groupId;
-            conn.routePoints = gridPoints.map(p => ({ x: p.x, y: p.y }));
-            conn.routeWidth = Math.max(1, Number(routeWidth) || 1);
-            conn.lineType = lineType || 'transport_line';
-            conn.efficiency = Number(efficiency) || 0;
-            conn.sourcePort = cleanSourcePort;
-            conn.targetPort = cleanTargetPort;
-        }
+        const { mergedGroupId, affectedGroupIds } = this.lineMergeCoordinator.mergeOverlaps({
+            groupId,
+            overlapMergeGroupIds,
+            blockedOverlapGroupIds,
+            allowGroupMerge
+        });
 
-        let mergedGroupId = groupId;
-        const affectedGroupIds = new Set([groupId]);
-        const previousAffectedGroupIds = this._affectedLogisticsGroupIds;
-        this._affectedLogisticsGroupIds = affectedGroupIds;
-        try {
-            if (allowGroupMerge) {
-                overlapMergeGroupIds.forEach(otherGroupId => {
-                    if (!otherGroupId || otherGroupId === mergedGroupId) return;
-                    if (blockedOverlapGroupIds.has(otherGroupId)) return;
-                    if (this.areLogisticsGroupsInSameMergeComponent(mergedGroupId, otherGroupId)) return;
-                    affectedGroupIds.add(otherGroupId);
-                    mergedGroupId = this.mergeLogisticsLineGroups(mergedGroupId, otherGroupId) || mergedGroupId;
-                    affectedGroupIds.add(mergedGroupId);
-                });
-                mergedGroupId = this.mergeConnectedLogisticsGroups(mergedGroupId) || mergedGroupId;
-                affectedGroupIds.add(mergedGroupId);
-            } else {
-                overlapMergeGroupIds.forEach(otherGroupId => {
-                    if (otherGroupId) affectedGroupIds.add(otherGroupId);
-                });
-            }
-        } finally {
-            this._affectedLogisticsGroupIds = previousAffectedGroupIds;
-        }
-
-        // [修正 v2] 建造/延伸/合併全部完成後，對最終群組再做一次統一重整。
-        // 確保純延伸（未觸發 mergeLogisticsLineGroups）的情境下 order 也正確。
-        const postBuildSegs = (GameEngine.state.logisticsLines || []).filter(
-            l => l && (l.groupId === mergedGroupId || l.id === mergedGroupId)
-        );
-        if (postBuildSegs.length > 0) {
-            this.orderLogisticsSegmentsByDirection(postBuildSegs);
-        }
-
-        if (conn && mergedGroupId !== groupId) {
-            conn.lineId = mergedGroupId;
-        }
-        this.recalculateLogisticsGroupEndpoints(mergedGroupId);
-        this.rebuildSpatialHashGrid();
-        this.updateActiveTransfersOnLogisticsChange(GameEngine.state, affectedGroupIds);
-        return additions[additions.length - 1] || segments.map(segment => occupied.get(this.getLogisticsSegmentOccupyKey(segment))).filter(Boolean).pop() || this.getLogisticsLineById(mergedGroupId) || null;
+        return this.lineFinalizer.finalizeBuild({
+            groupId,
+            mergedGroupId,
+            affectedGroupIds,
+            conn,
+            additions,
+            segments,
+            occupied
+        });
     }
 
     getLogisticsLineRoute(line) {
-        if (!line || !Array.isArray(line.routePoints) || line.routePoints.length < 2) return null;
-        return {
-            points: line.routePoints.map(p => ({ x: p.x, y: p.y })),
-            width: Math.max(1, Number(line.routeWidth) || 1)
-        };
+        return this.lineQuery.getRoute(line);
     }
 
     getLogisticsLineById(lineId) {
-        return this.ensureLogisticsLineStore().find(line =>
-            line.id === lineId ||
-            line.groupId === lineId ||
-            this.getLogisticsLineSelectionKey(line) === lineId
-        ) || null;
+        return this.lineStore.getById(lineId);
     }
 
     getLogisticsSegmentsByGroupId(groupId) {
-        return this.ensureLogisticsLineStore()
-            .filter(line => line.groupId === groupId || line.id === groupId)
-            .sort((a, b) => (a.order || 0) - (b.order || 0));
+        return this.lineStore.getSegmentsByGroupId(groupId);
     }
 
     setLogisticsGroupFilter(groupId, filterItem) {
@@ -2933,299 +2267,35 @@ export class ConveyorSystem {
     }
 
     getLogisticsLineNodePoints(line) {
-        const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
-        const nodes = [];
-        const push = (point) => {
-            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-            if (!nodes.some(node => Math.hypot(node.x - point.x, node.y - point.y) < 1)) {
-                nodes.push({ x: point.x, y: point.y });
-            }
-        };
-
-        points.forEach(push);
-        if (Number.isFinite(line?.x) && Number.isFinite(line?.y)) push({ x: line.x, y: line.y });
-        return nodes;
+        return this.lineQuery.getNodePoints(line);
     }
 
     isPointOnLogisticsLine(point, line) {
-        if (!point || !line) return false;
-        const points = Array.isArray(line.routePoints) ? line.routePoints : [];
-        if (points.some(p => p && Math.hypot(p.x - point.x, p.y - point.y) < 1)) return true;
-        if (Number.isFinite(line.x) && Number.isFinite(line.y) && Math.hypot(line.x - point.x, line.y - point.y) < 1) return true;
-
-        const eps = 1;
-        for (let i = 0; i < points.length - 1; i++) {
-            const a = points[i];
-            const b = points[i + 1];
-            if (!a || !b) continue;
-            const dx = b.x - a.x;
-            const dy = b.y - a.y;
-            const lengthSq = dx * dx + dy * dy;
-            if (lengthSq < 0.001) continue;
-            const t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq;
-            if (t < -0.001 || t > 1.001) continue;
-            const projX = a.x + dx * t;
-            const projY = a.y + dy * t;
-            if (Math.hypot(point.x - projX, point.y - projY) <= eps) return true;
-        }
-        return false;
+        return this.lineQuery.isPointOnLine(point, line);
     }
 
     getLogisticsLineDirectedCells(line) {
-        const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
-        if (points.length < 2) return [];
-        const TS = GameEngine.TILE_SIZE;
-        const cells = [];
-        const seen = new Set();
-
-        for (let i = 0; i < points.length - 1; i++) {
-            const a = points[i];
-            const b = points[i + 1];
-            if (!a || !b) continue;
-
-            const dx = b.x - a.x;
-            const dy = b.y - a.y;
-            const dist = Math.hypot(dx, dy);
-            if (dist < 0.001) continue;
-
-            const dirX = Math.sign(dx);
-            const dirY = Math.sign(dy);
-            const steps = Math.max(1, Math.round(dist / TS));
-            const stepSize = dist / steps;
-
-            for (let step = 0; step < steps; step++) {
-                const px = a.x + (dx / dist) * stepSize * step;
-                const py = a.y + (dy / dist) * stepSize * step;
-                const snapped = this.snapPointToGridCenter({ x: px, y: py });
-                const key = `${snapped.x},${snapped.y}`;
-                const uniqueKey = `${key}:${dirX},${dirY}`;
-                if (seen.has(uniqueKey)) continue;
-                seen.add(uniqueKey);
-                cells.push({ key, dirX, dirY });
-            }
-        }
-
-        return cells;
+        return this.lineQuery.getDirectedCells(line);
     }
 
     areLogisticsGroupsTouching(primaryGroupId, secondaryGroupId) {
-        if (!primaryGroupId || !secondaryGroupId || primaryGroupId === secondaryGroupId) return false;
-        const primaryLines = this.getLogisticsSegmentsByGroupId(primaryGroupId);
-        const secondaryLines = this.getLogisticsSegmentsByGroupId(secondaryGroupId);
-        if (!primaryLines.length || !secondaryLines.length) return false;
-        const getEndpointDirs = (line) => {
-            const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
-            if (points.length < 2) return [];
-            const start = points[0];
-            const end = points[points.length - 1];
-            const dx = end.x - start.x;
-            const dy = end.y - start.y;
-            const dir = Math.abs(dx) >= Math.abs(dy)
-                ? { x: Math.sign(dx) || 1, y: 0 }
-                : { x: 0, y: Math.sign(dy) || 1 };
-            return [
-                { key: `${Math.round(start.x)},${Math.round(start.y)}`, dirX: dir.x, dirY: dir.y, line },
-                { key: `${Math.round(end.x)},${Math.round(end.y)}`, dirX: dir.x, dirY: dir.y, line }
-            ];
-        };
-        const isBlockedSplitEndpointTouch = (endpoint, other) => {
-            if (!endpoint || !other || endpoint.key !== other.key) return false;
-            const endpointLine = endpoint.line || null;
-            const otherLine = other.line || null;
-            const endpointDetachedFrom = endpointLine?.detachedFromGroupId || null;
-            const otherDetachedFrom = otherLine?.detachedFromGroupId || null;
-            if (endpointLine?.suppressedOpenEndpointCellKey === endpoint.key) return true;
-            if (otherLine?.suppressedOpenEndpointCellKey === other.key) return true;
-            if (endpointDetachedFrom === secondaryGroupId && endpointLine?.detachedAtKey === endpoint.key) return true;
-            if (otherDetachedFrom === primaryGroupId && otherLine?.detachedAtKey === other.key) return true;
-            return false;
-        };
-
-        const secondaryEndpoints = new Map();
-        secondaryLines.forEach(line => {
-            getEndpointDirs(line).forEach(endpoint => {
-                if (!secondaryEndpoints.has(endpoint.key)) secondaryEndpoints.set(endpoint.key, []);
-                secondaryEndpoints.get(endpoint.key).push(endpoint);
-            });
-        });
-
-        for (const line of primaryLines) {
-            for (const endpoint of getEndpointDirs(line)) {
-                const matches = secondaryEndpoints.get(endpoint.key) || [];
-                if (matches.some(other =>
-                    !isBlockedSplitEndpointTouch(endpoint, other) &&
-                    !(other.dirX === -endpoint.dirX && other.dirY === -endpoint.dirY)
-                )) {
-                    return true;
-                }
-            }
-        }
-
-        const secondaryCells = new Map();
-        secondaryLines.forEach(line => {
-            this.getLogisticsLineDirectedCells(line).forEach(cell => {
-                if (!secondaryCells.has(cell.key)) secondaryCells.set(cell.key, []);
-                secondaryCells.get(cell.key).push(cell);
-            });
-        });
-
-        let hasSameDirectionOverlap = false;
-        for (const line of primaryLines) {
-            const cells = this.getLogisticsLineDirectedCells(line);
-            for (const cell of cells) {
-                const overlaps = secondaryCells.get(cell.key) || [];
-                if (overlaps.some(other => other.dirX === -cell.dirX && other.dirY === -cell.dirY)) return false;
-                if (overlaps.some(other => other.dirX === cell.dirX && other.dirY === cell.dirY)) hasSameDirectionOverlap = true;
-            }
-        }
-        return hasSameDirectionOverlap;
+        return this.groupConnectivity.areTouching(primaryGroupId, secondaryGroupId);
     }
 
     mergeConnectedLogisticsGroups(groupId) {
-        if (this.isProcessingMerge === true) {
-            return groupId;
-        }
-
-        let activeGroupId = groupId;
-        if (!activeGroupId) return null;
-
-        let merged = true;
-        while (merged) {
-            merged = false;
-            const otherGroupIds = [...new Set(this.ensureLogisticsLineStore()
-                .map(line => line?.groupId || line?.id)
-                .filter(id => id && id !== activeGroupId))];
-
-            for (const otherGroupId of otherGroupIds) {
-                if (!this.areLogisticsGroupsTouching(activeGroupId, otherGroupId)) continue;
-                if (this.areLogisticsGroupsInSameMergeComponent(activeGroupId, otherGroupId)) continue;
-                activeGroupId = this.mergeLogisticsLineGroups(activeGroupId, otherGroupId);
-                merged = true;
-                break;
-            }
-        }
-        return activeGroupId;
+        return this.lineMergeCoordinator.mergeConnectedGroups(groupId);
     }
 
     getDeletedGapContinuationRelation(groupAId, groupBId, state = GameEngine.state) {
-        if (!groupAId || !groupBId || groupAId === groupBId) return null;
-        const lines = this.getLogisticsLinesForState(state);
-        const groupALines = lines.filter(line => line && (line.groupId || line.id) === groupAId);
-        const groupBLines = lines.filter(line => line && (line.groupId || line.id) === groupBId);
-        const findRelation = (canonicalGroupId, continuationGroupId, continuationLines) => {
-            const continuation = continuationLines.filter(line =>
-                line?.detachedByDeletedGap === true &&
-                line?.detachedFromGroupId === canonicalGroupId
-            );
-            if (continuation.length === 0) return null;
-            return {
-                canonicalGroupId,
-                continuationGroupId,
-                detachKeys: [...new Set(continuation.map(line => line.detachedAtKey).filter(Boolean))]
-            };
-        };
-        return findRelation(groupAId, groupBId, groupBLines) ||
-            findRelation(groupBId, groupAId, groupALines);
+        return this.lineMergeCoordinator.getDeletedGapContinuationRelation(groupAId, groupBId, state);
     }
 
     reconnectDeletedGapContinuationGroups(groupAId, groupBId, state = GameEngine.state) {
-        const relation = this.getDeletedGapContinuationRelation(groupAId, groupBId, state);
-        if (!relation) return null;
-        const { canonicalGroupId, continuationGroupId, detachKeys } = relation;
-        const detachKeySet = new Set(detachKeys);
-        const mergedGroupId = this.mergeLogisticsLineGroups(canonicalGroupId, continuationGroupId) || canonicalGroupId;
-
-        this.getLogisticsSegmentsByGroupId(mergedGroupId).forEach(line => {
-            if (detachKeySet.has(line?.suppressedOpenEndpointCellKey)) {
-                delete line.suppressOpenEndpointCell;
-                delete line.suppressedOpenEndpointCellKey;
-            }
-            if (line?.detachedByDeletedGap === true &&
-                (line.detachedFromGroupId === canonicalGroupId || line.detachedFromGroupId === mergedGroupId)) {
-                delete line.detachedByDeletedGap;
-                delete line.detachedFromGroupId;
-                delete line.detachedAtKey;
-            }
-        });
-
-        const nodes = this.ensureLogisticsMergeNodeStore(state);
-        nodes.forEach(node => {
-            if (!node) return;
-            if (node.outputGroupId === continuationGroupId) node.outputGroupId = mergedGroupId;
-            if (node.outputGroupId === canonicalGroupId) node.outputGroupId = mergedGroupId;
-            if (Array.isArray(node.inputGroupIds)) {
-                node.inputGroupIds = [...new Set(node.inputGroupIds
-                    .map(id => id === continuationGroupId || id === canonicalGroupId ? mergedGroupId : id)
-                    .filter(id => id && id !== node.outputGroupId))];
-            }
-        });
-        state.logisticsMergeNodes = nodes.filter(node =>
-            node && node.outputGroupId && Array.isArray(node.inputGroupIds) && node.inputGroupIds.length > 0
-        );
-
-        this.orderLogisticsSegmentsByDirection(this.getLogisticsSegmentsByGroupId(mergedGroupId));
-        this.recalculateLogisticsGroupEndpoints(mergedGroupId);
-        return mergedGroupId;
+        return this.lineMergeCoordinator.reconnectDeletedGapContinuationGroups(groupAId, groupBId, state);
     }
 
     mergeLogisticsLineGroups(primaryGroupId, secondaryGroupId) {
-        if (this.isProcessingMerge === true) {
-            return primaryGroupId;
-        }
-        if (!primaryGroupId || !secondaryGroupId || primaryGroupId === secondaryGroupId) return primaryGroupId || secondaryGroupId || null;
-        if (this.areLogisticsGroupsInSameMergeComponent(primaryGroupId, secondaryGroupId)) return primaryGroupId;
-        if (this._affectedLogisticsGroupIds) {
-            this._affectedLogisticsGroupIds.add(primaryGroupId);
-            this._affectedLogisticsGroupIds.add(secondaryGroupId);
-        }
-        const lines = this.ensureLogisticsLineStore();
-        const primaryLines = lines.filter(line => line && (line.groupId === primaryGroupId || line.id === primaryGroupId));
-        const secondaryLines = lines.filter(line => line && (line.groupId === secondaryGroupId || line.id === secondaryGroupId));
-        if (primaryLines.length === 0 || secondaryLines.length === 0) return primaryGroupId;
-
-        const hasPortPosition = (port) => port && Number.isFinite(port.x) && Number.isFinite(port.y);
-        const primaryMeta = primaryLines.find(line => line && (line.sourceId || line.targetId || line.sourcePort || line.targetPort)) || primaryLines[0];
-        const secondaryMeta = secondaryLines.find(line => line && (line.sourceId || line.targetId || line.sourcePort || line.targetPort)) || secondaryLines[0];
-        let canonicalSourceId = primaryMeta?.sourceId || secondaryMeta?.sourceId || null;
-        let canonicalTargetId = primaryMeta?.targetId || secondaryMeta?.targetId || null;
-        let canonicalSourcePort = [primaryMeta?.sourcePort, secondaryMeta?.sourcePort].find(hasPortPosition) || null;
-        let canonicalTargetPort = [primaryMeta?.targetPort, secondaryMeta?.targetPort].find(hasPortPosition) || null;
-        let filter = primaryMeta?.filter || secondaryMeta?.filter || null;
-
-        (GameEngine.state.mapEntities || []).forEach(ent => {
-            if (!Array.isArray(ent.outputTargets)) return;
-            const sourceId = window.UIManager.getEntityId(ent);
-            ent.outputTargets.forEach(conn => {
-                if (!conn) return;
-                if (conn.lineId !== primaryGroupId && conn.lineId !== secondaryGroupId) return;
-                conn.lineId = primaryGroupId;
-                canonicalSourceId = sourceId || canonicalSourceId;
-                canonicalTargetId = conn.id || canonicalTargetId;
-                canonicalSourcePort = hasPortPosition(conn.sourcePort) ? conn.sourcePort : canonicalSourcePort;
-                canonicalTargetPort = hasPortPosition(conn.targetPort) ? conn.targetPort : canonicalTargetPort;
-                filter = conn.filter || filter;
-            });
-        });
-
-        [...primaryLines, ...secondaryLines].forEach(line => {
-            line.groupId = primaryGroupId;
-            if (canonicalSourceId) line.sourceId = canonicalSourceId;
-            if (canonicalTargetId) line.targetId = canonicalTargetId;
-            if (hasPortPosition(canonicalSourcePort)) line.sourcePort = canonicalSourcePort;
-            if (hasPortPosition(canonicalTargetPort)) line.targetPort = canonicalTargetPort;
-            if (filter) line.filter = filter;
-        });
-
-        // [修正 v2] 合併後強制重整 order/splitSequenceOrder，防止兩群組各自的 0..n
-        // 合併成一個群組後產生重複值，導致後續刪除前後段分割完全錯誤。
-        const allMergedSegs = lines.filter(l => l && l.groupId === primaryGroupId);
-        if (allMergedSegs.length > 0) {
-            this.orderLogisticsSegmentsByDirection(allMergedSegs);
-        }
-
-        if (GameEngine.state.selectedLogisticsGroupId === secondaryGroupId) GameEngine.state.selectedLogisticsGroupId = primaryGroupId;
-        this.recalculateLogisticsGroupEndpoints(primaryGroupId);
-        return primaryGroupId;
+        return this.lineMergeCoordinator.mergeGroups(primaryGroupId, secondaryGroupId);
     }
 
     cleanupDeletedLinePreviousTurnOverride(deletedLine, originalGroupId) {
@@ -3287,708 +2357,15 @@ export class ConveyorSystem {
     }
 
     orderLogisticsSegmentsByDirection(segments) {
-        if (!Array.isArray(segments) || segments.length <= 1) {
-            if (Array.isArray(segments) && segments.length === 1) {
-                segments[0].order = 0;
-                segments[0].splitSequenceOrder = 0;
-            }
-            return Array.isArray(segments) ? [...segments] : [];
-        }
-
-        const TS = GameEngine.TILE_SIZE || 20;
-        const align = TS / 2;
-        const getSequenceOrder = (seg) => Number.isFinite(seg?.splitSequenceOrder)
-            ? seg.splitSequenceOrder
-            : (Number.isFinite(seg?.order) ? seg.order : 0);
-        const getCoords = (seg) => {
-            if (Number.isFinite(seg?.startGx) && Number.isFinite(seg?.startGy) &&
-                Number.isFinite(seg?.endGx) && Number.isFinite(seg?.endGy)) {
-                return { startGx: seg.startGx, startGy: seg.startGy, endGx: seg.endGx, endGy: seg.endGy };
-            }
-            const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
-            const start = points[0] || { x: seg?.x || 0, y: seg?.y || 0 };
-            const end = points[points.length - 1] || start;
-            return {
-                startGx: Math.round(start.x / align),
-                startGy: Math.round(start.y / align),
-                endGx: Math.round(end.x / align),
-                endGy: Math.round(end.y / align)
-            };
-        };
-        const coordKey = (gx, gy) => gx + "," + gy;
-        const directionOf = (seg) => {
-            const c = getCoords(seg);
-            return {
-                x: Math.sign(c.endGx - c.startGx),
-                y: Math.sign(c.endGy - c.startGy)
-            };
-        };
-        const sortStable = (list) => [...list].sort((a, b) =>
-            getSequenceOrder(a) - getSequenceOrder(b) ||
-            String(a.id || "").localeCompare(String(b.id || ""))
-        );
-
-        const byStart = new Map();
-        const byEnd = new Map();
-        const addEndpoint = (map, key, seg) => {
-            if (!map.has(key)) map.set(key, []);
-            map.get(key).push(seg);
-        };
-        segments.forEach(seg => {
-            const c = getCoords(seg);
-            addEndpoint(byStart, coordKey(c.startGx, c.startGy), seg);
-            addEndpoint(byEnd, coordKey(c.endGx, c.endGy), seg);
-        });
-
-        const offsets = [
-            [0, 0],
-            [-1, 0], [1, 0], [0, -1], [0, 1],
-            [-1, -1], [-1, 1], [1, -1], [1, 1],
-            [-2, 0], [2, 0], [0, -2], [0, 2],
-            [-2, -1], [-2, 1], [2, -1], [2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2],
-            [-2, -2], [-2, 2], [2, -2], [2, 2]
-        ];
-
-        const countIncoming = (seg) => {
-            const c = getCoords(seg);
-            let count = 0;
-            offsets.forEach(([dx, dy]) => {
-                (byEnd.get(coordKey(c.startGx + dx, c.startGy + dy)) || []).forEach(candidate => {
-                    if (candidate !== seg) count++;
-                });
-            });
-            return count;
-        };
-
-        const ordered = [];
-        const remaining = new Set(segments);
-        let current = sortStable(segments).find(seg => countIncoming(seg) === 0) || sortStable(segments)[0];
-
-        const pickNext = (seg) => {
-            const c = getCoords(seg);
-            const currentDir = directionOf(seg);
-            const candidates = [];
-            offsets.forEach(([dx, dy], offsetIndex) => {
-                (byStart.get(coordKey(c.endGx + dx, c.endGy + dy)) || []).forEach(candidate => {
-                    if (!remaining.has(candidate) || candidate === seg) return;
-                    const candidateDir = directionOf(candidate);
-                    if (currentDir.x === -candidateDir.x && currentDir.y === -candidateDir.y) return;
-                    const distance = Math.hypot(dx, dy);
-                    const turnPenalty = currentDir.x === candidateDir.x && currentDir.y === candidateDir.y ? 0 : 0.25;
-                    candidates.push({ candidate, score: distance + turnPenalty, offsetIndex });
-                });
-            });
-            candidates.sort((a, b) =>
-                a.score - b.score ||
-                a.offsetIndex - b.offsetIndex ||
-                getSequenceOrder(a.candidate) - getSequenceOrder(b.candidate) ||
-                String(a.candidate.id || "").localeCompare(String(b.candidate.id || ""))
-            );
-            return candidates[0]?.candidate || null;
-        };
-
-        while (current && remaining.has(current)) {
-            ordered.push(current);
-            remaining.delete(current);
-            current = pickNext(current);
-        }
-
-        if (remaining.size > 0) {
-            sortStable([...remaining]).forEach(seg => ordered.push(seg));
-        }
-
-        for (let i = 0; i < ordered.length; i++) {
-            ordered[i].prevId = i > 0 ? ordered[i - 1].id : null;
-            ordered[i].nextId = i < ordered.length - 1 ? ordered[i + 1].id : null;
-            ordered[i].order = i;
-            ordered[i].splitSequenceOrder = i;
-
-            const prevSeg = i > 0 ? ordered[i - 1] : null;
-            const nextSeg = i < ordered.length - 1 ? ordered[i + 1] : null;
-            const isCorner = (prevSeg && prevSeg.dir !== ordered[i].dir) || 
-                             (nextSeg && nextSeg.dir !== ordered[i].dir);
-            ordered[i].isCorner = !!isCorner;
-        }
-
-        return ordered;
+        return this.lineOrdering.orderByDirection(segments);
     }
 
     updateActiveTransfersOnLogisticsChange(state, affectedGroupIds = null) {
-        if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
-        const TS = GameEngine.TILE_SIZE || 20;
-        const affectedSet = affectedGroupIds
-            ? new Set([...affectedGroupIds].filter(Boolean))
-            : null;
-        const allLines = state.logisticsLines || [];
-        const relevantLines = affectedSet && affectedSet.size > 0
-            ? allLines.filter(line => {
-                const groupId = line?.groupId || line?.id;
-                return groupId && affectedSet.has(groupId);
-            })
-            : allLines;
-        const entityById = new Map();
-        (state.mapEntities || []).forEach(ent => {
-            if (!ent) return;
-            entityById.set(window.UIManager.getEntityId(ent), ent);
-        });
-        const affectedSourceIds = new Set();
-        const affectedTargetIds = new Set();
-        relevantLines.forEach(line => {
-            if (line?.sourceId) affectedSourceIds.add(line.sourceId);
-            if (line?.targetId) affectedTargetIds.add(line.targetId);
-        });
-        const lineBuckets = new Map();
-        const addLineBucket = (key, line) => {
-            if (!key || !line) return;
-            if (!lineBuckets.has(key)) lineBuckets.set(key, []);
-            lineBuckets.get(key).push(line);
-        };
-        relevantLines.forEach(line => {
-            const route = Array.isArray(line?.routePoints) && line.routePoints.length >= 2
-                ? line.routePoints
-                : [{ x: line?.x, y: line?.y }, { x: line?.x, y: line?.y }];
-            for (let r = 0; r < route.length - 1; r++) {
-                const a = route[r];
-                const b = route[r + 1];
-                if (!a || !b) continue;
-                const dx = b.x - a.x;
-                const dy = b.y - a.y;
-                const dist = Math.hypot(dx, dy);
-                if (dist < 0.001) continue;
-                const steps = Math.max(1, Math.round(dist / TS));
-                const stepSize = dist / steps;
-                const dirX = dx / dist;
-                const dirY = dy / dist;
-                for (let step = 0; step <= steps; step++) {
-                    const px = step === steps ? b.x : a.x + dirX * stepSize * step;
-                    const py = step === steps ? b.y : a.y + dirY * stepSize * step;
-                    const snapped = this.snapPointToGridCenter({ x: px, y: py });
-                    addLineBucket(`${snapped.x},${snapped.y}`, line);
-                }
-            }
-        });
-        const getCandidateLines = (pos) => {
-            if (!pos || lineBuckets.size === 0) return relevantLines;
-            const snapped = this.snapPointToGridCenter(pos);
-            const candidates = new Set();
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    const key = `${snapped.x + dx * TS},${snapped.y + dy * TS}`;
-                    (lineBuckets.get(key) || []).forEach(line => candidates.add(line));
-                }
-            }
-            return candidates.size > 0 ? [...candidates] : relevantLines;
-        };
-        const shouldUpdateTransfer = (transfer) => {
-            if (!affectedSet || affectedSet.size === 0) return true;
-            const lineId = transfer?.lineId || null;
-            if (lineId && affectedSet.has(lineId)) return true;
-            const sourceId = transfer?.sourceId || null;
-            const targetId = transfer?.targetId || null;
-            return (sourceId && affectedSourceIds.has(sourceId)) || (targetId && affectedTargetIds.has(targetId));
-        };
-
-        const findShortestPathBetweenPoints = (segments, startPt, endPt) => {
-            if (!Array.isArray(segments) || segments.length === 0) return [];
-            const nodes = [];
-            segments.forEach(seg => {
-                if (Array.isArray(seg.routePoints) && seg.routePoints.length >= 2) {
-                    for (let i = 0; i < seg.routePoints.length - 1; i++) {
-                        const p1 = seg.routePoints[i];
-                        const p2 = seg.routePoints[i + 1];
-                        let n1 = nodes.find(n => Math.hypot(n.x - p1.x, n.y - p1.y) < 2);
-                        if (!n1) { n1 = { x: p1.x, y: p1.y, edges: [] }; nodes.push(n1); }
-                        let n2 = nodes.find(n => Math.hypot(n.x - p2.x, n.y - p2.y) < 2);
-                        if (!n2) { n2 = { x: p2.x, y: p2.y, edges: [] }; nodes.push(n2); }
-
-                        if (!n1.edges.includes(n2)) n1.edges.push(n2);
-                        if (!n2.edges.includes(n1)) n2.edges.push(n1);
-                    }
-                }
-            });
-
-            let startNode = null; let startDist = Infinity;
-            let endNode = null; let endDist = Infinity;
-
-            nodes.forEach(n => {
-                const ds = Math.hypot(n.x - startPt.x, n.y - startPt.y);
-                if (ds < startDist) { startDist = ds; startNode = n; }
-                const dt = Math.hypot(n.x - endPt.x, n.y - endPt.y);
-                if (dt < endDist) { endDist = dt; endNode = n; }
-            });
-
-            if (startNode && endNode) {
-                const queue = [[startNode]];
-                const visited = new Set([startNode]);
-                while (queue.length > 0) {
-                    const path = queue.shift();
-                    const curr = path[path.length - 1];
-
-                    if (curr === endNode) {
-                        return path.map(n => ({ x: n.x, y: n.y }));
-                    }
-
-                    curr.edges.forEach(neighbor => {
-                        if (!visited.has(neighbor)) {
-                            visited.add(neighbor);
-                            queue.push([...path, neighbor]);
-                        }
-                    });
-                }
-            }
-            return [];
-        };
-
-        const getPointOnPath = (points, progress) => {
-            if (!Array.isArray(points) || points.length === 0) return { x: 0, y: 0 };
-            if (points.length === 1) return { x: points[0].x, y: points[0].y };
-            const clamped = Math.max(0, Math.min(1, progress));
-            let total = 0;
-            const lengths = [];
-            for (let i = 0; i < points.length - 1; i++) {
-                const d = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-                lengths.push(d);
-                total += d;
-            }
-            if (total <= 0) return { x: points[0].x, y: points[0].y };
-            let targetDist = clamped * total;
-            for (let i = 0; i < lengths.length; i++) {
-                const len = lengths[i];
-                if (targetDist <= len || i === lengths.length - 1) {
-                    const ratio = len === 0 ? 0 : (targetDist / len);
-                    const p1 = points[i];
-                    const p2 = points[i + 1];
-
-                    return {
-                        x: p1.x + (p2.x - p1.x) * ratio,
-                        y: p1.y + (p2.y - p1.y) * ratio
-                    };
-                }
-                targetDist -= len;
-            }
-            return { x: points[points.length - 1].x, y: points[points.length - 1].y };
-        };
-
-        const getPathDistanceToProj = (points, pos) => {
-            if (!Array.isArray(points) || points.length < 2) return 0;
-            let bestDist = Infinity;
-            let bestPathDist = 0;
-            let currentPathDist = 0;
-
-            for (let i = 0; i < points.length - 1; i++) {
-                const p1 = points[i];
-                const p2 = points[i + 1];
-                const segLen = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-                if (segLen === 0) continue;
-
-                const u = ((pos.x - p1.x) * (p2.x - p1.x) + (pos.y - p1.y) * (p2.y - p1.y)) / (segLen * segLen);
-                const t = Math.max(0, Math.min(1, u));
-                const proj = {
-                    x: p1.x + t * (p2.x - p1.x),
-                    y: p1.y + t * (p2.y - p1.y)
-                };
-                const distToProj = Math.hypot(pos.x - proj.x, pos.y - proj.y);
-                if (distToProj < bestDist) {
-                    bestDist = distToProj;
-                    bestPathDist = currentPathDist + t * segLen;
-                }
-                currentPathDist += segLen;
-            }
-            return bestPathDist;
-        };
-
-        const getPathTotalLength = (points) => {
-            if (!Array.isArray(points) || points.length < 2) return 0;
-            let total = 0;
-            for (let i = 0; i < points.length - 1; i++) {
-                total += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-            }
-            return total;
-        };
-        const getDistanceToPath = (points, pos) => {
-            if (!Array.isArray(points) || points.length < 2 || !pos) return Infinity;
-            let bestDist = Infinity;
-            for (let i = 0; i < points.length - 1; i++) {
-                const p1 = points[i];
-                const p2 = points[i + 1];
-                const segLenSq = Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2);
-                if (segLenSq <= 0) continue;
-                const u = ((pos.x - p1.x) * (p2.x - p1.x) + (pos.y - p1.y) * (p2.y - p1.y)) / segLenSq;
-                const t = Math.max(0, Math.min(1, u));
-                const proj = {
-                    x: p1.x + t * (p2.x - p1.x),
-                    y: p1.y + t * (p2.y - p1.y)
-                };
-                bestDist = Math.min(bestDist, Math.hypot(pos.x - proj.x, pos.y - proj.y));
-            }
-            return bestDist;
-        };
-        const groupSegmentsCache = new Map();
-        const getGroupSegments = (groupId) => {
-            if (!groupSegmentsCache.has(groupId)) {
-                groupSegmentsCache.set(
-                    groupId,
-                    allLines.filter(l => l && (l.groupId === groupId || l.id === groupId))
-                );
-            }
-            return groupSegmentsCache.get(groupId);
-        };
-        const groupRouteCache = new Map();
-
-        for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
-            const t = state.activeTransfers[i];
-            if (!shouldUpdateTransfer(t)) continue;
-            if (!Array.isArray(t.routePoints) || t.routePoints.length < 2) continue;
-
-            // 計算目前視覺位置
-            const currentPos = getPointOnPath(t.routePoints, t.progress);
-
-            // 尋找地圖上最接近的輸送帶線段
-            let currentSeg = null;
-            let bestSegDist = Infinity;
-            getCandidateLines(currentPos).forEach(line => {
-                if (!line) return;
-                const route = Array.isArray(line.routePoints) && line.routePoints.length >= 2
-                    ? line.routePoints
-                    : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
-                const d = getDistanceToPath(route, currentPos);
-                if (d < bestSegDist && d <= TS * 0.75) {
-                    bestSegDist = d;
-                    currentSeg = line;
-                }
-            });
-
-            if (!currentSeg) {
-                // 底下輸送帶被刪除 -> 物品掉落或毀損
-                state.activeTransfers.splice(i, 1);
-                continue;
-            }
-
-            // 更新 lineId 到該線段的最新 groupId
-            const newGroupId = currentSeg.groupId || currentSeg.id;
-            t.lineId = newGroupId;
-
-            // 取得該群組全新的完整路徑點
-            const groupSegs = getGroupSegments(newGroupId);
-            let pathPoints = null;
-
-            let routeCache = groupRouteCache.get(newGroupId);
-            if (!routeCache) {
-                routeCache = {
-                    ordered: this.orderLogisticsSegmentsByDirection(groupSegs),
-                    shortestPaths: new Map()
-                };
-                groupRouteCache.set(newGroupId, routeCache);
-            }
-            const ordered = routeCache.ordered;
-            if (ordered.length > 0) {
-                const firstSeg = ordered[0];
-                const lastSeg = ordered[ordered.length - 1];
-                if (firstSeg && lastSeg && Array.isArray(firstSeg.routePoints) && Array.isArray(lastSeg.routePoints)) {
-                    const startPt = firstSeg.routePoints[0];
-                    const endPt = lastSeg.routePoints[lastSeg.routePoints.length - 1];
-                    if (startPt && endPt) {
-                        const endpointKey = `${Math.round(startPt.x)},${Math.round(startPt.y)}>${Math.round(endPt.x)},${Math.round(endPt.y)}`;
-                        let shortest = routeCache.shortestPaths.get(endpointKey);
-                        if (!shortest) {
-                            shortest = findShortestPathBetweenPoints(groupSegs, startPt, endPt);
-                            routeCache.shortestPaths.set(endpointKey, shortest);
-                        }
-                        shortest = Array.isArray(shortest) ? shortest.map(point => ({ ...point })) : shortest;
-                        if (shortest && shortest.length >= 2) {
-                            // 尋找起點與終點建築
-                            const sourceEnt = currentSeg.sourceId
-                                ? entityById.get(currentSeg.sourceId)
-                                : null;
-                            const targetEnt = currentSeg.targetId
-                                ? entityById.get(currentSeg.targetId)
-                                : null;
-
-                            const first = shortest[0];
-                            const last = shortest[shortest.length - 1];
-
-                            let sourceAnchor = null;
-                            if (sourceEnt) {
-                                const sourcePort = currentSeg.sourcePort || t.sourcePort
-                                    ? window.UIManager.resolveCurrentPortSlot(sourceEnt, currentSeg.sourcePort || t.sourcePort, first?.x, first?.y)
-                                    : window.UIManager.getNearestPortSlot(sourceEnt, first?.x ?? (targetEnt ? targetEnt.x : first?.x), first?.y ?? (targetEnt ? targetEnt.y : first?.y));
-                                sourceAnchor = sourcePort ? { x: sourcePort.x, y: sourcePort.y } : { x: sourceEnt.x, y: sourceEnt.y };
-                            }
-
-                            let targetAnchor = null;
-                            if (targetEnt) {
-                                const targetPort = currentSeg.targetPort || t.targetPort
-                                    ? window.UIManager.resolveCurrentPortSlot(targetEnt, currentSeg.targetPort || t.targetPort, last?.x, last?.y)
-                                    : window.UIManager.getNearestPortSlot(targetEnt, last?.x ?? (sourceEnt ? sourceEnt.x : last?.x), last?.y ?? (sourceEnt ? sourceEnt.y : last?.y));
-                                targetAnchor = targetPort ? { x: targetPort.x, y: targetPort.y } : { x: targetEnt.x, y: targetEnt.y };
-                            }
-                            const isOpenEndedLine = !targetAnchor && !currentSeg.targetId;
-
-                            if (sourceAnchor) {
-                                const distFirstToSource = Math.hypot(shortest[0].x - sourceAnchor.x, shortest[0].y - sourceAnchor.y);
-                                const distLastToSource = Math.hypot(shortest[shortest.length - 1].x - sourceAnchor.x, shortest[shortest.length - 1].y - sourceAnchor.y);
-                                if (distLastToSource < distFirstToSource) {
-                                    shortest.reverse();
-                                }
-                            } else if (targetAnchor) {
-                                const distFirstToTarget = Math.hypot(shortest[0].x - targetAnchor.x, shortest[0].y - targetAnchor.y);
-                                const distLastToTarget = Math.hypot(shortest[shortest.length - 1].x - targetAnchor.x, shortest[shortest.length - 1].y - targetAnchor.y);
-                                if (distFirstToTarget < distLastToTarget) {
-                                    shortest.reverse();
-                                }
-                            } else {
-                                // 即使無建築，也應與原路徑方向比對
-                                if (Array.isArray(t.routePoints) && t.routePoints.length >= 2) {
-                                    const distFirstToOldStart = Math.hypot(shortest[0].x - t.routePoints[0].x, shortest[0].y - t.routePoints[0].y);
-                                    const distLastToOldStart = Math.hypot(shortest[shortest.length - 1].x - t.routePoints[0].x, shortest[shortest.length - 1].y - t.routePoints[0].y);
-                                    if (distLastToOldStart < distFirstToOldStart) {
-                                        shortest.reverse();
-                                    }
-                                }
-                            }
-
-                            const transferPoints = [];
-                            const pushPoint = (point) => {
-                                if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-                                const lastPoint = transferPoints[transferPoints.length - 1];
-                                if (!lastPoint || Math.hypot(lastPoint.x - point.x, lastPoint.y - point.y) > 1) {
-                                    transferPoints.push({ x: point.x, y: point.y });
-                                }
-                            };
-
-                            if (sourceAnchor && !isOpenEndedLine) pushPoint(sourceAnchor);
-                            shortest.forEach(pushPoint);
-                            if (targetAnchor) pushPoint(targetAnchor);
-
-                            if (transferPoints.length >= 2) {
-                                pathPoints = transferPoints;
-                                annotateRoutePoints(pathPoints);
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (!pathPoints) {
-                pathPoints = [];
-                ordered.forEach(seg => {
-                    if (Array.isArray(seg.routePoints)) {
-                        seg.routePoints.forEach(p => {
-                            if (pathPoints.length === 0 ||
-                                Math.hypot(pathPoints[pathPoints.length - 1].x - p.x, pathPoints[pathPoints.length - 1].y - p.y) > 0.1) {
-                                pathPoints.push({ x: p.x, y: p.y });
-                            }
-                        });
-                    }
-                });
-                // Correctly annotate corners instead of using ordered[idx].isCorner (子任務 C-3)
-                if (pathPoints.length >= 3) {
-                    const getCardinalDir = (from, to) => {
-                        if (!from || !to) return null;
-                        const dx = to.x - from.x;
-                        const dy = to.y - from.y;
-                        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
-                        if (Math.abs(dx) >= Math.abs(dy)) return { x: Math.sign(dx) || 1, y: 0 };
-                        return { x: 0, y: Math.sign(dy) || 1 };
-                    };
-                    for (let idx = 1; idx < pathPoints.length - 1; idx++) {
-                        const prev = pathPoints[idx - 1];
-                        const curr = pathPoints[idx];
-                        const next = pathPoints[idx + 1];
-                        const inDir = getCardinalDir(prev, curr);
-                        const outDir = getCardinalDir(curr, next);
-                        if (inDir && outDir && (inDir.x !== outDir.x || inDir.y !== outDir.y)) {
-                            curr.isCorner = true;
-                        }
-                    }
-                }
-            } else {
-                const renderer = window.LogisticsRenderer || (typeof LogisticsRenderer !== 'undefined' ? LogisticsRenderer : null);
-                if (renderer && typeof renderer.annotateRoutePoints === 'function') {
-                    renderer.annotateRoutePoints(pathPoints);
-                }
-            }
-
-            if (pathPoints.length < 2) {
-                state.activeTransfers.splice(i, 1);
-                continue;
-            }
-
-            // 投影回新路徑上，重新計算 progress，保持在相同實體位置
-            const projDist = getPathDistanceToProj(pathPoints, currentPos);
-            const totalLen = getPathTotalLength(pathPoints);
-            t.progress = totalLen > 0 ? Math.max(0, Math.min(1, projDist / totalLen)) : 1;
-            t.routePoints = pathPoints;
-            t.sourceId = currentSeg.sourceId || null;
-            t.targetId = currentSeg.targetId || null;
-            t.efficiency = Number(currentSeg.efficiency) || 0;
-        }
-
-        this.applyLogisticsMergeNodes(state);
-        this.applyBlockedTransferQueues(state);
+        return this.transferRerouter.updateOnLogisticsChange(state, affectedGroupIds);
     }
 
     applyBlockedTransferQueues(state) {
-        if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
-        const TS = GameEngine.TILE_SIZE || 20;
-        const pathMetricsCache = new Map();
-
-        const getPathMetrics = (points) => {
-            if (!Array.isArray(points) || points.length < 2) return { total: 0, segments: [] };
-            const cached = pathMetricsCache.get(points);
-            if (cached) return cached;
-
-            let total = 0;
-            const segments = [];
-            for (let i = 0; i < points.length - 1; i++) {
-                const a = points[i];
-                const b = points[i + 1];
-                const dx = b.x - a.x;
-                const dy = b.y - a.y;
-                const len = Math.hypot(dx, dy);
-                segments.push({ a, b, dx, dy, len, start: total });
-                total += len;
-            }
-            const metrics = { total, segments };
-            pathMetricsCache.set(points, metrics);
-            return metrics;
-        };
-        const getPathTotalLength = (points) => {
-            return getPathMetrics(points).total;
-        };
-        const getPointOnPathByDistance = (points, distance) => {
-            if (!Array.isArray(points) || points.length < 2) return null;
-            let remaining = Math.max(0, Number(distance) || 0);
-            const segments = getPathMetrics(points).segments;
-            for (let i = 0; i < segments.length; i++) {
-                const { a, b, dx, dy, len } = segments[i];
-                if (len <= 0) continue;
-                if (remaining <= len || i === segments.length - 1) {
-                    const t = Math.max(0, Math.min(1, remaining / len));
-                    return {
-                        x: a.x + dx * t,
-                        y: a.y + dy * t
-                    };
-                }
-                remaining -= len;
-            }
-            return points[points.length - 1] || null;
-        };
-        const getPathDistanceToPoint = (points, point) => {
-            if (!Array.isArray(points) || points.length < 2 || !point) return 0;
-            let bestDist = Infinity;
-            let bestPathDist = 0;
-            const segments = getPathMetrics(points).segments;
-            for (let i = 0; i < segments.length; i++) {
-                const { a, dx, dy, len, start } = segments[i];
-                const lenSq = dx * dx + dy * dy;
-                if (lenSq <= 0) continue;
-                const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
-                const proj = { x: a.x + dx * t, y: a.y + dy * t };
-                const dist = Math.hypot(point.x - proj.x, point.y - proj.y);
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    bestPathDist = start + len * t;
-                }
-            }
-            return bestPathDist;
-        };
-        const pathKey = (transfer) => {
-            if (transfer.lineId) return `line:${transfer.lineId}`;
-            const points = transfer.routePoints || [];
-            const first = points[0];
-            const last = points[points.length - 1];
-            return [
-                "route",
-                first ? `${Math.round(first.x)},${Math.round(first.y)}` : "start",
-                last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"
-            ].join("|");
-        };
-        const groups = new Map();
-        state.activeTransfers.forEach(transfer => {
-            if (!transfer) return;
-            if (!Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) return;
-            const key = pathKey(transfer);
-            if (!groups.has(key)) groups.set(key, []);
-            groups.get(key).push(transfer);
-        });
-
-        groups.forEach(transfers => {
-            const canonical = transfers.reduce((best, transfer) => {
-                const len = getPathTotalLength(transfer.routePoints);
-                return len > best.length ? { points: transfer.routePoints, length: len } : best;
-            }, { points: null, length: 0 });
-            const useCanonical = transfers.length > 1 && canonical.length > 0 && transfers.some(transfer => {
-                const points = transfer.routePoints || [];
-                const canonicalPoints = canonical.points || [];
-                if (points.length !== canonicalPoints.length) return true;
-                return points.some((point, index) => {
-                    const other = canonicalPoints[index];
-                    return !other || Math.hypot(point.x - other.x, point.y - other.y) > 0.1;
-                });
-            });
-
-            const distanceCache = new Map();
-            const getDistance = (transfer) => {
-                if (distanceCache.has(transfer)) return distanceCache.get(transfer);
-                const total = getPathTotalLength(transfer.routePoints);
-                const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
-                const resolved = useCanonical
-                    ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance))
-                    : distance;
-                distanceCache.set(transfer, resolved);
-                return resolved;
-            };
-            transfers.sort((a, b) => {
-                const da = getDistance(a);
-                const db = getDistance(b);
-                if (db !== da) return db - da;
-                return String(a.id || "").localeCompare(String(b.id || ""));
-            });
-
-            let occupiedProgress = Infinity;
-            let queueBlockedBehind = false;
-            transfers.forEach(transfer => {
-                const sourceLength = getPathTotalLength(transfer.routePoints);
-                const totalLength = useCanonical ? canonical.length : sourceLength;
-                if (totalLength <= 0) return;
-
-                const sourceDistance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * sourceLength;
-                const desired = useCanonical
-                    ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, sourceDistance))
-                    : sourceDistance;
-                let maxAllowed = occupiedProgress - TS;
-                let breakpointLimit = totalLength;
-                const isMergeInput = this.isLogisticsMergeInputTransfer(transfer, state);
-
-                if (!transfer.targetId && !isMergeInput) {
-                    breakpointLimit = Math.floor(totalLength / TS) * TS;
-                    maxAllowed = Math.min(maxAllowed, breakpointLimit);
-                } else {
-                    maxAllowed = Math.min(maxAllowed, totalLength);
-                }
-
-                let queuedDistance = Math.max(0, Math.min(desired, maxAllowed));
-                if (Math.abs(queuedDistance - desired) < 0.1) {
-                    queuedDistance = desired;
-                }
-
-                const blockedAtBreakpoint = !transfer.targetId && !isMergeInput && queuedDistance >= breakpointLimit - 0.1;
-                transfer.queueBlocked = queuedDistance < desired - 0.1 || blockedAtBreakpoint || queueBlockedBehind;
-                if (useCanonical) {
-                    transfer.routePoints = canonical.points.map(point => ({ ...point }));
-                }
-                transfer.progress = Math.max(0, Math.min(1, queuedDistance / totalLength));
-                if (transfer.targetId || isMergeInput) {
-                    delete transfer.blockedOnBrokenLine;
-                } else {
-                    transfer.blockedOnBrokenLine = true;
-                }
-
-                occupiedProgress = queuedDistance;
-                queueBlockedBehind = transfer.queueBlocked === true;
-            });
-        });
+        return this.transferQueues.applyBlockedQueues(state);
     }
 
     recalculateLogisticsGroupEndpoints(groupId) {
@@ -4062,19 +2439,6 @@ export class ConveyorSystem {
             });
         });
 
-        const hasPortPosition = (port) => port && Number.isFinite(port.x) && Number.isFinite(port.y);
-        const clonePort = (port) => {
-            if (!port) return null;
-            const cloned = {
-                dir: port.dir,
-                slotIndex: port.slotIndex,
-                defIndex: port.defIndex,
-                width: Math.max(1, Number(port.width) || 1)
-            };
-            if (Number.isFinite(port.x)) cloned.x = port.x;
-            if (Number.isFinite(port.y)) cloned.y = port.y;
-            return cloned;
-        };
         const findEntityById = (id) => {
             if (!id) return null;
             return (state.mapEntities || []).find(ent => (window.UIManager?.getEntityId(ent) || ent?.id) === id) || null;
@@ -4085,9 +2449,9 @@ export class ConveyorSystem {
         const existingMeta = groupSegments.find(seg => seg && (seg.sourceId || seg.targetId || seg.sourcePort || seg.targetPort)) || null;
 
         if (!sourceEnt) {
-            const storedSourcePort = clonePort(storedConnection?.conn?.sourcePort);
-            const existingSourcePort = clonePort(existingMeta?.sourcePort);
-            const preservedSourcePort = [storedSourcePort, existingSourcePort].find(hasPortPosition) || null;
+            const storedSourcePort = cloneLogisticsPort(storedConnection?.conn?.sourcePort);
+            const existingSourcePort = cloneLogisticsPort(existingMeta?.sourcePort);
+            const preservedSourcePort = [storedSourcePort, existingSourcePort].find(hasLogisticsPortPosition) || null;
             const preservedSourceId = (storedConnection?.ent ? (window.UIManager?.getEntityId(storedConnection.ent) || storedConnection.ent.id) : null) ||
                 existingMeta?.sourceId ||
                 null;
@@ -4098,9 +2462,9 @@ export class ConveyorSystem {
         }
 
         if (!targetEnt) {
-            const storedTargetPort = clonePort(storedConnection?.conn?.targetPort);
-            const existingTargetPort = clonePort(existingMeta?.targetPort);
-            const preservedTargetPort = [storedTargetPort, existingTargetPort].find(hasPortPosition) || null;
+            const storedTargetPort = cloneLogisticsPort(storedConnection?.conn?.targetPort);
+            const existingTargetPort = cloneLogisticsPort(existingMeta?.targetPort);
+            const preservedTargetPort = [storedTargetPort, existingTargetPort].find(hasLogisticsPortPosition) || null;
             const preservedTargetId = storedConnection?.conn?.id || existingMeta?.targetId || null;
             if (preservedTargetId && preservedTargetPort && this.doesLogisticsGroupContainConnectionPoint(groupId, preservedTargetPort, TS * 0.75, state)) {
                 targetEnt = findEntityById(preservedTargetId);
@@ -4292,187 +2656,27 @@ export class ConveyorSystem {
     }
 
     getLogisticsSourcePortConnection(line) {
-        if (!line) return null;
-        const groupId = line.groupId || line.id || null;
-        const sourceId = line.sourceId || null;
-        if (!groupId || !sourceId) return null;
-        const sourceEnt = (GameEngine.state.mapEntities || []).find(ent =>
-            ent && window.UIManager?.getEntityId?.(ent) === sourceId
-        );
-        if (!sourceEnt || !Array.isArray(sourceEnt.outputTargets)) return null;
-        const linePort = line.sourcePort || null;
-        const samePort = (conn) => {
-            if (!linePort || !conn?.sourcePort) return true;
-            if (Number.isFinite(linePort.x) && Number.isFinite(linePort.y) &&
-                Number.isFinite(conn.sourcePort.x) && Number.isFinite(conn.sourcePort.y)) {
-                return Math.hypot(linePort.x - conn.sourcePort.x, linePort.y - conn.sourcePort.y) <= (GameEngine.TILE_SIZE || 20) * 0.75;
-            }
-            return (linePort.dir || null) === (conn.sourcePort.dir || null) &&
-                (linePort.slotIndex ?? linePort.defIndex ?? null) === (conn.sourcePort.slotIndex ?? conn.sourcePort.defIndex ?? null);
-        };
-        const conn = sourceEnt.outputTargets.find(item =>
-            item && item.lineId === groupId && samePort(item)
-        ) || null;
-        return conn ? { source: sourceEnt, conn } : null;
+        return this.sourcePortQuery.getConnection(line);
     }
 
     getLogisticsSourcePortCellInfo(line) {
-        if (!line || !this.getLogisticsSourcePortConnection(line)) return null;
-        const points = Array.isArray(line.routePoints) ? line.routePoints : [];
-        if (points.length < 2) return null;
-        const sourcePort = line.sourcePort || null;
-        if (!sourcePort || !Number.isFinite(sourcePort.x) || !Number.isFinite(sourcePort.y)) return null;
-        const TS = GameEngine.TILE_SIZE || 20;
-        const endpoints = [
-            { point: points[0], neighbor: points[1] },
-            { point: points[points.length - 1], neighbor: points[points.length - 2] }
-        ].filter(item => item.point && item.neighbor);
-        let portCell = null;
-        let bestDist = Infinity;
-        endpoints.forEach(item => {
-            const dist = Math.hypot(item.point.x - sourcePort.x, item.point.y - sourcePort.y);
-            if (dist <= TS * 1.1 && dist < bestDist) {
-                bestDist = dist;
-                portCell = item;
-            }
-        });
-        if (!portCell) return null;
-
-        const width = Math.max(1, Math.round(Number(line.routeWidth) || 1));
-        const rect = {
-            x: portCell.point.x - (TS * width) / 2,
-            y: portCell.point.y - TS / 2,
-            w: TS * width,
-            h: TS
-        };
-        const next = portCell.neighbor;
-        const horizontal = Math.abs((next?.x || portCell.point.x) - portCell.point.x) >= Math.abs((next?.y || portCell.point.y) - portCell.point.y);
-        if (!horizontal) {
-            rect.x = portCell.point.x - TS / 2;
-            rect.y = portCell.point.y - (TS * width) / 2;
-            rect.w = TS;
-            rect.h = TS * width;
-        }
-        return {
-            point: { x: portCell.point.x, y: portCell.point.y },
-            neighbor: { x: next.x, y: next.y },
-            sourcePort,
-            rect,
-            horizontal
-        };
+        return this.sourcePortQuery.getCellInfo(line);
     }
 
     isLogisticsSourcePortCell(line, worldX, worldY) {
-        const info = this.getLogisticsSourcePortCellInfo(line);
-        if (!info) return false;
-        const rect = info.rect;
-        return worldX >= rect.x && worldX <= rect.x + rect.w &&
-            worldY >= rect.y && worldY <= rect.y + rect.h;
+        return this.sourcePortQuery.isSourcePortCell(line, worldX, worldY);
     }
 
     getLogisticsSourcePortHitAt(worldX, worldY) {
-        const line = this.getLogisticsLinesAt(worldX, worldY).find(hit =>
-            this.isLogisticsSourcePortCell(hit, worldX, worldY)
-        );
-        if (!line) return null;
-        const portConn = this.getLogisticsSourcePortConnection(line);
-        if (!portConn) return null;
-        return { line, source: portConn.source, conn: portConn.conn };
+        return this.sourcePortQuery.getHitAt(worldX, worldY);
     }
 
     getLogisticsLineAt(worldX, worldY) {
-        return this.getLogisticsLinesAt(worldX, worldY)[0] || null;
+        return this.lineHitTester.getLineAt(worldX, worldY);
     }
 
     getLogisticsLinesAt(worldX, worldY) {
-        const TS = GameEngine.TILE_SIZE;
-        const getVisibleRects = (line) => {
-            const points = Array.isArray(line.routePoints)
-                ? line.routePoints.map(p => ({ x: p.x, y: p.y }))
-                : [];
-            if (points.length < 2) return [];
-            const width = Math.max(1, Math.round(Number(line.routeWidth) || 1));
-            const rects = [];
-            for (let i = 0; i < points.length - 1; i++) {
-                const a = points[i];
-                const b = points[i + 1];
-                const dx = b.x - a.x;
-                const dy = b.y - a.y;
-                const dist = Math.hypot(dx, dy);
-                if (dist < 0.001) continue;
-
-                const dir = { x: dx / dist, y: dy / dist };
-                const steps = Math.max(1, Math.round(dist / TS));
-                const stepSize = dist / steps;
-
-                for (let step = 0; step < steps; step++) {
-                    const px = a.x + dir.x * stepSize * step;
-                    const py = a.y + dir.y * stepSize * step;
-                    const cellKey = `${Math.round(px)},${Math.round(py)}`;
-                    if (this.isLogisticsDetachedSplitCell(line, cellKey)) continue;
-
-                    const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
-                    rects.push({
-                        x: px - (isHorizontal ? TS / 2 : (width * TS) / 2),
-                        y: py - (isHorizontal ? (width * TS) / 2 : TS / 2),
-                        w: (isHorizontal ? TS : width * TS),
-                        h: (isHorizontal ? width * TS : TS),
-                        segment: line,
-                        isEndpoint: false
-                    });
-                }
-            }
-            if (!line.targetId && !line.suppressOpenEndpointCell) {
-                const end = points[points.length - 1];
-                const prev = points[points.length - 2];
-                if (end && prev) {
-                    const endpointKey = `${Math.round(end.x)},${Math.round(end.y)}`;
-                    if (this.isLogisticsDetachedSplitCell(line, endpointKey)) return rects;
-                    const dx = end.x - prev.x;
-                    const dy = end.y - prev.y;
-                    const dist = Math.hypot(dx, dy);
-                    if (dist >= 0.001) {
-                        const dir = { x: dx / dist, y: dy / dist };
-                        const isHorizontal = Math.abs(dir.x) > Math.abs(dir.y);
-                        rects.push({
-                            x: end.x - (isHorizontal ? TS / 2 : (width * TS) / 2),
-                            y: end.y - (isHorizontal ? (width * TS) / 2 : TS / 2),
-                            w: (isHorizontal ? TS : width * TS),
-                            h: (isHorizontal ? width * TS : TS),
-                            segment: line,
-                            isEndpoint: true
-                        });
-                    }
-                }
-            }
-            return rects;
-        };
-        const hits = [];
-        const nearbyLines = this.spatialGrid.getNearby(worldX, worldY);
-        nearbyLines.forEach(line => {
-            getVisibleRects(line).forEach(rect => {
-                if (
-                    worldX >= rect.x && worldX <= rect.x + rect.w &&
-                    worldY >= rect.y && worldY <= rect.y + rect.h
-                ) {
-                    const cx = rect.x + rect.w / 2;
-                    const cy = rect.y + rect.h / 2;
-                    hits.push({
-                        line: rect.segment || line,
-                        distance: Math.hypot(worldX - cx, worldY - cy),
-                        isEndpoint: !!rect.isEndpoint,
-                        isSourcePortCell: this.isLogisticsSourcePortCell(rect.segment || line, worldX, worldY)
-                    });
-                }
-            });
-        });
-        hits.sort((a, b) =>
-            Number(b.isSourcePortCell) - Number(a.isSourcePortCell) ||
-            Number(a.isEndpoint) - Number(b.isEndpoint) ||
-            a.distance - b.distance ||
-            (b.line.createdAt || 0) - (a.line.createdAt || 0)
-        );
-        return hits.map(hit => hit.line);
+        return this.lineHitTester.getLinesAt(worldX, worldY);
     }
 }
 
