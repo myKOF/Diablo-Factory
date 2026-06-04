@@ -3,11 +3,11 @@ const path = require('path');
 
 const query = process.argv[2];
 if (!query) {
-    console.error("Please provide a search query.");
+    console.error("Please provide a search query");
     process.exit(1);
 }
 
-const ignoreDirs = new Set(['node_modules', '.git', 'tmp', 'dist', 'artifacts']);
+const ignoreDirs = ['node_modules', '.git', 'tmp', 'dist'];
 
 function searchDir(dir) {
     const files = fs.readdirSync(dir);
@@ -15,21 +15,24 @@ function searchDir(dir) {
         const fullPath = path.join(dir, file);
         const stat = fs.statSync(fullPath);
         if (stat.isDirectory()) {
-            if (!ignoreDirs.has(file)) {
-                searchDir(fullPath);
-            }
-        } else if (file.endsWith('.js') || file.endsWith('.cjs') || file.endsWith('.ts') || file.endsWith('.html')) {
-            const content = fs.readFileSync(fullPath, 'utf8');
-            if (content.includes(query)) {
-                const lines = content.split('\n');
-                lines.forEach((line, idx) => {
-                    if (line.includes(query)) {
-                        console.log(`${fullPath}:${idx + 1}: ${line.trim()}`);
-                    }
-                });
+            if (ignoreDirs.includes(file)) continue;
+            searchDir(fullPath);
+        } else if (stat.isFile()) {
+            if (file.endsWith('.js') || file.endsWith('.json') || file.endsWith('.html') || file.endsWith('.css')) {
+                const content = fs.readFileSync(fullPath, 'utf8');
+                if (content.includes(query)) {
+                    let lineNum = 0;
+                    const lines = content.split('\n');
+                    lines.forEach((line, index) => {
+                        if (line.includes(query)) {
+                            console.log(`${fullPath}:${index + 1}: ${line.trim()}`);
+                        }
+                    });
+                }
             }
         }
     }
 }
 
-searchDir(path.join(__dirname, '..'));
+const root = path.resolve(__dirname, '..');
+searchDir(root);

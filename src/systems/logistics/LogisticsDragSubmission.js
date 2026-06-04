@@ -1,0 +1,263 @@
+import { GameEngine } from '../game_systems.js';
+import { BuildingSystem } from '../BuildingSystem.js';
+
+function buildSingleSegmentAt(worldX, worldY) {
+    GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
+    return false;
+}
+
+function submitDrag() {
+    if (this.activeDrag && this.pendingDragPoint) {
+        const point = this.pendingDragPoint;
+        this.pendingDragPoint = null;
+        this.updateDragNow(point.x, point.y);
+    }
+    if (!this.activeDrag || !this.isValid || this.ghosts.length < 2) {
+        this.cancelDrag();
+        return;
+    }
+    const buildGhosts = this.ghosts;
+    if (buildGhosts.length < 2) {
+        this.cancelDrag();
+        return;
+    }
+
+    const buildUndoSnapshot = this.captureLogisticsBuildUndoSnapshot(GameEngine.state);
+
+    const drag = this.activeDrag;
+    const TS = GameEngine.TILE_SIZE;
+    const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
+    const scale = this.getRouteScale();
+    const gridUnit = TS / scale;
+
+    const points = buildGhosts.map(g => ({
+        ...g,
+        x: (g.x + offset.x * scale) * gridUnit,
+        y: (g.y + offset.y * scale) * gridUnit
+    }));
+    this.applyExtensionTurnArrowOverride(drag, points);
+
+    const lastPoint = points[points.length - 1];
+    const dragTarget = this.resolveDragTarget(lastPoint.x, lastPoint.y);
+    const targetBuilding = dragTarget.building || drag.targetBuilding;
+    const targetPort = dragTarget.port || drag.targetPort || (targetBuilding ? window.UIManager?.getNearestPortSlot(targetBuilding, points[points.length - 2]?.x || points[0].x, points[points.length - 2]?.y || points[0].y) : null);
+    const sourceGroupId = drag.sourceLine?.groupId || drag.sourceLine?.id || null;
+    const touchedTargetLine = this.findTouchedLogisticsLineAt(lastPoint, sourceGroupId);
+    const touchedTargetGroupId = touchedTargetLine ? (touchedTargetLine.groupId || touchedTargetLine.id) : null;
+
+    if (window.UIManager) {
+        const sourceEntity = drag.sourceEntity || (
+            drag.sourceLine?.sourceId
+                ? GameEngine.state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === drag.sourceLine.sourceId)
+                : null
+        );
+        let conn = null;
+        if (sourceEntity && targetBuilding) {
+            const targetId = window.UIManager.getEntityId(targetBuilding);
+            if (!Array.isArray(sourceEntity.outputTargets)) sourceEntity.outputTargets = [];
+            conn = sourceEntity.outputTargets.find(item => item.id === targetId || (drag.sourceLine?.groupId && item.lineId === drag.sourceLine.groupId));
+            if (!conn) {
+                conn = { id: targetId, filter: null };
+                sourceEntity.outputTargets.push(conn);
+            } else {
+                conn.id = targetId;
+            }
+        }
+        const beforeCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : 0;
+        const segmentCostCount = Math.max(1, buildGhosts.length - 1);
+        if (segmentCostCount < 2) {
+            GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
+            this.cancelDrag();
+            return;
+        }
+        const maxCosts = this.getTransportLineCost(segmentCostCount);
+        const missing = Object.entries(maxCosts).find(([resource, amount]) => (GameEngine.state.resources[resource] || 0) < amount);
+        if (missing) {
+            GameEngine.triggerWarning("1", [missing[0].toUpperCase()]);
+            this.cancelDrag();
+            return;
+        }
+        const transportCfg = this.getTransportLineConfig();
+
+        let shouldMergeWithSource = false;
+        let middleExtensionSplit = null;
+        if (drag.sourceLine && (drag.sourceLine.groupId || drag.sourceLine.id)) {
+            const sourceGroupId = drag.sourceLine.groupId || drag.sourceLine.id;
+            const lines = (GameEngine.state.logisticsLines || []).filter(l => l && (l.groupId === sourceGroupId || l.id === sourceGroupId));
+            
+            // 1. 統計所有點的 grid 出現次數以決定物理端點
+            const gridCounts = new Map();
+            lines.forEach(l => {
+                const pts = Array.isArray(l.routePoints) ? l.routePoints : [{ x: l.x, y: l.y }, { x: l.x, y: l.y }];
+                if (pts.length < 2) return;
+                const p1 = this.toGrid(pts[0].x, pts[0].y);
+                const p2 = this.toGrid(pts[pts.length - 1].x, pts[pts.length - 1].y);
+                
+                const k1 = `${p1.x},${p1.y}`;
+                const k2 = `${p2.x},${p2.y}`;
+                gridCounts.set(k1, (gridCounts.get(k1) || 0) + 1);
+                gridCounts.set(k2, (gridCounts.get(k2) || 0) + 1);
+            });
+            
+            const endpoints = [];
+            gridCounts.forEach((count, key) => {
+                if (count === 1) {
+                    const [gx, gy] = key.split(',').map(Number);
+                    endpoints.push({ x: gx, y: gy });
+                }
+            });
+            
+            if (lines.length === 1) {
+                const pts = Array.isArray(lines[0].routePoints) ? lines[0].routePoints : [{ x: lines[0].x, y: lines[0].y }];
+                if (pts.length >= 2) {
+                    const p1 = this.toGrid(pts[0].x, pts[0].y);
+                    const p2 = this.toGrid(pts[pts.length - 1].x, pts[pts.length - 1].y);
+                    endpoints.push(p1, p2);
+                }
+            }
+            
+            // 2. 檢查 drag.startX, drag.startY 對應 of grid 點是否鄰近（距離在一格 20px 以內）任何端點
+            const startGrid = this.toGrid(drag.startX, drag.startY);
+            const isNearEndpoint = endpoints.some(ep => {
+                const dist = Math.max(Math.abs(ep.x - startGrid.x), Math.abs(ep.y - startGrid.y));
+                return dist <= this.getRouteScale(); // 容許虛擬段造成的偏移（一格對應 routeScale 個 grid 單位）
+            });
+            
+            let isTrueEnd = isNearEndpoint;
+            if (isTrueEnd) {
+                const sourceLineKey = this.getLogisticsLineSelectionKey(drag.sourceLine);
+                const terminalSourceEndpoints = [];
+                lines.forEach(line => {
+                    if (!line || this.getLogisticsLineSelectionKey(line) !== sourceLineKey) return;
+                    const pts = Array.isArray(line.routePoints) ? line.routePoints : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
+                    if (pts.length < 2) return;
+                    const p1 = this.toGrid(pts[0].x, pts[0].y);
+                    const p2 = this.toGrid(pts[pts.length - 1].x, pts[pts.length - 1].y);
+                    const k1 = `${p1.x},${p1.y}`;
+                    const k2 = `${p2.x},${p2.y}`;
+                    if (gridCounts.get(k1) === 1 || lines.length === 1) terminalSourceEndpoints.push(p1);
+                    if (gridCounts.get(k2) === 1 || lines.length === 1) terminalSourceEndpoints.push(p2);
+                });
+                isTrueEnd = terminalSourceEndpoints.some(ep => {
+                    const dist = Math.max(Math.abs(ep.x - startGrid.x), Math.abs(ep.y - startGrid.y));
+                    return dist <= this.getRouteScale();
+                });
+            }
+
+            if (isTrueEnd) {
+                shouldMergeWithSource = true;
+                // 檢查是否為完全反向拖曳，反向也不允許合併
+                const sourceRoute = Array.isArray(drag.sourceLine.routePoints) ? drag.sourceLine.routePoints : [];
+                if (sourceRoute.length >= 2 && points.length >= 2) {
+                    const getDir = (a, b) => {
+                        if (!a || !b) return null;
+                        const dx = b.x - a.x;
+                        const dy = b.y - a.y;
+                        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+                        return Math.abs(dx) >= Math.abs(dy)
+                            ? { x: Math.sign(dx) || 1, y: 0 }
+                            : { x: 0, y: Math.sign(dy) || 1 };
+                    };
+                    const originalDir = getDir(sourceRoute[sourceRoute.length - 2], sourceRoute[sourceRoute.length - 1]);
+                    const extensionDir = getDir(points[0], points[1]);
+                    if (originalDir && extensionDir && originalDir.x === -extensionDir.x && originalDir.y === -extensionDir.y) {
+                        shouldMergeWithSource = false;
+                    }
+                }
+            }
+
+            if (!shouldMergeWithSource) {
+                middleExtensionSplit = this.splitSourceGroupForMiddleExtension(drag);
+                if (middleExtensionSplit) {
+                    shouldMergeWithSource = true;
+                    if (middleExtensionSplit.attachPoint && points.length > 0) {
+                        points[0] = { ...middleExtensionSplit.attachPoint };
+                    }
+                }
+            }
+        }
+
+        const createdLine = this.upsertLogisticsLine({
+            lineId: shouldMergeWithSource ? (middleExtensionSplit?.sourceGroupId || sourceGroupId || drag.sourceLine.groupId || drag.sourceLine.id) : null,
+            sourceEnt: sourceEntity,
+            targetEnt: targetBuilding,
+            targetPoint: targetPort || points[points.length - 1],
+            points: points,
+            routeWidth: drag.routeWidth || drag.sourcePort?.width || 1,
+            sourcePort: drag.sourcePort,
+            targetPort: targetPort,
+            conn,
+            lineType: transportCfg?.model || transportCfg?.type1 || 'transport_line',
+            efficiency: Number(transportCfg?.efficiency) || 0,
+            allowGroupMerge: !touchedTargetGroupId
+        });
+        let finalGroupId = createdLine?.groupId || null;
+        const submitAffectedGroupIds = new Set([
+            finalGroupId,
+            sourceGroupId,
+            touchedTargetGroupId,
+            middleExtensionSplit?.detachedGroupId
+        ].filter(Boolean));
+        if (createdLine?.groupId && touchedTargetGroupId) {
+            const reconnectedGroupId = this.reconnectDeletedGapContinuationGroups(createdLine.groupId, touchedTargetGroupId, GameEngine.state);
+            if (reconnectedGroupId) {
+                finalGroupId = reconnectedGroupId;
+                submitAffectedGroupIds.add(reconnectedGroupId);
+                submitAffectedGroupIds.add(touchedTargetGroupId);
+            } else {
+                this.registerLogisticsMergeNode({
+                    inputGroupId: createdLine.groupId,
+                    outputGroupId: touchedTargetGroupId,
+                    point: lastPoint,
+                    inputLine: createdLine,
+                    outputLine: touchedTargetLine
+                });
+                submitAffectedGroupIds.add(touchedTargetGroupId);
+            }
+        }
+        const afterCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : beforeCount;
+        const builtSegments = Math.max(0, afterCount - beforeCount);
+        if (!BuildingSystem.spendResources(GameEngine.state, this.getTransportLineCost(builtSegments))) {
+            this.restoreLogisticsBuildUndoSnapshot(buildUndoSnapshot, GameEngine.state);
+            this.cancelDrag();
+            return;
+        }
+        this.recordLogisticsBuildUndoSnapshot(buildUndoSnapshot, GameEngine.state);
+        if (drag.isLineExtension && finalGroupId && GameEngine.state) {
+            const finalSegments = this.getLogisticsSegmentsByGroupId(finalGroupId);
+            const activeSegment = finalSegments
+                .slice()
+                .sort((a, b) =>
+                    (Number(a?.createdAt) || 0) - (Number(b?.createdAt) || 0) ||
+                    (Number(a?.order) || 0) - (Number(b?.order) || 0)
+                )
+                .pop() || this.getLogisticsLineById(finalGroupId);
+            GameEngine.state.selectedLogisticsGroupId = finalGroupId;
+            GameEngine.state.selectedLogisticsLineId = activeSegment
+                ? this.getLogisticsLineSelectionKey(activeSegment)
+                : null;
+            if (window.UIManager) {
+                window.UIManager.activeLogisticsLine = activeSegment || null;
+                window.UIManager.activeLogisticsConnection = null;
+            }
+        }
+        GameEngine.addLog(`[物流] 傳送帶建造完成，共 ${builtSegments} 節。`, 'LOGISTICS');
+    }
+
+    this.cancelDrag();
+}
+
+export class LogisticsDragSubmission {
+    constructor(system) {
+        this.system = system;
+    }
+
+    buildSingleSegmentAt(worldX, worldY) {
+        return buildSingleSegmentAt.apply(this.system, arguments);
+    }
+
+    submitDrag() {
+        return submitDrag.apply(this.system, arguments);
+    }
+
+}

@@ -1,3 +1,9 @@
+import {
+    getPathDistanceToPoint,
+    getPathTotalLength,
+    getPointOnPathByDistance
+} from './LogisticsPathMetrics.js';
+
 export class LogisticsTransferQueues {
     constructor(system, getGameEngine) {
         this.system = system;
@@ -12,67 +18,6 @@ export class LogisticsTransferQueues {
         if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
         const TS = this.gameEngine.TILE_SIZE || 20;
         const pathMetricsCache = new Map();
-
-        const getPathMetrics = (points) => {
-            if (!Array.isArray(points) || points.length < 2) return { total: 0, segments: [] };
-            const cached = pathMetricsCache.get(points);
-            if (cached) return cached;
-
-            let total = 0;
-            const segments = [];
-            for (let i = 0; i < points.length - 1; i++) {
-                const a = points[i];
-                const b = points[i + 1];
-                const dx = b.x - a.x;
-                const dy = b.y - a.y;
-                const len = Math.hypot(dx, dy);
-                segments.push({ a, b, dx, dy, len, start: total });
-                total += len;
-            }
-            const metrics = { total, segments };
-            pathMetricsCache.set(points, metrics);
-            return metrics;
-        };
-        const getPathTotalLength = (points) => {
-            return getPathMetrics(points).total;
-        };
-        const getPointOnPathByDistance = (points, distance) => {
-            if (!Array.isArray(points) || points.length < 2) return null;
-            let remaining = Math.max(0, Number(distance) || 0);
-            const segments = getPathMetrics(points).segments;
-            for (let i = 0; i < segments.length; i++) {
-                const { a, b, dx, dy, len } = segments[i];
-                if (len <= 0) continue;
-                if (remaining <= len || i === segments.length - 1) {
-                    const t = Math.max(0, Math.min(1, remaining / len));
-                    return {
-                        x: a.x + dx * t,
-                        y: a.y + dy * t
-                    };
-                }
-                remaining -= len;
-            }
-            return points[points.length - 1] || null;
-        };
-        const getPathDistanceToPoint = (points, point) => {
-            if (!Array.isArray(points) || points.length < 2 || !point) return 0;
-            let bestDist = Infinity;
-            let bestPathDist = 0;
-            const segments = getPathMetrics(points).segments;
-            for (let i = 0; i < segments.length; i++) {
-                const { a, dx, dy, len, start } = segments[i];
-                const lenSq = dx * dx + dy * dy;
-                if (lenSq <= 0) continue;
-                const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
-                const proj = { x: a.x + dx * t, y: a.y + dy * t };
-                const dist = Math.hypot(point.x - proj.x, point.y - proj.y);
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    bestPathDist = start + len * t;
-                }
-            }
-            return bestPathDist;
-        };
         const pathKey = (transfer) => {
             if (transfer.lineId) return `line:${transfer.lineId}`;
             const points = transfer.routePoints || [];
@@ -95,7 +40,7 @@ export class LogisticsTransferQueues {
 
         groups.forEach(transfers => {
             const canonical = transfers.reduce((best, transfer) => {
-                const len = getPathTotalLength(transfer.routePoints);
+                const len = getPathTotalLength(transfer.routePoints, pathMetricsCache);
                 return len > best.length ? { points: transfer.routePoints, length: len } : best;
             }, { points: null, length: 0 });
             const useCanonical = transfers.length > 1 && canonical.length > 0 && transfers.some(transfer => {
@@ -111,10 +56,10 @@ export class LogisticsTransferQueues {
             const distanceCache = new Map();
             const getDistance = (transfer) => {
                 if (distanceCache.has(transfer)) return distanceCache.get(transfer);
-                const total = getPathTotalLength(transfer.routePoints);
+                const total = getPathTotalLength(transfer.routePoints, pathMetricsCache);
                 const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
                 const resolved = useCanonical
-                    ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance))
+                    ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance, pathMetricsCache), pathMetricsCache)
                     : distance;
                 distanceCache.set(transfer, resolved);
                 return resolved;
@@ -129,13 +74,13 @@ export class LogisticsTransferQueues {
             let occupiedProgress = Infinity;
             let queueBlockedBehind = false;
             transfers.forEach(transfer => {
-                const sourceLength = getPathTotalLength(transfer.routePoints);
+                const sourceLength = getPathTotalLength(transfer.routePoints, pathMetricsCache);
                 const totalLength = useCanonical ? canonical.length : sourceLength;
                 if (totalLength <= 0) return;
 
                 const sourceDistance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * sourceLength;
                 const desired = useCanonical
-                    ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, sourceDistance))
+                    ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, sourceDistance, pathMetricsCache), pathMetricsCache)
                     : sourceDistance;
                 let maxAllowed = occupiedProgress - TS;
                 let breakpointLimit = totalLength;

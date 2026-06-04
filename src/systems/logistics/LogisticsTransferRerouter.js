@@ -1,4 +1,17 @@
 import { annotateRoutePoints } from './LogisticsGeometry.js';
+import {
+    getDistanceToPath,
+    getPathDistanceToPoint,
+    getPathTotalLength,
+    getPointOnPathProgress,
+    pushUniquePoint
+} from './LogisticsPathMetrics.js';
+import {
+    buildSegmentNodeGraph,
+    findNearestNode,
+    findShortestNodePath,
+    getReachableNodes
+} from './LogisticsRouteGraph.js';
 
 export class LogisticsTransferRerouter {
     constructor(system, getGameEngine) {
@@ -87,175 +100,7 @@ export class LogisticsTransferRerouter {
             return (sourceId && affectedSourceIds.has(sourceId)) || (targetId && affectedTargetIds.has(targetId));
         };
 
-        const findShortestPathBetweenPoints = (segments, startPt, endPt) => {
-            if (!Array.isArray(segments) || segments.length === 0) return [];
-            const nodes = [];
-            segments.forEach(seg => {
-                if (Array.isArray(seg.routePoints) && seg.routePoints.length >= 2) {
-                    for (let i = 0; i < seg.routePoints.length - 1; i++) {
-                        const p1 = seg.routePoints[i];
-                        const p2 = seg.routePoints[i + 1];
-                        let n1 = nodes.find(n => Math.hypot(n.x - p1.x, n.y - p1.y) < 2);
-                        if (!n1) { n1 = { x: p1.x, y: p1.y, edges: [] }; nodes.push(n1); }
-                        let n2 = nodes.find(n => Math.hypot(n.x - p2.x, n.y - p2.y) < 2);
-                        if (!n2) { n2 = { x: p2.x, y: p2.y, edges: [] }; nodes.push(n2); }
-
-                        if (!n1.edges.includes(n2)) n1.edges.push(n2);
-                        if (!n2.edges.includes(n1)) n2.edges.push(n1);
-                    }
-                }
-            });
-
-            let startNode = null; let startDist = Infinity;
-            let endNode = null; let endDist = Infinity;
-
-            nodes.forEach(n => {
-                const ds = Math.hypot(n.x - startPt.x, n.y - startPt.y);
-                if (ds < startDist) { startDist = ds; startNode = n; }
-                const dt = Math.hypot(n.x - endPt.x, n.y - endPt.y);
-                if (dt < endDist) { endDist = dt; endNode = n; }
-            });
-
-            if (startNode && endNode) {
-                const queue = [[startNode]];
-                const visited = new Set([startNode]);
-                while (queue.length > 0) {
-                    const path = queue.shift();
-                    const curr = path[path.length - 1];
-
-                    if (curr === endNode) {
-                        return path.map(n => ({ x: n.x, y: n.y }));
-                    }
-
-                    curr.edges.forEach(neighbor => {
-                        if (!visited.has(neighbor)) {
-                            visited.add(neighbor);
-                            queue.push([...path, neighbor]);
-                        }
-                    });
-                }
-            }
-            return [];
-        };
-
-        const findDirectedShortestPath = (nodes, startPt, endPt) => {
-            if (!startPt || !endPt || !Array.isArray(nodes) || nodes.length === 0) return [];
-            let startNode = null; let startDist = Infinity;
-            let endNode = null; let endDist = Infinity;
-
-            nodes.forEach(n => {
-                const ds = Math.hypot(n.x - startPt.x, n.y - startPt.y);
-                if (ds < startDist) { startDist = ds; startNode = n; }
-                const dt = Math.hypot(n.x - endPt.x, n.y - endPt.y);
-                if (dt < endDist) { endDist = dt; endNode = n; }
-            });
-
-            if (startNode && endNode) {
-                const queue = [[startNode]];
-                const visited = new Set([startNode]);
-                while (queue.length > 0) {
-                    const path = queue.shift();
-                    const curr = path[path.length - 1];
-
-                    if (curr === endNode) {
-                        return path.map(n => ({ x: n.x, y: n.y }));
-                    }
-
-                    (curr.outEdges || []).forEach(neighbor => {
-                        if (!visited.has(neighbor)) {
-                            visited.add(neighbor);
-                            queue.push([...path, neighbor]);
-                        }
-                    });
-                }
-            }
-            return [];
-        };
-
-        const getPointOnPath = (points, progress) => {
-            if (!Array.isArray(points) || points.length === 0) return { x: 0, y: 0 };
-            if (points.length === 1) return { x: points[0].x, y: points[0].y };
-            const clamped = Math.max(0, Math.min(1, progress));
-            let total = 0;
-            const lengths = [];
-            for (let i = 0; i < points.length - 1; i++) {
-                const d = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-                lengths.push(d);
-                total += d;
-            }
-            if (total <= 0) return { x: points[0].x, y: points[0].y };
-            let targetDist = clamped * total;
-            for (let i = 0; i < lengths.length; i++) {
-                const len = lengths[i];
-                if (targetDist <= len || i === lengths.length - 1) {
-                    const ratio = len === 0 ? 0 : (targetDist / len);
-                    const p1 = points[i];
-                    const p2 = points[i + 1];
-
-                    return {
-                        x: p1.x + (p2.x - p1.x) * ratio,
-                        y: p1.y + (p2.y - p1.y) * ratio
-                    };
-                }
-                targetDist -= len;
-            }
-            return { x: points[points.length - 1].x, y: points[points.length - 1].y };
-        };
-
-        const getPathDistanceToProj = (points, pos) => {
-            if (!Array.isArray(points) || points.length < 2) return 0;
-            let bestDist = Infinity;
-            let bestPathDist = 0;
-            let currentPathDist = 0;
-
-            for (let i = 0; i < points.length - 1; i++) {
-                const p1 = points[i];
-                const p2 = points[i + 1];
-                const segLen = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-                if (segLen === 0) continue;
-
-                const u = ((pos.x - p1.x) * (p2.x - p1.x) + (pos.y - p1.y) * (p2.y - p1.y)) / (segLen * segLen);
-                const t = Math.max(0, Math.min(1, u));
-                const proj = {
-                    x: p1.x + t * (p2.x - p1.x),
-                    y: p1.y + t * (p2.y - p1.y)
-                };
-                const distToProj = Math.hypot(pos.x - proj.x, pos.y - proj.y);
-                if (distToProj < bestDist) {
-                    bestDist = distToProj;
-                    bestPathDist = currentPathDist + t * segLen;
-                }
-                currentPathDist += segLen;
-            }
-            return bestPathDist;
-        };
-
-        const getPathTotalLength = (points) => {
-            if (!Array.isArray(points) || points.length < 2) return 0;
-            let total = 0;
-            for (let i = 0; i < points.length - 1; i++) {
-                total += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-            }
-            return total;
-        };
-        const getDistanceToPath = (points, pos) => {
-            if (!Array.isArray(points) || points.length < 2 || !pos) return Infinity;
-            let bestDist = Infinity;
-            for (let i = 0; i < points.length - 1; i++) {
-                const p1 = points[i];
-                const p2 = points[i + 1];
-                const segLenSq = Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2);
-                if (segLenSq <= 0) continue;
-                const u = ((pos.x - p1.x) * (p2.x - p1.x) + (pos.y - p1.y) * (p2.y - p1.y)) / segLenSq;
-                const t = Math.max(0, Math.min(1, u));
-                const proj = {
-                    x: p1.x + t * (p2.x - p1.x),
-                    y: p1.y + t * (p2.y - p1.y)
-                };
-                bestDist = Math.min(bestDist, Math.hypot(pos.x - proj.x, pos.y - proj.y));
-            }
-            return bestDist;
-        };
+        const pathMetricsCache = new Map();
         const groupSegmentsCache = new Map();
         const getGroupSegments = (groupId) => {
             if (!groupSegmentsCache.has(groupId)) {
@@ -273,7 +118,7 @@ export class LogisticsTransferRerouter {
             if (!shouldUpdateTransfer(t)) continue;
             if (!Array.isArray(t.routePoints) || t.routePoints.length < 2) continue;
 
-            const currentPos = getPointOnPath(t.routePoints, t.progress);
+            const currentPos = getPointOnPathProgress(t.routePoints, t.progress, pathMetricsCache);
 
             let currentSeg = null;
             let bestSegDist = Infinity;
@@ -282,7 +127,7 @@ export class LogisticsTransferRerouter {
                 const route = Array.isArray(line.routePoints) && line.routePoints.length >= 2
                     ? line.routePoints
                     : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
-                const d = getDistanceToPath(route, currentPos);
+                const d = getDistanceToPath(route, currentPos, pathMetricsCache);
                 if (d < bestSegDist && d <= TS * 0.75) {
                     bestSegDist = d;
                     currentSeg = line;
@@ -303,94 +148,27 @@ export class LogisticsTransferRerouter {
             let routeCache = groupRouteCache.get(newGroupId);
             if (!routeCache) {
                 const ordered = system.orderLogisticsSegmentsByDirection(groupSegs);
-                const nodes = [];
-                groupSegs.forEach(seg => {
-                    if (Array.isArray(seg.routePoints) && seg.routePoints.length >= 2) {
-                        for (let i = 0; i < seg.routePoints.length - 1; i++) {
-                            const p1 = seg.routePoints[i];
-                            const p2 = seg.routePoints[i + 1];
-                            let n1 = nodes.find(n => Math.hypot(n.x - p1.x, n.y - p1.y) < 2);
-                            if (!n1) { n1 = { x: p1.x, y: p1.y, outEdges: [], inEdges: [], edges: [] }; nodes.push(n1); }
-                            let n2 = nodes.find(n => Math.hypot(n.x - p2.x, n.y - p2.y) < 2);
-                            if (!n2) { n2 = { x: p2.x, y: p2.y, outEdges: [], inEdges: [], edges: [] }; nodes.push(n2); }
-
-                            if (!n1.outEdges.includes(n2)) n1.outEdges.push(n2);
-                            if (!n2.inEdges.includes(n1)) n2.inEdges.push(n1);
-
-                            if (!n1.edges.includes(n2)) n1.edges.push(n2);
-                            if (!n2.edges.includes(n1)) n2.edges.push(n1);
-                        }
-                    }
-                });
-
-                const sources = nodes.filter(n => n.inEdges.length === 0);
-                const sinks = nodes.filter(n => n.outEdges.length === 0);
+                const graph = buildSegmentNodeGraph(groupSegs, { directed: true });
 
                 routeCache = {
                     ordered,
-                    nodes,
-                    sources,
-                    sinks,
+                    nodes: graph.nodes,
+                    sources: graph.sources,
+                    sinks: graph.sinks,
                     shortestPaths: new Map()
                 };
                 groupRouteCache.set(newGroupId, routeCache);
             }
             const ordered = routeCache.ordered;
             if (ordered.length > 0) {
-                let currNode = null;
-                let minDist = Infinity;
-                routeCache.nodes.forEach(n => {
-                    const d = Math.hypot(n.x - currentPos.x, n.y - currentPos.y);
-                    if (d < minDist) {
-                        minDist = d;
-                        currNode = n;
-                    }
-                });
-
-                const getReachableSources = (startNode) => {
-                    const reachable = [];
-                    const queue = [startNode];
-                    const visited = new Set([startNode]);
-                    while (queue.length > 0) {
-                        const curr = queue.shift();
-                        if (routeCache.sources.includes(curr)) {
-                            reachable.push(curr);
-                        }
-                        curr.inEdges.forEach(neighbor => {
-                            if (!visited.has(neighbor)) {
-                                visited.add(neighbor);
-                                queue.push(neighbor);
-                            }
-                        });
-                    }
-                    return reachable;
-                };
-
-                const getReachableSinks = (startNode) => {
-                    const reachable = [];
-                    const queue = [startNode];
-                    const visited = new Set([startNode]);
-                    while (queue.length > 0) {
-                        const curr = queue.shift();
-                        if (routeCache.sinks.includes(curr)) {
-                            reachable.push(curr);
-                        }
-                        curr.outEdges.forEach(neighbor => {
-                            if (!visited.has(neighbor)) {
-                                visited.add(neighbor);
-                                queue.push(neighbor);
-                            }
-                        });
-                    }
-                    return reachable;
-                };
+                const currNode = findNearestNode(routeCache.nodes, currentPos);
 
                 let startPt = null;
                 let endPt = null;
 
                 if (currNode) {
-                    const reachableSources = getReachableSources(currNode);
-                    const reachableSinks = getReachableSinks(currNode);
+                    const reachableSources = getReachableNodes(currNode, 'inEdges', routeCache.sources);
+                    const reachableSinks = getReachableNodes(currNode, 'outEdges', routeCache.sinks);
 
                     if (reachableSources.length > 0) {
                         if (reachableSources.length === 1) {
@@ -441,9 +219,9 @@ export class LogisticsTransferRerouter {
                     const endpointKey = `${Math.round(startPt.x)},${Math.round(startPt.y)}>${Math.round(endPt.x)},${Math.round(endPt.y)}`;
                     let shortest = routeCache.shortestPaths.get(endpointKey);
                     if (!shortest) {
-                        shortest = findDirectedShortestPath(routeCache.nodes, startPt, endPt);
+                        shortest = findShortestNodePath(routeCache.nodes, startPt, endPt, { directed: true });
                         if (!shortest || shortest.length === 0) {
-                            shortest = findShortestPathBetweenPoints(groupSegs, startPt, endPt);
+                            shortest = findShortestNodePath(routeCache.nodes, startPt, endPt, { directed: false });
                             routeCache.shortestPaths.set(endpointKey + '_fallback', true);
                         }
                         routeCache.shortestPaths.set(endpointKey, shortest);
@@ -517,17 +295,10 @@ export class LogisticsTransferRerouter {
                         }
 
                             const transferPoints = [];
-                            const pushPoint = (point) => {
-                                if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-                                const lastPoint = transferPoints[transferPoints.length - 1];
-                                if (!lastPoint || Math.hypot(lastPoint.x - point.x, lastPoint.y - point.y) > 1) {
-                                    transferPoints.push({ x: point.x, y: point.y });
-                                }
-                            };
 
-                            if (sourceAnchor && !isOpenEndedLine) pushPoint(sourceAnchor);
-                            shortest.forEach(pushPoint);
-                            if (targetAnchor) pushPoint(targetAnchor);
+                            if (sourceAnchor && !isOpenEndedLine) pushUniquePoint(transferPoints, sourceAnchor);
+                            shortest.forEach(point => pushUniquePoint(transferPoints, point));
+                            if (targetAnchor) pushUniquePoint(transferPoints, targetAnchor);
 
                             if (transferPoints.length >= 2) {
                                 pathPoints = transferPoints;
@@ -581,8 +352,8 @@ export class LogisticsTransferRerouter {
                 continue;
             }
 
-            const projDist = getPathDistanceToProj(pathPoints, currentPos);
-            const totalLen = getPathTotalLength(pathPoints);
+            const projDist = getPathDistanceToPoint(pathPoints, currentPos, pathMetricsCache);
+            const totalLen = getPathTotalLength(pathPoints, pathMetricsCache);
             t.progress = totalLen > 0 ? Math.max(0, Math.min(1, projDist / totalLen)) : 1;
             t.routePoints = pathPoints;
             t.sourceId = currentSeg.sourceId || null;

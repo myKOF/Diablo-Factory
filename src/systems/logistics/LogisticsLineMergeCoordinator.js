@@ -60,12 +60,82 @@ export class LogisticsLineMergeCoordinator {
             for (const otherGroupId of otherGroupIds) {
                 if (!this.system.areLogisticsGroupsTouching(activeGroupId, otherGroupId)) continue;
                 if (this.system.areLogisticsGroupsInSameMergeComponent(activeGroupId, otherGroupId)) continue;
+                
+                // [修復合流合併 Bug] 優先檢查是否為合流，若是則註冊 MergeNode，而非合併 Group
+                const mergeRegistered = this.tryRegisterMergeNodeForTouchingGroups(activeGroupId, otherGroupId);
+                if (mergeRegistered) {
+                    continue;
+                }
+
                 activeGroupId = this.mergeGroups(activeGroupId, otherGroupId);
                 merged = true;
                 break;
             }
         }
         return activeGroupId;
+    }
+
+    tryRegisterMergeNodeForTouchingGroups(groupAId, groupBId) {
+        const linesA = this.system.getLogisticsSegmentsByGroupId(groupAId);
+        const linesB = this.system.getLogisticsSegmentsByGroupId(groupBId);
+        if (!linesA.length || !linesB.length) return false;
+
+        const points = [];
+        const addPoint = (pt) => {
+            if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return;
+            if (!points.some(existing => Math.hypot(existing.x - pt.x, existing.y - pt.y) < 1)) {
+                points.push({ x: pt.x, y: pt.y });
+            }
+        };
+
+        linesA.forEach(line => {
+            const pts = Array.isArray(line?.routePoints) ? line.routePoints : [];
+            if (pts.length >= 2) {
+                addPoint(pts[0]);
+                addPoint(pts[pts.length - 1]);
+            }
+        });
+        linesB.forEach(line => {
+            const pts = Array.isArray(line?.routePoints) ? line.routePoints : [];
+            if (pts.length >= 2) {
+                addPoint(pts[0]);
+                addPoint(pts[pts.length - 1]);
+            }
+        });
+
+        for (const p of points) {
+            // 方向 1: A 匯入 B
+            {
+                const inputLine = linesA.find(line => this.system.mergeNodeStore.canLineEnterMergePoint(line, p));
+                const outputLine = linesB.find(line => this.system.mergeNodeStore.canLineLeaveMergePoint(line, p));
+                if (inputLine && outputLine) {
+                    const node = this.system.registerLogisticsMergeNode({
+                        inputGroupId: groupAId,
+                        outputGroupId: groupBId,
+                        point: p,
+                        inputLine,
+                        outputLine
+                    });
+                    if (node) return true;
+                }
+            }
+            // 方向 2: B 匯入 A
+            {
+                const inputLine = linesB.find(line => this.system.mergeNodeStore.canLineEnterMergePoint(line, p));
+                const outputLine = linesA.find(line => this.system.mergeNodeStore.canLineLeaveMergePoint(line, p));
+                if (inputLine && outputLine) {
+                    const node = this.system.registerLogisticsMergeNode({
+                        inputGroupId: groupBId,
+                        outputGroupId: groupAId,
+                        point: p,
+                        inputLine,
+                        outputLine
+                    });
+                    if (node) return true;
+                }
+            }
+        }
+        return false;
     }
 
     getDeletedGapContinuationRelation(groupAId, groupBId, state = this.gameEngine.state) {
