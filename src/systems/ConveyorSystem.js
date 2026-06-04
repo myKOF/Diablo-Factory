@@ -1891,25 +1891,65 @@ export class ConveyorSystem {
         const nodes = this.ensureLogisticsMergeNodeStore();
         const snapped = this.snapPointToGridCenter(point);
         const cellKey = `${Math.round(snapped.x)},${Math.round(snapped.y)}`;
-        let node = nodes.find(item => item && item.outputGroupId === outputGroupId && item.cellKey === cellKey);
-        if (!node) {
-            node = {
-                id: `merge_${cellKey}_${outputGroupId}`,
-                nodeId: `merge_${cellKey}_${outputGroupId}`,
-                type: 'logistics_merge',
-                cellKey,
-                x: snapped.x,
-                y: snapped.y,
-                point: { x: snapped.x, y: snapped.y },
-                inputGroupIds: [],
-                outputGroupId,
-                roundRobinIndex: 0
-            };
-            nodes.push(node);
-        }
-        if (!node.inputGroupIds.includes(inputGroupId)) {
-            node.inputGroupIds.push(inputGroupId);
-        }
+
+        // 收集該 cellKey 上所有已有的 directed edges (child -> parent)，以便解析最終的 downstream 主線
+        const edges = new Map(); // childGroupId -> parentGroupId
+        const allGroups = new Set();
+
+        nodes.forEach(n => {
+            if (n && n.cellKey === cellKey) {
+                allGroups.add(n.outputGroupId);
+                (n.inputGroupIds || []).forEach(inId => {
+                    edges.set(inId, n.outputGroupId);
+                    allGroups.add(inId);
+                });
+            }
+        });
+
+        edges.set(inputGroupId, outputGroupId);
+        allGroups.add(inputGroupId);
+        allGroups.add(outputGroupId);
+
+        // 追蹤以找出最終的 output 輸出線
+        const findUltimate = (g) => {
+            let current = g;
+            let visited = new Set();
+            while (edges.has(current)) {
+                if (visited.has(current)) break; // 防環路
+                visited.add(current);
+                current = edges.get(current);
+            }
+            return current;
+        };
+
+        const ultimateOutputGroupId = findUltimate(outputGroupId);
+
+        // 除了最終輸出線外，其他所有線都是輸入線
+        const ultimateInputGroupIds = new Set();
+        allGroups.forEach(g => {
+            if (g !== ultimateOutputGroupId) {
+                ultimateInputGroupIds.add(g);
+            }
+        });
+
+        // 過濾掉原本在同個 cellKey 的 merge 節點並更新 nodes 陣列，維持同個陣列引用
+        const filteredNodes = nodes.filter(n => !n || n.cellKey !== cellKey);
+        nodes.length = 0;
+        filteredNodes.forEach(n => nodes.push(n));
+
+        const node = {
+            id: `merge_${cellKey}_${ultimateOutputGroupId}`,
+            nodeId: `merge_${cellKey}_${ultimateOutputGroupId}`,
+            type: 'logistics_merge',
+            cellKey,
+            x: snapped.x,
+            y: snapped.y,
+            point: { x: snapped.x, y: snapped.y },
+            inputGroupIds: [...ultimateInputGroupIds],
+            outputGroupId: ultimateOutputGroupId,
+            roundRobinIndex: 0
+        };
+        nodes.push(node);
 
         const inputDir = this.getLogisticsLineDirectionAtPoint(inputLine, snapped);
         const outputDir = this.getLogisticsLineDirectionAtPoint(outputLine, snapped);
@@ -1918,6 +1958,7 @@ export class ConveyorSystem {
             node.inputDirections[inputGroupId] = inputDir;
         }
         if (outputDir) node.outputDir = outputDir;
+
         this.getLogisticsSegmentsByGroupId(inputGroupId).forEach(line => this.clearSuppressedLogisticsConnectionCell(line, snapped));
         this.getLogisticsSegmentsByGroupId(outputGroupId).forEach(line => this.clearSuppressedLogisticsConnectionCell(line, snapped));
         this.reassignDeletedGapContinuationToMergeInput(inputGroupId, outputGroupId, snapped);
