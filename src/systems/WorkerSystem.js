@@ -1675,18 +1675,18 @@ export class WorkerSystem {
             const sortedSegs = [];
             const remaining = [...segments];
             let current = remaining.sort((a, b) => (a.order || 0) - (b.order || 0))[0];
-            
+
             if (current) {
                 sortedSegs.push(current);
                 remaining.splice(remaining.indexOf(current), 1);
-                
+
                 while (remaining.length > 0) {
                     const lastSeg = sortedSegs[sortedSegs.length - 1];
                     const lastEp = lastSeg.routePoints?.[lastSeg.routePoints.length - 1] || { x: lastSeg.x, y: lastSeg.y };
-                    
+
                     let nextIndex = -1;
                     let minEdgeDist = 15; // 容許 15 像素內的偏差
-                    
+
                     for (let i = 0; i < remaining.length; i++) {
                         const rSeg = remaining[i];
                         const rSp = rSeg.routePoints?.[0] || { x: rSeg.x, y: rSeg.y };
@@ -1696,7 +1696,7 @@ export class WorkerSystem {
                             nextIndex = i;
                         }
                     }
-                    
+
                     if (nextIndex !== -1) {
                         sortedSegs.push(remaining[nextIndex]);
                         remaining.splice(nextIndex, 1);
@@ -1707,7 +1707,7 @@ export class WorkerSystem {
                     }
                 }
             }
-            
+
             const points = [];
             const pushPoint = (point) => {
                 if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
@@ -1716,13 +1716,13 @@ export class WorkerSystem {
                     points.push({ x: point.x, y: point.y });
                 }
             };
-            
+
             sortedSegs.forEach(seg => {
                 if (Array.isArray(seg.routePoints)) {
                     if (seg.routePoints.length > 0) pushPoint(seg.routePoints[0]);
                 }
             });
-            
+
             if (points.length >= 2) {
                 const normalizedPoints = this.normalizeTransferRoutePoints(source, target, points);
                 return normalizedPoints.length >= 2 ? normalizedPoints : null;
@@ -1761,19 +1761,19 @@ export class WorkerSystem {
         const rawRoutePoints = Array.isArray(orderedLineRoute) && orderedLineRoute.length >= 2
             ? orderedLineRoute.map(point => ({ x: point.x, y: point.y }))
             : Array.isArray(transferVisualRoute) && transferVisualRoute.length >= 2
-            ? transferVisualRoute.map(point => ({ x: point.x, y: point.y }))
-            : (Array.isArray(route?.points) && route.points.length >= 2
-                ? route.points.map(point => ({ x: point.x, y: point.y }))
-                : (Array.isArray(conn.routePoints) && conn.routePoints.length >= 2
-                    ? conn.routePoints.map(point => ({ x: point.x, y: point.y }))
-                    : null));
+                ? transferVisualRoute.map(point => ({ x: point.x, y: point.y }))
+                : (Array.isArray(route?.points) && route.points.length >= 2
+                    ? route.points.map(point => ({ x: point.x, y: point.y }))
+                    : (Array.isArray(conn.routePoints) && conn.routePoints.length >= 2
+                        ? conn.routePoints.map(point => ({ x: point.x, y: point.y }))
+                        : null));
         const routePoints = this.normalizeTransferRoutePoints(source, target, rawRoutePoints);
         if (routePoints) {
             annotateRoutePoints(routePoints);
         }
         // this.logTransferRouteDebug(source, target, conn, itemType, rawRoutePoints, routePoints);
         const transferId = `transfer_${Date.now().toString(36)}_${Math.floor(Math.random() * 10000).toString(36)}`;
-        
+
         // [新增] 自動設定追蹤目標
         if (state && !state.trackedTransferId) {
             state.trackedTransferId = transferId;
@@ -2538,16 +2538,18 @@ export class WorkerSystem {
             let t = state.activeTransfers[i];
             const maxAllowed = t.maxAllowedProgress !== undefined ? t.maxAllowedProgress : 1.0;
             const queueHeld = t.queueBlocked === true && t.progress >= maxAllowed - 0.0001;
-            
+
             if (!queueHeld && t.progress < maxAllowed) {
                 t.progress += deltaTime * (getTransferSpeed(t) / getRouteLengthInTiles(t));
                 if (t.progress > maxAllowed) {
                     t.progress = maxAllowed;
                 }
             } else if (t.progress > maxAllowed) {
+                // [只停不退] 阻塞時僅標記 queueBlocked，不強行扣減 progress 避免物品往回推
                 t.queueBlocked = true;
             }
-            
+
+
             // [新增] 追蹤邏輯
             if (state && state.trackedTransferId === t.id) {
                 const points = t.routePoints;
@@ -2561,7 +2563,7 @@ export class WorkerSystem {
                         segmentLengths.push(len);
                         totalLength += len;
                     }
-                    
+
                     let remain = t.progress * totalLength;
                     let currentSegment = 0;
                     for (let j = 0; j < segmentLengths.length; j++) {
@@ -2572,7 +2574,7 @@ export class WorkerSystem {
                         remain -= segmentLengths[j];
                         currentSegment = j; // fallback
                     }
-                    
+
                     if (t.lastSegment !== currentSegment) {
                         for (let seg = t.lastSegment + 1; seg <= currentSegment; seg++) {
                             const p1 = points[seg];
@@ -2642,8 +2644,15 @@ export class WorkerSystem {
                 ent.logisticsTimer = 0;
                 let itemSpawned = false;
 
-                for (let conn of ent.outputTargets) {
+                const outputTargets = Array.isArray(ent.outputTargets) ? ent.outputTargets : [];
+                const startIndex = outputTargets.length > 0
+                    ? Math.max(0, Math.floor(Number(ent.nextLogisticsOutputTargetIndex) || 0)) % outputTargets.length
+                    : 0;
+
+                for (let offset = 0; offset < outputTargets.length; offset++) {
                     if (itemSpawned) break; // 一次 tick 只發送一個物品，依序分配
+                    const connIndex = (startIndex + offset) % outputTargets.length;
+                    const conn = outputTargets[connIndex];
 
                     if (isWarehouse) {
                         if (conn.filter) {
@@ -2660,6 +2669,7 @@ export class WorkerSystem {
                                 this.assignTransferSerial(state, transfer);
                                 state.activeTransfers.push(transfer);
                                 itemSpawned = true;
+                                ent.nextLogisticsOutputTargetIndex = (connIndex + 1) % outputTargets.length;
                                 const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
                                 // addTransportLog(`[物流] ${getEntityLabel(ent)} -> ${getEntityLabel(target)} 開始輸送 ${String(conn.filter).toUpperCase()}（${getTransferRouteText(transfer)}）。`);
                             }
@@ -2675,6 +2685,7 @@ export class WorkerSystem {
                                 this.assignTransferSerial(state, transfer);
                                 state.activeTransfers.push(transfer);
                                 itemSpawned = true;
+                                ent.nextLogisticsOutputTargetIndex = (connIndex + 1) % outputTargets.length;
                                 const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
                                 // addTransportLog(`[物流] ${getEntityLabel(ent)} -> ${getEntityLabel(target)} 開始輸送 ${String(resType).toUpperCase()}（${getTransferRouteText(transfer)}）。`);
                                 break;

@@ -81,6 +81,7 @@
 
 ## [代碼收斂與自動化驗證]
 - **代碼洗滌**：任務結束前，刪除未引用變數與除錯 Log。
+- **唯一指定測試框架 (Playwright Only)**：所有自動化測試、E2E (端到端) 驗證與 UI 互動檢測，**強制且唯一指定使用 Playwright**。嚴禁 Agent 擅自安裝或使用 Cypress, Selenium, Puppeteer 等其他測試工具。
 - **按需自測**：預設不進行自測（參見動態模式協議）。若觸發自測，腳本必須強制執行 `await browser.close();` 關閉網頁實體，並以 `finally { process.exit(); }` 徹底了結進程。
 
 ## [動態執行模式切換協議 (Conditional Protocol)]

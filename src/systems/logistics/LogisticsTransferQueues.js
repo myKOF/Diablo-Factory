@@ -17,7 +17,24 @@ export class LogisticsTransferQueues {
     applyBlockedQueues(state) {
         if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
         const TS = this.gameEngine.TILE_SIZE || 20;
+        const minTransferSpacing = TS;
         const pathMetricsCache = new Map();
+        const pointKey = (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y)
+            ? `${Math.round(point.x)},${Math.round(point.y)}`
+            : null;
+        const hasSuppressedTerminalEndpoint = (transfer) => {
+            const lineId = transfer?.lineId || null;
+            const points = Array.isArray(transfer?.routePoints) ? transfer.routePoints : [];
+            const lastKey = pointKey(points[points.length - 1]);
+            if (!lineId || !lastKey || !Array.isArray(state.logisticsLines)) return false;
+            return state.logisticsLines.some(line => {
+                const groupId = line?.groupId || line?.id || null;
+                if (groupId !== lineId) return false;
+                if (line?.suppressedOpenEndpointCellKey === lastKey) return true;
+                return Array.isArray(line?.suppressedConnectionCellKeys) &&
+                    line.suppressedConnectionCellKeys.includes(lastKey);
+            });
+        };
         const pathKey = (transfer) => {
             if (transfer.lineId) return `line:${transfer.lineId}`;
             const points = transfer.routePoints || [];
@@ -82,12 +99,18 @@ export class LogisticsTransferQueues {
                 const desired = useCanonical
                     ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, sourceDistance, pathMetricsCache), pathMetricsCache)
                     : sourceDistance;
-                let maxAllowed = occupiedProgress - TS;
+                let maxAllowed = occupiedProgress - minTransferSpacing;
                 let breakpointLimit = totalLength;
                 const isMergeInput = this.system.isLogisticsMergeInputTransfer(transfer, state);
 
+                const stopBeforeSuppressedEndpoint = !transfer.targetId && !isMergeInput && hasSuppressedTerminalEndpoint(transfer);
+
                 if (!transfer.targetId && !isMergeInput) {
+
                     breakpointLimit = Math.floor(totalLength / TS) * TS;
+                    if (stopBeforeSuppressedEndpoint) {
+                        breakpointLimit = Math.max(0, breakpointLimit - TS);
+                    }
                     maxAllowed = Math.min(maxAllowed, breakpointLimit);
                 } else {
                     maxAllowed = Math.min(maxAllowed, totalLength);
@@ -104,9 +127,11 @@ export class LogisticsTransferQueues {
                     transfer.routePoints = canonical.points.map(point => ({ ...point }));
                 }
                 const currentDistance = Math.max(0, Math.min(desired, totalLength));
-                const nextDistance = queuedDistance < currentDistance - 0.1
-                    ? currentDistance
-                    : queuedDistance;
+                const nextDistance = stopBeforeSuppressedEndpoint && currentDistance > breakpointLimit
+                    ? breakpointLimit
+                    : queuedDistance < currentDistance - 0.1
+                        ? currentDistance
+                        : queuedDistance;
                 transfer.progress = Math.max(0, Math.min(1, nextDistance / totalLength));
                 if (transfer.targetId || isMergeInput) {
                     delete transfer.blockedOnBrokenLine;

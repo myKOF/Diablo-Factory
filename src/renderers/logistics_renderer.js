@@ -963,6 +963,11 @@ export class LogisticsRenderer {
             return keys;
         };
 
+        const primarySelectedGroupId = state.selectedLogisticsGroupId ||
+            (state.selectedLogisticsLineId && conveyorSystem?.getLogisticsLineById
+                ? conveyorSystem.getLogisticsLineById(state.selectedLogisticsLineId)?.groupId
+                : null);
+
         const drawnCanonicalGroups = new Set();
         if (Array.isArray(state.logisticsLines)) {
             groupSegments.forEach((groupSegs, groupKey) => {
@@ -1042,7 +1047,9 @@ export class LogisticsRenderer {
                         : groupSegs.some(line => conveyorSystem.isSelectedLogisticsLine(line)))
                     : groupSegs.some(line => state.selectedLogisticsLineId === line.id);
 
-                if (isGroupSelected) {
+                const isPrimarySelected = (groupKey === primarySelectedGroupId);
+
+                if (isPrimarySelected) {
                     // [核心修正] 移除原先的 segmentRoutes.forEach 繪製紅色方框，因為這會導致單擊也顯示整條方框。
                     // 紅色方框繪製已經被移至 drawLogisticsRoute 內部 (只針對被選中的單獨 line 繪製)。
 
@@ -2310,14 +2317,14 @@ export class LogisticsRenderer {
     static renderDebugRouteNumberSprites(scene, groupKey, routes, groupSegs = null) {
         if (!Array.isArray(routes) || routes.length === 0) return;
         const seen = new Set();
-        const labelKeys = LogisticsRenderer.getDebugLabelCellKeys(groupSegs);
+        const suppressedKeys = LogisticsRenderer.getDetachedSplitArrowCellKeys(groupSegs);
         let labelIndex = 0;
         routes.forEach((points, routeIndex) => {
             if (!Array.isArray(points)) return;
             points.forEach(point => {
                 if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
                 const key = `${Math.round(point.x)},${Math.round(point.y)}`;
-                if (labelKeys.size > 0 && !labelKeys.has(key)) return;
+                if (suppressedKeys.has(key)) return;
                 if (seen.has(key)) return;
                 seen.add(key);
                 LogisticsRenderer.renderLogisticsNumberSprite(
@@ -2602,39 +2609,73 @@ export class LogisticsRenderer {
             return merged;
         };
 
-        const outputBackfillRoutes = [];
+        const getBackfilledRoutes = (currentGroupId, currentOutputRoute, visited = new Set()) => {
+            if (visited.has(currentGroupId)) return [currentOutputRoute];
+            visited.add(currentGroupId);
 
-        nodes
-            .filter(node => node && node.outputGroupId === groupKey && Array.isArray(node.inputGroupIds))
-            .forEach(node => {
-                const nodePoint = node.point || { x: node.x, y: node.y };
-                if (!nodePoint) return;
+            const mergeNode = nodes.find(node => node && node.outputGroupId === currentGroupId && Array.isArray(node.inputGroupIds));
+            if (!mergeNode) return [currentOutputRoute];
 
-                let outputRoute = null;
-                if (conveyorSystem?.getLogisticsMergeNodeOutputRoute) {
-                    outputRoute = conveyorSystem.getLogisticsMergeNodeOutputRoute(node);
-                }
-                if (!outputRoute) {
-                    outputRoute = extendedRoutes.find(route =>
-                        isNear(route?.[0], nodePoint) || isNear(route?.[route.length - 1], nodePoint)
-                    );
-                }
-                const orientedOutputRoute = orientRouteToStartAt(outputRoute, nodePoint);
-                if (!orientedOutputRoute) return;
+            const nodePoint = mergeNode.point || { x: mergeNode.x, y: mergeNode.y };
+            if (!nodePoint) return [currentOutputRoute];
 
-                node.inputGroupIds.forEach(inputGroupId => {
+            const orientedOutputRoute = orientRouteToStartAt(currentOutputRoute, nodePoint);
+            if (!orientedOutputRoute) return [currentOutputRoute];
+
+            const resultRoutes = [];
+            const dirOut = orientedOutputRoute.length >= 2
+                ? LogisticsRenderer.getCardinalDir(orientedOutputRoute[0], orientedOutputRoute[1])
+                : null;
+            const sortedInputGroupIds = [...mergeNode.inputGroupIds].sort((aId, bId) => {
+                const getScore = (groupId) => {
                     const inputSegs = conveyorSystem?.getLogisticsSegmentsByGroupId
-                        ? conveyorSystem.getLogisticsSegmentsByGroupId(inputGroupId)
-                        : [];
+                        ? conveyorSystem.getLogisticsSegmentsByGroupId(groupId)
+                        : getStateGroupSegments(groupId);
+                    let maxScore = 0;
                     LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(inputSegs).forEach(inputRoute => {
                         const orientedInputRoute = orientRouteToEndAt(inputRoute, nodePoint);
-                        if (!orientedInputRoute) return;
-                        outputBackfillRoutes.push(appendRoute(orientedInputRoute, orientedOutputRoute));
+                        if (!orientedInputRoute || orientedInputRoute.length < 2) return;
+                        const dirIn = LogisticsRenderer.getCardinalDir(
+                            orientedInputRoute[orientedInputRoute.length - 2],
+                            orientedInputRoute[orientedInputRoute.length - 1]
+                        );
+                        if (dirIn && dirOut && dirIn.x === dirOut.x && dirIn.y === dirOut.y) {
+                            maxScore = 1;
+                        }
                     });
-                });
+                    return maxScore;
+                };
+                return getScore(bId) - getScore(aId);
             });
 
-        outputBackfillRoutes.forEach(addFinalRoute);
+            sortedInputGroupIds.forEach(inputGroupId => {
+                const inputSegs = conveyorSystem?.getLogisticsSegmentsByGroupId
+                    ? conveyorSystem.getLogisticsSegmentsByGroupId(inputGroupId)
+                    : getStateGroupSegments(inputGroupId);
+                let hasMerged = false;
+                LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(inputSegs).forEach(inputRoute => {
+                    const orientedInputRoute = orientRouteToEndAt(inputRoute, nodePoint);
+                    if (!orientedInputRoute) return;
+                    const mergedRoute = appendRoute(orientedInputRoute, orientedOutputRoute);
+                    hasMerged = true;
+                    const recurred = getBackfilledRoutes(inputGroupId, mergedRoute, new Set(visited));
+                    recurred.forEach(r => resultRoutes.push(r));
+                });
+                if (!hasMerged) {
+                    resultRoutes.push(currentOutputRoute);
+                }
+            });
+
+            return resultRoutes.length > 0 ? resultRoutes : [currentOutputRoute];
+        };
+
+        const backfilledRoutes = [];
+        extendedRoutes.forEach(route => {
+            const recursive = getBackfilledRoutes(groupKey, route);
+            recursive.forEach(r => backfilledRoutes.push(r));
+        });
+
+        backfilledRoutes.forEach(addFinalRoute);
         extendedRoutes.forEach(addFinalRoute);
 
         return finalRoutes;

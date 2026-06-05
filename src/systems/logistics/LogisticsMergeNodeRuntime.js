@@ -13,8 +13,62 @@ export class LogisticsMergeNodeRuntime {
             node && Array.isArray(node.inputGroupIds) && node.inputGroupIds.length > 0 && node.outputGroupId
         );
         if (!nodes.length || !Array.isArray(state?.activeTransfers) || state.activeTransfers.length === 0) return false;
+        const TS = this.gameEngine.TILE_SIZE || 20;
+        const minTransferSpacing = TS;
 
         let changed = false;
+        const getRouteLength = (route) => {
+            if (!Array.isArray(route) || route.length < 2) return 0;
+            let total = 0;
+            for (let i = 0; i < route.length - 1; i++) {
+                const a = route[i];
+                const b = route[i + 1];
+                if (!a || !b) continue;
+                total += Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0));
+            }
+            return total;
+        };
+        const getPathDistanceToPoint = (points, point) => {
+            if (!Array.isArray(points) || points.length < 2 || !point) return 0;
+            let bestDist = Infinity;
+            let bestPathDist = 0;
+            let total = 0;
+            for (let i = 0; i < points.length - 1; i++) {
+                const a = points[i];
+                const b = points[i + 1];
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const len = Math.hypot(dx, dy);
+                const lenSq = dx * dx + dy * dy;
+                if (lenSq > 0) {
+                    const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
+                    const proj = { x: a.x + dx * t, y: a.y + dy * t };
+                    const dist = Math.hypot(point.x - proj.x, point.y - proj.y);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestPathDist = total + len * t;
+                    }
+                }
+                total += len;
+            }
+            return bestPathDist;
+        };
+        const isOutputEntryOccupied = (candidate, node) => {
+            const outputGroupId = node.outputGroupId;
+            const mergePoint = node.point || { x: node.x, y: node.y };
+            return state.activeTransfers.some(other => {
+                if (!other || other === candidate || other.lineId !== outputGroupId) return false;
+                const route = Array.isArray(other.routePoints) ? other.routePoints : [];
+                const total = getRouteLength(route);
+                if (total <= 0) return false;
+                const otherDist = Math.max(0, Math.min(1, Number(other.progress) || 0)) * total;
+                const mergeNodeDistInOther = getPathDistanceToPoint(route, mergePoint);
+                const distFromMerge = otherDist - mergeNodeDistInOther;
+                // [只停不退] 使用相對距離絕對值，確保合流點前後安全間距內無其他物品佔用
+                return Math.abs(distFromMerge) < minTransferSpacing - 0.1;
+            });
+        };
+
         const findNodeForTransfer = (transfer) => {
             if (Number(transfer?.progress) < 0.999) return null;
             return this.system.getLogisticsMergeNodeForInputTransfer(transfer, state);
@@ -25,6 +79,12 @@ export class LogisticsMergeNodeRuntime {
             if (!node) return;
             const route = this.system.getLogisticsMergeNodeOutputRoute(node);
             if (!Array.isArray(route) || route.length < 2) return;
+            if (isOutputEntryOccupied(transfer, node)) {
+                transfer.progress = 1;
+                transfer.queueBlocked = true;
+                delete transfer.blockedOnBrokenLine;
+                return;
+            }
             const outputSeg = this.system.getLogisticsSegmentsByGroupId(node.outputGroupId)[0] || null;
             transfer.lineId = node.outputGroupId;
             transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));

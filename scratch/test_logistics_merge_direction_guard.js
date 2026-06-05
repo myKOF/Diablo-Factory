@@ -37,6 +37,13 @@ function createSystem() {
         getLogisticsSegmentsByGroupId(groupId) {
             return state.logisticsLines.filter(line => (line.groupId || line.id) === groupId);
         },
+        getLogisticsLinesForState(targetState = state) {
+            return Array.isArray(targetState.logisticsLines) ? targetState.logisticsLines : [];
+        },
+        orderLogisticsSegmentsByDirection(segments) {
+            return Array.isArray(segments) ? segments.slice() : [];
+        },
+        recalculateLogisticsGroupEndpoints() {},
         clearSuppressedLogisticsConnectionCell() {},
         reassignDeletedGapContinuationToMergeInput() {
             return false;

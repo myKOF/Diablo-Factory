@@ -42,4 +42,73 @@ if (rear.progress < rearBefore - 0.0001) {
     throw new Error(`Backpressure must not push a transfer backward. Before=${rearBefore}, after=${rear.progress}`);
 }
 
+const brokenRoute = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
+const brokenState = {
+    logisticsLines: [
+        {
+            id: 'broken_tail',
+            groupId: 'broken_line',
+            routePoints: brokenRoute.map(point => ({ ...point })),
+            suppressedOpenEndpointCellKey: '100,0',
+            suppressOpenEndpointCell: true
+        }
+    ],
+    activeTransfers: [
+        {
+            id: 'past_deleted_gap',
+            lineId: 'broken_line',
+            routePoints: brokenRoute.map(point => ({ ...point })),
+            progress: 0.95,
+            targetId: null
+        }
+    ]
+};
+
+queues.applyBlockedQueues(brokenState);
+
+const brokenTransfer = brokenState.activeTransfers[0];
+const brokenDistance = brokenTransfer.progress * 100;
+if (Math.abs(brokenDistance - 80) > 0.0001) {
+    throw new Error(`Deleted gap transfer should stop one cell before the suppressed endpoint, got ${brokenDistance}px.`);
+}
+if (brokenTransfer.blockedOnBrokenLine !== true) {
+    throw new Error('Deleted gap transfer should be marked blockedOnBrokenLine.');
+}
+
+const mergeInputState = {
+    activeTransfers: [
+        {
+            id: 'input_a_start',
+            lineId: 'input_a',
+            routePoints: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+            progress: 0.1,
+            targetId: null
+        },
+        {
+            id: 'input_b_start',
+            lineId: 'input_b',
+            routePoints: [{ x: 0, y: 20 }, { x: 100, y: 20 }],
+            progress: 0.1,
+            targetId: null
+        }
+    ]
+};
+const mergeInputQueues = new globalThis.LogisticsTransferQueues(
+    {
+        isLogisticsMergeInputTransfer: transfer => transfer.lineId === 'input_a' || transfer.lineId === 'input_b',
+        getLogisticsMergeNodeForInputTransfer: () => ({
+            outputGroupId: 'output_group',
+            inputGroupIds: ['input_a', 'input_b'],
+            point: { x: 100, y: 0 }
+        })
+    },
+    () => ({ TILE_SIZE: 20 })
+);
+mergeInputQueues.applyBlockedQueues(mergeInputState);
+mergeInputState.activeTransfers.forEach(transfer => {
+    if (transfer.queueBlocked === true) {
+        throw new Error('Merge input items far from the merge point should not block each other at spawn.');
+    }
+});
+
 console.log('Logistics queue no-pushback test passed.');

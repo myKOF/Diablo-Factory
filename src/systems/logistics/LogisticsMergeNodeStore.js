@@ -74,6 +74,71 @@ export class LogisticsMergeNodeStore {
         const snapped = this.system.snapPointToGridCenter(point);
         if (!this.canRegisterMergeDirection({ inputGroupId, outputGroupId, point: snapped, inputLine, outputLine })) return null;
         const cellKey = `${Math.round(snapped.x)},${Math.round(snapped.y)}`;
+
+        // 物理切分穿過合流點的線段
+        const state = GameEngine.state;
+        const allLines = this.system.getLogisticsLinesForState(state);
+        const targetGroupLines = allLines.filter(line => line && (line.groupId === outputGroupId || line.id === outputGroupId));
+        for (const seg of targetGroupLines) {
+            const pts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
+            if (pts.length < 2) continue;
+            let splitIdxInPoints = -1;
+            for (let i = 0; i < pts.length; i++) {
+                if (Math.hypot(pts[i].x - snapped.x, pts[i].y - snapped.y) < 0.1) {
+                    splitIdxInPoints = i;
+                    break;
+                }
+            }
+            if (splitIdxInPoints > 0 && splitIdxInPoints < pts.length - 1) {
+                const frontPts = pts.slice(0, splitIdxInPoints + 1);
+                const backPts = pts.slice(splitIdxInPoints);
+                const newSegId = `seg_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+                const newSeg = {
+                    ...seg,
+                    id: newSegId,
+                    routePoints: backPts,
+                    createdAt: Date.now() + 1
+                };
+                seg.routePoints = frontPts;
+                state.logisticsLines.push(newSeg);
+                break;
+            }
+        }
+
+
+        // 中段合流自動切分輸出群組
+        let finalOutputGroupId = outputGroupId;
+        const segments = this.system.getLogisticsSegmentsByGroupId(outputGroupId);
+        const ordered = this.system.orderLogisticsSegmentsByDirection(segments);
+        const splitSegment = ordered.find(seg => this.canLineEnterMergePoint(seg, snapped));
+        if (splitSegment) {
+            const splitIdx = ordered.indexOf(splitSegment);
+            const frontSegments = ordered.slice(0, splitIdx + 1);
+            const backSegments = ordered.slice(splitIdx + 1);
+            if (frontSegments.length > 0 && backSegments.length > 0) {
+                const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+                const frontTail = frontSegments[frontSegments.length - 1];
+                const backHead = backSegments[0];
+                if (frontTail) frontTail.nextId = null;
+                if (backHead) backHead.prevId = null;
+                backSegments.forEach(seg => {
+                    seg.groupId = newGroupId;
+                    seg.sourceId = null;
+                    seg.targetId = null;
+                    seg.sourcePort = null;
+                    seg.targetPort = null;
+                    seg.targetPoint = null;
+                    seg.detachedFromGroupId = outputGroupId;
+                    seg.detachedAtKey = cellKey;
+                });
+                this.system.orderLogisticsSegmentsByDirection(frontSegments);
+                this.system.orderLogisticsSegmentsByDirection(backSegments);
+                this.system.recalculateLogisticsGroupEndpoints(outputGroupId);
+                this.system.recalculateLogisticsGroupEndpoints(newGroupId);
+                finalOutputGroupId = newGroupId;
+            }
+        }
+
         const edges = new Map();
         const allGroups = new Set();
 
@@ -87,9 +152,13 @@ export class LogisticsMergeNodeStore {
             }
         });
 
-        edges.set(inputGroupId, outputGroupId);
+        edges.set(inputGroupId, finalOutputGroupId);
+        if (finalOutputGroupId !== outputGroupId) {
+            edges.set(outputGroupId, finalOutputGroupId);
+            allGroups.add(outputGroupId);
+        }
         allGroups.add(inputGroupId);
-        allGroups.add(outputGroupId);
+        allGroups.add(finalOutputGroupId);
 
         const findUltimate = (groupId) => {
             let current = groupId;
@@ -102,7 +171,7 @@ export class LogisticsMergeNodeStore {
             return current;
         };
 
-        const ultimateOutputGroupId = findUltimate(outputGroupId);
+        const ultimateOutputGroupId = findUltimate(finalOutputGroupId);
         const ultimateInputGroupIds = new Set();
         allGroups.forEach(groupId => {
             if (groupId !== ultimateOutputGroupId) ultimateInputGroupIds.add(groupId);
@@ -135,8 +204,11 @@ export class LogisticsMergeNodeStore {
         if (outputDir) node.outputDir = outputDir;
 
         this.system.getLogisticsSegmentsByGroupId(inputGroupId).forEach(line => this.system.clearSuppressedLogisticsConnectionCell(line, snapped));
-        this.system.getLogisticsSegmentsByGroupId(outputGroupId).forEach(line => this.system.clearSuppressedLogisticsConnectionCell(line, snapped));
-        this.system.reassignDeletedGapContinuationToMergeInput(inputGroupId, outputGroupId, snapped);
+        this.system.getLogisticsSegmentsByGroupId(finalOutputGroupId).forEach(line => this.system.clearSuppressedLogisticsConnectionCell(line, snapped));
+        if (finalOutputGroupId !== outputGroupId) {
+            this.system.getLogisticsSegmentsByGroupId(outputGroupId).forEach(line => this.system.clearSuppressedLogisticsConnectionCell(line, snapped));
+        }
+        this.system.reassignDeletedGapContinuationToMergeInput(inputGroupId, finalOutputGroupId, snapped);
         return node;
     }
 
