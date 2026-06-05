@@ -103,14 +103,18 @@ export class LogisticsTransferQueues {
                 if (useCanonical) {
                     transfer.routePoints = canonical.points.map(point => ({ ...point }));
                 }
-                transfer.progress = Math.max(0, Math.min(1, queuedDistance / totalLength));
+                const currentDistance = Math.max(0, Math.min(desired, totalLength));
+                const nextDistance = queuedDistance < currentDistance - 0.1
+                    ? currentDistance
+                    : queuedDistance;
+                transfer.progress = Math.max(0, Math.min(1, nextDistance / totalLength));
                 if (transfer.targetId || isMergeInput) {
                     delete transfer.blockedOnBrokenLine;
                 } else {
                     transfer.blockedOnBrokenLine = true;
                 }
 
-                occupiedProgress = queuedDistance;
+                occupiedProgress = Math.min(queuedDistance, currentDistance);
                 queueBlockedBehind = transfer.queueBlocked === true;
             });
         });

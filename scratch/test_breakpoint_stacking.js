@@ -162,7 +162,7 @@ if (testEnt.outputTargets.length > 0) {
 }
 console.log("[DEBUG TEST] outputBuffer:", testEnt.outputBuffer);
 
-worker.processAutomatedLogistics(GameEngine.state, 0.5); // 工人工作 0.5s，產生第一個物品
+worker.processAutomatedLogistics(GameEngine.state, 2); // 工人工作 2s，產生第一個物品
 console.log("[DEBUG TEST] activeTransfers count after process:", GameEngine.state.activeTransfers.length);
 if (GameEngine.state.activeTransfers.length > 0) {
     console.log("[DEBUG TEST] transfer[0]:", GameEngine.state.activeTransfers[0]);
@@ -174,7 +174,7 @@ const t1 = GameEngine.state.activeTransfers[0];
 t1.progress = 1.0; 
 
 // 再執行邏輯更新，產生第 2 個物品
-worker.processAutomatedLogistics(GameEngine.state, 0.5);
+worker.processAutomatedLogistics(GameEngine.state, 2);
 assert(GameEngine.state.activeTransfers.length === 2, "應成功產生第 2 個在途物品");
 
 const t2 = GameEngine.state.activeTransfers[1];

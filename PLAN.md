@@ -75,3 +75,28 @@
 - [x] 步驟 1：新增左側進入 junction 時，必須選擇向下轉向而非向右直行的回歸測試。
 - [x] 步驟 2：在 renderer 幾何 fallback 加入方向評分：反向拒絕、轉向優先、同向次之。
 - [x] 步驟 3：重新執行 debug route 測試與 finalize。
+
+# 2026-06-05 未連接路徑與回壓回推修復
+
+## 核心目標
+1. 未建立 `MergeNode` 前，選取物流線不得只因幾何接近就畫出下游完整路徑。
+2. 已建立合流後，Debug route 只能依照實際 `MergeNode` 與物流群組輸出路徑延伸。
+3. 物品回壓時只能停住等待，嚴禁將既有 `progress` 寫回較小值造成物品被推回。
+
+## 實施步驟
+- [x] 步驟 1：將 Debug route 測試改為驗證「無 MergeNode 不延伸」。
+- [x] 步驟 2：移除 renderer 依座標相鄰推測下游的幾何 fallback。
+- [x] 步驟 3：修正 `LogisticsTransferQueues` 與 `WorkerSystem` 回壓邏輯，阻塞時不降低物品進度。
+- [x] 步驟 4：執行 Debug route、回壓不回推、語法檢查與 `npm.cmd run finalize`。
+
+# 2026-06-05 精確接合完整路徑恢復
+
+## 核心目標
+1. 未接合、有空隙的物流線不得顯示下游完整路徑。
+2. 已精確貼合在同一接合點的物流線，即使 renderer 沒拿到完整 MergeNode helper route，也必須能從 state logistics lines 補出完整 Debug route。
+3. 同一接合點存在多條候選下游時，仍以轉向下游優先，避免選回直行錯線。
+
+## 實施步驟
+- [x] 步驟 1：新增精確貼合、空隙未接合、多候選轉向的 Debug route 回歸測試。
+- [x] 步驟 2：在 renderer 補回嚴格物理接合 fallback，距離限制為半格內，不再使用寬鬆幾何推測。
+- [x] 步驟 3：執行 Debug route、物流回壓、產出間隔、語法檢查與 `npm.cmd run finalize`。

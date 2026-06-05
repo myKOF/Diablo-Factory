@@ -188,6 +188,38 @@ if (!thirdInputFullRoute) {
     throw new Error('The third merge input group should extend to the downstream route.');
 }
 
+globalThis.conveyorSystem = {
+    ensureLogisticsMergeNodeStore: (state) => state.logisticsMergeNodes || []
+};
+const mergeStateFallbackRoute = {
+    logisticsMergeNodes: [
+        {
+            outputGroupId: 'state_downstream_group',
+            inputGroupIds: ['state_input_group'],
+            point: { x: 30, y: 50 }
+        }
+    ],
+    logisticsLines: [
+        makeSegForGroup('state_input', 'state_input_group', [[10, 50], [30, 50]]),
+        makeSegForGroup('state_downstream', 'state_downstream_group', [[30, 50], [30, 70], [30, 90]])
+    ]
+};
+const mergeStateFallbackRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRoutePoints(
+    mergeStateFallbackRoute,
+    'state_input_group',
+    [
+        makeSegForGroup('state_input', 'state_input_group', [[10, 50], [30, 50]])
+    ]
+);
+const mergeStateFallbackFullRoute = mergeStateFallbackRoutes.find(route =>
+    route[0]?.x === 10 &&
+    route[0]?.y === 50 &&
+    route.some(point => point.x === 30 && point.y === 90)
+);
+if (!mergeStateFallbackFullRoute) {
+    throw new Error('A connected MergeNode should render downstream route from state logistics lines when system route helpers are unavailable.');
+}
+
 globalThis.conveyorSystem = {};
 const geometricFallbackState = {
     logisticsMergeNodes: [],
@@ -209,7 +241,31 @@ const geometricFallbackFullRoute = geometricFallbackRoutes.find(route =>
     route.some(point => point.x === 30 && point.y === 90)
 );
 if (!geometricFallbackFullRoute) {
-    throw new Error('A selected route ending at another line start should render the downstream debug route even without a MergeNode.');
+    throw new Error('A selected route ending exactly on another line should render the downstream debug route.');
+}
+
+globalThis.conveyorSystem = {};
+const disconnectedGapState = {
+    logisticsMergeNodes: [],
+    logisticsLines: [
+        makeSegForGroup('input_with_gap', 'input_with_gap_group', [[10, 50], [30, 50]]),
+        makeSegForGroup('downstream_with_gap', 'downstream_with_gap_group', [[45, 50], [45, 70], [45, 90]])
+    ]
+};
+const disconnectedGapRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRoutePoints(
+    disconnectedGapState,
+    'input_with_gap_group',
+    [
+        makeSegForGroup('input_with_gap', 'input_with_gap_group', [[10, 50], [30, 50]])
+    ]
+);
+const disconnectedGapFullRoute = disconnectedGapRoutes.find(route =>
+    route[0]?.x === 10 &&
+    route[0]?.y === 50 &&
+    route.some(point => point.x === 45 && point.y === 90)
+);
+if (disconnectedGapFullRoute) {
+    throw new Error('A selected route must not render downstream cells when the next line is separated by a gap.');
 }
 
 globalThis.conveyorSystem = {};

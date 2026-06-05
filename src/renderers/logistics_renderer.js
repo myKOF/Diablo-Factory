@@ -2386,19 +2386,16 @@ export class LogisticsRenderer {
 
         const TS = GameEngine.TILE_SIZE || 20;
         const matchDist = TS * 2.5;
+        const physicalFallbackDist = Math.max(1, TS * 0.35);
         const nodes = conveyorSystem?.ensureLogisticsMergeNodeStore
             ? conveyorSystem.ensureLogisticsMergeNodeStore(state)
             : (state.logisticsMergeNodes || []);
         const getStateGroupSegments = (targetGroupId) => {
             if (!targetGroupId) return [];
-            if (conveyorSystem?.getLogisticsSegmentsByGroupId) {
-                const segs = conveyorSystem.getLogisticsSegmentsByGroupId(targetGroupId);
-                if (Array.isArray(segs) && segs.length > 0) return segs;
-            }
             return (Array.isArray(state.logisticsLines) ? state.logisticsLines : [])
                 .filter(line => (line?.groupId || line?.id || null) === targetGroupId);
         };
-        const sliceRouteFromAnchor = (route, anchorPoint) => {
+        const sliceRouteFromAnchor = (route, anchorPoint, maxDistance = matchDist) => {
             if (!Array.isArray(route) || route.length < 2 || !anchorPoint) return null;
             let bestIndex = -1;
             let bestDist = Infinity;
@@ -2409,7 +2406,7 @@ export class LogisticsRenderer {
                     bestIndex = index;
                 }
             });
-            if (bestIndex < 0 || bestDist > matchDist) return null;
+            if (bestIndex < 0 || bestDist > maxDistance) return null;
             const sliced = route.slice(bestIndex).map(point => ({ x: point.x, y: point.y }));
             if (sliced.length < 2) return null;
             sliced[0] = { x: anchorPoint.x, y: anchorPoint.y };
@@ -2421,7 +2418,7 @@ export class LogisticsRenderer {
         };
         const isOppositeDir = (a, b) => !!a && !!b && a.x === -b.x && a.y === -b.y;
         const isSameDir = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y;
-        const findGeometricOutputRoute = (currentGroupId, anchorPoint, visitedGroupIds, incomingDir = null) => {
+        const findPhysicalContinuationRoute = (currentGroupId, anchorPoint, visitedGroupIds, incomingDir = null) => {
             if (!anchorPoint) return null;
             const groups = [...new Set((Array.isArray(state.logisticsLines) ? state.logisticsLines : [])
                 .map(line => line?.groupId || line?.id || null)
@@ -2437,7 +2434,7 @@ export class LogisticsRenderer {
                 LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(getStateGroupSegments(candidateGroupId))
                     .forEach(route => candidateRoutes.push(route));
                 for (const points of candidateRoutes) {
-                    const route = sliceRouteFromAnchor(points, anchorPoint);
+                    const route = sliceRouteFromAnchor(points, anchorPoint, physicalFallbackDist);
                     if (!route) continue;
                     const exitDir = getRouteExitDir(route);
                     if (isOppositeDir(incomingDir, exitDir)) continue;
@@ -2451,7 +2448,6 @@ export class LogisticsRenderer {
             candidates.sort((a, b) => a.score - b.score);
             return candidates[0] || null;
         };
-
         const extendedRoutes = routes.map(route => {
             let currentRoute = [...route];
             let currentGroupId = groupKey;
@@ -2497,6 +2493,14 @@ export class LogisticsRenderer {
                             nextRoute = conveyorSystem.getLogisticsGroupRoutePoints(nextGroupId);
                         }
                     }
+                    if (!nextRoute) {
+                        const nodePoint = mergeNode.point || { x: mergeNode.x, y: mergeNode.y };
+                        const stateRoutes = LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(getStateGroupSegments(nextGroupId));
+                        for (const stateRoute of stateRoutes) {
+                            nextRoute = sliceRouteFromAnchor(stateRoute, nodePoint);
+                            if (nextRoute) break;
+                        }
+                    }
                 } else {
                     const incomingDir = currentRoute.length >= 2
                         ? LogisticsRenderer.getCardinalDir(currentRoute[currentRoute.length - 2], lastPt)
@@ -2504,8 +2508,8 @@ export class LogisticsRenderer {
                     const reverseIncomingDir = currentRoute.length >= 2
                         ? LogisticsRenderer.getCardinalDir(currentRoute[1], firstPt)
                         : null;
-                    const fallback = findGeometricOutputRoute(currentGroupId, lastPt, visitedGroupIds, incomingDir);
-                    const reverseFallback = fallback ? null : findGeometricOutputRoute(currentGroupId, firstPt, visitedGroupIds, reverseIncomingDir);
+                    const fallback = findPhysicalContinuationRoute(currentGroupId, lastPt, visitedGroupIds, incomingDir);
+                    const reverseFallback = fallback ? null : findPhysicalContinuationRoute(currentGroupId, firstPt, visitedGroupIds, reverseIncomingDir);
                     const chosenFallback = fallback || reverseFallback;
                     if (!chosenFallback) break;
                     isReverseMatch = !!reverseFallback;
