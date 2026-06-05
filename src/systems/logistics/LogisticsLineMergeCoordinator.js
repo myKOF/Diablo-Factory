@@ -109,14 +109,20 @@ export class LogisticsLineMergeCoordinator {
                 const inputLine = linesA.find(line => this.system.mergeNodeStore.canLineEnterMergePoint(line, p));
                 const outputLine = linesB.find(line => this.system.mergeNodeStore.canLineLeaveMergePoint(line, p));
                 if (inputLine && outputLine) {
-                    const node = this.system.registerLogisticsMergeNode({
-                        inputGroupId: groupAId,
-                        outputGroupId: groupBId,
-                        point: p,
-                        inputLine,
-                        outputLine
-                    });
-                    if (node) return true;
+                    const inputDir = this.system.getLogisticsLineDirectionAtPoint(inputLine, p);
+                    const outputDir = this.system.getLogisticsLineDirectionAtPoint(outputLine, p);
+                    const isSameDirection = inputDir && outputDir && inputDir.x === outputDir.x && inputDir.y === outputDir.y;
+
+                    if (!isSameDirection) {
+                        const node = this.system.registerLogisticsMergeNode({
+                            inputGroupId: groupAId,
+                            outputGroupId: groupBId,
+                            point: p,
+                            inputLine,
+                            outputLine
+                        });
+                        if (node) return true;
+                    }
                 }
             }
             // 方向 2: B 匯入 A
@@ -124,14 +130,20 @@ export class LogisticsLineMergeCoordinator {
                 const inputLine = linesB.find(line => this.system.mergeNodeStore.canLineEnterMergePoint(line, p));
                 const outputLine = linesA.find(line => this.system.mergeNodeStore.canLineLeaveMergePoint(line, p));
                 if (inputLine && outputLine) {
-                    const node = this.system.registerLogisticsMergeNode({
-                        inputGroupId: groupBId,
-                        outputGroupId: groupAId,
-                        point: p,
-                        inputLine,
-                        outputLine
-                    });
-                    if (node) return true;
+                    const inputDir = this.system.getLogisticsLineDirectionAtPoint(inputLine, p);
+                    const outputDir = this.system.getLogisticsLineDirectionAtPoint(outputLine, p);
+                    const isSameDirection = inputDir && outputDir && inputDir.x === outputDir.x && inputDir.y === outputDir.y;
+
+                    if (!isSameDirection) {
+                        const node = this.system.registerLogisticsMergeNode({
+                            inputGroupId: groupBId,
+                            outputGroupId: groupAId,
+                            point: p,
+                            inputLine,
+                            outputLine
+                        });
+                        if (node) return true;
+                    }
                 }
             }
         }

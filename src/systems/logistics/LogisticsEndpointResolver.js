@@ -329,7 +329,7 @@ function recalculateLogisticsGroupEndpoints(groupId) {
         const ports = window.UIManager?.getBuildingPortSlots(ent) || [];
         ports.forEach(port => {
             if (!port || !Number.isFinite(port.x) || !Number.isFinite(port.y)) return;
-            
+
             // 檢查是否為 source (輸出端)
             if (cfg.logistics?.canOutput) {
                 const dist = Math.hypot(port.x - startPt.x, port.y - startPt.y);

@@ -17,6 +17,12 @@ const makeSeg = (id, points) => ({
     routePoints: points.map(([x, y]) => ({ x, y })),
     routeWidth: 1
 });
+const makeSegForGroup = (id, groupId, points) => ({
+    id,
+    groupId,
+    routePoints: points.map(([x, y]) => ({ x, y })),
+    routeWidth: 1
+});
 
 const segments = [
     makeSeg('trunk_a', [[10, 10], [30, 10]]),
@@ -103,6 +109,198 @@ const detachedDebugRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRo
 );
 if (detachedDebugRoutes.some(route => route.some(point => point.x === 300 && point.y === 300))) {
     throw new Error('Detached split cell should not be included in debug routes.');
+}
+
+// --- 測試下游 MergeNode 延伸路徑邏輯 ---
+globalThis.conveyorSystem = {
+    ensureLogisticsMergeNodeStore: (state) => state.logisticsMergeNodes || [],
+    getLogisticsMergeNodeOutputRoute: (node) => {
+        if (node.outputGroupId === 'downstream_group') {
+            return [{ x: 30, y: 50 }, { x: 30, y: 70 }, { x: 30, y: 90 }];
+        }
+        return null;
+    }
+};
+
+const testStateWithMerge = {
+    logisticsMergeNodes: [
+        {
+            outputGroupId: 'downstream_group',
+            inputGroupIds: ['debug_group'],
+            point: { x: 30, y: 50 }
+        }
+    ]
+};
+
+const mergeDebugRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRoutePoints(
+    testStateWithMerge,
+    'debug_group',
+    [
+        makeSeg('branch', [[30, 10], [30, 50]])
+    ]
+);
+
+const branchExtended = mergeDebugRoutes.find(route =>
+    route[0]?.x === 30 && route[0]?.y === 10
+);
+
+if (!branchExtended) {
+    throw new Error('Failed to find branch route in merge test.');
+}
+
+const hasExtendedPoints = branchExtended.some(pt => pt.x === 30 && pt.y === 90);
+if (!hasExtendedPoints) {
+    throw new Error('Debug route was not extended downstream via the MergeNode output route.');
+}
+
+globalThis.conveyorSystem = {
+    ensureLogisticsMergeNodeStore: (state) => state.logisticsMergeNodes || [],
+    getLogisticsMergeNodeOutputRoute: (node) => {
+        if (node.outputGroupId === 'downstream_group') {
+            return [{ x: 30, y: 50 }, { x: 30, y: 70 }, { x: 30, y: 90 }];
+        }
+        return null;
+    }
+};
+
+const threeInputMergeState = {
+    logisticsMergeNodes: [
+        {
+            outputGroupId: 'downstream_group',
+            inputGroupIds: ['debug_group', 'second_input_group', 'third_input_group'],
+            point: { x: 30, y: 50 }
+        }
+    ]
+};
+const thirdInputRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRoutePoints(
+    threeInputMergeState,
+    'third_input_group',
+    [
+        makeSegForGroup('third_input', 'third_input_group', [[10, 50], [30, 50]])
+    ]
+);
+const thirdInputFullRoute = thirdInputRoutes.find(route =>
+    route[0]?.x === 10 &&
+    route[0]?.y === 50 &&
+    route.some(point => point.x === 30 && point.y === 90)
+);
+if (!thirdInputFullRoute) {
+    throw new Error('The third merge input group should extend to the downstream route.');
+}
+
+globalThis.conveyorSystem = {};
+const geometricFallbackState = {
+    logisticsMergeNodes: [],
+    logisticsLines: [
+        makeSegForGroup('third_input_no_node', 'third_input_no_node_group', [[10, 50], [30, 50]]),
+        makeSegForGroup('downstream_no_node', 'downstream_no_node_group', [[30, 50], [30, 70], [30, 90]])
+    ]
+};
+const geometricFallbackRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRoutePoints(
+    geometricFallbackState,
+    'third_input_no_node_group',
+    [
+        makeSegForGroup('third_input_no_node', 'third_input_no_node_group', [[10, 50], [30, 50]])
+    ]
+);
+const geometricFallbackFullRoute = geometricFallbackRoutes.find(route =>
+    route[0]?.x === 10 &&
+    route[0]?.y === 50 &&
+    route.some(point => point.x === 30 && point.y === 90)
+);
+if (!geometricFallbackFullRoute) {
+    throw new Error('A selected route ending at another line start should render the downstream debug route even without a MergeNode.');
+}
+
+globalThis.conveyorSystem = {};
+const midRouteFallbackState = {
+    logisticsMergeNodes: [],
+    logisticsLines: [
+        makeSegForGroup('third_input_mid', 'third_input_mid_group', [[10, 50], [30, 50]]),
+        makeSegForGroup('downstream_mid', 'downstream_mid_group', [[30, 30], [30, 50], [30, 70], [30, 90]])
+    ]
+};
+const midRouteFallbackRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRoutePoints(
+    midRouteFallbackState,
+    'third_input_mid_group',
+    [
+        makeSegForGroup('third_input_mid', 'third_input_mid_group', [[10, 50], [30, 50]])
+    ]
+);
+const midRouteFallbackFullRoute = midRouteFallbackRoutes.find(route =>
+    route[0]?.x === 10 &&
+    route[0]?.y === 50 &&
+    route.some(point => point.x === 30 && point.y === 90)
+);
+if (!midRouteFallbackFullRoute) {
+    throw new Error('A selected route ending on the middle of a downstream route should render from the junction to the downstream end.');
+}
+if (midRouteFallbackFullRoute?.some(point => point.x === 30 && point.y === 30)) {
+    throw new Error('Middle-route fallback should not prepend upstream cells before the junction.');
+}
+
+globalThis.conveyorSystem = {};
+const branchChoiceFallbackState = {
+    logisticsMergeNodes: [],
+    logisticsLines: [
+        makeSegForGroup('input_from_left', 'input_from_left_group', [[10, 50], [30, 50]]),
+        makeSegForGroup('wrong_straight', 'wrong_straight_group', [[30, 50], [50, 50]]),
+        makeSegForGroup('correct_down', 'correct_down_group', [[30, 50], [30, 70], [30, 90]])
+    ]
+};
+const branchChoiceRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRoutePoints(
+    branchChoiceFallbackState,
+    'input_from_left_group',
+    [
+        makeSegForGroup('input_from_left', 'input_from_left_group', [[10, 50], [30, 50]])
+    ]
+);
+const branchChoiceRoute = branchChoiceRoutes.find(route =>
+    route[0]?.x === 10 &&
+    route[0]?.y === 50 &&
+    route.some(point => point.x === 30 && point.y === 90)
+);
+if (!branchChoiceRoute) {
+    throw new Error('Fallback should choose the downstream turn route when a straight-through branch also touches the junction.');
+}
+if (branchChoiceRoute.some(point => point.x === 50 && point.y === 50)) {
+    throw new Error('Fallback should not choose the straight branch when a turn output leaves the same junction.');
+}
+
+globalThis.conveyorSystem = {
+    ensureLogisticsMergeNodeStore: (state) => state.logisticsMergeNodes || [],
+    getLogisticsMergeNodeOutputRoute: (node) => {
+        if (node.outputGroupId === 'downstream_group') {
+            return [{ x: 30, y: 50 }, { x: 30, y: 70 }, { x: 30, y: 90 }];
+        }
+        return null;
+    },
+    getLogisticsSegmentsByGroupId: (groupId) => {
+        if (groupId === 'debug_group') {
+            return [makeSegForGroup('input_branch', 'debug_group', [[30, 10], [30, 50]])];
+        }
+        if (groupId === 'downstream_group') {
+            return [makeSegForGroup('downstream', 'downstream_group', [[30, 50], [30, 70], [30, 90]])];
+        }
+        return [];
+    }
+};
+
+const outputSelectedRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRoutePoints(
+    testStateWithMerge,
+    'downstream_group',
+    [
+        makeSegForGroup('downstream', 'downstream_group', [[30, 50], [30, 70], [30, 90]])
+    ]
+);
+
+const outputFullRoute = outputSelectedRoutes.find(route =>
+    route[0]?.x === 30 &&
+    route[0]?.y === 10 &&
+    route.some(point => point.x === 30 && point.y === 90)
+);
+if (!outputFullRoute) {
+    throw new Error('Selecting the merge output group should still render the full input-to-output debug route.');
 }
 
 console.log('Logistics debug route rendering test passed.');

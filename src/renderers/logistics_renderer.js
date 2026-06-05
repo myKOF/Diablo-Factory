@@ -1054,14 +1054,14 @@ export class LogisticsRenderer {
                     }
                     if (!scene.logisticsNumberSprites) scene.logisticsNumberSprites = new Map();
                     if (!scene.logisticsVisibleNumberSpriteIds) scene.logisticsVisibleNumberSpriteIds = new Set();
-                    
+
                     // ── 純整數半格座標 Map + 有向鏈式排序（O(n)，支援 8 方向，零浮點） ──
                     // startGx/startGy：segment 起點的半格整數座標（優先讀 seg.startGx）
                     // endGx/endGy    ：segment 終點的半格整數座標（優先讀 seg.endGx）
                     // 舊資料若無這些欄位，從 routePoints 計算（向下相容）
 
                     const sortedSegs = [];
-                    const remaining  = [...groupSegs];
+                    const remaining = [...groupSegs];
 
                     // 取出 startAnchor（用來確認鏈的方向是否需要翻轉）
                     const _canonicalSourceId = representative?.sourceId || null;
@@ -1078,21 +1078,21 @@ export class LogisticsRenderer {
                     const _align = (GameEngine.TILE_SIZE || 64) / 2;
                     const _getGCoords = (seg) => {
                         if (Number.isFinite(seg?.startGx) && Number.isFinite(seg?.startGy) &&
-                            Number.isFinite(seg?.endGx)   && Number.isFinite(seg?.endGy)) {
+                            Number.isFinite(seg?.endGx) && Number.isFinite(seg?.endGy)) {
                             return { startGx: seg.startGx, startGy: seg.startGy, endGx: seg.endGx, endGy: seg.endGy };
                         }
                         const s = seg?.routePoints?.[0] || { x: seg?.x || 0, y: seg?.y || 0 };
                         const e = seg?.routePoints?.[seg?.routePoints?.length - 1] || s;
                         return {
                             startGx: Math.round(s.x / _align), startGy: Math.round(s.y / _align),
-                            endGx:   Math.round(e.x / _align), endGy:   Math.round(e.y / _align)
+                            endGx: Math.round(e.x / _align), endGy: Math.round(e.y / _align)
                         };
                     };
                     const _gKey = (gx, gy) => `${gx},${gy}`;
 
                     // 建立 startMap 與 endKeySet（整數格座標，無浮點問題）
                     // _endKeySet 擴展至 ±2 鄰居以容納轉彎 2 格半格座標偏差，排除自身起點
-                    const _startMap  = new Map();
+                    const _startMap = new Map();
                     const _endKeySet = new Set();
                     remaining.forEach(seg => {
                         const { startGx, startGy, endGx, endGy } = _getGCoords(seg);
@@ -1166,8 +1166,8 @@ export class LogisticsRenderer {
                             const { endGx: ex2, endGy: ey2 } = _getGCoords(_c2);
                             let _n2 = _startMap.get(_gKey(ex2, ey2));
                             if (!_n2 || !_remaining.has(_n2)) {
-                                for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1],[-2,0],[2,0],[0,-2],[0,2]]) {
-                                    const cc = _startMap.get(_gKey(ex2+dx, ey2+dy));
+                                for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [-1, 1], [1, -1], [1, 1], [-2, 0], [2, 0], [0, -2], [0, 2]]) {
+                                    const cc = _startMap.get(_gKey(ex2 + dx, ey2 + dy));
                                     if (cc && _remaining.has(cc)) { _n2 = cc; break; }
                                 }
                             }
@@ -1179,11 +1179,11 @@ export class LogisticsRenderer {
                     // 若整條鏈的方向與 startAnchor 相反，翻轉
                     if (startAnchor && sortedSegs.length > 1) {
                         const firstGC = _getGCoords(sortedSegs[0]);
-                        const lastGC  = _getGCoords(sortedSegs[sortedSegs.length - 1]);
+                        const lastGC = _getGCoords(sortedSegs[sortedSegs.length - 1]);
                         const firstPx = { x: firstGC.startGx * _align, y: firstGC.startGy * _align };
-                        const lastPx  = { x: lastGC.startGx  * _align, y: lastGC.startGy  * _align };
+                        const lastPx = { x: lastGC.startGx * _align, y: lastGC.startGy * _align };
                         const fd = Math.hypot(firstPx.x - startAnchor.x, firstPx.y - startAnchor.y);
-                        const ld = Math.hypot(lastPx.x  - startAnchor.x, lastPx.y  - startAnchor.y);
+                        const ld = Math.hypot(lastPx.x - startAnchor.x, lastPx.y - startAnchor.y);
                         if (ld < fd) sortedSegs.reverse();
                     }
 
@@ -1191,20 +1191,27 @@ export class LogisticsRenderer {
                     sortedSegs.forEach(seg => {
                         const gc = _getGCoords(seg);
                         seg.__numberLabelPoint = { x: gc.startGx * _align, y: gc.startGy * _align };
-                        seg.__numberNextPoint  = { x: gc.endGx   * _align, y: gc.endGy   * _align };
+                        seg.__numberNextPoint = { x: gc.endGx * _align, y: gc.endGy * _align };
                     });
 
                     const debugRoutes = LogisticsRenderer.getSelectedGroupDebugRoutePoints(state, groupKey, groupSegs);
                     LogisticsRenderer.renderDebugRouteNumberSprites(scene, groupKey, debugRoutes, groupSegs);
-                    const debugLabelCellKeys = LogisticsRenderer.getDebugLabelCellKeys(groupSegs);
+                    const extendedAllowedCellKeys = new Set();
                     debugRoutes.forEach(points => {
-                        LogisticsRenderer.drawRoutePointsDebug(graphics, points, debugLabelCellKeys);
+                        if (Array.isArray(points)) {
+                            points.forEach(pt => {
+                                extendedAllowedCellKeys.add(`${Math.round(pt.x)},${Math.round(pt.y)}`);
+                            });
+                        }
+                    });
+                    debugRoutes.forEach(points => {
+                        LogisticsRenderer.drawRoutePointsDebug(graphics, points, extendedAllowedCellKeys);
                     });
                 }
                 drawnCanonicalGroups.add(groupKey);
             });
         }
-        
+
         // 隱藏未使用的文字 (移出 if 區塊，確保即使所有線段被刪除也能正確隱藏)
         if (scene.logisticsNumberTexts) {
             scene.logisticsNumberTexts.forEach((txt, key) => {
@@ -2017,7 +2024,7 @@ export class LogisticsRenderer {
         const lineDepth = scene?.logisticsGraphics?.depth ?? "n/a";
         const itemDepth = scene?.logisticsTransferGraphics?.depth ?? graphics?.depth ?? "n/a";
         const aboveLine = Number.isFinite(itemDepth) && Number.isFinite(lineDepth) ? itemDepth > lineDepth : "n/a";
-                // GameEngine.addLog(
+        // GameEngine.addLog(
         //     `[DEBUG] Transfer render ${String(transfer.itemType || '').toUpperCase()} ` +
         //     `id=${transfer.id || 'none'} ` +
         //     `draw=${LogisticsRenderer.formatPoint({ x: px, y: py })} progress=${Number(transfer.progress || 0).toFixed(2)} ` +
@@ -2197,13 +2204,7 @@ export class LogisticsRenderer {
             const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
             if (points.length < 2) return;
             const suppressedKeys = new Set();
-            if (seg?.suppressOpenEndpointCell && seg.suppressedOpenEndpointCellKey) suppressedKeys.add(seg.suppressedOpenEndpointCellKey);
             if (seg?.detachedFromGroupId && seg.detachedAtKey) suppressedKeys.add(seg.detachedAtKey);
-            if (Array.isArray(seg?.suppressedConnectionCellKeys)) {
-                seg.suppressedConnectionCellKeys.forEach(key => {
-                    if (key) suppressedKeys.add(key);
-                });
-            }
             for (let i = 0; i < points.length - 1; i++) {
                 const a = points[i];
                 const b = points[i + 1];
@@ -2335,10 +2336,7 @@ export class LogisticsRenderer {
         const seen = new Set();
         const suppressedEndpointKeys = new Set(
             (Array.isArray(groupSegs) ? groupSegs : [])
-                .flatMap(seg => [
-                    seg?.suppressedOpenEndpointCellKey,
-                    ...(Array.isArray(seg?.suppressedConnectionCellKeys) ? seg.suppressedConnectionCellKeys : [])
-                ])
+                .map(seg => seg?.detachedFromGroupId && seg.detachedAtKey ? seg.detachedAtKey : null)
                 .filter(Boolean)
         );
         const normalize = (points) => {
@@ -2371,24 +2369,271 @@ export class LogisticsRenderer {
         };
 
         LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(groupSegs).forEach(addRoute);
-        if (routes.length > 0) return routes;
-
-        (state.mapEntities || []).forEach(ent => {
-            (ent?.outputTargets || []).forEach(conn => {
-                if (conn?.lineId !== groupKey) return;
-                addRoute(conn.routePoints);
+        if (routes.length === 0) {
+            (state.mapEntities || []).forEach(ent => {
+                (ent?.outputTargets || []).forEach(conn => {
+                    if (conn?.lineId !== groupKey) return;
+                    addRoute(conn.routePoints);
+                });
             });
-        });
-        if (routes.length > 0) return routes;
+        }
+        if (routes.length === 0) {
+            (Array.isArray(groupSegs) ? groupSegs : []).forEach(seg => {
+                const pts = normalize(seg?.routePoints);
+                if (pts) addRoute(pts);
+            });
+        }
 
-        const fallback = [];
-        (Array.isArray(groupSegs) ? groupSegs : []).forEach(seg => {
-            const pts = normalize(seg?.routePoints);
-            if (!pts) return;
-            addRoute(pts);
+        const TS = GameEngine.TILE_SIZE || 20;
+        const matchDist = TS * 2.5;
+        const nodes = conveyorSystem?.ensureLogisticsMergeNodeStore
+            ? conveyorSystem.ensureLogisticsMergeNodeStore(state)
+            : (state.logisticsMergeNodes || []);
+        const getStateGroupSegments = (targetGroupId) => {
+            if (!targetGroupId) return [];
+            if (conveyorSystem?.getLogisticsSegmentsByGroupId) {
+                const segs = conveyorSystem.getLogisticsSegmentsByGroupId(targetGroupId);
+                if (Array.isArray(segs) && segs.length > 0) return segs;
+            }
+            return (Array.isArray(state.logisticsLines) ? state.logisticsLines : [])
+                .filter(line => (line?.groupId || line?.id || null) === targetGroupId);
+        };
+        const sliceRouteFromAnchor = (route, anchorPoint) => {
+            if (!Array.isArray(route) || route.length < 2 || !anchorPoint) return null;
+            let bestIndex = -1;
+            let bestDist = Infinity;
+            route.forEach((point, index) => {
+                const dist = Math.hypot(point.x - anchorPoint.x, point.y - anchorPoint.y);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestIndex = index;
+                }
+            });
+            if (bestIndex < 0 || bestDist > matchDist) return null;
+            const sliced = route.slice(bestIndex).map(point => ({ x: point.x, y: point.y }));
+            if (sliced.length < 2) return null;
+            sliced[0] = { x: anchorPoint.x, y: anchorPoint.y };
+            return sliced;
+        };
+        const getRouteExitDir = (route) => {
+            if (!Array.isArray(route) || route.length < 2) return null;
+            return LogisticsRenderer.getCardinalDir(route[0], route[1]);
+        };
+        const isOppositeDir = (a, b) => !!a && !!b && a.x === -b.x && a.y === -b.y;
+        const isSameDir = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y;
+        const findGeometricOutputRoute = (currentGroupId, anchorPoint, visitedGroupIds, incomingDir = null) => {
+            if (!anchorPoint) return null;
+            const groups = [...new Set((Array.isArray(state.logisticsLines) ? state.logisticsLines : [])
+                .map(line => line?.groupId || line?.id || null)
+                .filter(Boolean))];
+            const candidates = [];
+            for (const candidateGroupId of groups) {
+                if (candidateGroupId === currentGroupId || visitedGroupIds.has(candidateGroupId)) continue;
+                const candidateRoutes = [];
+                if (conveyorSystem?.getLogisticsGroupRoutePoints) {
+                    const systemRoute = conveyorSystem.getLogisticsGroupRoutePoints(candidateGroupId, anchorPoint);
+                    if (Array.isArray(systemRoute) && systemRoute.length >= 2) candidateRoutes.push(systemRoute);
+                }
+                LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(getStateGroupSegments(candidateGroupId))
+                    .forEach(route => candidateRoutes.push(route));
+                for (const points of candidateRoutes) {
+                    const route = sliceRouteFromAnchor(points, anchorPoint);
+                    if (!route) continue;
+                    const exitDir = getRouteExitDir(route);
+                    if (isOppositeDir(incomingDir, exitDir)) continue;
+                    candidates.push({
+                        groupId: candidateGroupId,
+                        route,
+                        score: isSameDir(incomingDir, exitDir) ? 1 : 0
+                    });
+                }
+            }
+            candidates.sort((a, b) => a.score - b.score);
+            return candidates[0] || null;
+        };
+
+        const extendedRoutes = routes.map(route => {
+            let currentRoute = [...route];
+            let currentGroupId = groupKey;
+            const visitedGroupIds = new Set([groupKey]);
+
+            while (true) {
+                let lastPt = currentRoute[currentRoute.length - 1];
+                let firstPt = currentRoute[0];
+                if (!lastPt) break;
+
+                let isReverseMatch = false;
+                const mergeNode = nodes.find(node => {
+                    if (!node || !node.outputGroupId || !Array.isArray(node.inputGroupIds)) return false;
+                    const isIncluded = node.inputGroupIds.includes(currentGroupId);
+                    const np = node.point || { x: node.x, y: node.y };
+                    const distLast = Math.hypot(lastPt.x - np.x, lastPt.y - np.y);
+                    const distFirst = Math.hypot(firstPt.x - np.x, firstPt.y - np.y);
+                    
+                    if (isIncluded && (distLast <= matchDist || distFirst <= matchDist)) {
+                        if (distFirst < distLast) {
+                            isReverseMatch = true;
+                        }
+                        return true;
+                    }
+                    return false;
+                });
+
+                let nextGroupId = null;
+                let nextRoute = null;
+                if (mergeNode) {
+                    // 更新最後一個點
+                    lastPt = currentRoute[currentRoute.length - 1];
+                    nextGroupId = mergeNode.outputGroupId;
+                    if (conveyorSystem?.getLogisticsMergeNodeOutputRoute) {
+                        nextRoute = conveyorSystem.getLogisticsMergeNodeOutputRoute(mergeNode);
+                    } else if (state.logisticsMergeNodeStore && typeof state.logisticsMergeNodeStore.getLogisticsMergeNodeOutputRoute === 'function') {
+                        nextRoute = state.logisticsMergeNodeStore.getLogisticsMergeNodeOutputRoute(mergeNode);
+                    }
+
+                    if (!nextRoute && conveyorSystem?.getLogisticsSegmentsByGroupId) {
+                        const nextSegs = conveyorSystem.getLogisticsSegmentsByGroupId(nextGroupId);
+                        if (nextSegs && nextSegs.length > 0) {
+                            nextRoute = conveyorSystem.getLogisticsGroupRoutePoints(nextGroupId);
+                        }
+                    }
+                } else {
+                    const incomingDir = currentRoute.length >= 2
+                        ? LogisticsRenderer.getCardinalDir(currentRoute[currentRoute.length - 2], lastPt)
+                        : null;
+                    const reverseIncomingDir = currentRoute.length >= 2
+                        ? LogisticsRenderer.getCardinalDir(currentRoute[1], firstPt)
+                        : null;
+                    const fallback = findGeometricOutputRoute(currentGroupId, lastPt, visitedGroupIds, incomingDir);
+                    const reverseFallback = fallback ? null : findGeometricOutputRoute(currentGroupId, firstPt, visitedGroupIds, reverseIncomingDir);
+                    const chosenFallback = fallback || reverseFallback;
+                    if (!chosenFallback) break;
+                    isReverseMatch = !!reverseFallback;
+                    nextGroupId = chosenFallback.groupId;
+                    nextRoute = chosenFallback.route;
+                }
+
+                if (visitedGroupIds.has(nextGroupId)) break;
+                visitedGroupIds.add(nextGroupId);
+
+                if (!nextRoute || nextRoute.length < 2) break;
+
+                const nextStart = nextRoute[0];
+                const nextEnd = nextRoute[nextRoute.length - 1];
+
+                if (isReverseMatch) {
+                    const distStartToFirst = Math.hypot(nextStart.x - firstPt.x, nextStart.y - firstPt.y);
+                    const distEndToFirst = Math.hypot(nextEnd.x - firstPt.x, nextEnd.y - firstPt.y);
+                    
+                    let toPrepend = [...nextRoute];
+                    if (distStartToFirst < distEndToFirst) {
+                        toPrepend.reverse();
+                    }
+
+                    if (toPrepend.length > 0 && currentRoute.length > 0) {
+                        const match = Math.hypot(toPrepend[toPrepend.length - 1].x - firstPt.x, toPrepend[toPrepend.length - 1].y - firstPt.y) < 1;
+                        if (match) {
+                            toPrepend.pop();
+                        }
+                    }
+                    currentRoute = [...toPrepend, ...currentRoute];
+                } else {
+                    const distStartToLast = Math.hypot(nextStart.x - lastPt.x, nextStart.y - lastPt.y);
+                    const distEndToLast = Math.hypot(nextEnd.x - lastPt.x, nextEnd.y - lastPt.y);
+
+                    let toAppend = [...nextRoute];
+                    if (distEndToLast < distStartToLast) {
+                        toAppend.reverse();
+                    }
+
+                    const startIdx = Math.hypot(toAppend[0].x - lastPt.x, toAppend[0].y - lastPt.y) < 1 ? 1 : 0;
+                    for (let i = startIdx; i < toAppend.length; i++) {
+                        currentRoute.push({ x: toAppend[i].x, y: toAppend[i].y });
+                    }
+                }
+
+                currentGroupId = nextGroupId;
+            }
+            return currentRoute;
         });
-        addRoute(fallback);
-        return routes;
+
+        const finalRoutes = [];
+        const finalSeen = new Set();
+        const addFinalRoute = (points) => {
+            const clean = normalize(points);
+            if (!clean) return;
+            const key = clean.map(p => `${Math.round(p.x)},${Math.round(p.y)}`).join("|");
+            if (finalSeen.has(key)) return;
+            finalSeen.add(key);
+            finalRoutes.push(clean);
+        };
+        const isNear = (a, b, distance = matchDist) => !!a && !!b &&
+            Math.hypot(a.x - b.x, a.y - b.y) <= distance;
+        const orientRouteToEndAt = (route, point) => {
+            if (!Array.isArray(route) || route.length < 2 || !point) return null;
+            const copy = route.map(p => ({ x: p.x, y: p.y }));
+            const first = copy[0];
+            const last = copy[copy.length - 1];
+            if (isNear(last, point)) return copy;
+            if (isNear(first, point)) return copy.reverse();
+            return null;
+        };
+        const orientRouteToStartAt = (route, point) => {
+            if (!Array.isArray(route) || route.length < 2 || !point) return null;
+            const copy = route.map(p => ({ x: p.x, y: p.y }));
+            const first = copy[0];
+            const last = copy[copy.length - 1];
+            if (isNear(first, point)) return copy;
+            if (isNear(last, point)) return copy.reverse();
+            return null;
+        };
+        const appendRoute = (head, tail) => {
+            const merged = head.map(p => ({ x: p.x, y: p.y }));
+            const startIndex = merged.length > 0 && tail.length > 0 && isNear(merged[merged.length - 1], tail[0], 1)
+                ? 1
+                : 0;
+            for (let i = startIndex; i < tail.length; i++) {
+                merged.push({ x: tail[i].x, y: tail[i].y });
+            }
+            return merged;
+        };
+
+        const outputBackfillRoutes = [];
+
+        nodes
+            .filter(node => node && node.outputGroupId === groupKey && Array.isArray(node.inputGroupIds))
+            .forEach(node => {
+                const nodePoint = node.point || { x: node.x, y: node.y };
+                if (!nodePoint) return;
+
+                let outputRoute = null;
+                if (conveyorSystem?.getLogisticsMergeNodeOutputRoute) {
+                    outputRoute = conveyorSystem.getLogisticsMergeNodeOutputRoute(node);
+                }
+                if (!outputRoute) {
+                    outputRoute = extendedRoutes.find(route =>
+                        isNear(route?.[0], nodePoint) || isNear(route?.[route.length - 1], nodePoint)
+                    );
+                }
+                const orientedOutputRoute = orientRouteToStartAt(outputRoute, nodePoint);
+                if (!orientedOutputRoute) return;
+
+                node.inputGroupIds.forEach(inputGroupId => {
+                    const inputSegs = conveyorSystem?.getLogisticsSegmentsByGroupId
+                        ? conveyorSystem.getLogisticsSegmentsByGroupId(inputGroupId)
+                        : [];
+                    LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(inputSegs).forEach(inputRoute => {
+                        const orientedInputRoute = orientRouteToEndAt(inputRoute, nodePoint);
+                        if (!orientedInputRoute) return;
+                        outputBackfillRoutes.push(appendRoute(orientedInputRoute, orientedOutputRoute));
+                    });
+                });
+            });
+
+        outputBackfillRoutes.forEach(addFinalRoute);
+        extendedRoutes.forEach(addFinalRoute);
+
+        return finalRoutes;
     }
 
     static drawRoutePointsDebug(g, points, allowedCellKeys = null) {

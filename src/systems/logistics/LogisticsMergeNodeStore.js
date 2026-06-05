@@ -6,7 +6,7 @@ export class LogisticsMergeNodeStore {
     }
 
     getMergeDirectionTolerance() {
-        return Math.max(1, (GameEngine.TILE_SIZE || 20) * 0.25);
+        return Math.max(1, (GameEngine.TILE_SIZE || 20) * 0.75);
     }
 
     isPointNear(a, b, tolerance = this.getMergeDirectionTolerance()) {
