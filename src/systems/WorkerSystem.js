@@ -2437,6 +2437,94 @@ export class WorkerSystem {
                 return activeDistance < cellSize;
             });
         };
+        const getPathDistanceToPoint = (points, point) => {
+            if (!Array.isArray(points) || points.length < 2 || !point) return 0;
+            let bestDist = Infinity;
+            let bestPathDist = 0;
+            let total = 0;
+            for (let j = 0; j < points.length - 1; j++) {
+                const a = points[j];
+                const b = points[j + 1];
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const len = Math.hypot(dx, dy);
+                const lenSq = dx * dx + dy * dy;
+                if (lenSq > 0) {
+                    const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
+                    const proj = { x: a.x + dx * t, y: a.y + dy * t };
+                    const dist = Math.hypot(point.x - proj.x, point.y - proj.y);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestPathDist = total + len * t;
+                    }
+                }
+                total += len;
+            }
+            return bestPathDist;
+        };
+        const getMergeAdmissionWinner = (node, spacing) => {
+            if (!node || !Array.isArray(node.inputGroupIds)) return null;
+            const mergePoint = node.point || { x: node.x, y: node.y };
+            const key = `${node.outputGroupId || "output"}:${Math.round(mergePoint.x || 0)},${Math.round(mergePoint.y || 0)}`;
+            const contendersByLine = new Map();
+            state.activeTransfers.forEach(other => {
+                if (!other || !node.inputGroupIds.includes(other.lineId)) return;
+                if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
+                const otherTotal = getTransferRouteMetrics(other).totalPixels;
+                if (otherTotal <= 0) return;
+                const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
+                if (otherDistance < otherTotal - spacing - 0.1) return;
+                const current = contendersByLine.get(other.lineId);
+                if (!current || otherDistance > current.distance || (
+                    Math.abs(otherDistance - current.distance) <= 0.1 &&
+                    String(other.id || "") < String(current.transfer.id || "")
+                )) {
+                    contendersByLine.set(other.lineId, { transfer: other, distance: otherDistance });
+                }
+            });
+            const contenders = Array.from(contendersByLine.values())
+                .map(item => item.transfer)
+                .filter(item => item?.id)
+                .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+            if (contenders.length <= 1) return contenders[0]?.id || null;
+            const signature = contenders.map(item => item.id).join("|");
+            if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
+            const previous = state._logisticsMergeAdmissionWinners[key];
+            if (previous && previous.signature === signature && contenders.some(item => item.id === previous.winnerId)) {
+                return previous.winnerId;
+            }
+            const winner = contenders[Math.floor(Math.random() * contenders.length)];
+            state._logisticsMergeAdmissionWinners[key] = { signature, winnerId: winner.id };
+            return winner.id;
+        };
+        const getMergeInputMaxDistance = (transfer, totalLength, spacing) => {
+            if (!conveyorSystem || typeof conveyorSystem.getLogisticsMergeNodeForInputTransfer !== 'function') {
+                return totalLength;
+            }
+            const node = conveyorSystem.getLogisticsMergeNodeForInputTransfer(transfer, state);
+            if (!node || !node.outputGroupId) return totalLength;
+            const mergePoint = node.point || { x: node.x, y: node.y };
+            let requiredWait = 0;
+            state.activeTransfers.forEach(other => {
+                if (!other || other === transfer || other.lineId !== node.outputGroupId) return;
+                if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
+                const otherTotal = getTransferRouteMetrics(other).totalPixels;
+                if (otherTotal <= 0) return;
+                const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
+                const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
+                const distFromMerge = otherDistance - mergeDistance;
+                requiredWait = Math.max(requiredWait, Math.max(0, spacing - Math.abs(distFromMerge)));
+            });
+            if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
+            const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
+            if (desired >= totalLength - spacing - 0.1) {
+                const winnerId = getMergeAdmissionWinner(node, spacing);
+                if (winnerId && transfer.id && transfer.id !== winnerId) {
+                    return Math.max(0, totalLength - spacing);
+                }
+            }
+            return totalLength;
+        };
 
         // ==========================================
         // [新增] 計算每條物流線上物品的最大允許進度以實現堆積 (Backpressure & Stacking)
@@ -2511,6 +2599,8 @@ export class WorkerSystem {
                 if (j === 0) {
                     if (isBreakpoint) {
                         maxDist = dist_pn;
+                    } else if (isMergeInput) {
+                        maxDist = Math.min(totalLength, getMergeInputMaxDistance(t, totalLength, spacing));
                     } else {
                         maxDist = totalLength;
                     }

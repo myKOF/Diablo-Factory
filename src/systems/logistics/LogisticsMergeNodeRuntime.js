@@ -68,6 +68,50 @@ export class LogisticsMergeNodeRuntime {
                 return Math.abs(distFromMerge) < minTransferSpacing - 0.1;
             });
         };
+        const stopBeforeMergePoint = (transfer) => {
+            const total = getRouteLength(transfer.routePoints);
+            if (total <= 0) {
+                transfer.progress = 1;
+                return;
+            }
+            const waitDistance = Math.max(0, total - minTransferSpacing);
+            transfer.progress = Math.max(0, Math.min(1, waitDistance / total));
+        };
+        const getMergeAdmissionWinner = (node) => {
+            if (!node || !Array.isArray(node.inputGroupIds)) return null;
+            const mergePoint = node.point || { x: node.x, y: node.y };
+            const key = `${node.outputGroupId || "output"}:${Math.round(mergePoint.x || 0)},${Math.round(mergePoint.y || 0)}`;
+            const contendersByLine = new Map();
+            state.activeTransfers.forEach(other => {
+                if (!other || !node.inputGroupIds.includes(other.lineId)) return;
+                if (Number(other.progress) < 0.999) return;
+                const route = Array.isArray(other.routePoints) ? other.routePoints : [];
+                const total = getRouteLength(route);
+                if (total <= 0) return;
+                const current = contendersByLine.get(other.lineId);
+                const distance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * total;
+                if (!current || distance > current.distance || (
+                    Math.abs(distance - current.distance) <= 0.1 &&
+                    String(other.id || "") < String(current.transfer.id || "")
+                )) {
+                    contendersByLine.set(other.lineId, { transfer: other, distance });
+                }
+            });
+            const contenders = Array.from(contendersByLine.values())
+                .map(item => item.transfer)
+                .filter(item => item?.id)
+                .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+            if (contenders.length <= 1) return contenders[0]?.id || null;
+            const signature = contenders.map(item => item.id).join("|");
+            if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
+            const previous = state._logisticsMergeAdmissionWinners[key];
+            if (previous && previous.signature === signature && contenders.some(item => item.id === previous.winnerId)) {
+                return previous.winnerId;
+            }
+            const winner = contenders[Math.floor(Math.random() * contenders.length)];
+            state._logisticsMergeAdmissionWinners[key] = { signature, winnerId: winner.id };
+            return winner.id;
+        };
 
         const findNodeForTransfer = (transfer) => {
             if (Number(transfer?.progress) < 0.999) return null;
@@ -79,8 +123,15 @@ export class LogisticsMergeNodeRuntime {
             if (!node) return;
             const route = this.system.getLogisticsMergeNodeOutputRoute(node);
             if (!Array.isArray(route) || route.length < 2) return;
+            const winnerId = getMergeAdmissionWinner(node);
+            if (winnerId && transfer.id && transfer.id !== winnerId) {
+                stopBeforeMergePoint(transfer);
+                transfer.queueBlocked = true;
+                delete transfer.blockedOnBrokenLine;
+                return;
+            }
             if (isOutputEntryOccupied(transfer, node)) {
-                transfer.progress = 1;
+                stopBeforeMergePoint(transfer);
                 transfer.queueBlocked = true;
                 delete transfer.blockedOnBrokenLine;
                 return;

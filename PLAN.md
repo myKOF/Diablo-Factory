@@ -260,3 +260,45 @@
 - [x] 步驟 2：修改 `src/systems/logistics/LogisticsTransferQueues.js` 中的 `otherTransfers` 過濾條件，排除同一個 `lineId` 的其他車輛。
 - [ ] 步驟 3：執行 `npm run test:e2e` 或自測腳本，觀察物品流動，確認起點物品不再卡死。
 - [ ] 步驟 4：執行 `npm run finalize` 收尾。
+
+# 2026-06-05 物流物品邏輯佔位防重疊修正
+
+## 核心目標
+1. 不導入物理碰撞系統，改用既有物流更新流程中的距離佔位與合流點回壓檢查。
+2. 合流 output 入口一格內已有物品時，input 物品不得移入該合流 cell，必須停在自身路徑終點前一格。
+3. WorkerSystem 的移動前限制與 LogisticsTransferQueues 的移動後整理必須使用同一套合流點相對距離公式，避免其中一方覆蓋 `queueBlocked` 狀態。
+4. 既有物品若已經超過允許距離，只能停住並標記阻塞，不強制倒退修正。
+
+## 實施步驟
+- [x] 步驟 1：新增/執行合流不重疊與跨 Merge Node Stacking 回歸測試。
+- [x] 步驟 2：修正 `LogisticsMergeNodeRuntime`，output 入口被佔用時將 input 停在合流點前一格。
+- [x] 步驟 3：修正 `WorkerSystem`，在移動前依 output 線相對合流點距離限制 input 的 `maxAllowedProgress`。
+- [x] 步驟 4：修正 `LogisticsTransferQueues`，同步套用相同合流 output cell 佔位公式並保留只停不退。
+- [x] 步驟 5：執行 Playwright e2e 與 `npm.cmd run finalize`。
+
+# 2026-06-05 回壓隊列空隔移除修正
+
+## 核心目標
+1. 移除回壓時「前方一堵住，後方全部跟著停住」的傳遞式阻塞。
+2. 後方物品只在即將進入前車佔用距離時停止；若前方仍有空間，必須繼續移動補上空隔。
+3. 保留只停不退規則：已經超過允許距離的物品不強制倒退，只標記阻塞。
+
+## 實施步驟
+- [x] 步驟 1：新增後車有空間時必須繼續前進的回歸測試。
+- [x] 步驟 2：移除 `LogisticsTransferQueues` 的 `queueBlockedBehind` 傳遞式阻塞。
+- [x] 步驟 3：執行物流回歸測試、Playwright e2e 與 `npm.cmd run finalize`。
+
+# 2026-06-05 合流點入場隨機仲裁修正
+
+## 核心目標
+1. 同一合流點 output cell 空出時，多條 input 線不得同幀同時移入該空格。
+2. 對已到達合流點前一格的多條 input 線建立隨機 winner；同一批 contenders 在同一幀使用相同 winner。
+3. `WorkerSystem`、`LogisticsTransferQueues`、`LogisticsMergeNodeRuntime` 共用 `state._logisticsMergeAdmissionWinners`，避免三層判定抽到不同物品。
+4. output 線合流點前後一格內有物品時，input 仍必須等待，不得重疊。
+
+## 實施步驟
+- [x] 步驟 1：新增雙 input 同時搶同一合流點空格時只能放行一個的回歸測試。
+- [x] 步驟 2：在 WorkerSystem 移動前限制加入合流點 admission winner。
+- [x] 步驟 3：在 LogisticsTransferQueues 後處理加入相同 admission winner。
+- [x] 步驟 4：在 LogisticsMergeNodeRuntime 實際切換 output group 前加入相同 admission winner。
+- [x] 步驟 5：執行物流回歸、Playwright e2e 與 `npm.cmd run finalize`。

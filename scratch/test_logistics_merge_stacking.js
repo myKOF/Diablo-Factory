@@ -62,13 +62,13 @@ eval(queuesCode);
 
 const testSystemMock = {
     isLogisticsMergeInputTransfer: (transfer, state) => {
-        return transfer.lineId === 'input_line';
+        return transfer.lineId === 'input_line' || transfer.lineId === 'input_line_b';
     },
     getLogisticsMergeNodeForInputTransfer: (transfer, state) => {
-        if (transfer.lineId === 'input_line') {
+        if (transfer.lineId === 'input_line' || transfer.lineId === 'input_line_b') {
             return {
                 outputGroupId: 'output_line',
-                inputGroupIds: ['input_line'],
+                inputGroupIds: ['input_line', 'input_line_b'],
                 point: { x: 100, y: 100 }
             };
         }
@@ -149,6 +149,32 @@ console.log("[DEBUG 2] after tick: t2.progress:", t2.progress, "queueBlocked:", 
 assert(t2.progress === 0.95, `只停不退：超出的 progress 不應被倒退覆寫，實際：${t2.progress}`);
 assert(t2.queueBlocked === true, `只停不退：超出的 progress 應被標記為 queueBlocked`);
 
+const inputA = {
+    id: 'admission_input_a',
+    lineId: 'input_line',
+    routePoints: [{ x: 0, y: 100 }, { x: 100, y: 100 }],
+    progress: 0.8,
+    itemType: 'WOOD',
+    efficiency: 4
+};
+
+const inputB = {
+    id: 'admission_input_b',
+    lineId: 'input_line_b',
+    routePoints: [{ x: 100, y: 0 }, { x: 100, y: 100 }],
+    progress: 0.8,
+    itemType: 'WOOD',
+    efficiency: 4
+};
+
+GameEngine.state.activeTransfers = [inputA, inputB];
+GameEngine.state._logisticsMergeAdmissionWinners = {};
+worker.processAutomatedLogistics(GameEngine.state, 1.0);
+
+const admitted = [inputA, inputB].filter(t => t.progress > 0.8001);
+const waiting = [inputA, inputB].filter(t => t.progress <= 0.8001);
+assert(admitted.length === 1, `同一合流點空出時只能放行一個 input，實際放行：${admitted.length}`);
+assert(waiting.length === 1, `同一合流點空出時另一個 input 應停在前一格，實際等待：${waiting.length}`);
 
 if (passed) {
     console.log("🎉 跨 Merge Node 合流 Stacking 測試全部通過！");

@@ -35,6 +35,69 @@ export class LogisticsTransferQueues {
                     line.suppressedConnectionCellKeys.includes(lastKey);
             });
         };
+        const getMergeAdmissionWinner = (node) => {
+            if (!node || !Array.isArray(node.inputGroupIds)) return null;
+            const mergePoint = node.point || { x: node.x, y: node.y };
+            const key = `${node.outputGroupId || "output"}:${Math.round(mergePoint.x || 0)},${Math.round(mergePoint.y || 0)}`;
+            const contendersByLine = new Map();
+            state.activeTransfers.forEach(other => {
+                if (!other || !node.inputGroupIds.includes(other.lineId)) return;
+                if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
+                const otherTotal = getPathTotalLength(other.routePoints, pathMetricsCache);
+                if (otherTotal <= 0) return;
+                const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
+                if (otherDistance < otherTotal - minTransferSpacing - 0.1) return;
+                const current = contendersByLine.get(other.lineId);
+                if (!current || otherDistance > current.distance || (
+                    Math.abs(otherDistance - current.distance) <= 0.1 &&
+                    String(other.id || "") < String(current.transfer.id || "")
+                )) {
+                    contendersByLine.set(other.lineId, { transfer: other, distance: otherDistance });
+                }
+            });
+            const contenders = Array.from(contendersByLine.values())
+                .map(item => item.transfer)
+                .filter(item => item?.id)
+                .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+            if (contenders.length <= 1) return contenders[0]?.id || null;
+            const signature = contenders.map(item => item.id).join("|");
+            if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
+            const previous = state._logisticsMergeAdmissionWinners[key];
+            if (previous && previous.signature === signature && contenders.some(item => item.id === previous.winnerId)) {
+                return previous.winnerId;
+            }
+            const winner = contenders[Math.floor(Math.random() * contenders.length)];
+            state._logisticsMergeAdmissionWinners[key] = { signature, winnerId: winner.id };
+            return winner.id;
+        };
+        const getMergeInputMaxDistance = (transfer, totalLength) => {
+            if (!this.system || typeof this.system.getLogisticsMergeNodeForInputTransfer !== 'function') {
+                return totalLength;
+            }
+            const node = this.system.getLogisticsMergeNodeForInputTransfer(transfer, state);
+            if (!node || !node.outputGroupId) return totalLength;
+            const mergePoint = node.point || { x: node.x, y: node.y };
+            let requiredWait = 0;
+            state.activeTransfers.forEach(other => {
+                if (!other || other === transfer || other.lineId !== node.outputGroupId) return;
+                if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
+                const otherTotal = getPathTotalLength(other.routePoints, pathMetricsCache);
+                if (otherTotal <= 0) return;
+                const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
+                const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint, pathMetricsCache);
+                const distFromMerge = otherDistance - mergeDistance;
+                requiredWait = Math.max(requiredWait, Math.max(0, minTransferSpacing - Math.abs(distFromMerge)));
+            });
+            if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
+            const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
+            if (desired >= totalLength - minTransferSpacing - 0.1) {
+                const winnerId = getMergeAdmissionWinner(node);
+                if (winnerId && transfer.id && transfer.id !== winnerId) {
+                    return Math.max(0, totalLength - minTransferSpacing);
+                }
+            }
+            return totalLength;
+        };
         const pathKey = (transfer) => {
             if (transfer.lineId) return `line:${transfer.lineId}`;
             const points = transfer.routePoints || [];
@@ -89,7 +152,6 @@ export class LogisticsTransferQueues {
             });
 
             let occupiedProgress = Infinity;
-            let queueBlockedBehind = false;
             transfers.forEach(transfer => {
                 const sourceLength = getPathTotalLength(transfer.routePoints, pathMetricsCache);
                 const totalLength = useCanonical ? canonical.length : sourceLength;
@@ -114,6 +176,9 @@ export class LogisticsTransferQueues {
                     maxAllowed = Math.min(maxAllowed, breakpointLimit);
                 } else {
                     maxAllowed = Math.min(maxAllowed, totalLength);
+                    if (isMergeInput && occupiedProgress === Infinity) {
+                        maxAllowed = Math.min(maxAllowed, getMergeInputMaxDistance(transfer, totalLength));
+                    }
                 }
 
                 let queuedDistance = Math.max(0, Math.min(desired, maxAllowed));
@@ -122,7 +187,7 @@ export class LogisticsTransferQueues {
                 }
 
                 const blockedAtBreakpoint = !transfer.targetId && !isMergeInput && queuedDistance >= breakpointLimit - 0.1;
-                transfer.queueBlocked = queuedDistance < desired - 0.1 || blockedAtBreakpoint || queueBlockedBehind;
+                transfer.queueBlocked = queuedDistance < desired - 0.1 || blockedAtBreakpoint;
                 if (useCanonical) {
                     transfer.routePoints = canonical.points.map(point => ({ ...point }));
                 }
@@ -140,7 +205,6 @@ export class LogisticsTransferQueues {
                 }
 
                 occupiedProgress = Math.min(queuedDistance, currentDistance);
-                queueBlockedBehind = transfer.queueBlocked === true;
             });
         });
     }

@@ -75,6 +75,41 @@ if (brokenTransfer.blockedOnBrokenLine !== true) {
     throw new Error('Deleted gap transfer should be marked blockedOnBrokenLine.');
 }
 
+const gapState = {
+    logisticsLines: [
+        {
+            id: 'blocked_line',
+            groupId: 'blocked_line',
+            routePoints: route.map(point => ({ ...point })),
+            suppressedOpenEndpointCellKey: '100,0',
+            suppressOpenEndpointCell: true
+        }
+    ],
+    activeTransfers: [
+        {
+            id: 'blocked_front',
+            lineId: 'blocked_line',
+            routePoints: route.map(point => ({ ...point })),
+            progress: 0.8,
+            targetId: null
+        },
+        {
+            id: 'gap_rear',
+            lineId: 'blocked_line',
+            routePoints: route.map(point => ({ ...point })),
+            progress: 0.2,
+            targetId: null
+        }
+    ]
+};
+
+queues.applyBlockedQueues(gapState);
+
+const gapRear = gapState.activeTransfers.find(transfer => transfer.id === 'gap_rear');
+if (gapRear.queueBlocked === true) {
+    throw new Error('Rear transfer with free space ahead should keep moving to close the backpressure gap.');
+}
+
 const mergeInputState = {
     activeTransfers: [
         {
