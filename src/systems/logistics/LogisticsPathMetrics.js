@@ -10,7 +10,7 @@ export function buildPathMetrics(points) {
         if (!isFinitePoint(a) || !isFinitePoint(b)) continue;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
-        const len = Math.hypot(dx, dy);
+        const len = Math.abs(dx) + Math.abs(dy);
         segments.push({ a, b, dx, dy, len, start: total });
         total += len;
     }

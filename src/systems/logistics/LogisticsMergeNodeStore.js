@@ -191,6 +191,7 @@ export class LogisticsMergeNodeStore {
             point: { x: snapped.x, y: snapped.y },
             inputGroupIds: [...ultimateInputGroupIds],
             outputGroupId: ultimateOutputGroupId,
+            currentActiveSlot: 0,
             roundRobinIndex: 0
         };
         nodes.push(node);

@@ -8,6 +8,124 @@ export class LogisticsMergeNodeRuntime {
         return this.getGameEngine();
     }
 
+    getRouteLength(route) {
+        if (!Array.isArray(route) || route.length < 2) return 0;
+        let total = 0;
+        for (let i = 0; i < route.length - 1; i++) {
+            const a = route[i];
+            const b = route[i + 1];
+            if (!a || !b) continue;
+            total += Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0));
+        }
+        return total;
+    }
+
+    getMergeNodeKey(node) {
+        const mergePoint = node?.point || { x: node?.x, y: node?.y };
+        return `${node?.outputGroupId || "output"}:${Math.round(mergePoint?.x || 0)},${Math.round(mergePoint?.y || 0)}`;
+    }
+
+    ensureNodeSchedulerState(node) {
+        if (!node || !Array.isArray(node.inputGroupIds) || node.inputGroupIds.length === 0) return;
+        const totalSlots = node.inputGroupIds.length;
+        if (!Number.isInteger(node.currentActiveSlot)) {
+            node.currentActiveSlot = Number.isInteger(node.roundRobinIndex) ? node.roundRobinIndex : 0;
+        }
+        node.currentActiveSlot = ((node.currentActiveSlot % totalSlots) + totalSlots) % totalSlots;
+        node.roundRobinIndex = node.currentActiveSlot;
+    }
+
+    getReadyInputSlots(node, state, readyDistanceFromEnd) {
+        const slots = new Map();
+        if (!node || !Array.isArray(node.inputGroupIds) || !Array.isArray(state?.activeTransfers)) return slots;
+        state.activeTransfers.forEach(transfer => {
+            if (!transfer || !node.inputGroupIds.includes(transfer.lineId)) return;
+            const route = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
+            const total = this.getRouteLength(route);
+            if (total <= 0) return;
+            const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
+            if (distance < total - readyDistanceFromEnd - 0.1) return;
+            const current = slots.get(transfer.lineId);
+            if (!current || distance > current.distance || (
+                Math.abs(distance - current.distance) <= 0.1 &&
+                String(transfer.id || "") < String(current.transfer.id || "")
+            )) {
+                const slotIndex = node.inputGroupIds.indexOf(transfer.lineId);
+                slots.set(transfer.lineId, { transfer, distance, total, slotIndex });
+            }
+        });
+        return slots;
+    }
+
+    selectReadyInputSlot(node, slots, spacing) {
+        this.ensureNodeSchedulerState(node);
+        const inputGroupIds = Array.isArray(node?.inputGroupIds) ? node.inputGroupIds : [];
+        if (inputGroupIds.length === 0 || slots.size === 0) return null;
+
+        const mainInput = node.mainInputGroupId || node.mainInput || inputGroupIds[0];
+        const mainSlot = slots.get(mainInput);
+        const mainHasSevereBackpressure = mainSlot?.transfer?.queueBlocked === true &&
+            mainSlot.distance < mainSlot.total - spacing - 0.1;
+        if (mainSlot && !mainHasSevereBackpressure) {
+            return mainSlot;
+        }
+
+        if (inputGroupIds.length === 1) return null;
+        const sideCount = inputGroupIds.length - 1;
+        const rawStart = Number.isInteger(node.currentActiveSlot) ? node.currentActiveSlot : 1;
+        const start = rawStart <= 0 ? 1 : rawStart;
+        for (let attempt = 0; attempt < sideCount; attempt++) {
+            const slotIndex = ((start - 1 + attempt) % sideCount) + 1;
+            const candidate = slots.get(inputGroupIds[slotIndex]);
+            if (candidate) return candidate;
+        }
+        return null;
+    }
+
+    getLogisticsMergeAdmissionWinner(node, state = this.gameEngine.state, options = {}) {
+        if (!node || !Array.isArray(node.inputGroupIds) || node.inputGroupIds.length === 0) return null;
+        const spacing = Number.isFinite(options.spacing) ? options.spacing : (this.gameEngine.TILE_SIZE || 20);
+        const readyDistanceFromEnd = Number.isFinite(options.readyDistanceFromEnd)
+            ? options.readyDistanceFromEnd
+            : spacing;
+        const slots = this.getReadyInputSlots(node, state, readyDistanceFromEnd);
+        const signature = node.inputGroupIds
+            .map(groupId => slots.get(groupId)?.transfer?.id || "")
+            .join("|");
+        const key = this.getMergeNodeKey(node);
+        if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
+        const previous = state._logisticsMergeAdmissionWinners[key];
+        if (previous && previous.signature === signature && previous.winnerId) {
+            return previous.winnerId;
+        }
+
+        const winnerSlot = this.selectReadyInputSlot(node, slots, spacing);
+        const winnerId = winnerSlot?.transfer?.id || null;
+        state._logisticsMergeAdmissionWinners[key] = {
+            signature,
+            winnerId,
+            winnerSlotIndex: Number.isInteger(winnerSlot?.slotIndex) ? winnerSlot.slotIndex : -1,
+            committed: false
+        };
+        return winnerId;
+    }
+
+    commitLogisticsMergeAdmission(node, winnerId, state = this.gameEngine.state) {
+        if (!node || !winnerId || !Array.isArray(node.inputGroupIds) || node.inputGroupIds.length === 0) return;
+        const key = this.getMergeNodeKey(node);
+        const previous = state?._logisticsMergeAdmissionWinners?.[key] || null;
+        if (previous?.committed === true && previous?.winnerId === winnerId) return;
+        const slotIndex = Number.isInteger(previous?.winnerSlotIndex) && previous.winnerSlotIndex >= 0
+            ? previous.winnerSlotIndex
+            : node.inputGroupIds.findIndex(groupId => {
+                return state.activeTransfers?.some(transfer => transfer?.id === winnerId && transfer.lineId === groupId);
+            });
+        const safeSlotIndex = slotIndex >= 0 ? slotIndex : 0;
+        node.currentActiveSlot = (safeSlotIndex + 1) % node.inputGroupIds.length;
+        node.roundRobinIndex = node.currentActiveSlot;
+        if (previous) previous.committed = true;
+    }
+
     apply(state = this.gameEngine.state) {
         const nodes = this.system.ensureLogisticsMergeNodeStore(state).filter(node =>
             node && Array.isArray(node.inputGroupIds) && node.inputGroupIds.length > 0 && node.outputGroupId
@@ -17,17 +135,6 @@ export class LogisticsMergeNodeRuntime {
         const minTransferSpacing = TS;
 
         let changed = false;
-        const getRouteLength = (route) => {
-            if (!Array.isArray(route) || route.length < 2) return 0;
-            let total = 0;
-            for (let i = 0; i < route.length - 1; i++) {
-                const a = route[i];
-                const b = route[i + 1];
-                if (!a || !b) continue;
-                total += Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0));
-            }
-            return total;
-        };
         const getPathDistanceToPoint = (points, point) => {
             if (!Array.isArray(points) || points.length < 2 || !point) return 0;
             let bestDist = Infinity;
@@ -59,7 +166,7 @@ export class LogisticsMergeNodeRuntime {
             return state.activeTransfers.some(other => {
                 if (!other || other === candidate || other.lineId !== outputGroupId) return false;
                 const route = Array.isArray(other.routePoints) ? other.routePoints : [];
-                const total = getRouteLength(route);
+                const total = this.getRouteLength(route);
                 if (total <= 0) return false;
                 const otherDist = Math.max(0, Math.min(1, Number(other.progress) || 0)) * total;
                 const mergeNodeDistInOther = getPathDistanceToPoint(route, mergePoint);
@@ -69,7 +176,7 @@ export class LogisticsMergeNodeRuntime {
             });
         };
         const stopBeforeMergePoint = (transfer) => {
-            const total = getRouteLength(transfer.routePoints);
+            const total = this.getRouteLength(transfer.routePoints);
             if (total <= 0) {
                 transfer.progress = 1;
                 return;
@@ -78,39 +185,10 @@ export class LogisticsMergeNodeRuntime {
             transfer.progress = Math.max(0, Math.min(1, waitDistance / total));
         };
         const getMergeAdmissionWinner = (node) => {
-            if (!node || !Array.isArray(node.inputGroupIds)) return null;
-            const mergePoint = node.point || { x: node.x, y: node.y };
-            const key = `${node.outputGroupId || "output"}:${Math.round(mergePoint.x || 0)},${Math.round(mergePoint.y || 0)}`;
-            const contendersByLine = new Map();
-            state.activeTransfers.forEach(other => {
-                if (!other || !node.inputGroupIds.includes(other.lineId)) return;
-                if (Number(other.progress) < 0.999) return;
-                const route = Array.isArray(other.routePoints) ? other.routePoints : [];
-                const total = getRouteLength(route);
-                if (total <= 0) return;
-                const current = contendersByLine.get(other.lineId);
-                const distance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * total;
-                if (!current || distance > current.distance || (
-                    Math.abs(distance - current.distance) <= 0.1 &&
-                    String(other.id || "") < String(current.transfer.id || "")
-                )) {
-                    contendersByLine.set(other.lineId, { transfer: other, distance });
-                }
+            return this.getLogisticsMergeAdmissionWinner(node, state, {
+                spacing: minTransferSpacing,
+                readyDistanceFromEnd: 0.1
             });
-            const contenders = Array.from(contendersByLine.values())
-                .map(item => item.transfer)
-                .filter(item => item?.id)
-                .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-            if (contenders.length <= 1) return contenders[0]?.id || null;
-            const signature = contenders.map(item => item.id).join("|");
-            if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
-            const previous = state._logisticsMergeAdmissionWinners[key];
-            if (previous && previous.signature === signature && contenders.some(item => item.id === previous.winnerId)) {
-                return previous.winnerId;
-            }
-            const winner = contenders[Math.floor(Math.random() * contenders.length)];
-            state._logisticsMergeAdmissionWinners[key] = { signature, winnerId: winner.id };
-            return winner.id;
         };
 
         const findNodeForTransfer = (transfer) => {
@@ -137,6 +215,7 @@ export class LogisticsMergeNodeRuntime {
                 return;
             }
             const outputSeg = this.system.getLogisticsSegmentsByGroupId(node.outputGroupId)[0] || null;
+            this.commitLogisticsMergeAdmission(node, transfer.id, state);
             transfer.lineId = node.outputGroupId;
             transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
             transfer.progress = 0;

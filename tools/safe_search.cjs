@@ -3,64 +3,40 @@ const path = require('path');
 
 const query = process.argv[2];
 if (!query) {
-    console.error("Please provide a search query.");
+    console.error("Please provide a search query");
     process.exit(1);
 }
 
-const ignoreDirs = ['node_modules', '.git', 'tmp', 'dist'];
+const rootDir = path.resolve(__dirname, '..');
+const results = [];
 
-function searchDir(dir, queryStr) {
-    let results = [];
-    let files;
-    try {
-        files = fs.readdirSync(dir);
-    } catch (err) {
-        return results;
-    }
-
+function searchDir(dir) {
+    const files = fs.readdirSync(dir);
     for (const file of files) {
+        if (file === 'node_modules' || file === '.git' || file === 'tmp' || file === 'dist') continue;
         const fullPath = path.join(dir, file);
-        let stat;
-        try {
-            stat = fs.statSync(fullPath);
-        } catch (err) {
-            continue;
-        }
-
+        const stat = fs.statSync(fullPath);
         if (stat.isDirectory()) {
-            if (ignoreDirs.includes(file)) continue;
-            results = results.concat(searchDir(fullPath, queryStr));
-        } else if (stat.isFile()) {
-            // Only search text files
-            if (file.endsWith('.js') || file.endsWith('.cjs') || file.endsWith('.json') || file.endsWith('.md') || file.endsWith('.html') || file.endsWith('.css')) {
-                try {
-                    const content = fs.readFileSync(fullPath, 'utf8');
-                    if (content.includes(queryStr)) {
-                        const lines = content.split('\n');
-                        lines.forEach((line, idx) => {
-                            if (line.includes(queryStr)) {
-                                results.push({
-                                    file: path.relative(process.cwd(), fullPath),
-                                    line: idx + 1,
-                                    content: line.trim().substring(0, 150)
-                                });
-                            }
+            searchDir(fullPath);
+        } else if (stat.isFile() && (file.endsWith('.js') || file.endsWith('.cjs') || file.endsWith('.json') || file.endsWith('.html') || file.endsWith('.css'))) {
+            const content = fs.readFileSync(fullPath, 'utf-8');
+            if (content.includes(query)) {
+                let lineNum = 1;
+                const lines = content.split('\n');
+                for (const line of lines) {
+                    if (line.includes(query)) {
+                        results.push({
+                            file: path.relative(rootDir, fullPath),
+                            line: lineNum,
+                            content: line.trim()
                         });
                     }
-                } catch (err) {
-                    // Ignore read errors
+                    lineNum++;
                 }
             }
         }
     }
-    return results;
 }
 
-const matches = searchDir(process.cwd(), query);
-console.log(`Found ${matches.length} matches for "${query}":`);
-matches.slice(0, 50).forEach(m => {
-    console.log(`${m.file}:${m.line}: ${m.content}`);
-});
-if (matches.length > 50) {
-    console.log(`... and ${matches.length - 50} more matches.`);
-}
+searchDir(rootDir);
+console.log(JSON.stringify(results.slice(0, 50), null, 2));

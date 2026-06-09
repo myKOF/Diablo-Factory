@@ -17,10 +17,13 @@ export class LogisticsTransferQueues {
     applyBlockedQueues(state) {
         if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
         const TS = this.gameEngine.TILE_SIZE || 20;
-        const minTransferSpacing = TS;
+        const ITEM_LENGTH = TS;
+        const minTransferSpacing = ITEM_LENGTH;
+        const blockThreshold = ITEM_LENGTH;
+        const releaseThreshold = ITEM_LENGTH * 1.05;
         const pathMetricsCache = new Map();
         const pointKey = (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y)
-            ? `${Math.round(point.x)},${Math.round(point.y)}`
+            ? `${point.x},${point.y}`
             : null;
         const hasSuppressedTerminalEndpoint = (transfer) => {
             const lineId = transfer?.lineId || null;
@@ -37,8 +40,14 @@ export class LogisticsTransferQueues {
         };
         const getMergeAdmissionWinner = (node) => {
             if (!node || !Array.isArray(node.inputGroupIds)) return null;
+            if (this.system && typeof this.system.getLogisticsMergeAdmissionWinner === 'function') {
+                return this.system.getLogisticsMergeAdmissionWinner(node, state, {
+                    spacing: minTransferSpacing,
+                    readyDistanceFromEnd: minTransferSpacing
+                });
+            }
             const mergePoint = node.point || { x: node.x, y: node.y };
-            const key = `${node.outputGroupId || "output"}:${Math.round(mergePoint.x || 0)},${Math.round(mergePoint.y || 0)}`;
+            const key = `${node.outputGroupId || "output"}:${mergePoint.x || 0},${mergePoint.y || 0}`;
             const contendersByLine = new Map();
             state.activeTransfers.forEach(other => {
                 if (!other || !node.inputGroupIds.includes(other.lineId)) return;
@@ -105,8 +114,8 @@ export class LogisticsTransferQueues {
             const last = points[points.length - 1];
             return [
                 "route",
-                first ? `${Math.round(first.x)},${Math.round(first.y)}` : "start",
-                last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"
+                first ? `${first.x},${first.y}` : "start",
+                last ? `${last.x},${last.y}` : "end"
             ].join("|");
         };
         const groups = new Map();
@@ -151,7 +160,7 @@ export class LogisticsTransferQueues {
                 return String(a.id || "").localeCompare(String(b.id || ""));
             });
 
-            let occupiedProgress = Infinity;
+            let prevQueuedDistance = Infinity;
             transfers.forEach(transfer => {
                 const sourceLength = getPathTotalLength(transfer.routePoints, pathMetricsCache);
                 const totalLength = useCanonical ? canonical.length : sourceLength;
@@ -161,7 +170,13 @@ export class LogisticsTransferQueues {
                 const desired = useCanonical
                     ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, sourceDistance, pathMetricsCache), pathMetricsCache)
                     : sourceDistance;
-                let maxAllowed = occupiedProgress - minTransferSpacing;
+                const currentDistance = Math.max(0, Math.min(desired, totalLength));
+                const previousTransferDistance = Number.isFinite(transfer._queuedDistance)
+                    ? Math.max(0, Math.min(transfer._queuedDistance, totalLength))
+                    : currentDistance;
+                let maxAllowed = Number.isFinite(prevQueuedDistance)
+                    ? prevQueuedDistance - ITEM_LENGTH
+                    : Infinity;
                 let breakpointLimit = totalLength;
                 const isMergeInput = this.system.isLogisticsMergeInputTransfer(transfer, state);
 
@@ -176,14 +191,23 @@ export class LogisticsTransferQueues {
                     maxAllowed = Math.min(maxAllowed, breakpointLimit);
                 } else {
                     maxAllowed = Math.min(maxAllowed, totalLength);
-                    if (isMergeInput && occupiedProgress === Infinity) {
+                    if (isMergeInput && prevQueuedDistance === Infinity) {
                         maxAllowed = Math.min(maxAllowed, getMergeInputMaxDistance(transfer, totalLength));
                     }
                 }
 
                 let queuedDistance = Math.max(0, Math.min(desired, maxAllowed));
-                if (Math.abs(queuedDistance - desired) < 0.1) {
-                    queuedDistance = desired;
+                if (Number.isFinite(prevQueuedDistance)) {
+                    const distToFront = prevQueuedDistance - desired;
+                    if (distToFront < blockThreshold) {
+                        queuedDistance = Math.max(0, prevQueuedDistance - ITEM_LENGTH);
+                    } else if (transfer.queueBlocked === true && distToFront < releaseThreshold) {
+                        queuedDistance = Math.min(queuedDistance, previousTransferDistance);
+                    }
+                    queuedDistance = Math.max(0, Math.min(queuedDistance, maxAllowed));
+                }
+                if (currentDistance <= maxAllowed + 0.0001 && Math.abs(queuedDistance - currentDistance) < 0.1) {
+                    queuedDistance = currentDistance;
                 }
 
                 const blockedAtBreakpoint = !transfer.targetId && !isMergeInput && queuedDistance >= breakpointLimit - 0.1;
@@ -191,20 +215,18 @@ export class LogisticsTransferQueues {
                 if (useCanonical) {
                     transfer.routePoints = canonical.points.map(point => ({ ...point }));
                 }
-                const currentDistance = Math.max(0, Math.min(desired, totalLength));
                 const nextDistance = stopBeforeSuppressedEndpoint && currentDistance > breakpointLimit
                     ? breakpointLimit
-                    : queuedDistance < currentDistance - 0.1
-                        ? currentDistance
-                        : queuedDistance;
+                    : queuedDistance;
                 transfer.progress = Math.max(0, Math.min(1, nextDistance / totalLength));
+                transfer._queuedDistance = nextDistance;
                 if (transfer.targetId || isMergeInput) {
                     delete transfer.blockedOnBrokenLine;
                 } else {
                     transfer.blockedOnBrokenLine = true;
                 }
 
-                occupiedProgress = Math.min(queuedDistance, currentDistance);
+                prevQueuedDistance = nextDistance;
             });
         });
     }

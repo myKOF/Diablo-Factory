@@ -302,3 +302,31 @@
 - [x] 步驟 3：在 LogisticsTransferQueues 後處理加入相同 admission winner。
 - [x] 步驟 4：在 LogisticsMergeNodeRuntime 實際切換 output group 前加入相同 admission winner。
 - [x] 步驟 5：執行物流回歸、Playwright e2e 與 `npm.cmd run finalize`。
+
+# 2026-06-09 物流物品長條體路徑佔位修正
+
+## 核心目標
+1. 將傳送帶在途物品視為佔據 `ITEM_LENGTH = TILE_SIZE` 的路徑長條體，而不是單一座標點。
+2. 回壓與排隊邏輯一律沿 `routePoints` 的累積路徑長度計算，轉角不得被視為獨立容器。
+3. 渲染層在轉角段落加入外側位移補償，降低滿載轉彎時的視覺內側重疊感。
+
+## 實施步驟
+- [x] 步驟 1：定位 `applyBlockedTransferQueues`、路徑長度 helper 與物流物品渲染流程。
+- [x] 步驟 2：調整阻塞隊列，使相鄰物品沿路徑長度嚴格維持 `ITEM_LENGTH` 差值，並加入 5% 遲滯死區與微位移保持。
+- [x] 步驟 3：確保轉角位置計算與渲染補償使用同一條連續 route path，不新增第二套容器邏輯。
+- [x] 步驟 4：執行相關物流測試、語法檢查與 `npm run finalize`。
+
+# 2026-06-09 多路合流 Weighted Scheduler 修復
+
+## 核心目標
+1. 將多條物流線同時競爭同一合流點的即時爭搶邏輯改為合流節點狀態機排程。
+2. 每個合流節點保存 `currentActiveSlot` 與輸入槽位順序，確保同一幀最多放行一條輸入線。
+3. 在任何 `transfer.progress` 推進至合流入口前，必須先通過合流格點佔用與入場預約檢查。
+4. 主線輸入優先維持供料；主線為空或被嚴重回堵時，才輪詢副輸入線，避免主線飢餓。
+
+## 實施步驟
+- [x] 步驟 1：定位既有 `LogisticsMergeNodeRuntime`、admission winner 與回壓測試資料流。
+- [x] 步驟 2：新增三輸入同時到達合流點時，每輪只允許一條線入場且三線皆有機會入場的回歸測試。
+- [x] 步驟 3：在合流 runtime 實作節點級 `currentActiveSlot`、主線優先與副線 round-robin 排程。
+- [x] 步驟 4：將 WorkerSystem、LogisticsTransferQueues 與 MergeNodeRuntime 的入場判定改為共用排程結果，避免同幀多層判定不一致。
+- [x] 步驟 5：執行物流回歸、Playwright 驗證與 `npm run finalize`。

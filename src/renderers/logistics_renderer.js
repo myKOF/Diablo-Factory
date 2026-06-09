@@ -466,6 +466,21 @@ export class LogisticsRenderer {
         groupSegments.forEach((segments, groupKey) => {
             if (!Array.isArray(segments) || segments.length === 0) return;
 
+            let allConnectedGroupSegs = segments;
+            if (conveyorSystem && typeof conveyorSystem.getLogisticsMergeConnectedGroupIds === 'function') {
+                const connectedGroupIds = conveyorSystem.getLogisticsMergeConnectedGroupIds(groupKey, state);
+                if (connectedGroupIds && connectedGroupIds.size > 0) {
+                    const allSegs = [];
+                    connectedGroupIds.forEach(gid => {
+                        const segs = groupSegments.get(gid) || [];
+                        allSegs.push(...segs);
+                    });
+                    if (allSegs.length > 0) {
+                        allConnectedGroupSegs = allSegs;
+                    }
+                }
+            }
+
             const adj = new Map();
             const undirected = new Map();
             const cellAdj = new Map();
@@ -482,7 +497,7 @@ export class LogisticsRenderer {
                 cellAdj.get(a).add(b);
                 cellAdj.get(b).add(a);
             };
-            segments.forEach((seg) => {
+            allConnectedGroupSegs.forEach((seg) => {
                 const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
                 if (pts.length < 2) return;
                 const fromKey = makeNodeKey(pts[0]);
@@ -544,11 +559,19 @@ export class LogisticsRenderer {
                     if (cellKeySet.has(nextKey)) addCellEdge(key, nextKey);
                 });
             });
-            const representative = segments.find((seg) => seg && seg.sourceId && seg.targetId) || null;
-            const sourceEnt = representative
+            const segWithSource = allConnectedGroupSegs.find(seg => seg && seg.sourceId);
+            const segWithTarget = allConnectedGroupSegs.find(seg => seg && seg.targetId);
+            const representative = (segWithSource || segWithTarget) ? {
+                sourceId: segWithSource?.sourceId || null,
+                targetId: segWithTarget?.targetId || null,
+                sourcePort: segWithSource?.sourcePort || null,
+                targetPort: segWithTarget?.targetPort || null,
+                routeWidth: segWithSource?.routeWidth || segWithTarget?.routeWidth || 1,
+            } : null;
+            const sourceEnt = representative?.sourceId
                 ? (state.mapEntities?.find((ent) => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === representative.sourceId) || null)
                 : null;
-            const targetEnt = representative
+            const targetEnt = representative?.targetId
                 ? (state.mapEntities?.find((ent) => (ent.id || `${ent.type1}_${ent.x}_${ent.y}`) === representative.targetId) || null)
                 : null;
             const representativePortsCanConnect = () => {
@@ -857,7 +880,7 @@ export class LogisticsRenderer {
                     const sourcePort = representative.sourcePort || null;
                     const targetPort = representative.targetPort || null;
                     const groupEndpoints = [];
-                    segments.forEach((seg) => {
+                    allConnectedGroupSegs.forEach((seg) => {
                         const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
                         if (pts[0]) groupEndpoints.push(pts[0]);
                         if (pts[pts.length - 1]) groupEndpoints.push(pts[pts.length - 1]);
@@ -1462,6 +1485,7 @@ export class LogisticsRenderer {
 
             let px, py;
             if (Array.isArray(routePoints) && routePoints.length >= 2) {
+                LogisticsRenderer.annotateRoutePoints(routePoints);
                 const pathPoint = LogisticsRenderer.getPointOnTransferPath(routePoints, t.progress, 0, t);
                 if (!pathPoint) return;
                 px = pathPoint.x;
@@ -2058,7 +2082,7 @@ export class LogisticsRenderer {
         for (let i = 0; i < points.length - 1; i++) {
             const a = points[i];
             const b = points[i + 1];
-            const length = Math.hypot(b.x - a.x, b.y - a.y);
+            const length = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
             lengths.push(length);
             totalLength += length;
         }
@@ -2082,6 +2106,7 @@ export class LogisticsRenderer {
 
         const safeStartOffset = Math.max(0, Math.min(Number(startOffset) || 0, totalLength * 0.45));
         let targetDistance = safeStartOffset + clampedProgress * (totalLength - safeStartOffset);
+        const absoluteTargetDistance = targetDistance;
         for (let i = 0; i < lengths.length; i++) {
             const length = lengths[i];
             if (targetDistance <= length || i === lengths.length - 1) {
@@ -2089,15 +2114,45 @@ export class LogisticsRenderer {
                 const b = points[i + 1];
                 const localProgress = length > 0 ? targetDistance / length : 0;
 
-                return {
+                const point = {
                     x: a.x + (b.x - a.x) * localProgress,
                     y: a.y + (b.y - a.y) * localProgress
                 };
+                return LogisticsRenderer.applyCornerVisualCompensation(points, absoluteTargetDistance, point);
             }
             targetDistance -= length;
         }
         const last = points[points.length - 1];
         return { x: last.x, y: last.y };
+    }
+
+    static applyCornerVisualCompensation(points, pathDistance, point) {
+        if (!point || !Array.isArray(points) || points.length < 3) return point;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const radius = TS * 0.55;
+        const maxOffset = TS * 0.08;
+        let distanceAtPoint = 0;
+        for (let i = 1; i < points.length - 1; i++) {
+            const prev = points[i - 1];
+            const curr = points[i];
+            const next = points[i + 1];
+            distanceAtPoint += Math.abs(curr.x - prev.x) + Math.abs(curr.y - prev.y);
+            if (curr.isCorner !== true) continue;
+            const distToCorner = Math.abs(pathDistance - distanceAtPoint);
+            if (distToCorner > radius) continue;
+            const inDir = LogisticsRenderer.getCardinalDir(prev, curr);
+            const outDir = LogisticsRenderer.getCardinalDir(curr, next);
+            if (!inDir || !outDir || (inDir.x === outDir.x && inDir.y === outDir.y)) continue;
+            const outside = { x: inDir.x - outDir.x, y: inDir.y - outDir.y };
+            const outsideLen = Math.hypot(outside.x, outside.y) || 1;
+            const weight = 1 - (distToCorner / radius);
+            const offset = maxOffset * weight;
+            return {
+                x: point.x + (outside.x / outsideLen) * offset,
+                y: point.y + (outside.y / outsideLen) * offset
+            };
+        }
+        return point;
     }
 
     static annotateRoutePoints(points) {

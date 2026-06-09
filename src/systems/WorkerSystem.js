@@ -2382,7 +2382,7 @@ export class WorkerSystem {
 
             let total = 0;
             for (let j = 0; j < points.length - 1; j++) {
-                const segLen = Math.hypot(points[j + 1].x - points[j].x, points[j + 1].y - points[j].y);
+                const segLen = Math.abs(points[j + 1].x - points[j].x) + Math.abs(points[j + 1].y - points[j].y);
                 total += segLen;
             }
 
@@ -2447,7 +2447,7 @@ export class WorkerSystem {
                 const b = points[j + 1];
                 const dx = b.x - a.x;
                 const dy = b.y - a.y;
-                const len = Math.hypot(dx, dy);
+                const len = Math.abs(dx) + Math.abs(dy);
                 const lenSq = dx * dx + dy * dy;
                 if (lenSq > 0) {
                     const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
@@ -2464,6 +2464,12 @@ export class WorkerSystem {
         };
         const getMergeAdmissionWinner = (node, spacing) => {
             if (!node || !Array.isArray(node.inputGroupIds)) return null;
+            if (conveyorSystem && typeof conveyorSystem.getLogisticsMergeAdmissionWinner === 'function') {
+                return conveyorSystem.getLogisticsMergeAdmissionWinner(node, state, {
+                    spacing,
+                    readyDistanceFromEnd: spacing
+                });
+            }
             const mergePoint = node.point || { x: node.x, y: node.y };
             const key = `${node.outputGroupId || "output"}:${Math.round(mergePoint.x || 0)},${Math.round(mergePoint.y || 0)}`;
             const contendersByLine = new Map();
@@ -2635,7 +2641,7 @@ export class WorkerSystem {
                     t.progress = maxAllowed;
                 }
             } else if (t.progress > maxAllowed) {
-                // [只停不退] 阻塞時僅標記 queueBlocked，不強行扣減 progress 避免物品往回推
+                // 移動階段只標記阻塞；最終佔位由 LogisticsTransferQueues 統一裁決。
                 t.queueBlocked = true;
             }
 

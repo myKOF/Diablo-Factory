@@ -466,6 +466,10 @@ export class ConveyorSystem {
         return this.mergeNodeStore.isLogisticsMergeInputTransfer(...arguments);
     }
 
+    getLogisticsMergeAdmissionWinner(node, state = GameEngine.state, options = {}) {
+        return this.mergeNodeRuntime.getLogisticsMergeAdmissionWinner(node, state, options);
+    }
+
     applyLogisticsMergeNodes(state = GameEngine.state) {
         return this.mergeNodeRuntime.apply(state);
     }

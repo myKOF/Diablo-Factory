@@ -38,8 +38,9 @@ const rear = state.activeTransfers.find(transfer => transfer.id === 'rear');
 if (!rear.queueBlocked) {
     throw new Error('Rear transfer should be blocked when the front transfer is too close.');
 }
-if (rear.progress < rearBefore - 0.0001) {
-    throw new Error(`Backpressure must not push a transfer backward. Before=${rearBefore}, after=${rear.progress}`);
+const rearDistance = rear.progress * 100;
+if (Math.abs(rearDistance - 30) > 0.0001) {
+    throw new Error(`Rear transfer should be clamped one ITEM_LENGTH behind the front transfer. Before=${rearBefore}, distance=${rearDistance}`);
 }
 
 const brokenRoute = [{ x: 0, y: 0 }, { x: 100, y: 0 }];
