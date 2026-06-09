@@ -834,12 +834,12 @@ export class MainScene extends Phaser.Scene {
             Array.isArray(state.activeTransfers) && state.activeTransfers.length > 0;
 
         if (!hasStaticContent && !hasPreviewContent && !hasTransferContent) {
+            // [核心修復] 獨立清除靜態物流層，避免因地圖無靜態物流線而跳過預覽層清除
             if (this._logisticsLayerWasDrawn) {
                 this.logisticsGraphics.clear();
-                if (this.logisticsPreviewGraphics) this.logisticsPreviewGraphics.clear();
                 if (this.logisticsPortGraphics) this.logisticsPortGraphics.clear();
-                this.logisticsTransferGraphics.clear();
                 this._logisticsLayerWasDrawn = false;
+                this._logisticsPortLayerWasDrawn = false;
                 if (this.logisticsNumberTexts) {
                     this.logisticsNumberTexts.forEach(txt => {
                         if (txt && txt.setVisible) txt.setVisible(false);
@@ -856,6 +856,12 @@ export class MainScene extends Phaser.Scene {
                     });
                 }
             }
+            // [核心修復] 獨立清除預覽層
+            if (this.logisticsPreviewGraphics && this._logisticsPreviewLayerWasDrawn) {
+                this.logisticsPreviewGraphics.clear();
+                this._logisticsPreviewLayerWasDrawn = false;
+            }
+            // [核心修復] 獨立清除傳輸層
             if (this._logisticsTransferLayerWasDrawn) {
                 LogisticsRenderer.renderTransfers(this.logisticsTransferGraphics, state, this);
                 this._logisticsTransferLayerWasDrawn = false;

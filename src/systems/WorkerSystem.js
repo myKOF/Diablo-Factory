@@ -2510,24 +2510,40 @@ export class WorkerSystem {
             const node = conveyorSystem.getLogisticsMergeNodeForInputTransfer(transfer, state);
             if (!node || !node.outputGroupId) return totalLength;
             const mergePoint = node.point || { x: node.x, y: node.y };
+
+            const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
+            const isAtOrPastWaitLine = desired >= totalLength - spacing - 0.1;
+            const winnerId = getMergeAdmissionWinner(node, spacing);
+            const isWinner = winnerId && transfer.id && transfer.id === winnerId;
+
+
             let requiredWait = 0;
             state.activeTransfers.forEach(other => {
-                if (!other || other === transfer || other.lineId !== node.outputGroupId) return;
-                if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
-                const otherTotal = getTransferRouteMetrics(other).totalPixels;
-                if (otherTotal <= 0) return;
-                const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
-                const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
-                const distFromMerge = otherDistance - mergeDistance;
-                requiredWait = Math.max(requiredWait, Math.max(0, spacing - Math.abs(distFromMerge)));
+                if (!other || other === transfer) return;
+                if (other.lineId === node.outputGroupId) {
+                    if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
+                    const otherTotal = getTransferRouteMetrics(other).totalPixels;
+                    if (otherTotal <= 0) return;
+                    const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
+                    const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
+                    const distFromMerge = otherDistance - mergeDistance;
+                    requiredWait = Math.max(requiredWait, Math.max(0, spacing - Math.abs(distFromMerge)));
+                } else if (Array.isArray(node.inputGroupIds) && node.inputGroupIds.includes(other.lineId)) {
+                    if (desired < totalLength - 0.1) {
+                        if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
+                        const otherTotal = getTransferRouteMetrics(other).totalPixels;
+                        if (otherTotal <= 0) return;
+                        const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
+                        const distToMerge = otherTotal - otherDistance;
+                        if (distToMerge < spacing) {
+                            requiredWait = Math.max(requiredWait, Math.max(0, spacing - distToMerge));
+                        }
+                    }
+                }
             });
             if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
-            const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
-            if (desired >= totalLength - spacing - 0.1) {
-                const winnerId = getMergeAdmissionWinner(node, spacing);
-                if (winnerId && transfer.id && transfer.id !== winnerId) {
-                    return Math.max(0, totalLength - spacing);
-                }
+            if (isAtOrPastWaitLine && !isWinner) {
+                return Math.max(0, totalLength - spacing);
             }
             return totalLength;
         };

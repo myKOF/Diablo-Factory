@@ -86,24 +86,40 @@ export class LogisticsTransferQueues {
             const node = this.system.getLogisticsMergeNodeForInputTransfer(transfer, state);
             if (!node || !node.outputGroupId) return totalLength;
             const mergePoint = node.point || { x: node.x, y: node.y };
+
+            const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
+            const isAtOrPastWaitLine = desired >= totalLength - minTransferSpacing - 0.1;
+            const winnerId = getMergeAdmissionWinner(node);
+            const isWinner = winnerId && transfer.id && transfer.id === winnerId;
+
+
             let requiredWait = 0;
             state.activeTransfers.forEach(other => {
-                if (!other || other === transfer || other.lineId !== node.outputGroupId) return;
-                if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
-                const otherTotal = getPathTotalLength(other.routePoints, pathMetricsCache);
-                if (otherTotal <= 0) return;
-                const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
-                const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint, pathMetricsCache);
-                const distFromMerge = otherDistance - mergeDistance;
-                requiredWait = Math.max(requiredWait, Math.max(0, minTransferSpacing - Math.abs(distFromMerge)));
+                if (!other || other === transfer) return;
+                if (other.lineId === node.outputGroupId) {
+                    if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
+                    const otherTotal = getPathTotalLength(other.routePoints, pathMetricsCache);
+                    if (otherTotal <= 0) return;
+                    const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
+                    const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint, pathMetricsCache);
+                    const distFromMerge = otherDistance - mergeDistance;
+                    requiredWait = Math.max(requiredWait, Math.max(0, minTransferSpacing - Math.abs(distFromMerge)));
+                } else if (Array.isArray(node.inputGroupIds) && node.inputGroupIds.includes(other.lineId)) {
+                    if (desired < totalLength - 0.1) {
+                        if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
+                        const otherTotal = getPathTotalLength(other.routePoints, pathMetricsCache);
+                        if (otherTotal <= 0) return;
+                        const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
+                        const distToMerge = otherTotal - otherDistance;
+                        if (distToMerge < minTransferSpacing) {
+                            requiredWait = Math.max(requiredWait, Math.max(0, minTransferSpacing - distToMerge));
+                        }
+                    }
+                }
             });
             if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
-            const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
-            if (desired >= totalLength - minTransferSpacing - 0.1) {
-                const winnerId = getMergeAdmissionWinner(node);
-                if (winnerId && transfer.id && transfer.id !== winnerId) {
-                    return Math.max(0, totalLength - minTransferSpacing);
-                }
+            if (isAtOrPastWaitLine && !isWinner) {
+                return Math.max(0, totalLength - minTransferSpacing);
             }
             return totalLength;
         };
@@ -209,6 +225,7 @@ export class LogisticsTransferQueues {
                 if (currentDistance <= maxAllowed + 0.0001 && Math.abs(queuedDistance - currentDistance) < 0.1) {
                     queuedDistance = currentDistance;
                 }
+
 
                 const blockedAtBreakpoint = !transfer.targetId && !isMergeInput && queuedDistance >= breakpointLimit - 0.1;
                 transfer.queueBlocked = queuedDistance < desired - 0.1 || blockedAtBreakpoint;

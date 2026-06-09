@@ -330,3 +330,15 @@
 - [x] 步驟 3：在合流 runtime 實作節點級 `currentActiveSlot`、主線優先與副線 round-robin 排程。
 - [x] 步驟 4：將 WorkerSystem、LogisticsTransferQueues 與 MergeNodeRuntime 的入場判定改為共用排程結果，避免同幀多層判定不一致。
 - [x] 步驟 5：執行物流回歸、Playwright 驗證與 `npm run finalize`。
+
+# 2026-06-09 右鍵取消物流線建造虛影殘留卡住修復
+
+## 核心目標
+1. 解決當地圖上無任何已建造之靜態物流線時，右鍵取消物流線建造，綠色虛影依然卡在畫面上的 Bug。
+2. 確保在沒有靜態物流線與傳輸粒子的情況下，只要物流線建造預覽曾被繪製過（`_logisticsPreviewLayerWasDrawn` 為 `true`），就必須強制執行 clear() 清除。
+
+## 實施步驟
+- [ ] 步驟 1：定位 `src/scenes/MainScene.js` 裡的 `updateLogisticsLayer`。
+- [ ] 步驟 2：解耦靜態層與預覽層、傳輸層的 clear() 邏輯，當前置狀態為空時，只要 `_logisticsPreviewLayerWasDrawn` 或是 `_logisticsTransferLayerWasDrawn` 為 `true`，就獨立對其對應的 Graphics 進行 `clear()` 並將 flag 設為 `false`。
+- [ ] 步驟 3：手動測試與執行 `npm run finalize` 完成收尾。
+

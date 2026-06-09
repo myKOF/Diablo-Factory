@@ -301,15 +301,8 @@ export class LogisticsMergeNodeStore {
             if (!node.outputGroupId) return false;
             if (!this.system.isLogisticsMergeNodeInputConnectionIntact(node, lineId, state)) return false;
             const p = node.point || { x: node.x, y: node.y };
-            if (!this.canRegisterMergeDirection({
-                inputGroupId: lineId,
-                outputGroupId: node.outputGroupId,
-                point: p
-            })) {
-                return false;
-            }
             if (!endPoint) return true;
-            return p && Math.hypot(endPoint.x - p.x, endPoint.y - p.y) <= TS * 0.75;
+            return p && Math.hypot(endPoint.x - p.x, endPoint.y - p.y) <= TS * 1.5;
         }) || null;
     }
 

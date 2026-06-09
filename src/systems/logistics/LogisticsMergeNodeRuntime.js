@@ -95,6 +95,17 @@ export class LogisticsMergeNodeRuntime {
         const key = this.getMergeNodeKey(node);
         if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
         const previous = state._logisticsMergeAdmissionWinners[key];
+        if (previous && previous.winnerId) {
+            const currentWinnerTransfer = state.activeTransfers.find(t => t && t.id === previous.winnerId);
+            if (currentWinnerTransfer) {
+                const total = this.getRouteLength(currentWinnerTransfer.routePoints);
+                const currentDist = (currentWinnerTransfer.progress || 0) * total;
+                // [Winner 承諾保護] 只要前一次的 winner 還在衝刺或合流點處，繼續保持其 winner 身份，防止被其他剛進站的物品搶奪
+                if (total > 0 && currentDist >= total - spacing - 0.1) {
+                    return previous.winnerId;
+                }
+            }
+        }
         if (previous && previous.signature === signature && previous.winnerId) {
             return previous.winnerId;
         }
