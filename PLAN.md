@@ -469,3 +469,120 @@
 - [x] 步驟 1：新增轉角箭頭內移像素設定。
 - [x] 步驟 2：在 `drawLogisticsGroupTurnArrows()` 套用方向化偏移。
 - [x] 步驟 3：執行語法檢查與 `npm run finalize`。
+
+# 2026-06-10 物流線圓角面片裁切修正
+
+## 核心目標
+1. 消除圓角面片與方形直線格重疊造成的透明度疊加。
+2. 圓角面片只延伸到轉角 cell 的半格邊界，與前後方形格剛好貼合。
+3. 僅修改 `LogisticsRenderer` 的轉角視覺端點，不改路由、佔格、合流與回壓邏輯。
+
+## 實施步驟
+- [x] 步驟 1：確認圓角端點使用整格距離是重疊根因。
+- [x] 步驟 2：將 group 轉角面片端點從整格距離裁到半格距離。
+- [x] 步驟 3：將單段轉角面片端點同步裁到半格距離。
+- [x] 步驟 4：執行語法檢查與 `npm run finalize`。
+
+# 2026-06-10 物流線圓角端點貼合修正
+
+## 核心目標
+1. 消除半格裁切後仍殘留的細縫。
+2. 圓角面片起點切口必須垂直於進入方向，終點切口必須垂直於離開方向。
+3. 只調整轉角面片幾何，不改箭頭、物流路徑、佔格、合流與回壓邏輯。
+
+## 實施步驟
+- [x] 步驟 1：確認細縫來自端點使用曲線切線法線造成的斜切口。
+- [x] 步驟 2：讓 group 轉角面片傳入進入/離開方向作為端點切口方向。
+- [x] 步驟 3：讓單段轉角面片同步使用進入/離開方向作為端點切口方向。
+- [x] 步驟 4：執行語法檢查與 `npm run finalize`。
+
+# 2026-06-10 物流線匯流點朝主線彎曲視覺修正
+
+## 核心目標
+1. 多條物流線匯入主線時，支線在匯合點必須朝 output 主線方向彎曲，而不是各自以獨立直角或星形箭頭收尾。
+2. 僅調整 `LogisticsRenderer` 表現層，沿用 `logisticsMergeNodes`、inputGroupIds 與 outputGroupId，不修改物流路徑、佔格、排程、回壓或合流邏輯。
+3. 匯流 cell 的普通轉角底圖與普通箭頭必須讓位，由 merge 視覺轉角與單一 45 度箭頭負責顯示。
+
+## 實施步驟
+- [x] 步驟 1：定位 renderer 既有 merge node route helper 與 group turn 判定。
+- [x] 步驟 2：依 merge node input/output group 計算每個匯流 cell 的進入方向與主線輸出方向。
+- [x] 步驟 3：在 group 繪製時讓普通轉角/普通箭頭跳過 merge cell，改由 merge 視覺轉角補上。
+- [x] 步驟 4：執行語法檢查與 `npm run finalize`。
+
+# 2026-06-10 物流線匯流中段命中修正
+
+## 核心目標
+1. merge node 位於 route 中段或 segment 上時，也要能推導 input 進入方向與 output 主線方向。
+2. 修復右側支線未朝主線向下彎曲的問題。
+3. 僅修改 `LogisticsRenderer` 視覺方向推導，不改物流路徑、佔格、排程、回壓或合流邏輯。
+
+## 實施步驟
+- [x] 步驟 1：確認原本只檢查 route 起終點是右側匯流未命中的根因。
+- [x] 步驟 2：新增 route 中段/segment 命中方向推導。
+- [x] 步驟 3：merge 視覺轉角改用新的方向推導函式。
+- [x] 步驟 4：執行語法檢查與 `npm run finalize`。
+
+# 2026-06-10 物流線匯流物理交會 fallback 修正
+
+## 核心目標
+1. 未登記在 `logisticsMergeNodes.inputGroupIds` 的物理交會線，也要能顯示朝主線方向彎曲。
+2. 同一 cell 內若某 group 進入、另一 group 具有可輸出的主線方向，支線 group 產生 merge 視覺轉角。
+3. 僅作為 renderer fallback，不寫入物流狀態，不改路徑、佔格、排程、回壓或合流邏輯。
+
+## 實施步驟
+- [x] 步驟 1：確認右側線可能未登記在 merge node input group。
+- [x] 步驟 2：建立跨 group cell incoming/outgoing 方向索引。
+- [x] 步驟 3：為同格物理交會補上支線朝主線方向的 merge 視覺轉角。
+- [x] 步驟 4：執行語法檢查與 `npm run finalize`。
+
+# 2026-06-10 物流線同群組匯流視覺補齊
+
+## 核心目標
+1. 同一匯合點上，後續已併入主線 group 的線段也要能顯示朝主線方向彎曲。
+2. 只在同格接觸方向數達到匯流型節點時放寬同 group 限制，避免普通單一路徑轉角被誤判。
+3. 僅修改 `LogisticsRenderer` 視覺 fallback，不改物流狀態、路徑、佔格、排程或回壓。
+
+## 實施步驟
+- [x] 步驟 1：確認同 group 限制會排除第二條匯流線。
+- [x] 步驟 2：在物理交會 fallback 中加入匯流型節點判定。
+- [x] 步驟 3：匯流型節點允許同 group input/output 形成視覺彎角。
+- [x] 步驟 4：執行語法檢查與 `npm run finalize`。
+
+# 2026-06-10 物流線匯流主線方向校正
+
+## 核心目標
+1. 匯流點視覺彎角必須優先使用 merge node 註冊時保存的 `outputDir`，避免 debug route 在分叉節點用座標排序猜錯主線方向。
+2. 選中物流線的編號延伸路徑也必須依 `outputDir` 挑選匯流後路線，避免匯合後誤往右側外圈繞行。
+3. 僅修改 `LogisticsRenderer` 的表現層方向選擇，不改物流路徑、佔格、合流註冊、排程或回壓邏輯。
+
+## 實施步驟
+- [x] 步驟 1：確認錯誤編號來自 debug route 在多分支交會點猜錯 output 方向。
+- [x] 步驟 2：讓 merge 視覺方向優先讀取 `node.outputDir` 與 `node.inputDirections`。
+- [x] 步驟 3：讓 debug route 延伸依 `outputDir` 篩選匯流後候選路徑。
+- [x] 步驟 4：執行語法檢查與 `npm run finalize`。
+
+# 2026-06-10 三向匯流雙圓角補齊
+
+## 核心目標
+1. 三條物流線匯合為一條主線時，兩個支線方向都必須各自生成朝主線 outputDir 的圓角。
+2. 同一 merge cell 內，所有普通底圖與普通箭頭必須讓位，避免後畫的 group 把匯流圓角蓋掉。
+3. 僅調整 `LogisticsRenderer` 的匯流視覺，不改物流路徑、佔格、合流註冊、排程或回壓邏輯。
+
+## 實施步驟
+- [x] 步驟 1：確認三向匯流缺角來自同格其他 group 普通底圖覆蓋與 incoming 方向未完整補齊。
+- [x] 步驟 2：依 merge node `outputDir` 從同格物理接觸補齊所有 incoming 圓角。
+- [x] 步驟 3：建立全域 merge cell skip，讓所有 group 的普通底圖/箭頭在匯流格讓位。
+- [x] 步驟 4：執行語法檢查與 `npm run finalize`。
+
+# 2026-06-10 三向匯流主線底圖保留
+
+## 核心目標
+1. 三向匯流 cell 必須保留直線主線的方形底圖，避免看起來少一格。
+2. 同一 cell 的兩個匯流圓角仍維持顯示，普通箭頭與普通轉角箭頭仍需讓位。
+3. 僅調整 `LogisticsRenderer` 的底圖 skip 條件，不改物流路徑、佔格、合流註冊、排程或回壓邏輯。
+
+## 實施步驟
+- [x] 步驟 1：確認缺格來自 merge cell 被加入 `roundedBaseSkipCellKeys`。
+- [x] 步驟 2：移除 merge cell 對普通方形底圖的全域 skip。
+- [x] 步驟 3：保留 merge cell 對普通箭頭與普通轉角箭頭的 skip。
+- [x] 步驟 4：執行語法檢查與 `npm run finalize`。

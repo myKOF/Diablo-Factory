@@ -325,6 +325,44 @@ if (branchChoiceRoute.some(point => point.x === 50 && point.y === 50)) {
 
 globalThis.conveyorSystem = {
     ensureLogisticsMergeNodeStore: (state) => state.logisticsMergeNodes || [],
+    getLogisticsMergeNodeOutputRoute: () => [{ x: 30, y: 50 }, { x: 50, y: 50 }]
+};
+const outputDirPreferredState = {
+    logisticsMergeNodes: [
+        {
+            outputGroupId: 'dir_preferred_output',
+            inputGroupIds: ['dir_preferred_input'],
+            point: { x: 30, y: 50 },
+            outputDir: { x: 0, y: 1 }
+        }
+    ],
+    logisticsLines: [
+        makeSegForGroup('dir_preferred_input', 'dir_preferred_input', [[10, 50], [30, 50]]),
+        makeSegForGroup('dir_preferred_wrong', 'dir_preferred_output', [[30, 50], [50, 50]]),
+        makeSegForGroup('dir_preferred_down', 'dir_preferred_output', [[30, 50], [30, 70], [30, 90]])
+    ]
+};
+const outputDirPreferredRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRoutePoints(
+    outputDirPreferredState,
+    'dir_preferred_input',
+    [
+        makeSegForGroup('dir_preferred_input', 'dir_preferred_input', [[10, 50], [30, 50]])
+    ]
+);
+const outputDirPreferredRoute = outputDirPreferredRoutes.find(route =>
+    route[0]?.x === 10 &&
+    route[0]?.y === 50 &&
+    route.some(point => point.x === 30 && point.y === 90)
+);
+if (!outputDirPreferredRoute) {
+    throw new Error('Merge debug route should prefer the candidate whose first step matches node.outputDir.');
+}
+if (outputDirPreferredRoute.some(point => point.x === 50 && point.y === 50)) {
+    throw new Error('Merge debug route should not follow an output candidate that conflicts with node.outputDir.');
+}
+
+globalThis.conveyorSystem = {
+    ensureLogisticsMergeNodeStore: (state) => state.logisticsMergeNodes || [],
     getLogisticsMergeNodeOutputRoute: (node) => {
         if (node.outputGroupId === 'downstream_group') {
             return [{ x: 30, y: 50 }, { x: 30, y: 70 }, { x: 30, y: 90 }];

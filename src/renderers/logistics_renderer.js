@@ -1018,6 +1018,195 @@ export class LogisticsRenderer {
             });
             return keys;
         };
+        const getMergeVisualTurnsByGroup = () => {
+            const result = new Map();
+            const nodes = conveyorSystem?.ensureLogisticsMergeNodeStore
+                ? conveyorSystem.ensureLogisticsMergeNodeStore(state)
+                : (state.logisticsMergeNodes || []);
+            const routeCache = new Map();
+            const nodeSnap = GameEngine.TILE_SIZE * 1.25;
+            const keyOfPoint = (point) => `${Math.round(point.x)},${Math.round(point.y)}`;
+            const normalizeDir = (dir) => {
+                if (!dir || !Number.isFinite(dir.x) || !Number.isFinite(dir.y)) return null;
+                const x = Math.sign(dir.x);
+                const y = Math.sign(dir.y);
+                if (x !== 0 && y !== 0) {
+                    return Math.abs(dir.x) >= Math.abs(dir.y) ? { x, y: 0 } : { x: 0, y };
+                }
+                if (x === 0 && y === 0) return null;
+                return { x, y };
+            };
+            const getStateGroupSegments = (targetGroupId) => {
+                if (!targetGroupId) return [];
+                return (Array.isArray(state.logisticsLines) ? state.logisticsLines : [])
+                    .filter(line => (line?.groupId || line?.id || null) === targetGroupId);
+            };
+            const getGroupRoutes = (targetGroupId) => {
+                if (!targetGroupId) return [];
+                if (routeCache.has(targetGroupId)) return routeCache.get(targetGroupId);
+                const routes = [];
+                if (conveyorSystem?.getLogisticsSegmentsByGroupId) {
+                    LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(conveyorSystem.getLogisticsSegmentsByGroupId(targetGroupId))
+                        .forEach(route => routes.push(route));
+                }
+                LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(getStateGroupSegments(targetGroupId))
+                    .forEach(route => routes.push(route));
+                routeCache.set(targetGroupId, routes);
+                return routes;
+            };
+            const getRouteDirectionAtNode = (route, nodePoint, wantInputEnd) => {
+                if (!Array.isArray(route) || route.length < 2 || !nodePoint) return null;
+                let bestPoint = null;
+                route.forEach((point, index) => {
+                    const dist = Math.hypot(point.x - nodePoint.x, point.y - nodePoint.y);
+                    if (!bestPoint || dist < bestPoint.dist) bestPoint = { index, dist };
+                });
+                if (bestPoint && bestPoint.dist <= nodeSnap) {
+                    const index = bestPoint.index;
+                    if (wantInputEnd) {
+                        if (index > 0) return LogisticsRenderer.getCardinalDir(route[index - 1], route[index]);
+                        if (index < route.length - 1) return LogisticsRenderer.getCardinalDir(route[index + 1], route[index]);
+                    } else {
+                        if (index < route.length - 1) return LogisticsRenderer.getCardinalDir(route[index], route[index + 1]);
+                        if (index > 0) return LogisticsRenderer.getCardinalDir(route[index], route[index - 1]);
+                    }
+                }
+
+                const segmentSnap = Math.max(nodeSnap, GameEngine.TILE_SIZE * 0.55);
+                let bestSegment = null;
+                for (let i = 0; i < route.length - 1; i++) {
+                    const a = route[i];
+                    const b = route[i + 1];
+                    const dx = b.x - a.x;
+                    const dy = b.y - a.y;
+                    const lenSq = dx * dx + dy * dy;
+                    if (lenSq < 0.001) continue;
+                    const t = Math.max(0, Math.min(1, ((nodePoint.x - a.x) * dx + (nodePoint.y - a.y) * dy) / lenSq));
+                    const px = a.x + dx * t;
+                    const py = a.y + dy * t;
+                    const dist = Math.hypot(px - nodePoint.x, py - nodePoint.y);
+                    if (!bestSegment || dist < bestSegment.dist) bestSegment = { a, b, dist };
+                }
+                if (!bestSegment || bestSegment.dist > segmentSnap) return null;
+                return LogisticsRenderer.getCardinalDir(bestSegment.a, bestSegment.b);
+            };
+            const getNodeOutputDir = (node) => normalizeDir(node?.outputDir);
+            const getNodeInputDir = (node, inputGroupId) => normalizeDir(node?.inputDirections?.[inputGroupId]);
+            const addTurn = (targetGroupId, turn) => {
+                if (!targetGroupId || !turn) return;
+                if (!result.has(targetGroupId)) result.set(targetGroupId, []);
+                const existing = result.get(targetGroupId);
+                if (existing.some(item => item.key === turn.key && item.inDir.x === turn.inDir.x && item.inDir.y === turn.inDir.y)) return;
+                existing.push(turn);
+            };
+
+            (Array.isArray(nodes) ? nodes : []).forEach(node => {
+                if (!node || !Array.isArray(node.inputGroupIds) || !node.outputGroupId) return;
+                const nodePoint = node.point || { x: node.x, y: node.y };
+                if (!nodePoint || !Number.isFinite(nodePoint.x) || !Number.isFinite(nodePoint.y)) return;
+                const outDir = getNodeOutputDir(node) || getGroupRoutes(node.outputGroupId)
+                    .map(route => getRouteDirectionAtNode(route, nodePoint, false))
+                    .find(Boolean);
+                if (!outDir) return;
+                const key = keyOfPoint(nodePoint);
+                node.inputGroupIds.forEach(inputGroupId => {
+                    const inDir = getNodeInputDir(node, inputGroupId) || getGroupRoutes(inputGroupId)
+                        .map(route => getRouteDirectionAtNode(route, nodePoint, true))
+                        .find(Boolean);
+                    if (!LogisticsRenderer.getTurnArrowDirection(inDir, outDir)) return;
+                    addTurn(inputGroupId, {
+                        key,
+                        x: Math.round(nodePoint.x),
+                        y: Math.round(nodePoint.y),
+                        inDir,
+                        outDir
+                    });
+                });
+            });
+
+            const contactsByKey = new Map();
+            const pushContact = (key, contact) => {
+                if (!key || !contact?.groupId || !contact.dir) return;
+                if (!contactsByKey.has(key)) contactsByKey.set(key, []);
+                contactsByKey.get(key).push(contact);
+            };
+            groupSegments.forEach((groupSegs, groupId) => {
+                getGroupRoutes(groupId).forEach(route => {
+                    if (!Array.isArray(route) || route.length < 2) return;
+                    for (let i = 0; i < route.length - 1; i++) {
+                        const a = route[i];
+                        const b = route[i + 1];
+                        const dir = LogisticsRenderer.getCardinalDir(a, b);
+                        if (!dir) continue;
+                        const dist = Math.hypot(b.x - a.x, b.y - a.y);
+                        const steps = Math.max(1, Math.round(dist / GameEngine.TILE_SIZE));
+                        let prevKey = null;
+                        for (let step = 0; step <= steps; step++) {
+                            const point = {
+                                x: a.x + dir.x * GameEngine.TILE_SIZE * step,
+                                y: a.y + dir.y * GameEngine.TILE_SIZE * step
+                            };
+                            const key = keyOfPoint(point);
+                            if (prevKey && prevKey !== key) {
+                                const [x, y] = key.split(",").map(Number);
+                                pushContact(prevKey, { groupId, type: "out", dir, x: Math.round(a.x + dir.x * GameEngine.TILE_SIZE * (step - 1)), y: Math.round(a.y + dir.y * GameEngine.TILE_SIZE * (step - 1)) });
+                                pushContact(key, { groupId, type: "in", dir, x, y });
+                            }
+                            prevKey = key;
+                        }
+                    }
+                });
+            });
+            (Array.isArray(nodes) ? nodes : []).forEach(node => {
+                const outDir = getNodeOutputDir(node);
+                if (!outDir) return;
+                const nodePoint = node.point || { x: node.x, y: node.y };
+                if (!nodePoint || !Number.isFinite(nodePoint.x) || !Number.isFinite(nodePoint.y)) return;
+                const key = keyOfPoint(nodePoint);
+                const contacts = contactsByKey.get(key) || [];
+                contacts
+                    .filter(item => item.type === "in")
+                    .forEach(input => {
+                        if (!LogisticsRenderer.getTurnArrowDirection(input.dir, outDir)) return;
+                        addTurn(input.groupId, {
+                            key,
+                            x: Math.round(nodePoint.x),
+                            y: Math.round(nodePoint.y),
+                            inDir: input.dir,
+                            outDir
+                        });
+                    });
+            });
+            contactsByKey.forEach((contacts, key) => {
+                const incoming = contacts.filter(item => item.type === "in");
+                const outgoing = contacts.filter(item => item.type === "out");
+                const distinctContactDirs = new Set(contacts.map(item => `${item.type}:${item.dir.x},${item.dir.y}`));
+                const isMergeLikeContact = distinctContactDirs.size >= 3;
+                incoming.forEach(input => {
+                    const output = outgoing.find(candidate =>
+                        (isMergeLikeContact || candidate.groupId !== input.groupId) &&
+                        LogisticsRenderer.getTurnArrowDirection(input.dir, candidate.dir)
+                    );
+                    if (!output) return;
+                    const [x, y] = key.split(",").map(Number);
+                    addTurn(input.groupId, {
+                        key,
+                        x,
+                        y,
+                        inDir: input.dir,
+                        outDir: output.dir
+                    });
+                });
+            });
+            return result;
+        };
+        const mergeVisualTurnsByGroup = getMergeVisualTurnsByGroup();
+        const mergeVisualTurnCellKeys = new Set();
+        mergeVisualTurnsByGroup.forEach(turns => {
+            (Array.isArray(turns) ? turns : []).forEach(turn => {
+                if (turn?.key) mergeVisualTurnCellKeys.add(turn.key);
+            });
+        });
 
         const primarySelectedGroupId = state.selectedLogisticsGroupId ||
             (state.selectedLogisticsLineId && conveyorSystem?.getLogisticsLineById
@@ -1058,10 +1247,13 @@ export class LogisticsRenderer {
                 const turnCellKeys = pathTurnCellKeys.size > 0
                     ? pathTurnCellKeys
                     : (groupTurnCellKeys.get(groupKey) || null);
+                const mergeVisualTurns = mergeVisualTurnsByGroup.get(groupKey) || [];
                 const useConnectedIdleStyle = isPhysicallyConnected && !isOperating;
                 const effectiveTurnCellKeys = new Set();
                 const roundedBaseSkipCellKeys = new Set(turnCellKeys ? [...turnCellKeys] : []);
                 const detachedSplitArrowCellKeys = LogisticsRenderer.getDetachedSplitArrowCellKeys(groupSegs);
+                const ordinaryTurnSkipCellKeys = new Set(detachedSplitArrowCellKeys);
+                mergeVisualTurnCellKeys.forEach(key => ordinaryTurnSkipCellKeys.add(key));
                 groupSegs.forEach(seg => {
                     if (seg?.turnArrowOverride?.cellKey) effectiveTurnCellKeys.add(seg.turnArrowOverride.cellKey);
                 });
@@ -1076,6 +1268,7 @@ export class LogisticsRenderer {
                         if (key) ordinaryArrowSkipCellKeys.add(key);
                     });
                 }
+                mergeVisualTurnCellKeys.forEach(key => ordinaryArrowSkipCellKeys.add(key));
 
                 {
                     const baseThickness = logCfg.lineThickness || 3;
@@ -1090,6 +1283,14 @@ export class LogisticsRenderer {
                     LogisticsRenderer.drawLogisticsGroupRoundedTurns(
                         graphics,
                         groupSegs,
+                        thickPx,
+                        parseColor(normalColor),
+                        normalAlpha,
+                        ordinaryTurnSkipCellKeys
+                    );
+                    LogisticsRenderer.drawLogisticsMergeVisualTurns(
+                        graphics,
+                        mergeVisualTurns,
                         thickPx,
                         parseColor(normalColor),
                         normalAlpha,
@@ -1133,6 +1334,14 @@ export class LogisticsRenderer {
                         arrowAlpha,
                         arrowSize,
                         null,
+                        ordinaryTurnSkipCellKeys
+                    );
+                    LogisticsRenderer.drawLogisticsMergeVisualTurnArrows(
+                        graphics,
+                        mergeVisualTurns,
+                        arrowColor,
+                        arrowAlpha,
+                        arrowSize,
                         detachedSplitArrowCellKeys
                     );
                 }
@@ -2548,6 +2757,51 @@ export class LogisticsRenderer {
         };
         const isOppositeDir = (a, b) => !!a && !!b && a.x === -b.x && a.y === -b.y;
         const isSameDir = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y;
+        const normalizeDir = (dir) => {
+            if (!dir || !Number.isFinite(dir.x) || !Number.isFinite(dir.y)) return null;
+            const x = Math.sign(dir.x);
+            const y = Math.sign(dir.y);
+            if (x !== 0 && y !== 0) {
+                return Math.abs(dir.x) >= Math.abs(dir.y) ? { x, y: 0 } : { x: 0, y };
+            }
+            if (x === 0 && y === 0) return null;
+            return { x, y };
+        };
+        const orientRouteFromAnchor = (route, anchorPoint, maxDistance = matchDist) => {
+            if (!Array.isArray(route) || route.length < 2 || !anchorPoint) return null;
+            const first = route[0];
+            const last = route[route.length - 1];
+            if (first && Math.hypot(first.x - anchorPoint.x, first.y - anchorPoint.y) <= maxDistance) {
+                const copy = route.map(point => ({ x: point.x, y: point.y }));
+                copy[0] = { x: anchorPoint.x, y: anchorPoint.y };
+                return copy;
+            }
+            if (last && Math.hypot(last.x - anchorPoint.x, last.y - anchorPoint.y) <= maxDistance) {
+                const copy = route.map(point => ({ x: point.x, y: point.y })).reverse();
+                copy[0] = { x: anchorPoint.x, y: anchorPoint.y };
+                return copy;
+            }
+            return sliceRouteFromAnchor(route, anchorPoint, maxDistance);
+        };
+        const chooseMergeOutputRoute = (mergeNode, candidateRoutes) => {
+            const nodePoint = mergeNode?.point || { x: mergeNode?.x, y: mergeNode?.y };
+            if (!nodePoint) return null;
+            const preferredDir = normalizeDir(mergeNode?.outputDir);
+            const oriented = [];
+            (candidateRoutes || []).forEach((route, index) => {
+                const fromAnchor = orientRouteFromAnchor(route, nodePoint);
+                if (!fromAnchor || fromAnchor.length < 2) return;
+                const exitDir = getRouteExitDir(fromAnchor);
+                oriented.push({
+                    route: fromAnchor,
+                    score: preferredDir && isSameDir(preferredDir, exitDir) ? 0 : (preferredDir ? 2 : 1),
+                    index
+                });
+            });
+            if (oriented.length === 0) return null;
+            oriented.sort((a, b) => a.score - b.score || a.index - b.index);
+            return oriented[0].route;
+        };
         const findPhysicalContinuationRoute = (currentGroupId, anchorPoint, visitedGroupIds, incomingDir = null) => {
             if (!anchorPoint) return null;
             const groups = [...new Set((Array.isArray(state.logisticsLines) ? state.logisticsLines : [])
@@ -2611,26 +2865,25 @@ export class LogisticsRenderer {
                     // 更新最後一個點
                     lastPt = currentRoute[currentRoute.length - 1];
                     nextGroupId = mergeNode.outputGroupId;
+                    const outputRouteCandidates = [];
                     if (conveyorSystem?.getLogisticsMergeNodeOutputRoute) {
-                        nextRoute = conveyorSystem.getLogisticsMergeNodeOutputRoute(mergeNode);
+                        const outputRoute = conveyorSystem.getLogisticsMergeNodeOutputRoute(mergeNode);
+                        if (Array.isArray(outputRoute) && outputRoute.length >= 2) outputRouteCandidates.push(outputRoute);
                     } else if (state.logisticsMergeNodeStore && typeof state.logisticsMergeNodeStore.getLogisticsMergeNodeOutputRoute === 'function') {
-                        nextRoute = state.logisticsMergeNodeStore.getLogisticsMergeNodeOutputRoute(mergeNode);
+                        const outputRoute = state.logisticsMergeNodeStore.getLogisticsMergeNodeOutputRoute(mergeNode);
+                        if (Array.isArray(outputRoute) && outputRoute.length >= 2) outputRouteCandidates.push(outputRoute);
                     }
 
-                    if (!nextRoute && conveyorSystem?.getLogisticsSegmentsByGroupId) {
+                    if (conveyorSystem?.getLogisticsSegmentsByGroupId && conveyorSystem?.getLogisticsGroupRoutePoints) {
                         const nextSegs = conveyorSystem.getLogisticsSegmentsByGroupId(nextGroupId);
                         if (nextSegs && nextSegs.length > 0) {
-                            nextRoute = conveyorSystem.getLogisticsGroupRoutePoints(nextGroupId);
+                            const groupRoute = conveyorSystem.getLogisticsGroupRoutePoints(nextGroupId, mergeNode.point || { x: mergeNode.x, y: mergeNode.y });
+                            if (Array.isArray(groupRoute) && groupRoute.length >= 2) outputRouteCandidates.push(groupRoute);
                         }
                     }
-                    if (!nextRoute) {
-                        const nodePoint = mergeNode.point || { x: mergeNode.x, y: mergeNode.y };
-                        const stateRoutes = LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(getStateGroupSegments(nextGroupId));
-                        for (const stateRoute of stateRoutes) {
-                            nextRoute = sliceRouteFromAnchor(stateRoute, nodePoint);
-                            if (nextRoute) break;
-                        }
-                    }
+                    LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(getStateGroupSegments(nextGroupId))
+                        .forEach(stateRoute => outputRouteCandidates.push(stateRoute));
+                    nextRoute = chooseMergeOutputRoute(mergeNode, outputRouteCandidates);
                 } else {
                     const incomingDir = currentRoute.length >= 2
                         ? LogisticsRenderer.getCardinalDir(currentRoute[currentRoute.length - 2], lastPt)
@@ -3059,33 +3312,66 @@ export class LogisticsRenderer {
     static drawLogisticsRoundedTurnSegments(g, points, thickness, color, alpha, skipCellKeys = null) {
         const segments = LogisticsRenderer.getLogisticsRoundedTurnSegments(points, skipCellKeys);
         if (segments.length === 0) return;
-        segments.forEach(segment => LogisticsRenderer.fillLogisticsRibbon(g, segment, thickness, color, alpha));
+        segments.forEach(segment => LogisticsRenderer.fillLogisticsRibbon(g, segment.points, thickness, color, alpha, segment));
     }
 
     static drawLogisticsGroupRoundedTurns(g, groupSegs, thickness, color, alpha, skipCellKeys = null) {
         const turns = LogisticsRenderer.getLogisticsGroupTurnCells(groupSegs);
         if (!Array.isArray(turns) || turns.length === 0) return;
         const TS = GameEngine.TILE_SIZE || 20;
+        const turnRadius = TS / 2;
         const drawn = new Set();
         turns.forEach(({ x, y, inDir, outDir, key }) => {
             if (skipCellKeys?.has(key)) return;
             if (!inDir || !outDir) return;
             if (drawn.has(key)) return;
             drawn.add(key);
-            const entry = { x: x - inDir.x * TS, y: y - inDir.y * TS };
+            const entry = { x: x - inDir.x * turnRadius, y: y - inDir.y * turnRadius };
             const control = { x, y };
-            const exit = { x: x + outDir.x * TS, y: y + outDir.y * TS };
-            LogisticsRenderer.fillQuadraticCornerRibbon(g, entry, control, exit, thickness, color, alpha);
+            const exit = { x: x + outDir.x * turnRadius, y: y + outDir.y * turnRadius };
+            LogisticsRenderer.fillQuadraticCornerRibbon(g, entry, control, exit, thickness, color, alpha, inDir, outDir);
         });
     }
 
-    static fillQuadraticCornerRibbon(g, entry, control, exit, thickness, color, alpha) {
-        if (!g || !entry || !control || !exit) return;
-        const points = LogisticsRenderer.sampleQuadraticCorner(entry, control, exit, 16);
-        LogisticsRenderer.fillLogisticsRibbon(g, points, thickness, color, alpha);
+    static drawLogisticsMergeVisualTurns(g, turns, thickness, color, alpha, skipCellKeys = null) {
+        if (!Array.isArray(turns) || turns.length === 0) return;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const turnRadius = TS / 2;
+        turns.forEach(({ x, y, inDir, outDir, key }) => {
+            if (skipCellKeys?.has(key)) return;
+            if (!inDir || !outDir) return;
+            const entry = { x: x - inDir.x * turnRadius, y: y - inDir.y * turnRadius };
+            const control = { x, y };
+            const exit = { x: x + outDir.x * turnRadius, y: y + outDir.y * turnRadius };
+            LogisticsRenderer.fillQuadraticCornerRibbon(g, entry, control, exit, thickness, color, alpha, inDir, outDir);
+        });
     }
 
-    static fillLogisticsRibbon(g, points, thickness, color, alpha) {
+    static drawLogisticsMergeVisualTurnArrows(g, turns, color, alpha, size, skipCellKeys = null) {
+        if (!Array.isArray(turns) || turns.length === 0) return;
+        const insetOffset = Math.max(0, Number(UI_CONFIG.LogisticsSystem?.turnArrowInsetOffset) || 0);
+        g.fillStyle(color, alpha);
+        turns.forEach(({ x, y, inDir, outDir, key }) => {
+            if (skipCellKeys?.has(key)) return;
+            const turnDir = LogisticsRenderer.getTurnArrowDirection(inDir, outDir);
+            if (!turnDir) return;
+            const arrowSize = Math.max(size * 1.05, GameEngine.TILE_SIZE * 0.32);
+            const offsetX = outDir.x - inDir.x;
+            const offsetY = outDir.y - inDir.y;
+            const offsetLen = Math.hypot(offsetX, offsetY) || 1;
+            const arrowX = x + (offsetX / offsetLen) * insetOffset;
+            const arrowY = y + (offsetY / offsetLen) * insetOffset;
+            LogisticsRenderer.drawArrowhead(g, arrowX, arrowY, turnDir.x, turnDir.y, arrowSize);
+        });
+    }
+
+    static fillQuadraticCornerRibbon(g, entry, control, exit, thickness, color, alpha, startDir = null, endDir = null) {
+        if (!g || !entry || !control || !exit) return;
+        const points = LogisticsRenderer.sampleQuadraticCorner(entry, control, exit, 16);
+        LogisticsRenderer.fillLogisticsRibbon(g, points, thickness, color, alpha, { startDir, endDir });
+    }
+
+    static fillLogisticsRibbon(g, points, thickness, color, alpha, options = {}) {
         if (!g || !Array.isArray(points) || points.length < 2) return;
         const half = Math.max(1, Number(thickness) || 1) / 2;
         const left = [];
@@ -3094,8 +3380,11 @@ export class LogisticsRenderer {
         for (let i = 0; i < points.length; i++) {
             const prev = points[Math.max(0, i - 1)];
             const next = points[Math.min(points.length - 1, i + 1)];
-            const dx = next.x - prev.x;
-            const dy = next.y - prev.y;
+            const forcedDir = i === 0
+                ? options.startDir
+                : (i === points.length - 1 ? options.endDir : null);
+            const dx = forcedDir ? forcedDir.x : (next.x - prev.x);
+            const dy = forcedDir ? forcedDir.y : (next.y - prev.y);
             const len = Math.hypot(dx, dy);
             if (len < 0.001) continue;
             const nx = -dy / len;
@@ -3149,7 +3438,7 @@ export class LogisticsRenderer {
             if (skipCellKeys?.has(currKey)) continue;
             const prevLen = Math.hypot(curr.x - prev.x, curr.y - prev.y);
             const nextLen = Math.hypot(next.x - curr.x, next.y - curr.y);
-            const radius = Math.min(TS, prevLen, nextLen);
+            const radius = Math.min(TS / 2, prevLen, nextLen);
             if (radius < 1) continue;
             const entry = {
                 x: curr.x - inDir.x * radius,
@@ -3159,7 +3448,11 @@ export class LogisticsRenderer {
                 x: curr.x + outDir.x * radius,
                 y: curr.y + outDir.y * radius
             };
-            segments.push(LogisticsRenderer.sampleQuadraticCorner(entry, curr, exit, 12));
+            segments.push({
+                points: LogisticsRenderer.sampleQuadraticCorner(entry, curr, exit, 12),
+                startDir: inDir,
+                endDir: outDir
+            });
         }
         return segments;
     }
