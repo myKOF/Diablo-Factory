@@ -586,3 +586,16 @@
 - [x] 步驟 2：移除 merge cell 對普通方形底圖的全域 skip。
 - [x] 步驟 3：保留 merge cell 對普通箭頭與普通轉角箭頭的 skip。
 - [x] 步驟 4：執行語法檢查與 `npm run finalize`。
+
+# 2026-06-10 接通後匯流主線格保留
+
+## 核心目標
+1. 接通狀態下，`connectedCellPaths` 判定出的 turn cell 不可讓匯流主線方形底圖消失。
+2. 底圖 skip 與普通圓角 skip 必須分離：匯流格保留底圖，但仍跳過普通圓角與普通箭頭。
+3. 僅修改 `LogisticsRenderer` 的繪製參數，不改物流路徑、佔格、合流註冊、排程或回壓邏輯。
+
+## 實施步驟
+- [x] 步驟 1：確認接通後缺格來自 `turnCellKeys` 重新把匯流格加入底圖 skip。
+- [x] 步驟 2：拆分方形底圖 skip 與普通圓角 skip。
+- [x] 步驟 3：匯流格從底圖 skip 移除，但保留在普通圓角/普通箭頭 skip。
+- [x] 步驟 4：執行語法檢查與 `npm run finalize`。

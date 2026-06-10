@@ -133,7 +133,7 @@ export class LogisticsRenderer {
             const endpointKey = end ? `${Math.round(end.x)},${Math.round(end.y)}` : null;
             return !!endpointKey && !isDetachedSplitCell(line, endpointKey);
         };
-        const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null, skipBaseCellKeys = null) => {
+        const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null, skipBaseCellKeys = null, skipRoundedTurnCellKeys = null) => {
             const baseThickness = logCfg.lineThickness || 3;
             const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE);
             const usePortToPortStyle = !!isPortToPort && !!isConnected;
@@ -145,8 +145,9 @@ export class LogisticsRenderer {
                 : (!isConnected ? (logCfg.disconnectedLineAlpha ?? logCfg.lineAlpha) : logCfg.lineAlpha);
 
             const roundedSkipCellKeys = LogisticsRenderer.getLineSkippedCellKeys(line);
-            if (skipBaseCellKeys) {
-                skipBaseCellKeys.forEach(key => {
+            const effectiveRoundedTurnSkipCellKeys = skipRoundedTurnCellKeys || skipBaseCellKeys;
+            if (effectiveRoundedTurnSkipCellKeys) {
+                effectiveRoundedTurnSkipCellKeys.forEach(key => {
                     if (key) roundedSkipCellKeys.add(key);
                 });
             }
@@ -1251,6 +1252,11 @@ export class LogisticsRenderer {
                 const useConnectedIdleStyle = isPhysicallyConnected && !isOperating;
                 const effectiveTurnCellKeys = new Set();
                 const roundedBaseSkipCellKeys = new Set(turnCellKeys ? [...turnCellKeys] : []);
+                const roundedTurnSkipCellKeys = new Set(roundedBaseSkipCellKeys);
+                mergeVisualTurnCellKeys.forEach(key => {
+                    roundedBaseSkipCellKeys.delete(key);
+                    roundedTurnSkipCellKeys.add(key);
+                });
                 const detachedSplitArrowCellKeys = LogisticsRenderer.getDetachedSplitArrowCellKeys(groupSegs);
                 const ordinaryTurnSkipCellKeys = new Set(detachedSplitArrowCellKeys);
                 mergeVisualTurnCellKeys.forEach(key => ordinaryTurnSkipCellKeys.add(key));
@@ -1302,7 +1308,7 @@ export class LogisticsRenderer {
                     const isLineSelected = conveyorSystem && typeof conveyorSystem.isSelectedLogisticsLine === 'function'
                         ? conveyorSystem.isSelectedLogisticsLine(line)
                         : state.selectedLogisticsLineId === line.id;
-                    drawLogisticsRoute(route.points, route.width || widthTiles, isLineSelected, isConnected, line, useConnectedIdleStyle, ordinaryArrowSkipCellKeys, roundedBaseSkipCellKeys);
+                    drawLogisticsRoute(route.points, route.width || widthTiles, isLineSelected, isConnected, line, useConnectedIdleStyle, ordinaryArrowSkipCellKeys, roundedBaseSkipCellKeys, roundedTurnSkipCellKeys);
                 });
                 if (isPortToPortCandidate && useConnectedIdleStyle) {
                     segmentRoutes.forEach(({ route }) => {
