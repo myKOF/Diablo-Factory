@@ -791,6 +791,8 @@ export const UI_CONFIG = {
         arrowSize: 12,                   // 已建立物流線上的流動箭頭大小，範圍建議 6~24；只影響線上動畫箭頭
         disconnectedArrowSize: 12,       // 未設定搬運品項時的靜止箭頭大小
         dragArrowSize: 22,               // 拖曳拉線時前端箭頭大小，範圍建議 8~40；數值越大箭頭越長、物流線終點會更早停在箭頭底部
+        arrowGlobalScale: 0.7,           // 物流線箭頭全域縮放比例；0.7 代表所有物流箭頭等比縮小 30%
+        turnArrowInsetOffset: 6,         // 轉角 45 度箭頭沿轉角內側微調的像素距離；右轉下彎時會向左下偏移
         arrowSpeed: 30,                 // 箭頭前進速度 (像素/秒)
         arrowSpacing: 20,               // 箭頭之間的間距
 
