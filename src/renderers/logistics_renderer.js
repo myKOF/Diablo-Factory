@@ -1245,9 +1245,10 @@ export class LogisticsRenderer {
                     representative.sourceId === representative.targetId;
                 const connectedCellPaths = isSelfConnectedGroup ? [] : rawConnectedCellPaths;
                 const pathTurnCellKeys = getPathTurnCellKeys(connectedCellPaths);
-                const turnCellKeys = pathTurnCellKeys.size > 0
-                    ? pathTurnCellKeys
-                    : (groupTurnCellKeys.get(groupKey) || null);
+                const turnCellKeys = LogisticsRenderer.mergeTurnCellKeys(
+                    pathTurnCellKeys,
+                    groupTurnCellKeys.get(groupKey)
+                );
                 const mergeVisualTurns = mergeVisualTurnsByGroup.get(groupKey) || [];
                 const useConnectedIdleStyle = isPhysicallyConnected && !isOperating;
                 const effectiveTurnCellKeys = new Set();
@@ -3237,6 +3238,17 @@ export class LogisticsRenderer {
         return new Set(LogisticsRenderer.getLogisticsGroupTurnCells(segments).map(turn => turn.key));
     }
 
+    static mergeTurnCellKeys(...sets) {
+        const merged = new Set();
+        sets.forEach(set => {
+            if (!set || typeof set.forEach !== 'function') return;
+            set.forEach(key => {
+                if (key) merged.add(key);
+            });
+        });
+        return merged;
+    }
+
     static getLogisticsGroupTurnCells(segments) {
         if (!Array.isArray(segments) || segments.length === 0) return [];
         const TS = GameEngine.TILE_SIZE;
@@ -3484,11 +3496,15 @@ export class LogisticsRenderer {
     static drawLogisticsMergeVisualTurnArrows(g, turns, color, alpha, size, skipCellKeys = null) {
         if (!Array.isArray(turns) || turns.length === 0) return;
         const insetOffset = Math.max(0, Number(UI_CONFIG.LogisticsSystem?.turnArrowInsetOffset) || 0);
+        const drawnCellKeys = new Set();
         g.fillStyle(color, alpha);
         turns.forEach(({ x, y, inDir, outDir, key }) => {
             if (skipCellKeys?.has(key)) return;
+            const drawKey = key || `${Math.round(x)},${Math.round(y)}`;
+            if (drawnCellKeys.has(drawKey)) return;
             const turnDir = LogisticsRenderer.getTurnArrowDirection(inDir, outDir);
             if (!turnDir) return;
+            drawnCellKeys.add(drawKey);
             const arrowSize = Math.max(size * 1.05, GameEngine.TILE_SIZE * 0.32);
             const offsetX = outDir.x - inDir.x;
             const offsetY = outDir.y - inDir.y;

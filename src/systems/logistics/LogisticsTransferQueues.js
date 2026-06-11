@@ -103,7 +103,9 @@ export class LogisticsTransferQueues {
                     const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
                     const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint, pathMetricsCache);
                     const distFromMerge = otherDistance - mergeDistance;
-                    requiredWait = Math.max(requiredWait, Math.max(0, minTransferSpacing - Math.abs(distFromMerge)));
+                    if (Math.abs(distFromMerge) < minTransferSpacing - 0.1) {
+                        requiredWait = Math.max(requiredWait, minTransferSpacing);
+                    }
                 } else if (!isWinner && Array.isArray(node.inputGroupIds) && node.inputGroupIds.includes(other.lineId)) {
                     if (desired < totalLength - 0.1) {
                         if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;

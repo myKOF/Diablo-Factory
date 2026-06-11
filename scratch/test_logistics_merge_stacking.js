@@ -137,7 +137,7 @@ worker.processAutomatedLogistics(GameEngine.state, 1.0);
 console.log("[DEBUG 1] t2.progress:", t2.progress, "queueBlocked:", t2.queueBlocked);
 
 const t2Dist = t2.progress * 100;
-assert(Math.abs(t2Dist - 80) < 0.1, `t2 距離應被限制在 80px (progress = 0.8)，實際位置：${t2Dist}px (progress = ${t2.progress})`);
+assert(Math.abs(t2Dist - 100) < 0.1, `前車本 tick 已離開入口時，t2 應可抵達合流點，實際位置：${t2Dist}px (progress = ${t2.progress})`);
 
 // 測試 progress 超過 maxAllowed 時，嚴格佔位守衛會修正回合法距離。
 t2.progress = 0.95;
@@ -146,7 +146,7 @@ console.log("[DEBUG 2] setting t2.progress to 0.95, t1.progress to 0.0");
 worker.processAutomatedLogistics(GameEngine.state, 0.001); // 使用極微小時間，防止前車前進
 console.log("[DEBUG 2] after tick: t2.progress:", t2.progress, "queueBlocked:", t2.queueBlocked);
 
-assert(Math.abs(t2.progress - 0.8008) < 0.001, `嚴格佔位：超出的 progress 應被修正至輸出物品後方一格，實際：${t2.progress}`);
+assert(Math.abs(t2.progress - 0.8) < 0.001, `嚴格佔位：入口格未完整空出時應停在等待線，實際：${t2.progress}`);
 assert(t2.queueBlocked === true, `嚴格佔位：超出的 progress 應被標記為 queueBlocked`);
 
 const inputA = {

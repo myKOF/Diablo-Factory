@@ -38,6 +38,74 @@ export class LogisticsMergeNodeRuntime {
         return `${node?.outputGroupId || "output"}:${Math.round(mergePoint?.x || 0)},${Math.round(mergePoint?.y || 0)}`;
     }
 
+    getMergeWaitQueueState(node, state) {
+        const key = this.getMergeNodeKey(node);
+        if (!state._logisticsMergeWaitQueues) state._logisticsMergeWaitQueues = {};
+        if (!state._logisticsMergeWaitQueues[key]) {
+            state._logisticsMergeWaitQueues[key] = { queue: [], incomingQueues: {}, lastServed: null, currentOccupant: null };
+        }
+        const queueState = state._logisticsMergeWaitQueues[key];
+        if (!Array.isArray(queueState.queue)) queueState.queue = [];
+        if (!queueState.incomingQueues || typeof queueState.incomingQueues !== 'object') queueState.incomingQueues = {};
+        if (!node.incomingQueues || typeof node.incomingQueues !== 'object') node.incomingQueues = queueState.incomingQueues;
+        queueState.incomingQueues = node.incomingQueues;
+        if (node.lastServed === undefined) node.lastServed = queueState.lastServed || null;
+        queueState.lastServed = node.lastServed || null;
+        if (node.currentOccupant === undefined) node.currentOccupant = queueState.currentOccupant || null;
+        queueState.currentOccupant = node.currentOccupant || null;
+        return queueState;
+    }
+
+    syncMergeWaitQueue(node, state, slots) {
+        const queueState = this.getMergeWaitQueueState(node, state);
+        const inputGroupIds = Array.isArray(node?.inputGroupIds) ? node.inputGroupIds : [];
+        const readyTransferIdsByLine = new Map();
+        if (Array.isArray(state?.activeTransfers)) {
+            state.activeTransfers.forEach(transfer => {
+                if (!transfer?.id || !inputGroupIds.includes(transfer.lineId)) return;
+                const slot = slots.get(transfer.lineId);
+                if (slot?.transfer?.id === transfer.id) {
+                    readyTransferIdsByLine.set(transfer.lineId, transfer.id);
+                }
+            });
+        }
+
+        inputGroupIds.forEach(groupId => {
+            const readyId = readyTransferIdsByLine.get(groupId) || null;
+            const currentQueue = Array.isArray(queueState.incomingQueues[groupId])
+                ? queueState.incomingQueues[groupId]
+                : [];
+            queueState.incomingQueues[groupId] = currentQueue.filter(id => id === readyId);
+            if (readyId && !queueState.incomingQueues[groupId].includes(readyId)) {
+                queueState.incomingQueues[groupId].push(readyId);
+            }
+        });
+        Object.keys(queueState.incomingQueues).forEach(groupId => {
+            if (!inputGroupIds.includes(groupId)) delete queueState.incomingQueues[groupId];
+        });
+
+        queueState.queue = inputGroupIds.flatMap(groupId => queueState.incomingQueues[groupId] || []);
+        node.incomingQueues = queueState.incomingQueues;
+        return queueState.queue;
+    }
+
+    getQueuedAdmissionSlot(node, state, slots) {
+        const queueState = this.getMergeWaitQueueState(node, state);
+        const committedHeadId = Array.isArray(queueState.queue) ? queueState.queue[0] : null;
+        const key = this.getMergeNodeKey(node);
+        const pendingWinner = state?._logisticsMergeAdmissionWinners?.[key];
+        this.syncMergeWaitQueue(node, state, slots);
+        if (committedHeadId && pendingWinner?.committed !== false) {
+            const committedSlot = Array.from(slots.values())
+                .find(slot => slot?.transfer?.id === committedHeadId) || null;
+            if (committedSlot) {
+                return { winnerId: committedHeadId, slot: committedSlot };
+            }
+        }
+        const slot = this.selectReadyInputSlot(node, slots);
+        return { winnerId: slot?.transfer?.id || null, slot: slot || null };
+    }
+
     ensureNodeSchedulerState(node) {
         if (!node || !Array.isArray(node.inputGroupIds) || node.inputGroupIds.length === 0) return;
         const totalSlots = node.inputGroupIds.length;
@@ -112,6 +180,8 @@ export class LogisticsMergeNodeRuntime {
     getLogisticsMergeAdmissionWinner(node, state = this.gameEngine.state, options = {}) {
         if (!node || !Array.isArray(node.inputGroupIds) || node.inputGroupIds.length === 0) return null;
         const spacing = Number.isFinite(options.spacing) ? options.spacing : (this.gameEngine.TILE_SIZE || 20);
+        this.releaseClearedMergeOccupant(node, state, spacing);
+        if (node.currentOccupant?.transferId) return null;
         const readyDistanceFromEnd = Number.isFinite(options.readyDistanceFromEnd)
             ? options.readyDistanceFromEnd
             : spacing;
@@ -121,6 +191,17 @@ export class LogisticsMergeNodeRuntime {
             .join("|");
         const key = this.getMergeNodeKey(node);
         if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
+        const queuedAdmission = this.getQueuedAdmissionSlot(node, state, slots);
+        if (queuedAdmission.winnerId) {
+            state._logisticsMergeAdmissionWinners[key] = {
+                signature,
+                winnerId: queuedAdmission.winnerId,
+                winnerSlotIndex: Number.isInteger(queuedAdmission.slot?.slotIndex) ? queuedAdmission.slot.slotIndex : -1,
+                committed: false
+            };
+            return queuedAdmission.winnerId;
+        }
+
         const previous = state._logisticsMergeAdmissionWinners[key];
         const previousSlot = previous?.winnerId
             ? Array.from(slots.values()).find(slot => slot?.transfer?.id === previous.winnerId)
@@ -165,9 +246,79 @@ export class LogisticsMergeNodeRuntime {
         const safeSlotIndex = slotIndex >= 0 ? slotIndex : 0;
         node.currentActiveSlot = (safeSlotIndex + 1) % node.inputGroupIds.length;
         node.roundRobinIndex = node.currentActiveSlot;
+        node.lastServed = node.inputGroupIds[safeSlotIndex] || null;
         node.hasCommittedAdmission = true;
         node.admissionCommitCount = (Number(node.admissionCommitCount) || 0) + 1;
+        const queueState = this.getMergeWaitQueueState(node, state);
+        queueState.lastServed = node.lastServed;
+        queueState.currentOccupant = {
+            transferId: winnerId,
+            inputGroupId: node.lastServed,
+            outputGroupId: node.outputGroupId
+        };
+        node.currentOccupant = queueState.currentOccupant;
+        if (queueState.queue[0] === winnerId) {
+            queueState.queue.shift();
+        } else {
+            queueState.queue = queueState.queue.filter(id => id !== winnerId);
+        }
+        if (node.lastServed && Array.isArray(queueState.incomingQueues[node.lastServed])) {
+            queueState.incomingQueues[node.lastServed] = queueState.incomingQueues[node.lastServed].filter(id => id !== winnerId);
+        }
         if (previous) previous.committed = true;
+    }
+
+    getPathDistanceToPoint(points, point) {
+        if (!Array.isArray(points) || points.length < 2 || !point) return 0;
+        let bestDist = Infinity;
+        let bestPathDist = 0;
+        let total = 0;
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const len = Math.hypot(dx, dy);
+            const lenSq = dx * dx + dy * dy;
+            if (lenSq > 0) {
+                const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
+                const proj = { x: a.x + dx * t, y: a.y + dy * t };
+                const dist = Math.hypot(point.x - proj.x, point.y - proj.y);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestPathDist = total + len * t;
+                }
+            }
+            total += len;
+        }
+        return bestPathDist;
+    }
+
+    releaseClearedMergeOccupant(node, state, spacing) {
+        const queueState = this.getMergeWaitQueueState(node, state);
+        const occupant = node.currentOccupant || queueState.currentOccupant || null;
+        if (!occupant?.transferId) return false;
+        const transfer = Array.isArray(state?.activeTransfers)
+            ? state.activeTransfers.find(item => item?.id === occupant.transferId)
+            : null;
+        if (!transfer || transfer.lineId !== node.outputGroupId) {
+            node.currentOccupant = null;
+            queueState.currentOccupant = null;
+            return true;
+        }
+
+        const route = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
+        const total = this.getRouteLength(route);
+        if (total <= 0) return false;
+        const mergePoint = node.point || { x: node.x, y: node.y };
+        const currentDistance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
+        const mergeDistance = this.getPathDistanceToPoint(route, mergePoint);
+        if (currentDistance - mergeDistance >= spacing - 0.1) {
+            node.currentOccupant = null;
+            queueState.currentOccupant = null;
+            return true;
+        }
+        return false;
     }
 
     apply(state = this.gameEngine.state) {
@@ -204,20 +355,28 @@ export class LogisticsMergeNodeRuntime {
             }
             return bestPathDist;
         };
-        const isOutputEntryOccupied = (candidate, node) => {
+        const getOutputEntryState = (candidate, node) => {
+            this.releaseClearedMergeOccupant(node, state, minTransferSpacing);
+            if (node.currentOccupant?.transferId && node.currentOccupant.transferId !== candidate?.id) {
+                return { occupied: true };
+            }
             const outputGroupId = node.outputGroupId;
             const mergePoint = node.point || { x: node.x, y: node.y };
-            return state.activeTransfers.some(other => {
-                if (!other || other === candidate || other.lineId !== outputGroupId) return false;
+            let occupied = false;
+            state.activeTransfers.forEach(other => {
+                if (!other || other === candidate || other.lineId !== outputGroupId) return;
                 const route = Array.isArray(other.routePoints) ? other.routePoints : [];
                 const total = this.getRouteLength(route);
-                if (total <= 0) return false;
+                if (total <= 0) return;
                 const otherDist = Math.max(0, Math.min(1, Number(other.progress) || 0)) * total;
                 const mergeNodeDistInOther = getPathDistanceToPoint(route, mergePoint);
                 const distFromMerge = otherDist - mergeNodeDistInOther;
                 // [只停不退] 使用相對距離絕對值，確保合流點前後安全間距內無其他物品佔用
-                return Math.abs(distFromMerge) < minTransferSpacing - 0.1;
+                if (Math.abs(distFromMerge) < minTransferSpacing - 0.1) {
+                    occupied = true;
+                }
             });
+            return { occupied };
         };
         const stopBeforeMergePoint = (transfer) => {
             const total = this.getRouteLength(transfer.routePoints);
@@ -231,13 +390,17 @@ export class LogisticsMergeNodeRuntime {
         const getMergeAdmissionWinner = (node) => {
             return this.getLogisticsMergeAdmissionWinner(node, state, {
                 spacing: minTransferSpacing,
-                readyDistanceFromEnd: 0.1
+                readyDistanceFromEnd: minTransferSpacing
             });
         };
 
         const findNodeForTransfer = (transfer) => {
-            if (Number(transfer?.progress) < 0.999) return null;
-            return this.system.getLogisticsMergeNodeForInputTransfer(transfer, state);
+            const node = this.system.getLogisticsMergeNodeForInputTransfer(transfer, state);
+            if (!node) return null;
+            const total = this.getRouteLength(transfer.routePoints);
+            if (total <= 0) return node;
+            const distance = Math.max(0, Math.min(1, Number(transfer?.progress) || 0)) * total;
+            return distance >= total - minTransferSpacing - 0.1 ? node : null;
         };
 
         state.activeTransfers.forEach(transfer => {
@@ -252,9 +415,15 @@ export class LogisticsMergeNodeRuntime {
                 delete transfer.blockedOnBrokenLine;
                 return;
             }
-            if (isOutputEntryOccupied(transfer, node)) {
+            const outputEntryState = getOutputEntryState(transfer, node);
+            if (outputEntryState.occupied) {
                 stopBeforeMergePoint(transfer);
                 transfer.queueBlocked = true;
+                delete transfer.blockedOnBrokenLine;
+                return;
+            }
+            if (Number(transfer?.progress) < 0.999) {
+                delete transfer.queueBlocked;
                 delete transfer.blockedOnBrokenLine;
                 return;
             }

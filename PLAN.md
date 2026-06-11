@@ -1,3 +1,25 @@
+# 物流線匯合處流水線優化計畫
+
+## 目標
+
+重構物流線匯合處的物品移動與交通管制，避免匯合點重疊後才回推，改為預判煞車、空間詢問、Round-Robin 輪流放行與高密度緊貼跟隨。
+
+## 設計原則
+
+1. 維持物流邏輯批次更新，不替每格輸送帶新增獨立 Update。
+2. 新增輕量 Merger Controller 作為純邏輯資料結構，不直接操作 Phaser Sprite/UI。
+3. 物品移動採用路徑距離與前車間距計算，拒絕依賴物理推擠修正重疊。
+4. 匯合點以 incoming lane key 排隊，依 lastServed 實作 1-2-3-1-2-3 輪流路權。
+5. 鎖釋放以物品尾端離開入口判定區為準，不等待中心點走完整格。
+
+## 實作步驟
+
+1. 透過安全搜尋盤點 LogisticsManager、物品移動、logisticsLines 與既有測試位置。
+2. 先新增 Merger Controller 與 kinematics 的單元測試，覆蓋 2 路/3 路匯合、拒絕路權即停、前車空間足夠立即跟上。
+3. 建立純邏輯 Merger Controller 模組，提供重建匯合點、申請路權、釋放鎖與排隊清理。
+4. 將物品更新改成空間詢問式，整合 look-ahead 路權申請與 WAITING/MOVING 狀態。
+5. 執行測試、建置驗證與 `npm run finalize`，並回報 Debug 渲染耗時與 Draw Calls 數。
+
 # 2026-06-10 合流點輪詢放行修復計畫
 
 ## 核心目標

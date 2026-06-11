@@ -58,6 +58,17 @@ if (!hasDetachedRoute) {
     throw new Error('Detached component was not rendered as its own debug route.');
 }
 
+if (typeof globalThis.LogisticsRenderer.mergeTurnCellKeys !== 'function') {
+    throw new Error('LogisticsRenderer should expose mergeTurnCellKeys for renderer turn skip consistency.');
+}
+const mergedTurnKeys = globalThis.LogisticsRenderer.mergeTurnCellKeys(
+    new Set(['path_turn']),
+    new Set(['group_turn'])
+);
+if (!mergedTurnKeys.has('path_turn') || !mergedTurnKeys.has('group_turn')) {
+    throw new Error('Path turn keys and group turn keys should be merged, not selected as either-or.');
+}
+
 const branchRoute = routes.find(route =>
     route[0]?.x === 30 && route[0]?.y === 10 &&
     route.some(point => point.x === 30 && point.y === 50)
@@ -99,6 +110,27 @@ if (detachedLabelKeys.has('300,300')) {
 if (!detachedLabelKeys.has('320,300')) {
     throw new Error('Detached line should still label the first visible cell after the split.');
 }
+
+const originalDrawArrowhead = globalThis.LogisticsRenderer.drawArrowhead;
+let mergeVisualArrowCount = 0;
+globalThis.LogisticsRenderer.drawArrowhead = () => {
+    mergeVisualArrowCount++;
+};
+globalThis.LogisticsRenderer.drawLogisticsMergeVisualTurnArrows(
+    { fillStyle: () => {} },
+    [
+        { key: '400,400', x: 400, y: 400, inDir: { x: 1, y: 0 }, outDir: { x: 0, y: 1 } },
+        { key: '400,400', x: 400, y: 400, inDir: { x: 0, y: -1 }, outDir: { x: -1, y: 0 } }
+    ],
+    0xffffff,
+    1,
+    8
+);
+globalThis.LogisticsRenderer.drawArrowhead = originalDrawArrowhead;
+if (mergeVisualArrowCount !== 1) {
+    throw new Error(`同一物流格的匯流轉角箭頭應只繪製一次，實際繪製 ${mergeVisualArrowCount} 次。`);
+}
+
 const detachedDebugRoutes = globalThis.LogisticsRenderer.getSelectedGroupDebugRoutePoints(
     { mapEntities: [] },
     'debug_group',

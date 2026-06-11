@@ -146,5 +146,46 @@ const staleNode = store.getLogisticsMergeNodeForInputTransfer({
 }, GameEngine.state);
 assert(!staleNode, '殘留的反向 merge node 不會被 runtime 查詢採用');
 
+GameEngine.state.logisticsMergeNodes = [];
+GameEngine.state.logisticsLines = [
+    {
+        id: 'existing_input',
+        groupId: 'gExistingInput',
+        routePoints: [{ x: 260, y: 220 }, { x: 300, y: 220 }]
+    },
+    {
+        id: 'downstream_output',
+        groupId: 'gDownstreamOutput',
+        routePoints: [{ x: 300, y: 220 }, { x: 300, y: 280 }]
+    },
+    {
+        id: 'new_input',
+        groupId: 'gNewInput',
+        routePoints: [{ x: 300, y: 180 }, { x: 300, y: 220 }]
+    }
+];
+const firstMerge = store.registerLogisticsMergeNode({
+    inputGroupId: 'gExistingInput',
+    outputGroupId: 'gDownstreamOutput',
+    point: { x: 300, y: 220 },
+    inputLine: GameEngine.state.logisticsLines[0],
+    outputLine: GameEngine.state.logisticsLines[1]
+});
+assert(firstMerge && firstMerge.inputGroupIds.includes('gExistingInput'), '既有輸入線先成功接到下游輸出');
+const chainedMerge = store.registerLogisticsMergeNode({
+    inputGroupId: 'gNewInput',
+    outputGroupId: 'gExistingInput',
+    point: { x: 300, y: 220 },
+    inputLine: GameEngine.state.logisticsLines[2],
+    outputLine: GameEngine.state.logisticsLines[0]
+});
+assert(
+    chainedMerge &&
+    chainedMerge.outputGroupId === 'gDownstreamOutput' &&
+    chainedMerge.inputGroupIds.includes('gExistingInput') &&
+    chainedMerge.inputGroupIds.includes('gNewInput'),
+    '新增輸入線碰到既有匯合輸入時，會沿用同一匯合點的下游輸出'
+);
+
 if (!passed) process.exit(1);
 console.log('logistics merge direction guard tests passed');

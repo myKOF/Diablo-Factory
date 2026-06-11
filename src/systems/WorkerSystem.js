@@ -2522,12 +2522,21 @@ export class WorkerSystem {
                 if (!other || other === transfer) return;
                 if (other.lineId === node.outputGroupId) {
                     if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
-                    const otherTotal = getTransferRouteMetrics(other).totalPixels;
+                    const otherMetrics = getTransferRouteMetrics(other);
+                    const otherTotal = otherMetrics.totalPixels;
                     if (otherTotal <= 0) return;
-                    const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
+                    const otherProgress = Math.max(0, Math.min(1, Number(other.progress) || 0));
+                    const otherMaxAllowed = other.maxAllowedProgress !== undefined ? other.maxAllowedProgress : 1.0;
+                    const otherQueueHeld = other.queueBlocked === true && otherProgress >= otherMaxAllowed - 0.0001;
+                    const projectedProgress = otherQueueHeld
+                        ? otherProgress
+                        : Math.min(otherMaxAllowed, otherProgress + deltaTime * (getTransferSpeed(other) / Math.max(1, otherMetrics.totalTiles)));
+                    const otherDistance = projectedProgress * otherTotal;
                     const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
                     const distFromMerge = otherDistance - mergeDistance;
-                    requiredWait = Math.max(requiredWait, Math.max(0, spacing - Math.abs(distFromMerge)));
+                    if (Math.abs(distFromMerge) < spacing - 0.1) {
+                        requiredWait = Math.max(requiredWait, spacing);
+                    }
                 } else if (!isWinner && Array.isArray(node.inputGroupIds) && node.inputGroupIds.includes(other.lineId)) {
                     if (desired < totalLength - 0.1) {
                         if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
@@ -2548,6 +2557,10 @@ export class WorkerSystem {
             return totalLength;
         };
 
+        if (conveyorSystem && typeof conveyorSystem.applyBlockedTransferQueues === 'function') {
+            conveyorSystem.applyBlockedTransferQueues(state);
+        }
+
         // ==========================================
         // [新增] 計算每條物流線上物品的最大允許進度以實現堆積 (Backpressure & Stacking)
         // ==========================================
@@ -2563,7 +2576,15 @@ export class WorkerSystem {
 
         const cellSize = this.engine?.TILE_SIZE || 20;
 
-        transfersByPath.forEach((groupTransfers, pathKey) => {
+        const isMergeInputTransfer = (transfer) => conveyorSystem &&
+            typeof conveyorSystem.isLogisticsMergeInputTransfer === 'function' &&
+            conveyorSystem.isLogisticsMergeInputTransfer(transfer, state);
+
+        Array.from(transfersByPath.entries()).sort(([, a], [, b]) => {
+            const aIsMergeInput = a.some(isMergeInputTransfer);
+            const bIsMergeInput = b.some(isMergeInputTransfer);
+            return Number(aIsMergeInput) - Number(bIsMergeInput);
+        }).forEach(([pathKey, groupTransfers]) => {
             // 根據 progress 由大到小排序（最前方的物品在 index 0），若 progress 相同則以 id 排序以保證穩定排序
             groupTransfers.sort((a, b) => {
                 const diff = (b.progress || 0) - (a.progress || 0);
@@ -2581,9 +2602,7 @@ export class WorkerSystem {
                     continue;
                 }
 
-                const isMergeInput = conveyorSystem &&
-                    typeof conveyorSystem.isLogisticsMergeInputTransfer === 'function' &&
-                    conveyorSystem.isLogisticsMergeInputTransfer(t, state);
+                const isMergeInput = isMergeInputTransfer(t);
                 const isBreakpoint = !t.targetId && !isMergeInput;
                 if (isMergeInput) {
                     delete t.queueBlocked;
@@ -2643,6 +2662,9 @@ export class WorkerSystem {
 
                 prevMaxDist = maxDist;
                 t.maxAllowedProgress = maxDist / totalLength;
+                if (isMergeInput) {
+                    t.queueBlocked = maxDist < totalLength - 0.1 && desired >= maxDist - 0.1;
+                }
             }
         });
 
@@ -2700,15 +2722,6 @@ export class WorkerSystem {
                 }
             }
 
-            if (
-                t.progress >= 1 &&
-                conveyorSystem &&
-                typeof conveyorSystem.applyLogisticsMergeNodes === 'function' &&
-                conveyorSystem.applyLogisticsMergeNodes(state)
-            ) {
-                t = state.activeTransfers[i];
-            }
-
             if (t.progress >= 1) {
                 if (t.targetId) {
                     let target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
@@ -2733,6 +2746,10 @@ export class WorkerSystem {
                     t.progress = 1;
                 }
             }
+        }
+
+        if (conveyorSystem && typeof conveyorSystem.applyLogisticsMergeNodes === 'function') {
+            conveyorSystem.applyLogisticsMergeNodes(state);
         }
 
         // 2. 讓滿足工人條件的建築自動發送物品
@@ -2808,8 +2825,5 @@ export class WorkerSystem {
             }
         });
 
-        if (conveyorSystem && typeof conveyorSystem.applyBlockedTransferQueues === 'function') {
-            conveyorSystem.applyBlockedTransferQueues(state);
-        }
     }
 }

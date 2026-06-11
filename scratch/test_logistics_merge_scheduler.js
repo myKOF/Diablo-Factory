@@ -193,6 +193,68 @@ try {
     const admittedWinner = queueWinner.state.activeTransfers.find(transfer => transfer.id === 'winner_at_gate');
     assert(admittedWinner.progress >= 0.999, '合流 winner 不可被其他等待中的 input 反向限速而停在合流點前。');
 
+    const carryEntry = createHarness([
+        {
+            id: 'front_output',
+            lineId: 'output_group',
+            routePoints: [{ x: 100, y: 100 }, { x: 200, y: 100 }],
+            progress: 0.27,
+            sourceId: 'merge_output',
+            targetId: 'target'
+        },
+        {
+            id: 'carry_input',
+            lineId: 'side_a',
+            routePoints: [{ x: 40, y: 100 }, { x: 100, y: 100 }],
+            progress: 1,
+            sourceId: 'side_a_source',
+            targetId: null
+        }
+    ]);
+
+    carryEntry.runtime.apply(carryEntry.state);
+    const carriedInput = carryEntry.state.activeTransfers.find(transfer => transfer.id === 'carry_input');
+    assert(carriedInput.lineId === 'output_group', '入口有安全餘量時，input 應進入 output。');
+    assert(
+        carriedInput.progress === 0,
+        `input 進入 output 後必須從合流點連續起步，不可帶進度瞬移，實際 progress=${carriedInput.progress}`
+    );
+
+    const queuedWaiter = createHarness([
+        {
+            id: 'queued_first',
+            lineId: 'side_a',
+            routePoints: [{ x: 40, y: 100 }, { x: 100, y: 100 }],
+            progress: 0.8,
+            serialNumber: 1,
+            sourceId: 'side_a_source',
+            targetId: null
+        },
+        {
+            id: 'arrived_second',
+            lineId: 'side_b',
+            routePoints: [{ x: 100, y: 40 }, { x: 100, y: 100 }],
+            progress: 1,
+            serialNumber: 2,
+            sourceId: 'side_b_source',
+            targetId: null
+        }
+    ]);
+    queuedWaiter.state._logisticsMergeWaitQueues = {
+        'output_group:100,100': { queue: ['queued_first'] }
+    };
+
+    queuedWaiter.runtime.apply(queuedWaiter.state);
+    const stillQueuedFirst = queuedWaiter.state.activeTransfers.find(transfer => transfer.id === 'queued_first');
+    const blockedSecond = queuedWaiter.state.activeTransfers.find(transfer => transfer.id === 'arrived_second');
+    assert(stillQueuedFirst.lineId === 'side_a', '等待佇列隊首尚未抵達終點時，應保留在 input 線。');
+    assert(blockedSecond.lineId === 'side_b' && Math.abs(blockedSecond.progress - (40 / 60)) < 0.001, '後到物品不可插隊，必須停在自身路徑的等待線。');
+
+    stillQueuedFirst.progress = 1;
+    queuedWaiter.runtime.apply(queuedWaiter.state);
+    assert(stillQueuedFirst.lineId === 'output_group', '等待佇列隊首抵達且 output 可用時應先通過。');
+    assert(queuedWaiter.state._logisticsMergeWaitQueues['output_group:100,100'].queue[0] === 'arrived_second', '隊首通過後，下一個等待物品應成為新隊首。');
+
     const fairness = createHarness([
         {
             id: 'a_side_first',

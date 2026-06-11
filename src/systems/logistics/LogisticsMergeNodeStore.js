@@ -68,12 +68,56 @@ export class LogisticsMergeNodeStore {
         return state.logisticsMergeNodes;
     }
 
+    resolveExistingMergeOutputAtCell(nodes, cellKey, outputGroupId, point, outputLine = null) {
+        if (!Array.isArray(nodes) || !cellKey || !outputGroupId || !point) {
+            return { outputGroupId, outputLine };
+        }
+
+        const cellNodes = nodes.filter(node => node && node.cellKey === cellKey);
+        if (cellNodes.length === 0) return { outputGroupId, outputLine };
+
+        const edges = new Map();
+        const groups = new Set();
+        cellNodes.forEach(node => {
+            if (!node?.outputGroupId) return;
+            groups.add(node.outputGroupId);
+            (node.inputGroupIds || []).forEach(inputId => {
+                if (!inputId) return;
+                edges.set(inputId, node.outputGroupId);
+                groups.add(inputId);
+            });
+        });
+        if (!groups.has(outputGroupId)) return { outputGroupId, outputLine };
+
+        let resolvedGroupId = outputGroupId;
+        const visited = new Set();
+        while (edges.has(resolvedGroupId) && !visited.has(resolvedGroupId)) {
+            visited.add(resolvedGroupId);
+            resolvedGroupId = edges.get(resolvedGroupId);
+        }
+        if (!resolvedGroupId || resolvedGroupId === outputGroupId) {
+            return { outputGroupId, outputLine };
+        }
+
+        const resolvedLine = this.getCandidateLines(resolvedGroupId)
+            .find(line => this.canLineLeaveMergePoint(line, point)) || null;
+        return {
+            outputGroupId: resolvedGroupId,
+            outputLine: resolvedLine || outputLine
+        };
+    }
+
     registerLogisticsMergeNode({ inputGroupId, outputGroupId, point, inputLine = null, outputLine = null }) {
         if (!inputGroupId || !outputGroupId || inputGroupId === outputGroupId || !point) return null;
         const nodes = this.system.ensureLogisticsMergeNodeStore();
         const snapped = this.system.snapPointToGridCenter(point);
-        if (!this.canRegisterMergeDirection({ inputGroupId, outputGroupId, point: snapped, inputLine, outputLine })) return null;
         const cellKey = `${Math.round(snapped.x)},${Math.round(snapped.y)}`;
+        const resolvedOutput = this.resolveExistingMergeOutputAtCell(nodes, cellKey, outputGroupId, snapped, outputLine);
+        outputGroupId = resolvedOutput.outputGroupId;
+        outputLine = resolvedOutput.outputLine;
+        if (inputGroupId === outputGroupId) return null;
+        if (!this.canRegisterMergeDirection({ inputGroupId, outputGroupId, point: snapped, inputLine, outputLine })) return null;
+        const previousInputDirections = {};
 
         // 物理切分穿過合流點的線段
         const state = GameEngine.state;
@@ -145,6 +189,9 @@ export class LogisticsMergeNodeStore {
         nodes.forEach(node => {
             if (node && node.cellKey === cellKey) {
                 allGroups.add(node.outputGroupId);
+                if (node.inputDirections && typeof node.inputDirections === 'object') {
+                    Object.assign(previousInputDirections, node.inputDirections);
+                }
                 (node.inputGroupIds || []).forEach(inputId => {
                     edges.set(inputId, node.outputGroupId);
                     allGroups.add(inputId);
@@ -191,6 +238,7 @@ export class LogisticsMergeNodeStore {
             point: { x: snapped.x, y: snapped.y },
             inputGroupIds: [...ultimateInputGroupIds],
             outputGroupId: ultimateOutputGroupId,
+            inputDirections: { ...previousInputDirections },
             currentActiveSlot: 0,
             roundRobinIndex: 0
         };
@@ -199,7 +247,6 @@ export class LogisticsMergeNodeStore {
         const inputDir = this.system.getLogisticsLineDirectionAtPoint(inputLine, snapped);
         const outputDir = this.system.getLogisticsLineDirectionAtPoint(outputLine, snapped);
         if (inputDir) {
-            node.inputDirections = node.inputDirections || {};
             node.inputDirections[inputGroupId] = inputDir;
         }
         if (outputDir) node.outputDir = outputDir;
@@ -301,6 +348,11 @@ export class LogisticsMergeNodeStore {
             if (!node.outputGroupId) return false;
             if (!this.system.isLogisticsMergeNodeInputConnectionIntact(node, lineId, state)) return false;
             const p = node.point || { x: node.x, y: node.y };
+            const inputStillEnters = this.getCandidateLines(lineId)
+                .some(line => this.canLineEnterMergePoint(line, p));
+            const outputStillLeaves = this.getCandidateLines(node.outputGroupId)
+                .some(line => this.canLineLeaveMergePoint(line, p));
+            if (!inputStillEnters || !outputStillLeaves) return false;
             if (!endPoint) return true;
             return p && Math.hypot(endPoint.x - p.x, endPoint.y - p.y) <= TS * 1.5;
         }) || null;
