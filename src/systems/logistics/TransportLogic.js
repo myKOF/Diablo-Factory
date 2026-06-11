@@ -3,7 +3,7 @@
  * @description 物流流量控制引擎
  *
  * 職責（遵守職責分離協議）：
- * - Priority Merge：主線空閒時優先通行，副線 Round-Robin 等待
+ * - Round-Robin Merge：多輸入合流依序公平放行，避免任一路堵死
  * - Round-Robin / Filter 分流：根據 filter 篩選目標，輪替分配
  * - Backpressure 回壓傳遞：下游滿載→遞迴阻塞上游
  * - 不操作任何渲染物件（Phaser Sprites / UI）
@@ -179,13 +179,13 @@ export class TransportLogic {
     }
 
     // ─────────────────────────────────────────
-    // 5. Priority Merge（優先合流）
+    // 5. Round-Robin Merge（公平合流）
     // ─────────────────────────────────────────
 
     /**
      * 注冊合流節點
      * @param {string} nodeId
-     * @param {string[]} inputGroupIds - index 0 為主線（最高優先級）
+     * @param {string[]} inputGroupIds - 固定輪詢順序
      * @param {string} outputGroupId
      */
     registerMergeNode(nodeId, inputGroupIds, outputGroupId) {
@@ -198,12 +198,12 @@ export class TransportLogic {
     }
 
     /**
-     * 處理合流節點（Priority Merge 邏輯）
+     * 處理合流節點（Round-Robin Merge 邏輯）
      *
      * 規則：
-     * 1. 主線（index 0）有物品且輸出線空閒 → 主線物品優先通過
-     * 2. 主線空閒時，副線按 Round-Robin 順序輪替
-     * 3. 輸出線被回壓阻塞 → 所有輸入線停止
+     * 1. 輸出線被回壓阻塞 → 所有輸入線停止
+     * 2. 從目前輪詢槽位開始，尋找第一條末端已有物品的輸入線
+     * 3. 放行一個物品後，下一輪從下一個槽位繼續
      *
      * @param {string} nodeId
      * @returns {{ merged: boolean, sourceGroupId: string|null, reason: string }}
@@ -221,29 +221,19 @@ export class TransportLogic {
         // 解除輸入線的阻塞標記（下游已疏通）
         node.inputGroupIds.forEach(id => this._blockedGroups.delete(id));
 
-        const primaryGroupId = node.inputGroupIds[0];
-        const primaryItems = this._getItemsAtEnd(primaryGroupId);
+        const inputCount = node.inputGroupIds.length;
+        node.roundRobinIndex = ((Number(node.roundRobinIndex) || 0) % inputCount + inputCount) % inputCount;
 
-        // 規則 1：主線有物品 → 主線優先
-        if (primaryItems.length > 0) {
-            const item = primaryItems[0];
-            this._transferItemToLine(item, node.outputGroupId);
-            this.emit('merge:primary', { nodeId, item, sourceGroupId: primaryGroupId });
-            return { merged: true, sourceGroupId: primaryGroupId, reason: '主線優先通過' };
-        }
-
-        // 規則 2：主線空閒 → 副線 Round-Robin
-        const secondaryInputs = node.inputGroupIds.slice(1);
-        for (let attempt = 0; attempt < secondaryInputs.length; attempt++) {
-            const idx = node.roundRobinIndex % secondaryInputs.length;
-            node.roundRobinIndex = (node.roundRobinIndex + 1) % secondaryInputs.length;
-            const candidateGroupId = secondaryInputs[idx];
+        for (let attempt = 0; attempt < inputCount; attempt++) {
+            const idx = (node.roundRobinIndex + attempt) % inputCount;
+            const candidateGroupId = node.inputGroupIds[idx];
             const candidateItems = this._getItemsAtEnd(candidateGroupId);
             if (candidateItems.length > 0) {
                 const item = candidateItems[0];
                 this._transferItemToLine(item, node.outputGroupId);
-                this.emit('merge:secondary', { nodeId, item, sourceGroupId: candidateGroupId });
-                return { merged: true, sourceGroupId: candidateGroupId, reason: `副線 Round-Robin（index=${idx}）` };
+                node.roundRobinIndex = (idx + 1) % inputCount;
+                this.emit('merge:round-robin', { nodeId, item, sourceGroupId: candidateGroupId });
+                return { merged: true, sourceGroupId: candidateGroupId, reason: `合流輪詢（index=${idx}）` };
             }
         }
 

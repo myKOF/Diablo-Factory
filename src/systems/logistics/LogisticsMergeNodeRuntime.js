@@ -20,6 +20,19 @@ export class LogisticsMergeNodeRuntime {
         return total;
     }
 
+    getCardinalDirection(from, to) {
+        if (this.system && typeof this.system.getCardinalDirection === 'function') {
+            return this.system.getCardinalDirection(from, to);
+        }
+        if (!from || !to) return null;
+        const dx = (to.x || 0) - (from.x || 0);
+        const dy = (to.y || 0) - (from.y || 0);
+        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+        return Math.abs(dx) >= Math.abs(dy)
+            ? { x: Math.sign(dx) || 1, y: 0 }
+            : { x: 0, y: Math.sign(dy) || 1 };
+    }
+
     getMergeNodeKey(node) {
         const mergePoint = node?.point || { x: node?.x, y: node?.y };
         return `${node?.outputGroupId || "output"}:${Math.round(mergePoint?.x || 0)},${Math.round(mergePoint?.y || 0)}`;
@@ -33,6 +46,27 @@ export class LogisticsMergeNodeRuntime {
         }
         node.currentActiveSlot = ((node.currentActiveSlot % totalSlots) + totalSlots) % totalSlots;
         node.roundRobinIndex = node.currentActiveSlot;
+    }
+
+    hasStartedRoundRobin(node) {
+        if (!node) return false;
+        if (node.hasCommittedAdmission === true) return true;
+        if (Number.isInteger(node.admissionCommitCount) && node.admissionCommitCount > 0) return true;
+        return Number.isInteger(node.currentActiveSlot) && node.currentActiveSlot !== 0;
+    }
+
+    compareReadySlots(a, b) {
+        const distanceDelta = (b?.distance || 0) - (a?.distance || 0);
+        if (Math.abs(distanceDelta) > 0.1) return distanceDelta;
+        const serialA = Number(a?.transfer?.serialNumber);
+        const serialB = Number(b?.transfer?.serialNumber);
+        if (Number.isFinite(serialA) && Number.isFinite(serialB) && serialA !== serialB) {
+            return serialA - serialB;
+        }
+        if (Number.isFinite(serialA) !== Number.isFinite(serialB)) {
+            return Number.isFinite(serialA) ? -1 : 1;
+        }
+        return String(a?.transfer?.id || "").localeCompare(String(b?.transfer?.id || ""));
     }
 
     getReadyInputSlots(node, state, readyDistanceFromEnd) {
@@ -57,25 +91,18 @@ export class LogisticsMergeNodeRuntime {
         return slots;
     }
 
-    selectReadyInputSlot(node, slots, spacing) {
+    selectReadyInputSlot(node, slots) {
         this.ensureNodeSchedulerState(node);
         const inputGroupIds = Array.isArray(node?.inputGroupIds) ? node.inputGroupIds : [];
         if (inputGroupIds.length === 0 || slots.size === 0) return null;
 
-        const mainInput = node.mainInputGroupId || node.mainInput || inputGroupIds[0];
-        const mainSlot = slots.get(mainInput);
-        const mainHasSevereBackpressure = mainSlot?.transfer?.queueBlocked === true &&
-            mainSlot.distance < mainSlot.total - spacing - 0.1;
-        if (mainSlot && !mainHasSevereBackpressure) {
-            return mainSlot;
+        if (!this.hasStartedRoundRobin(node)) {
+            return Array.from(slots.values()).sort((a, b) => this.compareReadySlots(a, b))[0] || null;
         }
 
-        if (inputGroupIds.length === 1) return null;
-        const sideCount = inputGroupIds.length - 1;
-        const rawStart = Number.isInteger(node.currentActiveSlot) ? node.currentActiveSlot : 1;
-        const start = rawStart <= 0 ? 1 : rawStart;
-        for (let attempt = 0; attempt < sideCount; attempt++) {
-            const slotIndex = ((start - 1 + attempt) % sideCount) + 1;
+        const start = Number.isInteger(node.currentActiveSlot) ? node.currentActiveSlot : 0;
+        for (let attempt = 0; attempt < inputGroupIds.length; attempt++) {
+            const slotIndex = (start + attempt) % inputGroupIds.length;
             const candidate = slots.get(inputGroupIds[slotIndex]);
             if (candidate) return candidate;
         }
@@ -95,22 +122,26 @@ export class LogisticsMergeNodeRuntime {
         const key = this.getMergeNodeKey(node);
         if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
         const previous = state._logisticsMergeAdmissionWinners[key];
+        const previousSlot = previous?.winnerId
+            ? Array.from(slots.values()).find(slot => slot?.transfer?.id === previous.winnerId)
+            : null;
         if (previous && previous.winnerId) {
             const currentWinnerTransfer = state.activeTransfers.find(t => t && t.id === previous.winnerId);
-            if (currentWinnerTransfer) {
+            if (currentWinnerTransfer && previousSlot) {
                 const total = this.getRouteLength(currentWinnerTransfer.routePoints);
                 const currentDist = (currentWinnerTransfer.progress || 0) * total;
-                // [Winner 承諾保護] 只要前一次的 winner 還在衝刺或合流點處，繼續保持其 winner 身份，防止被其他剛進站的物品搶奪
-                if (total > 0 && currentDist >= total - spacing - 0.1) {
+                const holdDistance = Math.max(0, total - readyDistanceFromEnd - 0.1);
+                // [Winner 承諾保護] 僅保護仍符合本次 ready 門檻的 winner；避免等待線上的舊 winner 卡住已到達合流點的物品。
+                if (total > 0 && currentDist >= holdDistance) {
                     return previous.winnerId;
                 }
             }
         }
-        if (previous && previous.signature === signature && previous.winnerId) {
+        if (previous && previous.signature === signature && previous.winnerId && previousSlot) {
             return previous.winnerId;
         }
 
-        const winnerSlot = this.selectReadyInputSlot(node, slots, spacing);
+        const winnerSlot = this.selectReadyInputSlot(node, slots);
         const winnerId = winnerSlot?.transfer?.id || null;
         state._logisticsMergeAdmissionWinners[key] = {
             signature,
@@ -134,6 +165,8 @@ export class LogisticsMergeNodeRuntime {
         const safeSlotIndex = slotIndex >= 0 ? slotIndex : 0;
         node.currentActiveSlot = (safeSlotIndex + 1) % node.inputGroupIds.length;
         node.roundRobinIndex = node.currentActiveSlot;
+        node.hasCommittedAdmission = true;
+        node.admissionCommitCount = (Number(node.admissionCommitCount) || 0) + 1;
         if (previous) previous.committed = true;
     }
 
@@ -226,6 +259,14 @@ export class LogisticsMergeNodeRuntime {
                 return;
             }
             const outputSeg = this.system.getLogisticsSegmentsByGroupId(node.outputGroupId)[0] || null;
+            const inputRoute = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
+            const mergePoint = node.point || { x: node.x, y: node.y };
+            const inputDir = inputRoute.length >= 2
+                ? this.getCardinalDirection(inputRoute[inputRoute.length - 2], inputRoute[inputRoute.length - 1])
+                : null;
+            const outputDir = node.outputDir || (Array.isArray(route) && route.length >= 2
+                ? this.getCardinalDirection(route[0], route[1])
+                : null);
             this.commitLogisticsMergeAdmission(node, transfer.id, state);
             transfer.lineId = node.outputGroupId;
             transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
@@ -233,6 +274,16 @@ export class LogisticsMergeNodeRuntime {
             transfer.sourceId = outputSeg?.sourceId || transfer.sourceId || null;
             transfer.targetId = outputSeg?.targetId || null;
             transfer.efficiency = Number(outputSeg?.efficiency) || Number(transfer.efficiency) || 0;
+            if (mergePoint && inputDir && outputDir) {
+                transfer._mergeVisualTurn = {
+                    x: mergePoint.x,
+                    y: mergePoint.y,
+                    inDir: { x: inputDir.x, y: inputDir.y },
+                    outDir: { x: outputDir.x, y: outputDir.y }
+                };
+            } else {
+                delete transfer._mergeVisualTurn;
+            }
             delete transfer.blockedOnBrokenLine;
             delete transfer.queueBlocked;
             changed = true;

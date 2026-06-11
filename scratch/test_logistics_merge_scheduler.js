@@ -5,6 +5,19 @@ let runtimeCode = fs.readFileSync(path.join(__dirname, '../src/systems/logistics
 runtimeCode = runtimeCode.replace(/export class LogisticsMergeNodeRuntime/, 'globalThis.LogisticsMergeNodeRuntime = class LogisticsMergeNodeRuntime');
 eval(runtimeCode);
 
+globalThis.isFinitePoint = (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y);
+let metricsCode = fs.readFileSync(path.join(__dirname, '../src/systems/logistics/LogisticsPathMetrics.js'), 'utf8');
+metricsCode = metricsCode
+    .replace(/import\s+[\s\S]*?\s+from\s+['"].*?['"];?/g, '')
+    .replace(/export function (\w+)/g, 'globalThis.$1 = function');
+eval(metricsCode);
+
+let queuesCode = fs.readFileSync(path.join(__dirname, '../src/systems/logistics/LogisticsTransferQueues.js'), 'utf8');
+queuesCode = queuesCode
+    .split('\n').slice(5).join('\n')
+    .replace(/export class LogisticsTransferQueues/, 'globalThis.LogisticsTransferQueues = class LogisticsTransferQueues');
+eval(queuesCode);
+
 const originalRandom = Math.random;
 
 function createHarness(activeTransfers) {
@@ -36,12 +49,41 @@ function assert(condition, message) {
     if (!condition) throw new Error(message);
 }
 
+function createQueueHarness(activeTransfers) {
+    const outputRoute = [{ x: 100, y: 100 }, { x: 100, y: 260 }];
+    const node = {
+        id: 'merge_queue',
+        outputGroupId: 'output_group',
+        inputGroupIds: ['side_a', 'side_b', 'side_c'],
+        point: { x: 100, y: 100 }
+    };
+    const state = {
+        logisticsMergeNodes: [node],
+        activeTransfers
+    };
+    const system = {
+        ensureLogisticsMergeNodeStore: () => state.logisticsMergeNodes,
+        getLogisticsMergeNodeForInputTransfer: (transfer) => {
+            return node.inputGroupIds.includes(transfer.lineId) ? node : null;
+        },
+        getLogisticsMergeNodeOutputRoute: () => outputRoute,
+        getLogisticsSegmentsByGroupId: () => [{ sourceId: 'merge_output', targetId: 'target', efficiency: 4 }]
+    };
+    const runtime = new globalThis.LogisticsMergeNodeRuntime(system, () => ({ TILE_SIZE: 20, state }));
+    const queues = new globalThis.LogisticsTransferQueues({
+        ...system,
+        getLogisticsMergeAdmissionWinner: (...args) => runtime.getLogisticsMergeAdmissionWinner(...args),
+        isLogisticsMergeInputTransfer: (transfer) => !!system.getLogisticsMergeNodeForInputTransfer(transfer)
+    }, () => ({ TILE_SIZE: 20, state }));
+    return { state, queues };
+}
+
 try {
     Math.random = () => 0;
 
-    const priority = createHarness([
+    const firstArrival = createHarness([
         {
-            id: 'a_side_should_wait',
+            id: 'a_side_should_enter_first',
             lineId: 'side_a',
             routePoints: [{ x: 40, y: 100 }, { x: 100, y: 100 }],
             progress: 1,
@@ -49,21 +91,107 @@ try {
             targetId: null
         },
         {
-            id: 'z_main_should_enter',
+            id: 'z_main_should_wait',
             lineId: 'main_input',
             routePoints: [{ x: 100, y: 40 }, { x: 100, y: 100 }],
-            progress: 1,
+            progress: 0.9,
             sourceId: 'main_source',
             targetId: null
         }
     ]);
 
-    priority.runtime.apply(priority.state);
+    firstArrival.runtime.apply(firstArrival.state);
 
-    const mainTransfer = priority.state.activeTransfers.find(transfer => transfer.id === 'z_main_should_enter');
-    const sideTransfer = priority.state.activeTransfers.find(transfer => transfer.id === 'a_side_should_wait');
-    assert(mainTransfer.lineId === 'output_group', '主輸入已有物品時必須優先進入 output。');
-    assert(sideTransfer.lineId === 'side_a' && sideTransfer.queueBlocked === true, '副輸入在主線優先時必須停在合流點前。');
+    const mainTransfer = firstArrival.state.activeTransfers.find(transfer => transfer.id === 'z_main_should_wait');
+    const sideTransfer = firstArrival.state.activeTransfers.find(transfer => transfer.id === 'a_side_should_enter_first');
+    assert(sideTransfer.lineId === 'output_group', '先到達合流點的輸入線應先進入 output。');
+    assert(mainTransfer.lineId === 'main_input', '尚未到達合流點的輸入線不應搶先進入 output。');
+
+    const seededCycle = createHarness([
+        {
+            id: 'a_side_near',
+            lineId: 'side_a',
+            routePoints: [{ x: 40, y: 100 }, { x: 100, y: 100 }],
+            progress: 0.999,
+            serialNumber: 2,
+            sourceId: 'side_a_source',
+            targetId: null
+        },
+        {
+            id: 'b_side_arrived',
+            lineId: 'side_b',
+            routePoints: [{ x: 100, y: 40 }, { x: 100, y: 100 }],
+            progress: 1,
+            serialNumber: 1,
+            sourceId: 'side_b_source',
+            targetId: null
+        }
+    ]);
+
+    seededCycle.runtime.apply(seededCycle.state);
+    const seededEntered = seededCycle.state.activeTransfers.find(transfer => transfer.lineId === 'output_group');
+    assert(seededEntered.id === 'b_side_arrived', '第一次合流可由實際較早抵達者起跑，不強制從槽位 1 開始。');
+
+    const staleWinner = createHarness([
+        {
+            id: 'old_winner_waiting',
+            lineId: 'side_a',
+            routePoints: [{ x: 40, y: 100 }, { x: 100, y: 100 }],
+            progress: 0.8,
+            sourceId: 'side_a_source',
+            targetId: null
+        },
+        {
+            id: 'arrived_can_pass',
+            lineId: 'side_b',
+            routePoints: [{ x: 100, y: 40 }, { x: 100, y: 100 }],
+            progress: 1,
+            sourceId: 'side_b_source',
+            targetId: null
+        }
+    ]);
+    staleWinner.state._logisticsMergeAdmissionWinners = {
+        'output_group:100,100': {
+            signature: '|old_winner_waiting|',
+            winnerId: 'old_winner_waiting',
+            winnerSlotIndex: 1,
+            committed: false
+        }
+    };
+
+    staleWinner.runtime.apply(staleWinner.state);
+    const staleBypassed = staleWinner.state.activeTransfers.find(transfer => transfer.id === 'arrived_can_pass');
+    assert(staleBypassed.lineId === 'output_group', '等待線上的舊 winner 不可永久阻擋已抵達合流點的輸入。');
+
+    const queueWinner = createQueueHarness([
+        {
+            id: 'winner_at_gate',
+            lineId: 'side_a',
+            routePoints: [{ x: 20, y: 100 }, { x: 100, y: 100 }],
+            progress: 1,
+            sourceId: 'side_a_source',
+            targetId: null
+        },
+        {
+            id: 'nearby_waiter_b',
+            lineId: 'side_b',
+            routePoints: [{ x: 100, y: 20 }, { x: 100, y: 100 }],
+            progress: 0.85,
+            sourceId: 'side_b_source',
+            targetId: null
+        },
+        {
+            id: 'nearby_waiter_c',
+            lineId: 'side_c',
+            routePoints: [{ x: 180, y: 100 }, { x: 100, y: 100 }],
+            progress: 0.85,
+            sourceId: 'side_c_source',
+            targetId: null
+        }
+    ]);
+    queueWinner.queues.applyBlockedQueues(queueWinner.state);
+    const admittedWinner = queueWinner.state.activeTransfers.find(transfer => transfer.id === 'winner_at_gate');
+    assert(admittedWinner.progress >= 0.999, '合流 winner 不可被其他等待中的 input 反向限速而停在合流點前。');
 
     const fairness = createHarness([
         {

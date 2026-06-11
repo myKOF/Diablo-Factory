@@ -1754,7 +1754,8 @@ export class LogisticsRenderer {
             let px, py;
             if (Array.isArray(routePoints) && routePoints.length >= 2) {
                 LogisticsRenderer.annotateRoutePoints(routePoints);
-                const pathPoint = LogisticsRenderer.getPointOnTransferPath(routePoints, t.progress, 0, t);
+                const pathPoint = LogisticsRenderer.getPointOnMergeTransferPath(routePoints, t.progress, t, state) ||
+                    LogisticsRenderer.getPointOnTransferPath(routePoints, t.progress, 0, t);
                 if (!pathPoint) return;
                 px = pathPoint.x;
                 py = pathPoint.y;
@@ -2399,6 +2400,133 @@ export class LogisticsRenderer {
         }
         const last = metricPoints[metricPoints.length - 1];
         const prev = metricPoints[metricPoints.length - 2] || last;
+        return { x: last.x, y: last.y, angle: Math.atan2(last.y - prev.y, last.x - prev.x) };
+    }
+
+    static getPointOnMergeTransferPath(points, progress, transfer, state = GameEngine.state) {
+        if (!Array.isArray(points) || points.length < 2 || !transfer) return null;
+        const metrics = LogisticsRenderer.getTransferPathMetrics(points, transfer);
+        const totalLength = metrics?.totalLength || 0;
+        if (totalLength <= 0) return null;
+        const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+        const targetDistance = clampedProgress * totalLength;
+
+        const outputVisual = LogisticsRenderer.getMergeOutputTransferVisualPoint(points, targetDistance, transfer);
+        if (outputVisual) return outputVisual;
+
+        const node = conveyorSystem?.getLogisticsMergeNodeForInputTransfer
+            ? conveyorSystem.getLogisticsMergeNodeForInputTransfer(transfer, state)
+            : null;
+        if (!node) return null;
+        const nodePoint = node.point || { x: node.x, y: node.y };
+        if (!nodePoint || !Number.isFinite(nodePoint.x) || !Number.isFinite(nodePoint.y)) return null;
+        const inDir = LogisticsRenderer.getMergeInputDirection(points, transfer, node);
+        const outDir = LogisticsRenderer.getMergeOutputDirection(node);
+        if (!inDir || !outDir || !LogisticsRenderer.getTurnArrowDirection(inDir, outDir)) return null;
+
+        const virtualPoints = LogisticsRenderer.buildMergeInputVirtualTurnPath(points, nodePoint, outDir);
+        if (!virtualPoints) return null;
+        return LogisticsRenderer.getPointOnVirtualTransferPathByDistance(virtualPoints, targetDistance, transfer);
+    }
+
+    static getMergeOutputTransferVisualPoint(points, targetDistance, transfer) {
+        const turn = transfer?._mergeVisualTurn;
+        if (!turn || !turn.inDir || !turn.outDir || !Number.isFinite(turn.x) || !Number.isFinite(turn.y)) return null;
+        const nodePoint = { x: turn.x, y: turn.y };
+        const virtualPoints = LogisticsRenderer.buildMergeOutputVirtualTurnPath(points, nodePoint, turn.inDir);
+        if (!virtualPoints) return null;
+        const TS = GameEngine.TILE_SIZE || 20;
+        return LogisticsRenderer.getPointOnVirtualTransferPathByDistance(virtualPoints, TS + targetDistance, transfer);
+    }
+
+    static buildMergeInputVirtualTurnPath(points, nodePoint, outDir) {
+        if (!Array.isArray(points) || points.length < 2 || !nodePoint || !outDir) return null;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const virtualPoints = points.map(point => ({ x: point.x, y: point.y }));
+        const outputPoint = { x: nodePoint.x + outDir.x * TS, y: nodePoint.y + outDir.y * TS };
+        const last = virtualPoints[virtualPoints.length - 1];
+        if (!last || Math.hypot(last.x - nodePoint.x, last.y - nodePoint.y) > 0.5) {
+            virtualPoints.push({ x: nodePoint.x, y: nodePoint.y });
+        }
+        virtualPoints.push(outputPoint);
+        LogisticsRenderer.annotateRoutePoints(virtualPoints);
+        return virtualPoints;
+    }
+
+    static buildMergeOutputVirtualTurnPath(points, nodePoint, inDir) {
+        if (!Array.isArray(points) || points.length < 2 || !nodePoint || !inDir) return null;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const inputPoint = { x: nodePoint.x - inDir.x * TS, y: nodePoint.y - inDir.y * TS };
+        const virtualPoints = [inputPoint, { x: nodePoint.x, y: nodePoint.y }];
+        const startIndex = Math.hypot(points[0].x - nodePoint.x, points[0].y - nodePoint.y) <= 0.5 ? 1 : 0;
+        for (let i = startIndex; i < points.length; i++) {
+            virtualPoints.push({ x: points[i].x, y: points[i].y });
+        }
+        LogisticsRenderer.annotateRoutePoints(virtualPoints);
+        return virtualPoints;
+    }
+
+    static getPointOnVirtualTransferPathByDistance(points, distance, cacheOwner = null) {
+        const metrics = LogisticsRenderer.getTransferPathMetrics(points, cacheOwner);
+        if (!metrics || !Array.isArray(metrics.points) || !Array.isArray(metrics.lengths)) return null;
+        return LogisticsRenderer.getPointOnMetricPath(metrics.points, metrics.lengths, distance);
+    }
+
+    static getMergeInputDirection(points, transfer, node) {
+        const storedDir = node?.inputDirections?.[transfer?.lineId];
+        if (storedDir && Number.isFinite(storedDir.x) && Number.isFinite(storedDir.y)) {
+            return { x: Math.sign(storedDir.x), y: Math.sign(storedDir.y) };
+        }
+        if (!Array.isArray(points) || points.length < 2) return null;
+        return LogisticsRenderer.getCardinalDir(points[points.length - 2], points[points.length - 1]);
+    }
+
+    static getMergeOutputDirection(node) {
+        const storedDir = node?.outputDir;
+        if (storedDir && Number.isFinite(storedDir.x) && Number.isFinite(storedDir.y)) {
+            return { x: Math.sign(storedDir.x), y: Math.sign(storedDir.y) };
+        }
+        const route = conveyorSystem?.getLogisticsMergeNodeOutputRoute
+            ? conveyorSystem.getLogisticsMergeNodeOutputRoute(node)
+            : null;
+        if (Array.isArray(route) && route.length >= 2) {
+            return LogisticsRenderer.getCardinalDir(route[0], route[1]);
+        }
+        return null;
+    }
+
+    static getSegmentLengths(points) {
+        if (!Array.isArray(points) || points.length < 2) return [];
+        const lengths = [];
+        for (let i = 0; i < points.length - 1; i++) {
+            lengths.push(Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y));
+        }
+        return lengths;
+    }
+
+    static getPathLength(points) {
+        return LogisticsRenderer.getSegmentLengths(points).reduce((sum, length) => sum + length, 0);
+    }
+
+    static getPointOnMetricPath(points, lengths, distance) {
+        if (!Array.isArray(points) || points.length < 2) return null;
+        let targetDistance = Math.max(0, Number(distance) || 0);
+        for (let i = 0; i < points.length - 1; i++) {
+            const length = lengths[i] || 0;
+            if (targetDistance <= length || i === points.length - 2) {
+                const a = points[i];
+                const b = points[i + 1];
+                const localProgress = length > 0 ? Math.max(0, Math.min(1, targetDistance / length)) : 0;
+                return {
+                    x: a.x + (b.x - a.x) * localProgress,
+                    y: a.y + (b.y - a.y) * localProgress,
+                    angle: Math.atan2(b.y - a.y, b.x - a.x)
+                };
+            }
+            targetDistance -= length;
+        }
+        const last = points[points.length - 1];
+        const prev = points[points.length - 2] || last;
         return { x: last.x, y: last.y, angle: Math.atan2(last.y - prev.y, last.x - prev.x) };
     }
 

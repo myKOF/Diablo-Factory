@@ -361,6 +361,70 @@ if (outputDirPreferredRoute.some(point => point.x === 50 && point.y === 50)) {
     throw new Error('Merge debug route should not follow an output candidate that conflicts with node.outputDir.');
 }
 
+const mergeTurnNode = {
+    outputGroupId: 'merge_visual_output',
+    inputGroupIds: ['merge_visual_input'],
+    point: { x: 20, y: 0 },
+    outputDir: { x: 0, y: 1 },
+    inputDirections: {
+        merge_visual_input: { x: 1, y: 0 }
+    }
+};
+globalThis.conveyorSystem = {
+    getLogisticsMergeNodeForInputTransfer: (transfer) =>
+        transfer?.lineId === 'merge_visual_input' ? mergeTurnNode : null,
+    getLogisticsMergeNodeOutputRoute: () => [{ x: 20, y: 0 }, { x: 20, y: 40 }]
+};
+const mergeInputVisualPoint = globalThis.LogisticsRenderer.getPointOnMergeTransferPath(
+    [{ x: 0, y: 0 }, { x: 20, y: 0 }],
+    1,
+    { lineId: 'merge_visual_input' },
+    {}
+);
+const expectedMergeInputVirtualPath = globalThis.LogisticsRenderer.buildMergeInputVirtualTurnPath(
+    [{ x: 0, y: 0 }, { x: 20, y: 0 }],
+    { x: 20, y: 0 },
+    { x: 0, y: 1 }
+);
+const expectedMergeSwitchPoint = globalThis.LogisticsRenderer.getPointOnVirtualTransferPathByDistance(
+    expectedMergeInputVirtualPath,
+    GameEngine.TILE_SIZE,
+    {}
+);
+if (
+    !mergeInputVisualPoint ||
+    Math.hypot(
+        mergeInputVisualPoint.x - expectedMergeSwitchPoint.x,
+        mergeInputVisualPoint.y - expectedMergeSwitchPoint.y
+    ) > 0.1
+) {
+    throw new Error('Merge input transfer should advance through the rounded turn at the original movement speed.');
+}
+const mergeOutputTransfer = {
+    lineId: 'merge_visual_output',
+    _mergeVisualTurn: {
+        x: 20,
+        y: 0,
+        inDir: { x: 1, y: 0 },
+        outDir: { x: 0, y: 1 }
+    }
+};
+const mergeOutputVisualPoint = globalThis.LogisticsRenderer.getPointOnMergeTransferPath(
+    [{ x: 20, y: 0 }, { x: 20, y: 40 }],
+    0,
+    mergeOutputTransfer,
+    {}
+);
+if (
+    !mergeOutputVisualPoint ||
+    Math.hypot(
+        mergeOutputVisualPoint.x - expectedMergeSwitchPoint.x,
+        mergeOutputVisualPoint.y - expectedMergeSwitchPoint.y
+    ) > 0.1
+) {
+    throw new Error('Merge output transfer should continue from the same rounded turn distance as the input switch point.');
+}
+
 globalThis.conveyorSystem = {
     ensureLogisticsMergeNodeStore: (state) => state.logisticsMergeNodes || [],
     getLogisticsMergeNodeOutputRoute: (node) => {
