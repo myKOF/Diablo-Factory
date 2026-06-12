@@ -2511,49 +2511,44 @@ export class WorkerSystem {
             if (!node || !node.outputGroupId) return totalLength;
             const mergePoint = node.point || { x: node.x, y: node.y };
 
-            const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
-            const isAtOrPastWaitLine = desired >= totalLength - spacing - 0.1;
             const winnerId = getMergeAdmissionWinner(node, spacing);
             const isWinner = winnerId && transfer.id && transfer.id === winnerId;
-
+            // [非勝者等待線] 與 LogisticsTransferQueues 一致：未取得路權前一律停在合流點前一格，
+            // 杜絕貼隊推進造成的相位損失與重疊。
+            if (!isWinner) {
+                return Math.max(0, totalLength - spacing);
+            }
 
             let requiredWait = 0;
             state.activeTransfers.forEach(other => {
                 if (!other || other === transfer) return;
-                if (other.lineId === node.outputGroupId) {
-                    if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
-                    const otherMetrics = getTransferRouteMetrics(other);
-                    const otherTotal = otherMetrics.totalPixels;
-                    if (otherTotal <= 0) return;
-                    const otherProgress = Math.max(0, Math.min(1, Number(other.progress) || 0));
-                    const otherMaxAllowed = other.maxAllowedProgress !== undefined ? other.maxAllowedProgress : 1.0;
-                    const otherQueueHeld = other.queueBlocked === true && otherProgress >= otherMaxAllowed - 0.0001;
-                    const projectedProgress = otherQueueHeld
-                        ? otherProgress
-                        : Math.min(otherMaxAllowed, otherProgress + deltaTime * (getTransferSpeed(other) / Math.max(1, otherMetrics.totalTiles)));
-                    const otherDistance = projectedProgress * otherTotal;
-                    const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
-                    const distFromMerge = otherDistance - mergeDistance;
-                    if (Math.abs(distFromMerge) < spacing - 0.1) {
-                        requiredWait = Math.max(requiredWait, spacing);
-                    }
-                } else if (!isWinner && Array.isArray(node.inputGroupIds) && node.inputGroupIds.includes(other.lineId)) {
-                    if (desired < totalLength - 0.1) {
-                        if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
-                        const otherTotal = getTransferRouteMetrics(other).totalPixels;
-                        if (otherTotal <= 0) return;
-                        const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
-                        const distToMerge = otherTotal - otherDistance;
-                        if (distToMerge < spacing) {
-                            requiredWait = Math.max(requiredWait, Math.max(0, spacing - distToMerge));
-                        }
-                    }
+                if (other.lineId !== node.outputGroupId) return;
+                if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
+                const otherMetrics = getTransferRouteMetrics(other);
+                const otherTotal = otherMetrics.totalPixels;
+                if (otherTotal <= 0) return;
+                const otherProgress = Math.max(0, Math.min(1, Number(other.progress) || 0));
+                const otherMaxAllowed = other.maxAllowedProgress !== undefined ? other.maxAllowedProgress : 1.0;
+                const otherQueueHeld = other.queueBlocked === true && otherProgress >= otherMaxAllowed - 0.0001;
+                const projectedProgress = otherQueueHeld
+                    ? otherProgress
+                    : Math.min(otherMaxAllowed, otherProgress + deltaTime * (getTransferSpeed(other) / Math.max(1, otherMetrics.totalTiles)));
+                const otherDistance = projectedProgress * otherTotal;
+                const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
+                const distFromMerge = otherDistance - mergeDistance;
+                if (Math.abs(distFromMerge) < spacing - 0.1) {
+                    // [緊密放行] 勝者隨前車逐步跟進保持一格間距。
+                    const followGap = distFromMerge >= 0
+                        ? Math.max(0, spacing - distFromMerge)
+                        : spacing;
+                    requiredWait = Math.max(requiredWait, followGap);
+                } else if (node.zipperTurn !== 'branch' &&
+                    distFromMerge <= -(spacing + 0.1) && distFromMerge > -spacing * 3) {
+                    // [防碎片視界] 輪到主線時，三格內有逼近中的來車：於等待線候命，禁止插它前面。
+                    requiredWait = Math.max(requiredWait, spacing);
                 }
             });
             if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
-            if (isAtOrPastWaitLine && !isWinner) {
-                return Math.max(0, totalLength - spacing);
-            }
             return totalLength;
         };
 
@@ -2579,6 +2574,11 @@ export class WorkerSystem {
         const isMergeInputTransfer = (transfer) => conveyorSystem &&
             typeof conveyorSystem.isLogisticsMergeInputTransfer === 'function' &&
             conveyorSystem.isLogisticsMergeInputTransfer(transfer, state);
+        const isMergeOutputTransfer = (transfer) => {
+            const lineId = transfer?.lineId || null;
+            if (!lineId || !Array.isArray(state.logisticsMergeNodes)) return false;
+            return state.logisticsMergeNodes.some(node => node?.outputGroupId === lineId);
+        };
 
         Array.from(transfersByPath.entries()).sort(([, a], [, b]) => {
             const aIsMergeInput = a.some(isMergeInputTransfer);
@@ -2633,6 +2633,7 @@ export class WorkerSystem {
                     }
                 }
 
+                // [緊密不重疊] 主線與一般線統一使用完整物品長度作為間距，嚴防重疊。
                 let spacing = cellSize;
                 const desired = (t.progress || 0) * totalLength;
 
@@ -2641,11 +2642,14 @@ export class WorkerSystem {
                     if (isBreakpoint) {
                         maxDist = dist_pn;
                     } else if (isMergeInput) {
-                        maxDist = Math.min(totalLength, getMergeInputMaxDistance(t, totalLength, spacing));
+                        maxDist = Math.min(totalLength, getMergeInputMaxDistance(t, totalLength, cellSize));
                     } else {
                         maxDist = totalLength;
                     }
                 } else {
+                    maxDist = totalLength;
+                }
+                if (j > 0) {
                     const frontItem = groupTransfers[j - 1];
                     const frontDist = (frontItem.progress || 0) * getTransferRouteMetrics(frontItem).totalPixels;
                     const physicalLimit = Math.max(0, Math.min(frontDist, prevMaxDist) - spacing);
@@ -2657,6 +2661,14 @@ export class WorkerSystem {
                         }
                     } else {
                         maxDist = physicalLimit;
+                    }
+                }
+                // [拉鏈式合流] 主線穿越車在輪到支線時於合流點前一格讓行（對佇列中任何位置的穿越車皆適用）
+                if (isMergeOutputTransfer(t) && conveyorSystem &&
+                    typeof conveyorSystem.getLogisticsMergeThroughYieldLimit === 'function') {
+                    const yieldLimit = conveyorSystem.getLogisticsMergeThroughYieldLimit(t, state, cellSize);
+                    if (Number.isFinite(yieldLimit)) {
+                        maxDist = Math.min(maxDist, yieldLimit);
                     }
                 }
 

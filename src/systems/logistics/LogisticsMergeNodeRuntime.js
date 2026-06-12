@@ -20,6 +20,11 @@ export class LogisticsMergeNodeRuntime {
         return total;
     }
 
+    getMergeGateSpacing() {
+        // [緊密不重疊] 間距必須等於完整物品長度（一格），確保最密排列時物品邊緣相接而不重疊。
+        return Math.max(1, this.gameEngine.TILE_SIZE || 20);
+    }
+
     getCardinalDirection(from, to) {
         if (this.system && typeof this.system.getCardinalDirection === 'function') {
             return this.system.getCardinalDirection(from, to);
@@ -249,6 +254,8 @@ export class LogisticsMergeNodeRuntime {
         node.lastServed = node.inputGroupIds[safeSlotIndex] || null;
         node.hasCommittedAdmission = true;
         node.admissionCommitCount = (Number(node.admissionCommitCount) || 0) + 1;
+        // [拉鏈式合流] 支線完成插入後，輪次交還主線穿越車
+        node.zipperTurn = 'main';
         const queueState = this.getMergeWaitQueueState(node, state);
         queueState.lastServed = node.lastServed;
         queueState.currentOccupant = {
@@ -266,6 +273,46 @@ export class LogisticsMergeNodeRuntime {
             queueState.incomingQueues[node.lastServed] = queueState.incomingQueues[node.lastServed].filter(id => id !== winnerId);
         }
         if (previous) previous.committed = true;
+    }
+
+    // [拉鏈式合流] 計算穿越車（已在輸出線上、尚未通過合流點）的讓行上限距離。
+    // 輪到支線時，穿越車停在合流點前一格，讓支線物品插入後形成剛好一格間距；
+    // 穿越車通過合流點時將輪次交還支線（zipperTurn），達成 1:1 拉鏈互插、主線全程滿載無碎片間隙。
+    getMergeThroughYieldLimit(transfer, state = this.gameEngine.state, spacing = this.getMergeGateSpacing()) {
+        if (!transfer?.lineId) return Infinity;
+        const nodes = this.system.ensureLogisticsMergeNodeStore(state).filter(node =>
+            node && node.outputGroupId === transfer.lineId &&
+            Array.isArray(node.inputGroupIds) && node.inputGroupIds.length > 0
+        );
+        if (!nodes.length) return Infinity;
+        const route = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
+        const total = this.getRouteLength(route);
+        if (total <= 0) return Infinity;
+        const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
+        let limit = Infinity;
+        nodes.forEach(node => {
+            const mergePoint = node.point || { x: node.x, y: node.y };
+            const mergeDistance = this.getPathDistanceToPoint(route, mergePoint);
+            // 路線起點即合流點（本物品就是在此插入的）→ 與此節點無讓行關係
+            if (mergeDistance <= 0.1) return;
+            if (distance >= mergeDistance - 0.1) {
+                // 正在通過合流點（一格窗口內）：把輪次交還支線
+                if (distance - mergeDistance < spacing - 0.1) {
+                    node.zipperTurn = 'branch';
+                }
+                return;
+            }
+            // 僅在「輪到支線」且支線確實有物品就緒等待時讓行
+            if (node.zipperTurn !== 'branch') return;
+            const winnerId = this.getLogisticsMergeAdmissionWinner(node, state, {
+                spacing,
+                readyDistanceFromEnd: spacing
+            });
+            if (!winnerId) return;
+            // [只停不退] 讓行線為合流點前一格；若已越過讓行線則停在原地
+            limit = Math.min(limit, Math.max(distance, mergeDistance - spacing));
+        });
+        return limit;
     }
 
     getPathDistanceToPoint(points, point) {
@@ -313,7 +360,10 @@ export class LogisticsMergeNodeRuntime {
         const mergePoint = node.point || { x: node.x, y: node.y };
         const currentDistance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
         const mergeDistance = this.getPathDistanceToPoint(route, mergePoint);
-        if (currentDistance - mergeDistance >= spacing - 0.1) {
+        // 只要物品已越過合流點，立即釋放佔用鎖定；
+        // 實際碰撞防護由 getOutputEntryState 的間距檢查承接，
+        // 使「門禁等待」與「下一物品接近」時間重疊，消除串聯延遲。
+        if (currentDistance >= mergeDistance - 0.1) {
             node.currentOccupant = null;
             queueState.currentOccupant = null;
             return true;
@@ -326,8 +376,8 @@ export class LogisticsMergeNodeRuntime {
             node && Array.isArray(node.inputGroupIds) && node.inputGroupIds.length > 0 && node.outputGroupId
         );
         if (!nodes.length || !Array.isArray(state?.activeTransfers) || state.activeTransfers.length === 0) return false;
-        const TS = this.gameEngine.TILE_SIZE || 20;
-        const minTransferSpacing = TS;
+        const minTransferSpacing = this.getMergeGateSpacing();
+        const admittedNodeKeys = new Set();
 
         let changed = false;
         const getPathDistanceToPoint = (points, point) => {
@@ -374,6 +424,12 @@ export class LogisticsMergeNodeRuntime {
                 // [只停不退] 使用相對距離絕對值，確保合流點前後安全間距內無其他物品佔用
                 if (Math.abs(distFromMerge) < minTransferSpacing - 0.1) {
                     occupied = true;
+                } else if (node.zipperTurn !== 'branch' &&
+                    distFromMerge <= -(minTransferSpacing + 0.1) && distFromMerge > -minTransferSpacing * 3) {
+                    // [防碎片視界] 輪到主線時，三格內有逼近中的來車：禁止插到它前面，
+                    // 否則留下的小數間隙因同速永遠無法閉合；等它通過後再緊貼其後插入。
+                    // 輪到支線（zipperTurn === 'branch'）時來車必停讓行線，插入必然緊密，無需視界。
+                    occupied = true;
                 }
             });
             return { occupied };
@@ -384,8 +440,10 @@ export class LogisticsMergeNodeRuntime {
                 transfer.progress = 1;
                 return;
             }
+            const current = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
             const waitDistance = Math.max(0, total - minTransferSpacing);
-            transfer.progress = Math.max(0, Math.min(1, waitDistance / total));
+            // [只停不退] 物品只能停止或前進，嚴禁往回推；已越過等待線者停在原地。
+            transfer.progress = Math.max(0, Math.min(1, Math.max(waitDistance, Math.min(current, total)) / total));
         };
         const getMergeAdmissionWinner = (node) => {
             return this.getLogisticsMergeAdmissionWinner(node, state, {
@@ -406,6 +464,13 @@ export class LogisticsMergeNodeRuntime {
         state.activeTransfers.forEach(transfer => {
             const node = findNodeForTransfer(transfer);
             if (!node) return;
+            const nodeKey = this.getMergeNodeKey(node);
+            if (admittedNodeKeys.has(nodeKey)) {
+                stopBeforeMergePoint(transfer);
+                transfer.queueBlocked = true;
+                delete transfer.blockedOnBrokenLine;
+                return;
+            }
             const route = this.system.getLogisticsMergeNodeOutputRoute(node);
             if (!Array.isArray(route) || route.length < 2) return;
             const winnerId = getMergeAdmissionWinner(node);
@@ -422,7 +487,11 @@ export class LogisticsMergeNodeRuntime {
                 delete transfer.blockedOnBrokenLine;
                 return;
             }
-            if (Number(transfer?.progress) < 0.999) {
+            const inputTotal = this.getRouteLength(transfer.routePoints);
+            const inputDistance = Math.max(0, Math.min(1, Number(transfer?.progress) || 0)) * inputTotal;
+            // [等速過彎] 必須實際抵達輸入線終點（即合流點）才切換路線，杜絕提前切換造成的瞬移。
+            const isAtMergeGate = inputTotal <= 0 || inputDistance >= inputTotal - 0.5;
+            if (!isAtMergeGate) {
                 delete transfer.queueBlocked;
                 delete transfer.blockedOnBrokenLine;
                 return;
@@ -440,6 +509,8 @@ export class LogisticsMergeNodeRuntime {
             transfer.lineId = node.outputGroupId;
             transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
             transfer.progress = 0;
+            // 路線已切換，舊路線上的排隊距離殘值必須清除，避免排隊邏輯誤判位置。
+            delete transfer._queuedDistance;
             transfer.sourceId = outputSeg?.sourceId || transfer.sourceId || null;
             transfer.targetId = outputSeg?.targetId || null;
             transfer.efficiency = Number(outputSeg?.efficiency) || Number(transfer.efficiency) || 0;
@@ -455,6 +526,7 @@ export class LogisticsMergeNodeRuntime {
             }
             delete transfer.blockedOnBrokenLine;
             delete transfer.queueBlocked;
+            admittedNodeKeys.add(nodeKey);
             changed = true;
         });
 

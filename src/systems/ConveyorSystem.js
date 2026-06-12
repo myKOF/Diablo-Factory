@@ -470,6 +470,10 @@ export class ConveyorSystem {
         return this.mergeNodeRuntime.getLogisticsMergeAdmissionWinner(node, state, options);
     }
 
+    getLogisticsMergeThroughYieldLimit(transfer, state = GameEngine.state, spacing) {
+        return this.mergeNodeRuntime.getMergeThroughYieldLimit(transfer, state, spacing);
+    }
+
     applyLogisticsMergeNodes(state = GameEngine.state) {
         return this.mergeNodeRuntime.apply(state);
     }

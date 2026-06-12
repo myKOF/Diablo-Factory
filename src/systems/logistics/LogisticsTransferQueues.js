@@ -19,6 +19,8 @@ export class LogisticsTransferQueues {
         const TS = this.gameEngine.TILE_SIZE || 20;
         const ITEM_LENGTH = TS;
         const minTransferSpacing = ITEM_LENGTH;
+        // [緊密不重疊] 合流間距與一般排隊間距一致，等於完整物品長度，嚴防重疊。
+        const mergeGateSpacing = ITEM_LENGTH;
         const blockThreshold = ITEM_LENGTH;
         const releaseThreshold = ITEM_LENGTH * 1.05;
         const pathMetricsCache = new Map();
@@ -38,12 +40,17 @@ export class LogisticsTransferQueues {
                     line.suppressedConnectionCellKeys.includes(lastKey);
             });
         };
+        const isMergeOutputTransfer = (transfer) => {
+            const lineId = transfer?.lineId || null;
+            if (!lineId || !Array.isArray(state.logisticsMergeNodes)) return false;
+            return state.logisticsMergeNodes.some(node => node?.outputGroupId === lineId);
+        };
         const getMergeAdmissionWinner = (node) => {
             if (!node || !Array.isArray(node.inputGroupIds)) return null;
             if (this.system && typeof this.system.getLogisticsMergeAdmissionWinner === 'function') {
                 return this.system.getLogisticsMergeAdmissionWinner(node, state, {
-                    spacing: minTransferSpacing,
-                    readyDistanceFromEnd: minTransferSpacing
+                    spacing: mergeGateSpacing,
+                    readyDistanceFromEnd: mergeGateSpacing
                 });
             }
             const mergePoint = node.point || { x: node.x, y: node.y };
@@ -55,7 +62,7 @@ export class LogisticsTransferQueues {
                 const otherTotal = getPathTotalLength(other.routePoints, pathMetricsCache);
                 if (otherTotal <= 0) return;
                 const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
-                if (otherDistance < otherTotal - minTransferSpacing - 0.1) return;
+                if (otherDistance < otherTotal - mergeGateSpacing - 0.1) return;
                 const current = contendersByLine.get(other.lineId);
                 if (!current || otherDistance > current.distance || (
                     Math.abs(otherDistance - current.distance) <= 0.1 &&
@@ -87,42 +94,38 @@ export class LogisticsTransferQueues {
             if (!node || !node.outputGroupId) return totalLength;
             const mergePoint = node.point || { x: node.x, y: node.y };
 
-            const desired = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * totalLength;
-            const isAtOrPastWaitLine = desired >= totalLength - minTransferSpacing - 0.1;
             const winnerId = getMergeAdmissionWinner(node);
             const isWinner = winnerId && transfer.id && transfer.id === winnerId;
-
+            // [非勝者等待線] 未取得路權前一律停在合流點前一格；
+            // 嚴禁「隨他線逼近而漸進」的灰色地帶——那會讓非勝者貼隊推進，
+            // 在勝者插入瞬間形成 <1 格間距並損失相位，產生週期性空隙。
+            if (!isWinner) {
+                return Math.max(0, totalLength - mergeGateSpacing);
+            }
 
             let requiredWait = 0;
             state.activeTransfers.forEach(other => {
                 if (!other || other === transfer) return;
-                if (other.lineId === node.outputGroupId) {
-                    if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
-                    const otherTotal = getPathTotalLength(other.routePoints, pathMetricsCache);
-                    if (otherTotal <= 0) return;
-                    const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
-                    const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint, pathMetricsCache);
-                    const distFromMerge = otherDistance - mergeDistance;
-                    if (Math.abs(distFromMerge) < minTransferSpacing - 0.1) {
-                        requiredWait = Math.max(requiredWait, minTransferSpacing);
-                    }
-                } else if (!isWinner && Array.isArray(node.inputGroupIds) && node.inputGroupIds.includes(other.lineId)) {
-                    if (desired < totalLength - 0.1) {
-                        if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
-                        const otherTotal = getPathTotalLength(other.routePoints, pathMetricsCache);
-                        if (otherTotal <= 0) return;
-                        const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
-                        const distToMerge = otherTotal - otherDistance;
-                        if (distToMerge < minTransferSpacing) {
-                            requiredWait = Math.max(requiredWait, Math.max(0, minTransferSpacing - distToMerge));
-                        }
-                    }
+                if (other.lineId !== node.outputGroupId) return;
+                if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
+                const otherTotal = getPathTotalLength(other.routePoints, pathMetricsCache);
+                if (otherTotal <= 0) return;
+                const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
+                const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint, pathMetricsCache);
+                const distFromMerge = otherDistance - mergeDistance;
+                if (Math.abs(distFromMerge) < mergeGateSpacing - 0.1) {
+                    // [緊密放行] 勝者隨前車前進逐步跟進，保持剛好一格間距。
+                    const followGap = distFromMerge >= 0
+                        ? Math.max(0, mergeGateSpacing - distFromMerge)
+                        : mergeGateSpacing;
+                    requiredWait = Math.max(requiredWait, followGap);
+                } else if (node.zipperTurn !== 'branch' &&
+                    distFromMerge <= -(mergeGateSpacing + 0.1) && distFromMerge > -mergeGateSpacing * 3) {
+                    // [防碎片視界] 輪到主線時，三格內有逼近中的來車：於等待線候命，禁止插它前面。
+                    requiredWait = Math.max(requiredWait, mergeGateSpacing);
                 }
             });
             if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
-            if (isAtOrPastWaitLine && !isWinner) {
-                return Math.max(0, totalLength - minTransferSpacing);
-            }
             return totalLength;
         };
         const pathKey = (transfer) => {
@@ -146,6 +149,8 @@ export class LogisticsTransferQueues {
         });
 
         groups.forEach(transfers => {
+            const queueSpacing = transfers.some(isMergeOutputTransfer) ? mergeGateSpacing : ITEM_LENGTH;
+            const queueReleaseThreshold = queueSpacing * 1.05;
             const canonical = transfers.reduce((best, transfer) => {
                 const len = getPathTotalLength(transfer.routePoints, pathMetricsCache);
                 return len > best.length ? { points: transfer.routePoints, length: len } : best;
@@ -193,7 +198,7 @@ export class LogisticsTransferQueues {
                     ? Math.max(0, Math.min(transfer._queuedDistance, totalLength))
                     : currentDistance;
                 let maxAllowed = Number.isFinite(prevQueuedDistance)
-                    ? prevQueuedDistance - ITEM_LENGTH
+                    ? prevQueuedDistance - queueSpacing
                     : Infinity;
                 let breakpointLimit = totalLength;
                 const isMergeInput = this.system.isLogisticsMergeInputTransfer(transfer, state);
@@ -212,14 +217,22 @@ export class LogisticsTransferQueues {
                     if (isMergeInput && prevQueuedDistance === Infinity) {
                         maxAllowed = Math.min(maxAllowed, getMergeInputMaxDistance(transfer, totalLength));
                     }
+                    // [拉鏈式合流] 主線穿越車在輪到支線時於合流點前一格讓行
+                    if (isMergeOutputTransfer(transfer) &&
+                        this.system && typeof this.system.getLogisticsMergeThroughYieldLimit === 'function') {
+                        const yieldLimit = this.system.getLogisticsMergeThroughYieldLimit(transfer, state, mergeGateSpacing);
+                        if (Number.isFinite(yieldLimit)) {
+                            maxAllowed = Math.min(maxAllowed, yieldLimit);
+                        }
+                    }
                 }
 
                 let queuedDistance = Math.max(0, Math.min(desired, maxAllowed));
                 if (Number.isFinite(prevQueuedDistance)) {
                     const distToFront = prevQueuedDistance - desired;
-                    if (distToFront < blockThreshold) {
-                        queuedDistance = Math.max(0, prevQueuedDistance - ITEM_LENGTH);
-                    } else if (transfer.queueBlocked === true && distToFront < releaseThreshold) {
+                    if (distToFront < queueSpacing) {
+                        queuedDistance = Math.max(0, prevQueuedDistance - queueSpacing);
+                    } else if (transfer.queueBlocked === true && distToFront < queueReleaseThreshold) {
                         queuedDistance = Math.min(queuedDistance, previousTransferDistance);
                     }
                     queuedDistance = Math.max(0, Math.min(queuedDistance, maxAllowed));
@@ -234,9 +247,14 @@ export class LogisticsTransferQueues {
                 if (useCanonical) {
                     transfer.routePoints = canonical.points.map(point => ({ ...point }));
                 }
-                const nextDistance = stopBeforeSuppressedEndpoint && currentDistance > breakpointLimit
+                let nextDistance = stopBeforeSuppressedEndpoint && currentDistance > breakpointLimit
                     ? breakpointLimit
                     : queuedDistance;
+                // [只停不退] 物品只能停止或前進；以「當前實際位置」為下限，
+                // 嚴禁任何排隊/合流規則把已前進的物品往回推（兩套上限實作的微小分歧不得轉化為倒退）。
+                if (!(stopBeforeSuppressedEndpoint && currentDistance > breakpointLimit)) {
+                    nextDistance = Math.max(nextDistance, Math.min(currentDistance, totalLength));
+                }
                 transfer.progress = Math.max(0, Math.min(1, nextDistance / totalLength));
                 transfer._queuedDistance = nextDistance;
                 if (transfer.targetId || isMergeInput) {

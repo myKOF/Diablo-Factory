@@ -1,3 +1,37 @@
+# 2026-06-12 拉鏈式合流（Zipper Merge）碎片間隙修復
+
+## 根因
+主線穿越車流不受合流閘門管制；支線物品插入到「逼近中的穿越車」前方時，留下的小數間隙因同速永遠無法閉合，形成「數個緊密＋半格空隙」的循環圖樣。
+
+## 解法
+1. 穿越車在「輪到支線」（`node.zipperTurn === 'branch'`）且支線有就緒物品時，於合流點前一格讓行（只停不退）。
+2. 支線物品插入後輪次交還主線（commit 時設 `zipperTurn = 'main'`）；穿越車通過合流點時輪次交還支線。
+3. 1:1 拉鏈互插，離線模擬驗證：隨機上游車流下主線間隙 100%（單支線）/ 96.6%（三支線穩態）恰好一格，零重疊、零後退。
+
+## 實裝位置
+- `LogisticsMergeNodeRuntime.getMergeThroughYieldLimit`（新增）＋ commit 輪次切換
+- `ConveyorSystem.getLogisticsMergeThroughYieldLimit`（委派）
+- `LogisticsTransferQueues` 與 `WorkerSystem` 的 maxAllowed 計算掛載讓行上限
+
+## 補強：防碎片視界（輪次條件式）
+- 輪到主線（`zipperTurn !== 'branch'`）時，支線禁止插入三格視界內逼近中的來車前方，改為等其通過後緊貼插入。
+- 輪到支線時來車必停讓行線（合流點前一格），插入必然緊密，視界不生效（否則互等死鎖）。
+- 最終模擬：隨機上游車流 + 三支線串聯，主線間隙 100%（1420/1420 樣本）恰好一格，零重疊、無死鎖。
+
+# 2026-06-12 合流 Gate 連續放行重構計畫
+
+## 核心目標
+1. 取消「上一個物品完全通過/鎖釋放後才選下一個 winner」的合流獨占規則。
+2. 將合流點改為入口空間 Gate：只要 output 起點後方已空出 `itemSpacing`，下一個 input 物品即可取得 slot 並切入 output。
+3. Round-Robin 仍只決定下一個輸入分支，安全性由 output 起點空間檢查保證，避免重疊與推擠。
+
+## 實施步驟
+- [x] 步驟 1：建立紅燈測試，證明 currentOccupant 存在但 output 已空出時仍應選出下一個 winner。
+- [x] 步驟 2：移除 currentOccupant 作為 admission 獨占鎖的語意，改由 output entry spacing 決定是否可放行。
+- [x] 步驟 3：允許已抵達等待線的 winner 直接切入 output 起點，不要求 input progress 到 1。
+- [x] 步驟 4：同步合流 runtime 與 transfer queue 的 itemSpacing，保留不重疊與 Round-Robin。
+- [x] 步驟 5：執行物流回歸、Playwright E2E、清理 tmp 並執行 `npm.cmd run finalize`。
+
 # 物流線匯合處流水線優化計畫
 
 ## 目標
