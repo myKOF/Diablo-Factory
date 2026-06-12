@@ -95,9 +95,12 @@ export class LogisticsTransferRerouter {
             if (!affectedSet || affectedSet.size === 0) return true;
             const lineId = transfer?.lineId || null;
             if (lineId && affectedSet.has(lineId)) return true;
-            const sourceId = transfer?.sourceId || null;
-            const targetId = transfer?.targetId || null;
-            return (sourceId && affectedSourceIds.has(sourceId)) || (targetId && affectedTargetIds.has(targetId));
+            
+            // 如果此物品所屬的物流線在當前所有物流線中已經不存在，說明該物流線已被刪除，此物品也需要被更新（以利後續清除）
+            const lineExists = allLines.some(line => line && (line.groupId === lineId || line.id === lineId));
+            if (!lineExists) return true;
+
+            return false;
         };
 
         const pathMetricsCache = new Map();

@@ -40,7 +40,7 @@ function cleanupLogisticsMergeNodesForDeletedLine(deletedLine) {
     const points = Array.isArray(deletedLine?.routePoints) ? deletedLine.routePoints : [];
     if (points.length === 0) return new Set();
     const TS = GameEngine.TILE_SIZE || 20;
-    const tolerance = TS * 0.8;
+    const tolerance = TS * 0.25; // 緊密判定：只在非常靠近合流點時才移除節點，避免中段拆分誤判
     const nodes = this.ensureLogisticsMergeNodeStore(state);
     const removedNodes = nodes.filter(node => {
         const point = node?.point || (Number.isFinite(node?.x) && Number.isFinite(node?.y) ? { x: node.x, y: node.y } : null);
@@ -127,6 +127,21 @@ function deleteLogisticsLineById(lineId) {
                     seg.detachedFromGroupId = groupId;
                     if (detachKey) seg.detachedAtKey = detachKey;
                     seg.detachedByDeletedGap = true;
+                });
+
+                // 更新受影響的 MergeNode 的 inputGroupIds 與 inputDirections
+                const nodes = this.ensureLogisticsMergeNodeStore(state);
+                nodes.forEach(node => {
+                    if (node && Array.isArray(node.inputGroupIds)) {
+                        const idx = node.inputGroupIds.indexOf(groupId);
+                        if (idx >= 0) {
+                            node.inputGroupIds[idx] = newGroupId;
+                            if (node.inputDirections && node.inputDirections[groupId]) {
+                                node.inputDirections[newGroupId] = node.inputDirections[groupId];
+                                delete node.inputDirections[groupId];
+                            }
+                        }
+                    }
                 });
 
                 // 自動重新計算兩段物流線的端點及與建築物的連接關係

@@ -756,7 +756,16 @@
 3. 僅修改 `LogisticsUndoStore` 的 transfer 清理判定，不改物流路由、合流排程、回壓或渲染。
 
 ## 實施步驟
-- [x] 步驟 1：新增同 group 中「保留線段物品留下、消失線段物品清除」的回歸測試。
-- [x] 步驟 2：確認測試在現況下失敗，根因為 affected group 被整組清除。
-- [x] 步驟 3：改為用 transfer 目前位置與復原後物流線幾何距離判定是否清除。
 - [x] 步驟 4：執行回歸測試、語法檢查與 `npm run finalize`。
+
+# 2026-06-12 物流線拆分與合流卡死修復計畫
+
+## 核心目標
+1. 解決在途物品（activeTransfers）在物流線拆分時，非受影響支線的物品被誤清除的問題。
+2. 解決物流線拆分後，MergeNode 缺少後半段新群組（newGroupId）的 input 資訊，導致合流點卡死、物品無法通過的問題。
+
+## 實施步驟
+- [ ] 步驟 1：修改 src/systems/logistics/LogisticsTransferRerouter.js，限制僅在 affectedSet 包含其 lineId 或是該 lineId 已不存於 allLines 時更新對應在途物品。
+- [ ] 步驟 2：修改 src/systems/logistics/LogisticsDeletionService.js，在拆分群組後更新對應 MergeNode 的 inputGroupIds 與 inputDirections。
+- [ ] 步驟 3：執行物流回歸測試與自測，驗證物流暢通。
+- [ ] 步驟 4：執行 npm run finalize 完成收尾。
