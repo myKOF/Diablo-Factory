@@ -96,17 +96,15 @@ export class LogisticsMergeNodeRuntime {
 
     getQueuedAdmissionSlot(node, state, slots) {
         const queueState = this.getMergeWaitQueueState(node, state);
-        const committedHeadId = Array.isArray(queueState.queue) ? queueState.queue[0] : null;
         const key = this.getMergeNodeKey(node);
         const pendingWinner = state?._logisticsMergeAdmissionWinners?.[key];
         this.syncMergeWaitQueue(node, state, slots);
-        if (committedHeadId && pendingWinner?.committed !== false) {
-            const committedSlot = Array.from(slots.values())
-                .find(slot => slot?.transfer?.id === committedHeadId) || null;
-            if (committedSlot) {
-                return { winnerId: committedHeadId, slot: committedSlot };
-            }
+        if (pendingWinner?.committed === false) {
+            const pendingSlot = Array.from(slots.values())
+                .find(slot => slot?.transfer?.id === pendingWinner.winnerId) || null;
+            if (pendingSlot) return { winnerId: pendingWinner.winnerId, slot: pendingSlot };
         }
+        // [先到先過] queue 僅保留除錯/狀態同步用途，不再以線別順序作為合流優先權。
         const slot = this.selectReadyInputSlot(node, slots);
         return { winnerId: slot?.transfer?.id || null, slot: slot || null };
     }
@@ -168,18 +166,9 @@ export class LogisticsMergeNodeRuntime {
         this.ensureNodeSchedulerState(node);
         const inputGroupIds = Array.isArray(node?.inputGroupIds) ? node.inputGroupIds : [];
         if (inputGroupIds.length === 0 || slots.size === 0) return null;
-
-        if (!this.hasStartedRoundRobin(node)) {
-            return Array.from(slots.values()).sort((a, b) => this.compareReadySlots(a, b))[0] || null;
-        }
-
-        const start = Number.isInteger(node.currentActiveSlot) ? node.currentActiveSlot : 0;
-        for (let attempt = 0; attempt < inputGroupIds.length; attempt++) {
-            const slotIndex = (start + attempt) % inputGroupIds.length;
-            const candidate = slots.get(inputGroupIds[slotIndex]);
-            if (candidate) return candidate;
-        }
-        return null;
+        // [無線別優先權] 二線/三線匯流皆以物品距離合流點的實際先後決定；
+        // 同距離時才用 serialNumber/id 穩定排序，避免任何固定分支取得隱性優先權。
+        return Array.from(slots.values()).sort((a, b) => this.compareReadySlots(a, b))[0] || null;
     }
 
     getLogisticsMergeAdmissionWinner(node, state = this.gameEngine.state, options = {}) {
@@ -497,14 +486,6 @@ export class LogisticsMergeNodeRuntime {
                 return;
             }
             const outputSeg = this.system.getLogisticsSegmentsByGroupId(node.outputGroupId)[0] || null;
-            const inputRoute = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
-            const mergePoint = node.point || { x: node.x, y: node.y };
-            const inputDir = inputRoute.length >= 2
-                ? this.getCardinalDirection(inputRoute[inputRoute.length - 2], inputRoute[inputRoute.length - 1])
-                : null;
-            const outputDir = node.outputDir || (Array.isArray(route) && route.length >= 2
-                ? this.getCardinalDirection(route[0], route[1])
-                : null);
             this.commitLogisticsMergeAdmission(node, transfer.id, state);
             transfer.lineId = node.outputGroupId;
             transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
@@ -514,16 +495,8 @@ export class LogisticsMergeNodeRuntime {
             transfer.sourceId = outputSeg?.sourceId || transfer.sourceId || null;
             transfer.targetId = outputSeg?.targetId || null;
             transfer.efficiency = Number(outputSeg?.efficiency) || Number(transfer.efficiency) || 0;
-            if (mergePoint && inputDir && outputDir) {
-                transfer._mergeVisualTurn = {
-                    x: mergePoint.x,
-                    y: mergePoint.y,
-                    inDir: { x: inputDir.x, y: inputDir.y },
-                    outDir: { x: outputDir.x, y: outputDir.y }
-                };
-            } else {
-                delete transfer._mergeVisualTurn;
-            }
+            // output 主線必須使用單一渲染相位；保留匯流虛擬圓角會讓同線物品視覺距離小於一格。
+            delete transfer._mergeVisualTurn;
             delete transfer.blockedOnBrokenLine;
             delete transfer.queueBlocked;
             admittedNodeKeys.add(nodeKey);

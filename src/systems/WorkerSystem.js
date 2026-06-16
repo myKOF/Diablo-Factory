@@ -2346,6 +2346,10 @@ export class WorkerSystem {
 
     processAutomatedLogistics(state, deltaTime) {
         if (!state.activeTransfers) state.activeTransfers = [];
+        // [固定子步長] 物品移動與合流放行對 tick 粗細極度敏感：每 tick 位移 = 速度×dt，
+        // dt 過大時 winner 過衝合流閘門，留下永不閉合的碎片間隙（5Hz→56%、20Hz→83% 滿載）。
+        // 把「移動+合流」這段切成固定 stepDt 子步長，與外部 tick 率脫鉤；建築發料仍用完整 deltaTime。
+        let stepDt = deltaTime;
         const addTransportLog = (message) => {
             if (this.engine && typeof this.engine.addLog === 'function') {
                 this.engine.addLog(message, 'LOGISTICS');
@@ -2532,7 +2536,7 @@ export class WorkerSystem {
                 const otherQueueHeld = other.queueBlocked === true && otherProgress >= otherMaxAllowed - 0.0001;
                 const projectedProgress = otherQueueHeld
                     ? otherProgress
-                    : Math.min(otherMaxAllowed, otherProgress + deltaTime * (getTransferSpeed(other) / Math.max(1, otherMetrics.totalTiles)));
+                    : Math.min(otherMaxAllowed, otherProgress + stepDt * (getTransferSpeed(other) / Math.max(1, otherMetrics.totalTiles)));
                 const otherDistance = projectedProgress * otherTotal;
                 const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
                 const distFromMerge = otherDistance - mergeDistance;
@@ -2551,6 +2555,13 @@ export class WorkerSystem {
             if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
             return totalLength;
         };
+
+        // [固定子步長] 把「回壓佇列→堆積限制→移動→合流放行」整段以固定 stepDt 重複推進，
+        // 使每子步位移 ≤ 一個合理格分數，合流閘門維持細粒度，不受外部 tick 粗細影響。
+        const LOGISTICS_SUB_DT = 0.0167; // ~60Hz 等效粒度，間距收斂到 1 格/93% 滿載（dt 上限 0.2 → ≤12 子步）
+        const subSteps = Math.max(1, Math.ceil(deltaTime / LOGISTICS_SUB_DT - 1e-6));
+        stepDt = deltaTime / subSteps;
+        for (let _subStep = 0; _subStep < subSteps; _subStep++) {
 
         if (conveyorSystem && typeof conveyorSystem.applyBlockedTransferQueues === 'function') {
             conveyorSystem.applyBlockedTransferQueues(state);
@@ -2686,7 +2697,7 @@ export class WorkerSystem {
             const queueHeld = t.queueBlocked === true && t.progress >= maxAllowed - 0.0001;
 
             if (!queueHeld && t.progress < maxAllowed) {
-                t.progress += deltaTime * (getTransferSpeed(t) / getRouteLengthInTiles(t));
+                t.progress += stepDt * (getTransferSpeed(t) / getRouteLengthInTiles(t));
                 if (t.progress > maxAllowed) {
                     t.progress = maxAllowed;
                 }
@@ -2763,6 +2774,8 @@ export class WorkerSystem {
         if (conveyorSystem && typeof conveyorSystem.applyLogisticsMergeNodes === 'function') {
             conveyorSystem.applyLogisticsMergeNodes(state);
         }
+
+        } // ── 固定子步長迴圈結束 ──
 
         // 2. 讓滿足工人條件的建築自動發送物品
         state.mapEntities.forEach(ent => {

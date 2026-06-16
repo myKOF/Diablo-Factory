@@ -2412,9 +2412,6 @@ export class LogisticsRenderer {
         const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
         const targetDistance = clampedProgress * totalLength;
 
-        const outputVisual = LogisticsRenderer.getMergeOutputTransferVisualPoint(points, targetDistance, transfer);
-        if (outputVisual) return outputVisual;
-
         const node = conveyorSystem?.getLogisticsMergeNodeForInputTransfer
             ? conveyorSystem.getLogisticsMergeNodeForInputTransfer(transfer, state)
             : null;
@@ -2425,46 +2422,66 @@ export class LogisticsRenderer {
         const outDir = LogisticsRenderer.getMergeOutputDirection(node);
         if (!inDir || !outDir || !LogisticsRenderer.getTurnArrowDirection(inDir, outDir)) return null;
 
-        const virtualPoints = LogisticsRenderer.buildMergeInputVirtualTurnPath(points, nodePoint, outDir);
-        if (!virtualPoints) return null;
-        return LogisticsRenderer.getPointOnVirtualTransferPathByDistance(virtualPoints, targetDistance, transfer);
+        return LogisticsRenderer.getMergeInputTerminalArcPoint(
+            points,
+            transfer,
+            nodePoint,
+            inDir,
+            outDir,
+            targetDistance,
+            totalLength
+        );
     }
 
-    static getMergeOutputTransferVisualPoint(points, targetDistance, transfer) {
-        const turn = transfer?._mergeVisualTurn;
-        if (!turn || !turn.inDir || !turn.outDir || !Number.isFinite(turn.x) || !Number.isFinite(turn.y)) return null;
-        const nodePoint = { x: turn.x, y: turn.y };
-        const virtualPoints = LogisticsRenderer.buildMergeOutputVirtualTurnPath(points, nodePoint, turn.inDir);
-        if (!virtualPoints) return null;
+    static getMergeInputTerminalArcPoint(points, transfer, nodePoint, inDir, outDir, targetDistance, totalLength) {
+        if (!Array.isArray(points) || points.length < 2 || !nodePoint || !inDir || !outDir || totalLength <= 0) return null;
         const TS = GameEngine.TILE_SIZE || 20;
-        return LogisticsRenderer.getPointOnVirtualTransferPathByDistance(virtualPoints, TS + targetDistance, transfer);
-    }
-
-    static buildMergeInputVirtualTurnPath(points, nodePoint, outDir) {
-        if (!Array.isArray(points) || points.length < 2 || !nodePoint || !outDir) return null;
-        const TS = GameEngine.TILE_SIZE || 20;
-        const virtualPoints = points.map(point => ({ x: point.x, y: point.y }));
-        const outputPoint = { x: nodePoint.x + outDir.x * TS, y: nodePoint.y + outDir.y * TS };
-        const last = virtualPoints[virtualPoints.length - 1];
-        if (!last || Math.hypot(last.x - nodePoint.x, last.y - nodePoint.y) > 0.5) {
-            virtualPoints.push({ x: nodePoint.x, y: nodePoint.y });
+        const arcLength = Math.min(TS, totalLength);
+        const arcStartDistance = Math.max(0, totalLength - arcLength);
+        if (targetDistance <= arcStartDistance + 0.001) {
+            return LogisticsRenderer.getPointOnTransferPath(points, targetDistance / totalLength, 0, transfer);
         }
-        virtualPoints.push(outputPoint);
-        LogisticsRenderer.annotateRoutePoints(virtualPoints);
-        return virtualPoints;
+
+        const start = LogisticsRenderer.getPointOnTransferPath(points, arcStartDistance / totalLength, 0, transfer);
+        if (!start) return null;
+        const local = Math.max(0, Math.min(1, (targetDistance - arcStartDistance) / Math.max(1, arcLength)));
+        const handle = arcLength * 0.55;
+        const c1 = {
+            x: start.x + inDir.x * handle,
+            y: start.y + inDir.y * handle
+        };
+        const c2 = {
+            x: nodePoint.x + outDir.x * handle,
+            y: nodePoint.y + outDir.y * handle
+        };
+        const point = LogisticsRenderer.sampleCubicBezier(start, c1, c2, nodePoint, local);
+        const tangent = LogisticsRenderer.sampleCubicBezierTangent(start, c1, c2, nodePoint, local);
+        const angle = Math.atan2(tangent.y, tangent.x);
+        return {
+            x: point.x,
+            y: point.y,
+            angle
+        };
     }
 
-    static buildMergeOutputVirtualTurnPath(points, nodePoint, inDir) {
-        if (!Array.isArray(points) || points.length < 2 || !nodePoint || !inDir) return null;
-        const TS = GameEngine.TILE_SIZE || 20;
-        const inputPoint = { x: nodePoint.x - inDir.x * TS, y: nodePoint.y - inDir.y * TS };
-        const virtualPoints = [inputPoint, { x: nodePoint.x, y: nodePoint.y }];
-        const startIndex = Math.hypot(points[0].x - nodePoint.x, points[0].y - nodePoint.y) <= 0.5 ? 1 : 0;
-        for (let i = startIndex; i < points.length; i++) {
-            virtualPoints.push({ x: points[i].x, y: points[i].y });
-        }
-        LogisticsRenderer.annotateRoutePoints(virtualPoints);
-        return virtualPoints;
+    static sampleCubicBezier(p0, p1, p2, p3, t) {
+        const u = 1 - t;
+        const a = u * u * u;
+        const b = 3 * u * u * t;
+        const c = 3 * u * t * t;
+        const d = t * t * t;
+        return {
+            x: p0.x * a + p1.x * b + p2.x * c + p3.x * d,
+            y: p0.y * a + p1.y * b + p2.y * c + p3.y * d
+        };
+    }
+
+    static sampleCubicBezierTangent(p0, p1, p2, p3, t) {
+        const u = 1 - t;
+        return {
+            x: 3 * u * u * (p1.x - p0.x) + 6 * u * t * (p2.x - p1.x) + 3 * t * t * (p3.x - p2.x),
+            y: 3 * u * u * (p1.y - p0.y) + 6 * u * t * (p2.y - p1.y) + 3 * t * t * (p3.y - p2.y)
+        };
     }
 
     static getPointOnVirtualTransferPathByDistance(points, distance, cacheOwner = null) {

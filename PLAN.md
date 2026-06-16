@@ -1,3 +1,64 @@
+# 2026-06-16 匯流轉彎弧線方向修復計畫
+
+## 核心目標
+1. 修正匯流 input 轉彎尾端先往輸出反方向偏移，再拉回 merge node 的生硬軌跡。
+2. 讓匯流點轉彎使用與一般物流線一致的圓滑弧線方向，沿 output 方向自然收斂。
+3. 僅調整 renderer 的視覺曲線控制點，不改合流 admission、回壓與主線滿載相位。
+
+## 實施步驟
+- [x] 步驟 1：新增/更新匯流轉彎方向回歸測試，確認舊控制點會讓曲線往 output 反方向偏移。
+- [x] 步驟 2：修正 `LogisticsRenderer.getMergeInputTerminalArcPoint()` 的末端控制點方向。
+- [x] 步驟 3：執行物流/渲染回歸、語法檢查與 `npm.cmd run finalize`。
+
+# 2026-06-16 匯流 input 尾端曲線速度修復計畫
+
+## 核心目標
+1. 移除匯流 input 尾端「最後一小段拉回 output 起點」造成的非線性吸附感。
+2. 改為建立自然抵達 merge node 的 input terminal 視覺路徑，讓進度接近 1 時位置與速度連續。
+3. 保留 output 主線一格滿載相位，不恢復 output 虛擬圓角。
+
+## 實施步驟
+- [x] 步驟 1：新增尾端速度平滑回歸測試，確認 90→95 與 95→100 不會暴增。
+- [x] 步驟 2：以 input terminal 視覺路徑取代尾端 smoothstep 拉回。
+- [x] 步驟 3：執行 renderer/物流回歸、語法檢查與 `npm.cmd run finalize`。
+
+# 2026-06-16 匯流轉彎末端瞬移修復計畫
+
+## 核心目標
+1. 匯流 input 物品在 progress=1 時，渲染位置必須與切換到 output group 後的 progress=0 位置一致。
+2. 保留 output 主線一格滿載相位，不恢復會壓縮主線距離的 output 虛擬圓角。
+3. 僅調整匯流 input 視覺取樣，不改合流 admission、回壓與物流拓樸。
+
+## 實施步驟
+- [x] 步驟 1：更新 renderer 回歸測試，確認 input 末端與 output 起點無跳躍。
+- [x] 步驟 2：修正 `LogisticsRenderer.getPointOnMergeTransferPath()` 的匯流 input 尾端映射。
+- [x] 步驟 3：執行渲染回歸、物流回歸、語法檢查與 `npm.cmd run finalize`。
+
+# 2026-06-16 匯流後主線視覺等速與不重疊修復計畫
+
+## 核心目標
+1. 消除匯流後 output 主線上 `_mergeVisualTurn` 物品與一般 output 物品的渲染距離差，避免同一條線出現重疊、空隔與忽快忽慢。
+2. 讓匯流圓角只負責切線瞬間的視覺連續，不改變 output 主線上物品之間的一格邏輯間距。
+3. 保留既有合流 admission、回壓與批次移動架構，不新增每格 Update。
+
+## 實施步驟
+- [x] 步驟 1：新增渲染距離回歸測試，證明 output 主線上邏輯相差一格的物品必須渲染相差一格。
+- [x] 步驟 2：修正 `LogisticsRenderer` 的 merge output 虛擬圓角取樣，使其不改變 output 主線相位。
+- [x] 步驟 3：執行渲染回歸、物流回歸、語法檢查與 `npm.cmd run finalize`。
+
+# 2026-06-16 三方匯流滿載無間隔修復計畫
+
+## 核心目標
+1. 移除合流 admission 對固定線別槽位的優先語意，二線或三線匯流皆以「物品實際先抵達等待區」決定下一個通過者。
+2. 前一個物品尚在匯流轉彎時，下一個 winner 只要 output 已釋出足夠空間，就必須開始向前跟進，讓最終主線維持一格緊貼且不重疊。
+3. 保留既有 MergeNode、回壓與批次物流架構，不新增每格輸送帶 Update，也不改 Router/occupancy。
+
+## 實施步驟
+- [x] 步驟 1：新增回歸測試，證明先抵達者不可被 round-robin 線別槽位延後。
+- [x] 步驟 2：調整 `LogisticsMergeNodeRuntime` 的 winner 選擇，以 ready transfer 的實際距離/序號決定，而不是固定線別槽位。
+- [x] 步驟 3：確認合流 winner 在 output 半釋放時不被標記阻塞，可跟隨前車逐步貼近。
+- [x] 步驟 4：執行物流回歸、語法檢查與 `npm run finalize`。
+
 # 2026-06-12 拉鏈式合流（Zipper Merge）碎片間隙修復
 
 ## 根因

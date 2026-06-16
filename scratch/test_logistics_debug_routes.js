@@ -413,24 +413,57 @@ const mergeInputVisualPoint = globalThis.LogisticsRenderer.getPointOnMergeTransf
     { lineId: 'merge_visual_input' },
     {}
 );
-const expectedMergeInputVirtualPath = globalThis.LogisticsRenderer.buildMergeInputVirtualTurnPath(
-    [{ x: 0, y: 0 }, { x: 20, y: 0 }],
-    { x: 20, y: 0 },
-    { x: 0, y: 1 }
-);
-const expectedMergeSwitchPoint = globalThis.LogisticsRenderer.getPointOnVirtualTransferPathByDistance(
-    expectedMergeInputVirtualPath,
-    GameEngine.TILE_SIZE,
-    {}
-);
 if (
     !mergeInputVisualPoint ||
     Math.hypot(
-        mergeInputVisualPoint.x - expectedMergeSwitchPoint.x,
-        mergeInputVisualPoint.y - expectedMergeSwitchPoint.y
+        mergeInputVisualPoint.x - 20,
+        mergeInputVisualPoint.y - 0
     ) > 0.1
 ) {
-    throw new Error('Merge input transfer should advance through the rounded turn at the original movement speed.');
+    throw new Error('Merge input transfer should reach the output route start at progress=1 to avoid a merge-end snap.');
+}
+const mergeInputNearEndPoint = globalThis.LogisticsRenderer.getPointOnMergeTransferPath(
+    [{ x: 0, y: 0 }, { x: 20, y: 0 }],
+    0.95,
+    { lineId: 'merge_visual_input' },
+    {}
+);
+if (
+    !mergeInputNearEndPoint ||
+    Math.hypot(mergeInputNearEndPoint.x - 20, mergeInputNearEndPoint.y - 0) > GameEngine.TILE_SIZE * 0.25
+) {
+    throw new Error('Merge input transfer should visually converge to the output start before the route switch frame.');
+}
+const outputAxisOffset = (mergeInputNearEndPoint.y - 0) * mergeTurnNode.outputDir.y;
+if (outputAxisOffset < -0.1) {
+    throw new Error(`Merge input transfer should not bend opposite to the output line before switching routes, got ${outputAxisOffset}px.`);
+}
+const mergeInputArcPoint = globalThis.LogisticsRenderer.getPointOnMergeTransferPath(
+    [{ x: 0, y: 0 }, { x: 20, y: 0 }],
+    0.75,
+    { lineId: 'merge_visual_input' },
+    {}
+);
+const arcOutputAxisOffset = (mergeInputArcPoint.y - 0) * mergeTurnNode.outputDir.y;
+if (!mergeInputArcPoint || arcOutputAxisOffset < 0.5) {
+    throw new Error('Merge input transfer should follow the normal curved path toward the output direction, not rotate in place or bend backward.');
+}
+const mergeInputTailStartPoint = globalThis.LogisticsRenderer.getPointOnMergeTransferPath(
+    [{ x: 0, y: 0 }, { x: 20, y: 0 }],
+    0.9,
+    { lineId: 'merge_visual_input' },
+    {}
+);
+const tailFirstStep = Math.hypot(
+    mergeInputNearEndPoint.x - mergeInputTailStartPoint.x,
+    mergeInputNearEndPoint.y - mergeInputTailStartPoint.y
+);
+const tailSecondStep = Math.hypot(
+    mergeInputVisualPoint.x - mergeInputNearEndPoint.x,
+    mergeInputVisualPoint.y - mergeInputNearEndPoint.y
+);
+if (tailSecondStep > tailFirstStep * 1.35 + 0.1) {
+    throw new Error(`Merge input tail should not accelerate into a snap. prev=${tailFirstStep}px next=${tailSecondStep}px.`);
 }
 const mergeOutputTransfer = {
     lineId: 'merge_visual_output',
@@ -441,20 +474,40 @@ const mergeOutputTransfer = {
         outDir: { x: 0, y: 1 }
     }
 };
-const mergeOutputVisualPoint = globalThis.LogisticsRenderer.getPointOnMergeTransferPath(
+const getRenderedTransferPoint = (points, progress, transfer) =>
+    globalThis.LogisticsRenderer.getPointOnMergeTransferPath(points, progress, transfer, {}) ||
+    globalThis.LogisticsRenderer.getPointOnTransferPath(points, progress, 0, transfer);
+const mergeOutputVisualPoint = getRenderedTransferPoint(
     [{ x: 20, y: 0 }, { x: 20, y: 40 }],
     0,
-    mergeOutputTransfer,
-    {}
+    mergeOutputTransfer
 );
 if (
     !mergeOutputVisualPoint ||
     Math.hypot(
-        mergeOutputVisualPoint.x - expectedMergeSwitchPoint.x,
-        mergeOutputVisualPoint.y - expectedMergeSwitchPoint.y
+        mergeOutputVisualPoint.x - 20,
+        mergeOutputVisualPoint.y - 0
     ) > 0.1
 ) {
-    throw new Error('Merge output transfer should continue from the same rounded turn distance as the input switch point.');
+    throw new Error('Merge output transfer should align to the output route start to preserve mainline spacing.');
+}
+const mergeOutputRear = getRenderedTransferPoint(
+    [{ x: 20, y: 0 }, { x: 20, y: 60 }],
+    0,
+    mergeOutputTransfer
+);
+const mergeOutputFront = globalThis.LogisticsRenderer.getPointOnTransferPath(
+    [{ x: 20, y: 0 }, { x: 20, y: 60 }],
+    20 / 60,
+    0,
+    {}
+);
+const mergeOutputVisualSpacing = Math.hypot(
+    mergeOutputFront.x - mergeOutputRear.x,
+    mergeOutputFront.y - mergeOutputRear.y
+);
+if (Math.abs(mergeOutputVisualSpacing - GameEngine.TILE_SIZE) > 0.1) {
+    throw new Error(`Merge output items should render one tile apart when logic spacing is one tile, got ${mergeOutputVisualSpacing}px.`);
 }
 
 globalThis.conveyorSystem = {
