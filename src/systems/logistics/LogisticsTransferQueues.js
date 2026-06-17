@@ -113,13 +113,16 @@ export class LogisticsTransferQueues {
                 const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
                 const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint, pathMetricsCache);
                 const distFromMerge = otherDistance - mergeDistance;
-                if (Math.abs(distFromMerge) < mergeGateSpacing - 0.1) {
+                const followingMainMayOverlapTurn = node.zipperTurn === 'branch' &&
+                    node.awaitingMainPass !== true &&
+                    distFromMerge < -0.1;
+                if (Math.abs(distFromMerge) < mergeGateSpacing - 0.1 && !followingMainMayOverlapTurn) {
                     // [緊密放行] 勝者隨前車前進逐步跟進，保持剛好一格間距。
                     const followGap = distFromMerge >= 0
                         ? Math.max(0, mergeGateSpacing - distFromMerge)
                         : mergeGateSpacing;
                     requiredWait = Math.max(requiredWait, followGap);
-                } else if (node.zipperTurn !== 'branch' &&
+                } else if (node.awaitingMainPass === true && node.zipperTurn !== 'branch' &&
                     distFromMerge <= -(mergeGateSpacing + 0.1) && distFromMerge > -mergeGateSpacing * 3) {
                     // [防碎片視界] 輪到主線時，三格內有逼近中的來車：於等待線候命，禁止插它前面。
                     requiredWait = Math.max(requiredWait, mergeGateSpacing);

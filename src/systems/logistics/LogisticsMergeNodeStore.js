@@ -118,6 +118,7 @@ export class LogisticsMergeNodeStore {
         if (inputGroupId === outputGroupId) return null;
         if (!this.canRegisterMergeDirection({ inputGroupId, outputGroupId, point: snapped, inputLine, outputLine })) return null;
         const previousInputDirections = {};
+        const previousSchedulerState = {};
 
         // 物理切分穿過合流點的線段
         const state = GameEngine.state;
@@ -189,6 +190,22 @@ export class LogisticsMergeNodeStore {
         nodes.forEach(node => {
             if (node && node.cellKey === cellKey) {
                 allGroups.add(node.outputGroupId);
+                [
+                    'currentActiveSlot',
+                    'roundRobinIndex',
+                    'lastServed',
+                    'hasCommittedAdmission',
+                    'admissionCommitCount',
+                    'zipperTurn',
+                    'awaitingMainPass',
+                    'lastThroughTransferId',
+                    'currentOccupant',
+                    'incomingQueues'
+                ].forEach(key => {
+                    if (previousSchedulerState[key] === undefined && node[key] !== undefined) {
+                        previousSchedulerState[key] = node[key];
+                    }
+                });
                 if (node.inputDirections && typeof node.inputDirections === 'object') {
                     Object.assign(previousInputDirections, node.inputDirections);
                 }
@@ -239,9 +256,27 @@ export class LogisticsMergeNodeStore {
             inputGroupIds: [...ultimateInputGroupIds],
             outputGroupId: ultimateOutputGroupId,
             inputDirections: { ...previousInputDirections },
-            currentActiveSlot: 0,
-            roundRobinIndex: 0
+            currentActiveSlot: Number.isInteger(previousSchedulerState.currentActiveSlot)
+                ? previousSchedulerState.currentActiveSlot
+                : 0,
+            roundRobinIndex: Number.isInteger(previousSchedulerState.roundRobinIndex)
+                ? previousSchedulerState.roundRobinIndex
+                : 0
         };
+        [
+            'lastServed',
+            'hasCommittedAdmission',
+            'admissionCommitCount',
+            'zipperTurn',
+            'awaitingMainPass',
+            'lastThroughTransferId',
+            'currentOccupant',
+            'incomingQueues'
+        ].forEach(key => {
+            if (previousSchedulerState[key] !== undefined) {
+                node[key] = previousSchedulerState[key];
+            }
+        });
         nodes.push(node);
 
         const inputDir = this.system.getLogisticsLineDirectionAtPoint(inputLine, snapped);

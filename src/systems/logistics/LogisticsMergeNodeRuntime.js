@@ -102,16 +102,18 @@ export class LogisticsMergeNodeRuntime {
         if (pendingWinner?.committed === false) {
             const pendingSlot = Array.from(slots.values())
                 .find(slot => slot?.transfer?.id === pendingWinner.winnerId) || null;
-            if (pendingSlot) return { winnerId: pendingWinner.winnerId, slot: pendingSlot };
+            const pendingAtGate = pendingSlot &&
+                Number(pendingSlot.distance) >= Math.max(0, Number(pendingSlot.total) - 0.5);
+            if (pendingAtGate) return { winnerId: pendingWinner.winnerId, slot: pendingSlot };
         }
-        // [先到先過] queue 僅保留除錯/狀態同步用途，不再以線別順序作為合流優先權。
+        // [三線輪詢] queue 僅保留除錯/狀態同步用途；實際 winner 由 currentActiveSlot 決定穩定輪替。
         const slot = this.selectReadyInputSlot(node, slots);
         return { winnerId: slot?.transfer?.id || null, slot: slot || null };
     }
 
     ensureNodeSchedulerState(node) {
         if (!node || !Array.isArray(node.inputGroupIds) || node.inputGroupIds.length === 0) return;
-        const totalSlots = node.inputGroupIds.length;
+        const totalSlots = this.getMergeParticipantCount(node);
         if (!Number.isInteger(node.currentActiveSlot)) {
             node.currentActiveSlot = Number.isInteger(node.roundRobinIndex) ? node.roundRobinIndex : 0;
         }
@@ -119,25 +121,20 @@ export class LogisticsMergeNodeRuntime {
         node.roundRobinIndex = node.currentActiveSlot;
     }
 
+    getMergeParticipantCount(node) {
+        const inputCount = Array.isArray(node?.inputGroupIds) ? node.inputGroupIds.length : 0;
+        return inputCount + 1;
+    }
+
+    getMergeThroughSlotIndex(node) {
+        return Array.isArray(node?.inputGroupIds) ? node.inputGroupIds.length : 0;
+    }
+
     hasStartedRoundRobin(node) {
         if (!node) return false;
         if (node.hasCommittedAdmission === true) return true;
         if (Number.isInteger(node.admissionCommitCount) && node.admissionCommitCount > 0) return true;
         return Number.isInteger(node.currentActiveSlot) && node.currentActiveSlot !== 0;
-    }
-
-    compareReadySlots(a, b) {
-        const distanceDelta = (b?.distance || 0) - (a?.distance || 0);
-        if (Math.abs(distanceDelta) > 0.1) return distanceDelta;
-        const serialA = Number(a?.transfer?.serialNumber);
-        const serialB = Number(b?.transfer?.serialNumber);
-        if (Number.isFinite(serialA) && Number.isFinite(serialB) && serialA !== serialB) {
-            return serialA - serialB;
-        }
-        if (Number.isFinite(serialA) !== Number.isFinite(serialB)) {
-            return Number.isFinite(serialA) ? -1 : 1;
-        }
-        return String(a?.transfer?.id || "").localeCompare(String(b?.transfer?.id || ""));
     }
 
     getReadyInputSlots(node, state, readyDistanceFromEnd) {
@@ -166,16 +163,47 @@ export class LogisticsMergeNodeRuntime {
         this.ensureNodeSchedulerState(node);
         const inputGroupIds = Array.isArray(node?.inputGroupIds) ? node.inputGroupIds : [];
         if (inputGroupIds.length === 0 || slots.size === 0) return null;
-        // [無線別優先權] 二線/三線匯流皆以物品距離合流點的實際先後決定；
-        // 同距離時才用 serialNumber/id 穩定排序，避免任何固定分支取得隱性優先權。
-        return Array.from(slots.values()).sort((a, b) => this.compareReadySlots(a, b))[0] || null;
+        const totalSlots = this.getMergeParticipantCount(node);
+        for (let offset = 0; offset < totalSlots; offset++) {
+            const index = (node.currentActiveSlot + offset) % totalSlots;
+            if (index >= inputGroupIds.length) continue;
+            const groupId = inputGroupIds[index];
+            const slot = slots.get(groupId);
+            if (slot) return slot;
+        }
+        return null;
+    }
+
+    findReadyThroughTransfer(node, state, spacing = this.getMergeGateSpacing()) {
+        if (!node?.outputGroupId || !Array.isArray(state?.activeTransfers)) return null;
+        const mergePoint = node.point || { x: node.x, y: node.y };
+        let best = null;
+        state.activeTransfers.forEach(transfer => {
+            if (!transfer || transfer.lineId !== node.outputGroupId || transfer._mergeVisualTurn) return;
+            const route = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
+            const total = this.getRouteLength(route);
+            if (total <= 0) return;
+            const mergeDistance = this.getPathDistanceToPoint(route, mergePoint);
+            if (mergeDistance <= 0.1) return;
+            const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
+            if (distance < mergeDistance - spacing - 0.1) return;
+            if (distance > mergeDistance + spacing - 0.1) return;
+            if (!best || distance > best.distance) {
+                best = { transfer, distance, mergeDistance, total };
+            }
+        });
+        return best;
+    }
+
+    isThroughSlotDue(node) {
+        this.ensureNodeSchedulerState(node);
+        return node.currentActiveSlot === this.getMergeThroughSlotIndex(node);
     }
 
     getLogisticsMergeAdmissionWinner(node, state = this.gameEngine.state, options = {}) {
         if (!node || !Array.isArray(node.inputGroupIds) || node.inputGroupIds.length === 0) return null;
         const spacing = Number.isFinite(options.spacing) ? options.spacing : (this.gameEngine.TILE_SIZE || 20);
         this.releaseClearedMergeOccupant(node, state, spacing);
-        if (node.currentOccupant?.transferId) return null;
         const readyDistanceFromEnd = Number.isFinite(options.readyDistanceFromEnd)
             ? options.readyDistanceFromEnd
             : spacing;
@@ -185,8 +213,22 @@ export class LogisticsMergeNodeRuntime {
             .join("|");
         const key = this.getMergeNodeKey(node);
         if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
+        if (this.isThroughSlotDue(node) && this.findReadyThroughTransfer(node, state, spacing)) {
+            state._logisticsMergeAdmissionWinners[key] = {
+                signature,
+                winnerId: null,
+                winnerSlotIndex: this.getMergeThroughSlotIndex(node),
+                committed: false
+            };
+            node.zipperTurn = 'main';
+            node.awaitingMainPass = true;
+            return null;
+        }
         const queuedAdmission = this.getQueuedAdmissionSlot(node, state, slots);
         if (queuedAdmission.winnerId) {
+            if (node.awaitingMainPass !== true) {
+                node.zipperTurn = 'branch';
+            }
             state._logisticsMergeAdmissionWinners[key] = {
                 signature,
                 winnerId: queuedAdmission.winnerId,
@@ -205,8 +247,9 @@ export class LogisticsMergeNodeRuntime {
             if (currentWinnerTransfer && previousSlot) {
                 const total = this.getRouteLength(currentWinnerTransfer.routePoints);
                 const currentDist = (currentWinnerTransfer.progress || 0) * total;
-                const holdDistance = Math.max(0, total - readyDistanceFromEnd - 0.1);
-                // [Winner 承諾保護] 僅保護仍符合本次 ready 門檻的 winner；避免等待線上的舊 winner 卡住已到達合流點的物品。
+                const holdDistance = Math.max(0, total - 0.5);
+                // [Winner 承諾保護] 僅保護已抵達合流門口的 winner；
+                // 停在一格等待區內但尚未到門口的舊 winner 不可卡住已抵達合流點的物品。
                 if (total > 0 && currentDist >= holdDistance) {
                     return previous.winnerId;
                 }
@@ -218,6 +261,9 @@ export class LogisticsMergeNodeRuntime {
 
         const winnerSlot = this.selectReadyInputSlot(node, slots);
         const winnerId = winnerSlot?.transfer?.id || null;
+        if (winnerId && node.awaitingMainPass !== true) {
+            node.zipperTurn = 'branch';
+        }
         state._logisticsMergeAdmissionWinners[key] = {
             signature,
             winnerId,
@@ -238,13 +284,14 @@ export class LogisticsMergeNodeRuntime {
                 return state.activeTransfers?.some(transfer => transfer?.id === winnerId && transfer.lineId === groupId);
             });
         const safeSlotIndex = slotIndex >= 0 ? slotIndex : 0;
-        node.currentActiveSlot = (safeSlotIndex + 1) % node.inputGroupIds.length;
+        node.currentActiveSlot = (safeSlotIndex + 1) % this.getMergeParticipantCount(node);
         node.roundRobinIndex = node.currentActiveSlot;
         node.lastServed = node.inputGroupIds[safeSlotIndex] || null;
         node.hasCommittedAdmission = true;
         node.admissionCommitCount = (Number(node.admissionCommitCount) || 0) + 1;
         // [拉鏈式合流] 支線完成插入後，輪次交還主線穿越車
         node.zipperTurn = 'main';
+        node.awaitingMainPass = true;
         const queueState = this.getMergeWaitQueueState(node, state);
         queueState.lastServed = node.lastServed;
         queueState.currentOccupant = {
@@ -262,6 +309,27 @@ export class LogisticsMergeNodeRuntime {
             queueState.incomingQueues[node.lastServed] = queueState.incomingQueues[node.lastServed].filter(id => id !== winnerId);
         }
         if (previous) previous.committed = true;
+    }
+
+    commitLogisticsMergeThroughAdmission(node, transferId, state = this.gameEngine.state) {
+        if (!node || !transferId) return;
+        if (node.lastThroughTransferId === transferId) return;
+        node.lastThroughTransferId = transferId;
+        
+        const throughSlotIndex = this.getMergeThroughSlotIndex(node);
+        // [三線輪詢修正] 只有在「真正輪到主線」時，才更新 currentActiveSlot 到下一個支線；
+        // 如果是插隊通行（awaitingMainPass 觸發），則保留當前的 currentActiveSlot 不予覆寫，
+        // 確保剛才支線 commit 時排定好的下一條支線不會被主線車中途篡改。
+        if (node.currentActiveSlot === throughSlotIndex) {
+            node.currentActiveSlot = (throughSlotIndex + 1) % this.getMergeParticipantCount(node);
+            node.roundRobinIndex = node.currentActiveSlot;
+        }
+
+        node.lastServed = node.outputGroupId || null;
+        node.awaitingMainPass = false;
+        node.zipperTurn = 'branch';
+        const queueState = this.getMergeWaitQueueState(node, state);
+        queueState.lastServed = node.lastServed;
     }
 
     // [拉鏈式合流] 計算穿越車（已在輸出線上、尚未通過合流點）的讓行上限距離。
@@ -282,22 +350,41 @@ export class LogisticsMergeNodeRuntime {
         nodes.forEach(node => {
             const mergePoint = node.point || { x: node.x, y: node.y };
             const mergeDistance = this.getPathDistanceToPoint(route, mergePoint);
-            // 路線起點即合流點（本物品就是在此插入的）→ 與此節點無讓行關係
-            if (mergeDistance <= 0.1) return;
+            if (mergeDistance <= 0.1) {
+                if (this.isThroughSlotDue(node)) {
+                    if (distance < spacing - 0.1) {
+                        this.commitLogisticsMergeThroughAdmission(node, transfer.id, state);
+                    }
+                    return;
+                }
+                if (node.lastThroughTransferId === transfer.id && distance < spacing - 0.1) return;
+                const winnerId = this.getLogisticsMergeAdmissionWinner(node, state, {
+                    spacing,
+                    readyDistanceFromEnd: spacing
+                });
+                if (!winnerId) return;
+                limit = Math.min(limit, distance);
+                return;
+            }
             if (distance >= mergeDistance - 0.1) {
-                // 正在通過合流點（一格窗口內）：把輪次交還支線
+                // 正在通過合流點（一格窗口內）：through 也算一次正式放行，納入三方輪替。
                 if (distance - mergeDistance < spacing - 0.1) {
-                    node.zipperTurn = 'branch';
+                    this.commitLogisticsMergeThroughAdmission(node, transfer.id, state);
                 }
                 return;
             }
-            // 僅在「輪到支線」且支線確實有物品就緒等待時讓行
-            if (node.zipperTurn !== 'branch') return;
+            if (this.isThroughSlotDue(node)) return;
             const winnerId = this.getLogisticsMergeAdmissionWinner(node, state, {
                 spacing,
                 readyDistanceFromEnd: spacing
             });
             if (!winnerId) return;
+            // 僅在「輪到支線」且支線確實有物品就緒等待時讓行；
+            // 初次有支線等待時主線需建立讓行意圖，避免滿載主線永久佔優。
+            if (node.zipperTurn !== 'branch') {
+                if (node.awaitingMainPass === true) return;
+                node.zipperTurn = 'branch';
+            }
             // [只停不退] 讓行線為合流點前一格；若已越過讓行線則停在原地
             limit = Math.min(limit, Math.max(distance, mergeDistance - spacing));
         });
@@ -396,9 +483,6 @@ export class LogisticsMergeNodeRuntime {
         };
         const getOutputEntryState = (candidate, node) => {
             this.releaseClearedMergeOccupant(node, state, minTransferSpacing);
-            if (node.currentOccupant?.transferId && node.currentOccupant.transferId !== candidate?.id) {
-                return { occupied: true };
-            }
             const outputGroupId = node.outputGroupId;
             const mergePoint = node.point || { x: node.x, y: node.y };
             let occupied = false;
@@ -410,10 +494,15 @@ export class LogisticsMergeNodeRuntime {
                 const otherDist = Math.max(0, Math.min(1, Number(other.progress) || 0)) * total;
                 const mergeNodeDistInOther = getPathDistanceToPoint(route, mergePoint);
                 const distFromMerge = otherDist - mergeNodeDistInOther;
+                const followingMainMayOverlapTurn = node.zipperTurn === 'branch' &&
+                    node.awaitingMainPass !== true &&
+                    distFromMerge < -0.1;
                 // [只停不退] 使用相對距離絕對值，確保合流點前後安全間距內無其他物品佔用
-                if (Math.abs(distFromMerge) < minTransferSpacing - 0.1) {
+                // [轉彎優先窗口] 輪到支線時，位於合流點前方的直行後車不得阻止 winner 過彎；
+                // 轉彎期間允許短暫視覺重疊，後車會由主線讓行/排隊邏輯接續跟上。
+                if (Math.abs(distFromMerge) < minTransferSpacing - 0.1 && !followingMainMayOverlapTurn) {
                     occupied = true;
-                } else if (node.zipperTurn !== 'branch' &&
+                } else if (node.awaitingMainPass === true && node.zipperTurn !== 'branch' &&
                     distFromMerge <= -(minTransferSpacing + 0.1) && distFromMerge > -minTransferSpacing * 3) {
                     // [防碎片視界] 輪到主線時，三格內有逼近中的來車：禁止插到它前面，
                     // 否則留下的小數間隙因同速永遠無法閉合；等它通過後再緊貼其後插入。
@@ -486,17 +575,49 @@ export class LogisticsMergeNodeRuntime {
                 return;
             }
             const outputSeg = this.system.getLogisticsSegmentsByGroupId(node.outputGroupId)[0] || null;
+            const inputGroupId = transfer.lineId;
+            const mergePoint = node.point || { x: node.x, y: node.y };
+            const inputPoints = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
+            const inputDir = node.inputDirections?.[inputGroupId] || (() => {
+                const prev = inputPoints[inputPoints.length - 2];
+                const last = inputPoints[inputPoints.length - 1];
+                if (!prev || !last) return null;
+                return { x: Math.sign(last.x - prev.x), y: Math.sign(last.y - prev.y) };
+            })();
+            const outputDir = node.outputDir || (() => {
+                const first = route[0];
+                const next = route[1];
+                if (!first || !next) return null;
+                return { x: Math.sign(next.x - first.x), y: Math.sign(next.y - first.y) };
+            })();
             this.commitLogisticsMergeAdmission(node, transfer.id, state);
             transfer.lineId = node.outputGroupId;
-            transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
-            transfer.progress = 0;
+            const virtualTurnRoute = this.buildMergeContinuousTurnRoute(inputPoints, route, mergePoint, inputDir, outputDir);
+            if (virtualTurnRoute) {
+                const routeLength = this.getRouteLength(virtualTurnRoute);
+                const mergeDistance = this.getPathDistanceToPoint(virtualTurnRoute, mergePoint);
+                transfer.routePoints = virtualTurnRoute;
+                transfer.progress = routeLength > 0 ? Math.max(0, Math.min(1, mergeDistance / routeLength)) : 0;
+            } else {
+                transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
+                transfer.progress = 0;
+            }
             // 路線已切換，舊路線上的排隊距離殘值必須清除，避免排隊邏輯誤判位置。
             delete transfer._queuedDistance;
             transfer.sourceId = outputSeg?.sourceId || transfer.sourceId || null;
             transfer.targetId = outputSeg?.targetId || null;
             transfer.efficiency = Number(outputSeg?.efficiency) || Number(transfer.efficiency) || 0;
-            // output 主線必須使用單一渲染相位；保留匯流虛擬圓角會讓同線物品視覺距離小於一格。
-            delete transfer._mergeVisualTurn;
+            if (inputDir && outputDir && (inputDir.x !== outputDir.x || inputDir.y !== outputDir.y)) {
+                transfer._mergeVisualTurn = {
+                    x: mergePoint.x,
+                    y: mergePoint.y,
+                    outputGroupId: node.outputGroupId,
+                    inDir: { x: inputDir.x, y: inputDir.y },
+                    outDir: { x: outputDir.x, y: outputDir.y }
+                };
+            } else {
+                delete transfer._mergeVisualTurn;
+            }
             delete transfer.blockedOnBrokenLine;
             delete transfer.queueBlocked;
             admittedNodeKeys.add(nodeKey);
@@ -504,5 +625,26 @@ export class LogisticsMergeNodeRuntime {
         });
 
         return changed;
+    }
+
+    buildMergeContinuousTurnRoute(inputPoints, outputRoute, mergePoint, inputDir, outputDir) {
+        if (!Array.isArray(inputPoints) || inputPoints.length < 2) return null;
+        if (!Array.isArray(outputRoute) || outputRoute.length < 2) return null;
+        if (!mergePoint || !inputDir || !outputDir) return null;
+        if (inputDir.x === outputDir.x && inputDir.y === outputDir.y) return null;
+        const inputPrev = inputPoints[inputPoints.length - 2];
+        if (!inputPrev) return null;
+        const points = [
+            { x: inputPrev.x, y: inputPrev.y },
+            { x: mergePoint.x, y: mergePoint.y }
+        ];
+        outputRoute.slice(1).forEach(point => {
+            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+            const last = points[points.length - 1];
+            if (!last || Math.hypot(last.x - point.x, last.y - point.y) > 0.1) {
+                points.push({ x: point.x, y: point.y });
+            }
+        });
+        return points.length >= 2 ? points : null;
     }
 }

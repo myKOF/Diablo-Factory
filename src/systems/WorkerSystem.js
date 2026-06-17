@@ -2540,13 +2540,16 @@ export class WorkerSystem {
                 const otherDistance = projectedProgress * otherTotal;
                 const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
                 const distFromMerge = otherDistance - mergeDistance;
-                if (Math.abs(distFromMerge) < spacing - 0.1) {
+                const followingMainMayOverlapTurn = node.zipperTurn === 'branch' &&
+                    node.awaitingMainPass !== true &&
+                    distFromMerge < -0.1;
+                if (Math.abs(distFromMerge) < spacing - 0.1 && !followingMainMayOverlapTurn) {
                     // [緊密放行] 勝者隨前車逐步跟進保持一格間距。
                     const followGap = distFromMerge >= 0
                         ? Math.max(0, spacing - distFromMerge)
                         : spacing;
                     requiredWait = Math.max(requiredWait, followGap);
-                } else if (node.zipperTurn !== 'branch' &&
+                } else if (node.awaitingMainPass === true && node.zipperTurn !== 'branch' &&
                     distFromMerge <= -(spacing + 0.1) && distFromMerge > -spacing * 3) {
                     // [防碎片視界] 輪到主線時，三格內有逼近中的來車：於等待線候命，禁止插它前面。
                     requiredWait = Math.max(requiredWait, spacing);
@@ -2682,7 +2685,6 @@ export class WorkerSystem {
                         maxDist = Math.min(maxDist, yieldLimit);
                     }
                 }
-
                 prevMaxDist = maxDist;
                 t.maxAllowedProgress = maxDist / totalLength;
                 if (isMergeInput) {
@@ -2706,6 +2708,19 @@ export class WorkerSystem {
                 t.queueBlocked = true;
             }
 
+            if (t._mergeVisualTurn && Array.isArray(t.routePoints) && t.routePoints.length >= 2) {
+                const turnPoint = { x: Number(t._mergeVisualTurn.x), y: Number(t._mergeVisualTurn.y) };
+                if (Number.isFinite(turnPoint.x) && Number.isFinite(turnPoint.y)) {
+                    const metrics = getTransferRouteMetrics(t);
+                    const currentDistance = Math.max(0, Math.min(1, Number(t.progress) || 0)) * metrics.totalPixels;
+                    const mergeDistance = getPathDistanceToPoint(t.routePoints, turnPoint);
+                    if (currentDistance > mergeDistance + cellSize + 0.1) {
+                        delete t._mergeVisualTurn;
+                    }
+                } else {
+                    delete t._mergeVisualTurn;
+                }
+            }
 
             // [新增] 追蹤邏輯
             if (state && state.trackedTransferId === t.id) {

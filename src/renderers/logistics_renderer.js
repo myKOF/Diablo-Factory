@@ -2412,6 +2412,15 @@ export class LogisticsRenderer {
         const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
         const targetDistance = clampedProgress * totalLength;
 
+        const outputTurnPoint = LogisticsRenderer.getMergeOutputVisualHandoffPoint(
+            points,
+            clampedProgress,
+            targetDistance,
+            totalLength,
+            transfer
+        );
+        if (outputTurnPoint) return outputTurnPoint;
+
         const node = conveyorSystem?.getLogisticsMergeNodeForInputTransfer
             ? conveyorSystem.getLogisticsMergeNodeForInputTransfer(transfer, state)
             : null;
@@ -2444,43 +2453,56 @@ export class LogisticsRenderer {
 
         const start = LogisticsRenderer.getPointOnTransferPath(points, arcStartDistance / totalLength, 0, transfer);
         if (!start) return null;
-        const local = Math.max(0, Math.min(1, (targetDistance - arcStartDistance) / Math.max(1, arcLength)));
-        const handle = arcLength * 0.55;
-        const c1 = {
-            x: start.x + inDir.x * handle,
-            y: start.y + inDir.y * handle
-        };
-        const c2 = {
-            x: nodePoint.x + outDir.x * handle,
-            y: nodePoint.y + outDir.y * handle
-        };
-        const point = LogisticsRenderer.sampleCubicBezier(start, c1, c2, nodePoint, local);
-        const tangent = LogisticsRenderer.sampleCubicBezierTangent(start, c1, c2, nodePoint, local);
-        const angle = Math.atan2(tangent.y, tangent.x);
-        return {
-            x: point.x,
-            y: point.y,
-            angle
-        };
+        const virtualTurnPath = [
+            { x: start.x, y: start.y },
+            { x: nodePoint.x, y: nodePoint.y },
+            {
+                x: nodePoint.x + outDir.x * arcLength,
+                y: nodePoint.y + outDir.y * arcLength
+            }
+        ];
+        return LogisticsRenderer.getPointOnVirtualTransferPathByDistance(
+            virtualTurnPath,
+            targetDistance - arcStartDistance
+        );
     }
 
-    static sampleCubicBezier(p0, p1, p2, p3, t) {
-        const u = 1 - t;
-        const a = u * u * u;
-        const b = 3 * u * u * t;
-        const c = 3 * u * t * t;
-        const d = t * t * t;
-        return {
-            x: p0.x * a + p1.x * b + p2.x * c + p3.x * d,
-            y: p0.y * a + p1.y * b + p2.y * c + p3.y * d
+    static getMergeOutputVisualHandoffPoint(points, progress, targetDistance, totalLength, transfer) {
+        const turn = transfer?._mergeVisualTurn;
+        if (!turn || !Array.isArray(points) || points.length < 2 || totalLength <= 0) return null;
+        if (turn.outputGroupId && transfer?.lineId && turn.outputGroupId !== transfer.lineId) return null;
+        const nodePoint = { x: Number(turn.x), y: Number(turn.y) };
+        const inDir = turn.inDir;
+        const outDir = turn.outDir;
+        if (!Number.isFinite(nodePoint.x) || !Number.isFinite(nodePoint.y) || !inDir || !outDir) return null;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const mergeDistance = LogisticsRenderer.getPathDistanceToPoint(points, nodePoint);
+        const localDistance = targetDistance - mergeDistance;
+        if (localDistance < -0.001 || localDistance > TS + 0.001) return null;
+        const start = {
+            x: nodePoint.x - Math.sign(inDir.x || 0) * TS,
+            y: nodePoint.y - Math.sign(inDir.y || 0) * TS
         };
-    }
-
-    static sampleCubicBezierTangent(p0, p1, p2, p3, t) {
-        const u = 1 - t;
+        const virtualTurnPath = [
+            start,
+            nodePoint,
+            {
+                x: nodePoint.x + Math.sign(outDir.x || 0) * TS,
+                y: nodePoint.y + Math.sign(outDir.y || 0) * TS
+            }
+        ];
+        const curvePoint = LogisticsRenderer.getPointOnVirtualTransferPathByDistance(
+            virtualTurnPath,
+            TS + Math.max(0, localDistance)
+        );
+        const normalPoint = LogisticsRenderer.getPointOnTransferPath(points, progress, 0, null);
+        if (!curvePoint || !normalPoint) return curvePoint || normalPoint || null;
+        const t = Math.max(0, Math.min(1, localDistance / TS));
+        const blend = t * t * (3 - 2 * t);
         return {
-            x: 3 * u * u * (p1.x - p0.x) + 6 * u * t * (p2.x - p1.x) + 3 * t * t * (p3.x - p2.x),
-            y: 3 * u * u * (p1.y - p0.y) + 6 * u * t * (p2.y - p1.y) + 3 * t * t * (p3.y - p2.y)
+            x: curvePoint.x + (normalPoint.x - curvePoint.x) * blend,
+            y: curvePoint.y + (normalPoint.y - curvePoint.y) * blend,
+            angle: blend < 0.999 ? curvePoint.angle : normalPoint.angle
         };
     }
 
@@ -2524,6 +2546,32 @@ export class LogisticsRenderer {
 
     static getPathLength(points) {
         return LogisticsRenderer.getSegmentLengths(points).reduce((sum, length) => sum + length, 0);
+    }
+
+    static getPathDistanceToPoint(points, point) {
+        if (!Array.isArray(points) || points.length < 2 || !point) return 0;
+        let bestDist = Infinity;
+        let bestPathDist = 0;
+        let total = 0;
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const len = Math.hypot(dx, dy);
+            const lenSq = dx * dx + dy * dy;
+            if (lenSq > 0) {
+                const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
+                const proj = { x: a.x + dx * t, y: a.y + dy * t };
+                const dist = Math.hypot(point.x - proj.x, point.y - proj.y);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestPathDist = total + len * t;
+                }
+            }
+            total += len;
+        }
+        return bestPathDist;
     }
 
     static getPointOnMetricPath(points, lengths, distance) {

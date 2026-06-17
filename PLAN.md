@@ -1,3 +1,31 @@
+# 2026-06-17 三線壅塞連續輪替修正計畫
+
+## 核心目標
+1. 在三條 input 都持續壅塞、持續補貨的情況下，合流放行紀錄必須穩定輪替 A>B>C>A>B>C，不得固定左側或任一單線連續通過。
+2. 修正輪詢狀態在 pending winner、through slot、merge node 註冊或測試補貨時被重置/跳過的根因。
+3. 保留物品自然直行/轉彎與「只停不退」原則，不使用瞬移或強制拉回位置。
+4. 完成後執行物流回歸與 `npm run finalize`。
+
+## 實施步驟
+- [x] 步驟 1：用安全搜尋盤點 merge node 註冊、inputGroupIds 更新、admission winner 與 through slot 狀態流。
+- [x] 步驟 2：新增三線持續壅塞補貨紅燈測試，重現單線連續優先。
+- [x] 步驟 3：局部修正輪詢狀態或 input 註冊根因，確保 commit 後下一條 ready input 取得路權。（已修正 `commitLogisticsMergeThroughAdmission` 中插隊主線車覆寫 `currentActiveSlot` 的 Bug）
+- [/] 步驟 4：執行合流/回壓回歸、語法檢查與 finalize。
+
+# 2026-06-17 三線匯流公平輪詢與滿載修復計畫
+
+## 核心目標
+1. 三條 input 匯入同一 output 時，放行順序必須依穩定 input 順序輪流通過，例如 A>B>C>A>B>C，不再讓單一路線長期優先。
+2. 未輪到或 output 空間不足的物品必須停在匯合點前一格等待，不得佔住 merge cell。
+3. 前車離開 output 入口達到安全間距時，下一個輪到的 input 要能提前啟動轉彎，讓合流後主線維持一格滿載且不重疊。
+4. 匯流物品仍使用既有正常直行/轉彎取樣，不新增瞬移、強制拉位或表現層修正邏輯。
+
+## 實施步驟
+- [x] 步驟 1：使用 `tools/safe_search.cjs` 盤點 `LogisticsMergeNodeRuntime`、`LogisticsTransferQueues` 與相關合流回歸測試。
+- [x] 步驟 2：新增紅燈回歸測試，重現三入口同時等待時必須 A>B>C 輪流放行，且非 winner 停在前一格。
+- [x] 步驟 3：局部修正合流 winner 選擇與等待線限制，保留 output entry spacing 作為唯一安全放行條件。
+- [x] 步驟 4：執行物流回歸、語法檢查與 `npm run finalize`，回報 Debug 渲染耗時與 Draw Calls。
+
 # 2026-06-16 匯流轉彎弧線方向修復計畫
 
 ## 核心目標
