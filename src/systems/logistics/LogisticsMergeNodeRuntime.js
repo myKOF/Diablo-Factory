@@ -338,6 +338,8 @@ export class LogisticsMergeNodeRuntime {
     // 穿越車通過合流點時將輪次交還支線（zipperTurn），達成 1:1 拉鏈互插、主線全程滿載無碎片間隙。
     getMergeThroughYieldLimit(transfer, state = this.gameEngine.state, spacing = this.getMergeGateSpacing()) {
         if (!transfer?.lineId) return Infinity;
+        // 正在過彎中的物品絕對不應該被限速
+        if (transfer._mergeVisualTurn) return Infinity;
         const nodes = this.system.ensureLogisticsMergeNodeStore(state).filter(node =>
             node && node.outputGroupId === transfer.lineId &&
             Array.isArray(node.inputGroupIds) && node.inputGroupIds.length > 0
@@ -391,8 +393,27 @@ export class LogisticsMergeNodeRuntime {
                 if (node.awaitingMainPass === true) return;
                 node.zipperTurn = 'branch';
             }
-            // [只停不退] 讓行線為合流點前一格；若已越過讓行線則停在原地
-            limit = Math.min(limit, Math.max(distance, mergeDistance - spacing));
+
+            // 尋找剛合流過去的支線車 A，動態放寬直行車的讓行間距，實現無縫跟進
+            let dynamicSpacing = spacing;
+            if (node.lastAdmittedTransferId) {
+                const admitted = state.activeTransfers.find(t => t && t.id === node.lastAdmittedTransferId);
+                if (admitted && admitted.lineId === node.outputGroupId) {
+                    const rA = Array.isArray(admitted.routePoints) ? admitted.routePoints : [];
+                    const tA = this.getRouteLength(rA);
+                    const dA = Math.max(0, Math.min(1, Number(admitted.progress) || 0)) * tA;
+                    const mDA = this.getPathDistanceToPoint(rA, mergePoint);
+                    const distance_A = dA - mDA;
+                    if (distance_A >= -0.1 && distance_A < spacing - 0.1) {
+                        dynamicSpacing = Math.max(0, spacing - distance_A);
+                    } else if (distance_A >= spacing - 0.1) {
+                        dynamicSpacing = 0;
+                    }
+                }
+            }
+
+            // [只停不退] 讓行線為合流點前一格（動態調整以實現無縫跟進）；若已越過讓行線則停在原地
+            limit = Math.min(limit, Math.max(distance, mergeDistance - dynamicSpacing));
         });
         return limit;
     }

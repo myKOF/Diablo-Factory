@@ -1,3 +1,17 @@
+# 2026-06-17 物流多線合流後物品無縫接合與避免轉彎車煞車修復計畫
+
+## 核心目標
+1. 解決合流之後轉彎的物品 A 會莫名煞車等待後方的直行物品 B 跟上的怪異行為。
+2. 改為「前進無煞車」原則：轉彎物品 A 轉彎後以 100% 正常速度前進，絕不煞車或減速。
+3. 實現「足夠空間平滑放行」：後方直行物品 B 在等待線時，若前車 A 正好在轉彎或前進，B 的最大前進限制 `limit` 應根據 A 已經在輸出路徑上的前進距離 `distance_A` 來動態放寬（即 `mergeDistance - spacing + distance_A`），使 B 能在 A 前進的同時平滑往前跟進，最終正好無縫貼上 A。
+4. 避免物品瞬移、忽然煞車、加速或無故旋轉等 regression，確保既有 Fair Merge 與 Backpressure Stacking 運作正常。
+
+## 實施步驟
+- [ ] 步驟 1：在 `LogisticsMergeNodeRuntime.js` 的 `getMergeThroughYieldLimit` 最前面，當 `transfer._mergeVisualTurn` 存在時直接返回 `Infinity`，避免轉彎物品被誤判定為穿越車限制速度。
+- [ ] 步驟 2：在 `getMergeThroughYieldLimit` 對穿越車進行讓行限制時，若 node 處於支線輪次（`zipperTurn === 'branch'` 或等待支線），尋找剛合流的支線車 A（`node.lastAdmittedTransferId`），若 A 正在輸出線上前進，則將 B 的讓行距離動態縮小（`dynamicSpacing = Math.max(0, spacing - distance_A)`），使 B 平滑前進跟上，達成無縫拼接。
+- [ ] 步驟 3：運行 Playwright 測試與物流線合流驗證，確保所有功能通過。
+- [ ] 步驟 4：執行 `npm run finalize`。
+
 # 2026-06-17 物流線合流死鎖與塞車問題修復計畫（續）
 
 ## 核心目標
