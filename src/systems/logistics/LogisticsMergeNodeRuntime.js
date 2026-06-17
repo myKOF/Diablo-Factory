@@ -523,7 +523,7 @@ export class LogisticsMergeNodeRuntime {
                 const distFromMerge = otherDist - mergeNodeDistInOther;
                 const followingMainMayOverlapTurn = node.zipperTurn === 'branch' &&
                     node.awaitingMainPass !== true &&
-                    distFromMerge < -0.1;
+                    distFromMerge < -0.01;
                 // [只停不退] 使用相對距離絕對值，確保合流點前後安全間距內無其他物品佔用
                 // [轉彎優先窗口] 輪到支線時，位於合流點前方的直行後車不得阻止 winner 過彎；
                 // 轉彎期間允許短暫視覺重疊，後車會由主線讓行/排隊邏輯接續跟上。

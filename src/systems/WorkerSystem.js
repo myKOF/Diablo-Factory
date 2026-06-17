@@ -2542,7 +2542,7 @@ export class WorkerSystem {
                 const distFromMerge = otherDistance - mergeDistance;
                 const followingMainMayOverlapTurn = node.zipperTurn === 'branch' &&
                     node.awaitingMainPass !== true &&
-                    distFromMerge < -0.1;
+                    distFromMerge < -0.01;
                 if (Math.abs(distFromMerge) < spacing - 0.1 && !followingMainMayOverlapTurn) {
                     // [緊密放行] 勝者隨前車逐步跟進保持一格間距。
                     const followGap = distFromMerge >= 0

@@ -115,7 +115,7 @@ export class LogisticsTransferQueues {
                 const distFromMerge = otherDistance - mergeDistance;
                 const followingMainMayOverlapTurn = node.zipperTurn === 'branch' &&
                     node.awaitingMainPass !== true &&
-                    distFromMerge < -0.1;
+                    distFromMerge < -0.01;
                 if (Math.abs(distFromMerge) < mergeGateSpacing - 0.1 && !followingMainMayOverlapTurn) {
                     // [緊密放行] 勝者隨前車前進逐步跟進，保持剛好一格間距。
                     const followGap = distFromMerge >= 0
