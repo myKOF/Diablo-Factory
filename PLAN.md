@@ -1,3 +1,16 @@
+# 2026-06-17 多線合流死鎖與堵死問題修復計畫
+
+## 核心目標
+1. 解決多條物流輸入線合流至同一輸出線起點時，剛合流過去的物品與待合流物品互相等待導致堵死死鎖的 Bug。
+2. 藉由記錄 `node.lastAdmittedTransferId`，在 `getMergeThroughYieldLimit` 中對其放行，消除剛合流車與待合流車的死鎖。
+3. 確保不影響既有的 Round-Robin 公平輪詢與 Stacking 回壓邏輯。
+
+## 實施步驟
+- [x] 步驟 1：在 `LogisticsMergeNodeRuntime.js` 的 `commitLogisticsMergeAdmission` 中記錄 `node.lastAdmittedTransferId = winnerId`。
+- [x] 步驟 2：在 `getMergeThroughYieldLimit` 中加入針對 `lastAdmittedTransferId` 且在合流點一格範圍內的車的忽略邏輯。
+- [x] 步驟 3：運行 Playwright 測試與物流線合流驗證，確保完全修復且無 regression。
+- [x] 步驟 4：執行 `npm run finalize`。
+
 # 2026-06-17 三線壅塞連續輪替修正計畫
 
 ## 核心目標

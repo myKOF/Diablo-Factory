@@ -289,6 +289,7 @@ export class LogisticsMergeNodeRuntime {
         node.lastServed = node.inputGroupIds[safeSlotIndex] || null;
         node.hasCommittedAdmission = true;
         node.admissionCommitCount = (Number(node.admissionCommitCount) || 0) + 1;
+        node.lastAdmittedTransferId = winnerId;
         // [拉鏈式合流] 支線完成插入後，輪次交還主線穿越車
         node.zipperTurn = 'main';
         node.awaitingMainPass = true;
@@ -348,8 +349,13 @@ export class LogisticsMergeNodeRuntime {
         const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
         let limit = Infinity;
         nodes.forEach(node => {
+            const isLastAdmitted = node.lastAdmittedTransferId === transfer.id;
             const mergePoint = node.point || { x: node.x, y: node.y };
             const mergeDistance = this.getPathDistanceToPoint(route, mergePoint);
+            const distFromMerge = distance - mergeDistance;
+            if (isLastAdmitted && distFromMerge >= -0.1 && distFromMerge < spacing - 0.1) {
+                return;
+            }
             if (mergeDistance <= 0.1) {
                 if (this.isThroughSlotDue(node)) {
                     if (distance < spacing - 0.1) {
