@@ -316,7 +316,7 @@ export class LogisticsMergeNodeRuntime {
         if (!node || !transferId) return;
         if (node.lastThroughTransferId === transferId) return;
         node.lastThroughTransferId = transferId;
-        
+
         const throughSlotIndex = this.getMergeThroughSlotIndex(node);
         // [三線輪詢修正] 只有在「真正輪到主線」時，才更新 currentActiveSlot 到下一個支線；
         // 如果是插隊通行（awaitingMainPass 觸發），則保留當前的 currentActiveSlot 不予覆寫，
@@ -364,12 +364,12 @@ export class LogisticsMergeNodeRuntime {
                     return;
                 }
                 if (node.lastThroughTransferId === transfer.id && distance < spacing - 0.1) return;
-                const winnerId = this.getLogisticsMergeAdmissionWinner(node, state, {
+                this.getLogisticsMergeAdmissionWinner(node, state, {
                     spacing,
                     readyDistanceFromEnd: spacing
                 });
-                if (!winnerId) return;
-                limit = Math.min(limit, distance);
+                // 已經在輸出線上（mergeDistance <= 0.1）的物品不應被限速，
+                // 否則它無法前進拉開間距，會導致待合流物品因 occupied 檢查而無法合流，造成互卡死鎖。
                 return;
             }
             if (distance >= mergeDistance - 0.1) {
@@ -598,16 +598,8 @@ export class LogisticsMergeNodeRuntime {
             })();
             this.commitLogisticsMergeAdmission(node, transfer.id, state);
             transfer.lineId = node.outputGroupId;
-            const virtualTurnRoute = this.buildMergeContinuousTurnRoute(inputPoints, route, mergePoint, inputDir, outputDir);
-            if (virtualTurnRoute) {
-                const routeLength = this.getRouteLength(virtualTurnRoute);
-                const mergeDistance = this.getPathDistanceToPoint(virtualTurnRoute, mergePoint);
-                transfer.routePoints = virtualTurnRoute;
-                transfer.progress = routeLength > 0 ? Math.max(0, Math.min(1, mergeDistance / routeLength)) : 0;
-            } else {
-                transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
-                transfer.progress = 0;
-            }
+            transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
+            transfer.progress = 0;
             // 路線已切換，舊路線上的排隊距離殘值必須清除，避免排隊邏輯誤判位置。
             delete transfer._queuedDistance;
             transfer.sourceId = outputSeg?.sourceId || transfer.sourceId || null;
@@ -631,26 +623,5 @@ export class LogisticsMergeNodeRuntime {
         });
 
         return changed;
-    }
-
-    buildMergeContinuousTurnRoute(inputPoints, outputRoute, mergePoint, inputDir, outputDir) {
-        if (!Array.isArray(inputPoints) || inputPoints.length < 2) return null;
-        if (!Array.isArray(outputRoute) || outputRoute.length < 2) return null;
-        if (!mergePoint || !inputDir || !outputDir) return null;
-        if (inputDir.x === outputDir.x && inputDir.y === outputDir.y) return null;
-        const inputPrev = inputPoints[inputPoints.length - 2];
-        if (!inputPrev) return null;
-        const points = [
-            { x: inputPrev.x, y: inputPrev.y },
-            { x: mergePoint.x, y: mergePoint.y }
-        ];
-        outputRoute.slice(1).forEach(point => {
-            if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
-            const last = points[points.length - 1];
-            if (!last || Math.hypot(last.x - point.x, last.y - point.y) > 0.1) {
-                points.push({ x: point.x, y: point.y });
-            }
-        });
-        return points.length >= 2 ? points : null;
     }
 }

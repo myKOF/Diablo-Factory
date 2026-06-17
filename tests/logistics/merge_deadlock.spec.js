@@ -6,8 +6,8 @@ test('物流合流點死鎖修復驗證測試', async ({ page }) => {
     await page.waitForFunction(() => typeof window.GAME_STATE !== 'undefined', null, { timeout: 15000 });
 
     const result = await page.evaluate(async () => {
-        const { LogisticsMergeNodeRuntime } = await import('/src/systems/logistics/LogisticsMergeNodeRuntime.js');
-        const { GameEngine } = await import('/src/systems/game_systems.js');
+        const { LogisticsMergeNodeRuntime } = await import('/src/systems/logistics/LogisticsMergeNodeRuntime.js?v=' + Date.now());
+        const { GameEngine } = await import('/src/systems/game_systems.js?v=' + Date.now());
 
         const state = GameEngine.state;
         const originalState = JSON.parse(JSON.stringify(state));

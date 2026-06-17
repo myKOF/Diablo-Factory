@@ -1,4 +1,34 @@
+# 2026-06-17 物流線合流死鎖與塞車問題修復計畫（續）
+
+## 核心目標
+1. 解決在修正瞬移問題後，主線直行車與支線合流車在合流點因限速而互卡死鎖的問題。
+2. 確立「已越過合流點的車，前進是為了讓出空間」的物理邏輯原則。
+3. 修正 `LogisticsMergeNodeRuntime.js` 的 `getMergeThroughYieldLimit` 函式，當 `mergeDistance <= 0.1`（車已越過合流點在輸出線上）時，不對其進行限速（不設定 `limit`），以利其前進拉開安全間距，避免與待合流物品產生死鎖。
+4. 確保不影響既有的 Round-Robin 公平輪詢與 Stacking 回壓邏輯，所有 10 個 Playwright E2E 測試套件均順利通過。
+5. 完成後執行 `npm run finalize`。
+
+## 實施步驟
+- [ ] 步驟 1：建立或更新 `implementation_plan.md`，並設定 `request_feedback = true` 來請求使用者批准。
+- [ ] 步驟 2：修改 `LogisticsMergeNodeRuntime.js`，在 `mergeDistance <= 0.1` 區塊中，當 `winnerId` 存在時，不再限制其 `limit = Math.min(limit, distance)`，而是直接 `return;`。
+- [ ] 步驟 3：運行 Playwright 測試與物流線合流驗證，確保完全修復且無 regression。
+- [ ] 步驟 4：執行 `npm run finalize`。
+
+# 2026-06-17 直行與轉彎合流之堆積定位跳躍與瞬移修復計畫
+
+## 核心目標
+1. 解決直行物流物品在合流點前產生大幅度「回跳兩格」瞬移的嚴重問題。
+2. 確立「職責分離」：邏輯層（物理層）嚴禁提早切換 `lineId`，統一於抵達合流點 0.5px 內才進行路線切換，避免因起點坐標系不同造成 backpressure/stacking 計算出錯而將物品拉回。
+3. 表現層（渲染層）負責在合流前 20px 內渲染圓角弧線（若轉彎），邏輯層維持 100% 精確且無損的自然移動。
+4. 恢復 `isAtMergeGate` 距離判定至 `0.5`px，移除邏輯層的 `virtualTurnRoute`（完全由渲染層的 `getMergeOutputVisualHandoffPoint` 圓滑承接）。
+
+## 實施步驟
+- [ ] 步驟 1：修改 `LogisticsMergeNodeRuntime.js` 的 `apply`，將 `isAtMergeGate` 門禁判定恢复為原來的 `inputTotal - 0.5`（0.5px）。
+- [ ] 步驟 2：移除 `apply` 中邏輯層的 `virtualTurnRoute` 相關操作，所有物品在切換時統一使用 `route.map(...)` 輸出線路徑且 `progress = 0`。
+- [ ] 步驟 3：運行 Playwright 自測及手動驗證，確保物流暢通、無瞬移且零 regression。
+- [ ] 步驟 4：執行 `npm run finalize`。
+
 # 2026-06-17 多線合流死鎖與堵死問題修復計畫
+
 
 ## 核心目標
 1. 解決多條物流輸入線合流至同一輸出線起點時，剛合流過去的物品與待合流物品互相等待導致堵死死鎖的 Bug。

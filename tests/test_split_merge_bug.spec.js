@@ -49,7 +49,10 @@ test('物流線拆分在途物品不誤清且合流點不卡死測試', async ({
         conveyorSystem.submitDrag();
 
         // 等待合流點註冊
-        await new Promise(r => setTimeout(r, 200));
+        for (let i = 0; i < 30; i++) {
+            if (state.logisticsMergeNodes && state.logisticsMergeNodes.length > 0) break;
+            await new Promise(r => setTimeout(r, 100));
+        }
 
         const initialNodes = state.logisticsMergeNodes || [];
         if (initialNodes.length === 0) {
