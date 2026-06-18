@@ -9,6 +9,8 @@ import { HUDRenderer } from "../renderers/hud_renderer.js";
 import { InputSystem } from "../systems/InputSystem.js";
 import { conveyorSystem } from "../systems/ConveyorSystem.js";
 import { LogisticsUI } from "../ui/LogisticsUI.js";
+import { DebugRenderLayer } from "../debug/DebugRenderLayer.js";
+import { RenderDebugger } from "../debug/RenderDebugger.js";
 
 export class MainScene extends Phaser.Scene {
     constructor() {
@@ -194,6 +196,13 @@ export class MainScene extends Phaser.Scene {
         this.isMouseIn = true;
         this.input.on('gameout', () => { this.isMouseIn = false; });
         this.input.on('gameover', () => { this.isMouseIn = true; });
+
+        // 工程 X 光除錯層 (Phase 1) 與視覺狀態序列化 (Phase 2)
+        this.debugLayer = new DebugRenderLayer(this);
+        RenderDebugger.init(this);
+        if (typeof window !== "undefined" && window.DEBUG_RENDER_MODE === undefined) {
+            window.DEBUG_RENDER_MODE = false;
+        }
     }
 
     generateTextures() {
@@ -917,6 +926,15 @@ export class MainScene extends Phaser.Scene {
         const deltaTime = delta / 1000;
         const state = window.GAME_STATE;
         if (!state) return;
+
+        // 工程 X 光模式：放在最前段，確保即使下方有提前 return 的跳過分支仍每幀執行
+        if (this.debugLayer) {
+            if (typeof window !== "undefined" && window.DEBUG_RENDER_MODE) {
+                this.debugLayer.render();
+            } else {
+                this.debugLayer.hide();
+            }
+        }
 
         this.updateLogisticsLayer(state);
         // RTS 邊緣捲動實作

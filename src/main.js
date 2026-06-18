@@ -1,6 +1,7 @@
 import { GameEngine } from "./systems/game_systems.js";
 import { PhaserRenderer } from "./renderers/phaser_renderer.js";
 import { UIManager } from "./ui/ui.js";
+import { RenderDebugger } from "./debug/RenderDebugger.js";
 
 /**
  * 遊戲啟動與環境限制
@@ -85,5 +86,15 @@ async function initGame() {
     await GameEngine.start();
     PhaserRenderer.init();
     UIManager.init();
+
+    // 視覺除錯系統全域掛載 (Phase 1 + Phase 2)
+    // 用法：在 console 執行 window.DEBUG_RENDER_MODE = true 開啟 X 光疊圖；
+    //       exportCurrentVisualState() 取得 AI 可讀的視覺狀態 JSON。
+    // 一併暴露 GameEngine 供 E2E 驗證腳本驅動模擬 (Phase 3)，與既有過渡性全域一致。
+    window.GameEngine = GameEngine;
+    window.RenderDebugger = RenderDebugger;
+    window.exportCurrentVisualState = (opts) => RenderDebugger.exportCurrentVisualState(opts);
+    if (window.DEBUG_RENDER_MODE === undefined) window.DEBUG_RENDER_MODE = false;
+
     console.log("所有系統啟動完畢。");
 }
