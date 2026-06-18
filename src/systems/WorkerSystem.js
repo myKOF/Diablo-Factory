@@ -2599,14 +2599,65 @@ export class WorkerSystem {
             const bIsMergeInput = b.some(isMergeInputTransfer);
             return Number(aIsMergeInput) - Number(bIsMergeInput);
         }).forEach(([pathKey, groupTransfers]) => {
-            // 根據 progress 由大到小排序（最前方的物品在 index 0），若 progress 相同則以 id 排序以保證穩定排序
+            // [對齊最長主線] 與 LogisticsTransferQueues 一致：
+            // 尋找組內最長路徑作為基準路徑 (canonical)，並以此計算對齊後的距離進行排序與 Stacking 計算，
+            // 避免轉彎車剛合流到 output 路線時，因 progress 重置為 0 被誤判在直行後車的後方而產生煞車。
+            const canonical = groupTransfers.reduce((best, transfer) => {
+                const len = getTransferRouteMetrics(transfer).totalPixels;
+                return len > best.length ? { points: transfer.routePoints, length: len } : best;
+            }, { points: null, length: 0 });
+
+            const useCanonical = groupTransfers.length > 1 && canonical.length > 0 && groupTransfers.some(transfer => {
+                const points = transfer.routePoints || [];
+                const canonicalPoints = canonical.points || [];
+                if (points.length !== canonicalPoints.length) return true;
+                return points.some((point, index) => {
+                    const other = canonicalPoints[index];
+                    return !other || Math.hypot(point.x - other.x, point.y - other.y) > 0.1;
+                });
+            });
+
+            const getPointOnPathByDistance = (pts, distance) => {
+                if (!Array.isArray(pts) || pts.length < 2) return null;
+                let remaining = Math.max(0, Number(distance) || 0);
+                for (let i = 0; i < pts.length - 1; i++) {
+                    const a = pts[i];
+                    const b = pts[i + 1];
+                    const dx = b.x - a.x;
+                    const dy = b.y - a.y;
+                    const len = Math.abs(dx) + Math.abs(dy); // 正交物流路徑長度
+                    if (len <= 0) continue;
+                    if (remaining <= len || i === pts.length - 2) {
+                        const t = Math.max(0, Math.min(1, remaining / len));
+                        return { x: a.x + dx * t, y: a.y + dy * t };
+                    }
+                    remaining -= len;
+                }
+                const last = pts[pts.length - 1];
+                return last ? { x: last.x, y: last.y } : null;
+            };
+
+            const distanceCache = new Map();
+            const getDistance = (transfer) => {
+                if (distanceCache.has(transfer)) return distanceCache.get(transfer);
+                const total = getTransferRouteMetrics(transfer).totalPixels;
+                const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
+                const resolved = useCanonical
+                    ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance))
+                    : distance;
+                distanceCache.set(transfer, resolved);
+                return resolved;
+            };
+
+            // 排序：若是 useCanonical，以對齊後的 canonical 距離由大到小排序，否則依 progress 排序
             groupTransfers.sort((a, b) => {
-                const diff = (b.progress || 0) - (a.progress || 0);
-                if (Math.abs(diff) > 0.0001) return diff;
+                const da = getDistance(a);
+                const db = getDistance(b);
+                if (Math.abs(db - da) > 0.0001) return db - da;
                 return String(a.id).localeCompare(String(b.id));
             });
 
-            let prevMaxDist = Infinity;
+            let prevMaxCanonicalDist = Infinity;
             for (let j = 0; j < groupTransfers.length; j++) {
                 const t = groupTransfers[j];
                 const metrics = getTransferRouteMetrics(t);
@@ -2647,6 +2698,10 @@ export class WorkerSystem {
                     }
                 }
 
+                const startDistOnCanonical = useCanonical
+                    ? getPathDistanceToPoint(canonical.points, t.routePoints[0])
+                    : 0;
+
                 // [緊密不重疊] 主線與一般線統一使用完整物品長度作為間距，嚴防重疊。
                 let spacing = cellSize;
                 const desired = (t.progress || 0) * totalLength;
@@ -2661,22 +2716,25 @@ export class WorkerSystem {
                         maxDist = totalLength;
                     }
                 } else {
-                    maxDist = totalLength;
-                }
-                if (j > 0) {
                     const frontItem = groupTransfers[j - 1];
-                    const frontDist = (frontItem.progress || 0) * getTransferRouteMetrics(frontItem).totalPixels;
-                    const physicalLimit = Math.max(0, Math.min(frontDist, prevMaxDist) - spacing);
+                    const frontCanonicalDist = getDistance(frontItem);
+                    const physicalLimitCanonical = Math.max(startDistOnCanonical, Math.min(frontCanonicalDist, prevMaxCanonicalDist) - spacing);
+
+                    let limitCanonical = startDistOnCanonical + totalLength;
                     if (desired <= dist_pn) {
-                        if (frontDist > dist_pn || prevMaxDist > dist_pn) {
-                            maxDist = Math.min(dist_pn, physicalLimit);
+                        const targetLimitCanonical = startDistOnCanonical + dist_pn;
+                        if (frontCanonicalDist > targetLimitCanonical || prevMaxCanonicalDist > targetLimitCanonical) {
+                            limitCanonical = Math.min(targetLimitCanonical, physicalLimitCanonical);
                         } else {
-                            maxDist = physicalLimit;
+                            limitCanonical = physicalLimitCanonical;
                         }
                     } else {
-                        maxDist = physicalLimit;
+                        limitCanonical = physicalLimitCanonical;
                     }
+                    // 將 canonical 座標系的限制還原至物品局部座標系的 maxDist
+                    maxDist = Math.max(0, limitCanonical - startDistOnCanonical);
                 }
+
                 // [拉鏈式合流] 主線穿越車在輪到支線時於合流點前一格讓行（對佇列中任何位置的穿越車皆適用）
                 if (isMergeOutputTransfer(t) && conveyorSystem &&
                     typeof conveyorSystem.getLogisticsMergeThroughYieldLimit === 'function') {
@@ -2685,7 +2743,8 @@ export class WorkerSystem {
                         maxDist = Math.min(maxDist, yieldLimit);
                     }
                 }
-                prevMaxDist = maxDist;
+
+                prevMaxCanonicalDist = startDistOnCanonical + maxDist;
                 t.maxAllowedProgress = maxDist / totalLength;
                 if (isMergeInput) {
                     t.queueBlocked = maxDist < totalLength - 0.1 && desired >= maxDist - 0.1;
@@ -2810,7 +2869,6 @@ export class WorkerSystem {
             const itemDispatchInterval = 2; // 基準：1 名工人每 2 秒發送一個物品。
             ent.logisticsTimer = (ent.logisticsTimer || 0) + deltaTime * efficiency;
             if (ent.logisticsTimer >= itemDispatchInterval) {
-                ent.logisticsTimer = 0;
                 let itemSpawned = false;
 
                 const outputTargets = Array.isArray(ent.outputTargets) ? ent.outputTargets : [];
@@ -2861,6 +2919,10 @@ export class WorkerSystem {
                             }
                         }
                     }
+                }
+
+                if (itemSpawned) {
+                    ent.logisticsTimer = Math.max(0, ent.logisticsTimer - itemDispatchInterval);
                 }
             }
         });

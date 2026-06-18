@@ -2374,33 +2374,99 @@ export class LogisticsRenderer {
     static getPointOnTransferPath(points, progress, startOffset = 0, cacheOwner = null) {
         if (!Array.isArray(points) || points.length < 2) return null;
         const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
-        const metrics = LogisticsRenderer.getTransferPathMetrics(points, cacheOwner);
-        const metricPoints = metrics?.points || points;
-        const lengths = metrics?.lengths || [];
-        const totalLength = metrics?.totalLength || 0;
-        if (totalLength <= 0) return { x: metricPoints[0].x, y: metricPoints[0].y, angle: 0 };
 
-        const safeStartOffset = Math.max(0, Math.min(Number(startOffset) || 0, totalLength * 0.45));
-        let targetDistance = safeStartOffset + clampedProgress * (totalLength - safeStartOffset);
-        const absoluteTargetDistance = targetDistance;
-        for (let i = 0; i < lengths.length; i++) {
-            const length = lengths[i];
-            if (targetDistance <= length || i === lengths.length - 1) {
-                const a = metricPoints[i];
-                const b = metricPoints[i + 1];
-                const localProgress = length > 0 ? targetDistance / length : 0;
+        // 1. 計算折線的曼哈頓總長度與各段長度，使直線段視覺位移與邏輯位移 100% 等價對齊
+        const segments = [];
+        let totalPixels = 0;
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            const len = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+            segments.push({ a, b, len, start: totalPixels });
+            totalPixels += len;
+        }
+        if (totalPixels <= 0) return { x: points[0].x, y: points[0].y, angle: 0 };
 
-                const point = {
+        // 2. 計算每個轉角 Corner 資訊
+        const TS = GameEngine.TILE_SIZE || 20;
+        const corners = [];
+        let distanceAtPoint = 0;
+        for (let i = 1; i < points.length - 1; i++) {
+            const prev = points[i - 1];
+            const curr = points[i];
+            const next = points[i + 1];
+            const prevLen = Math.abs(curr.x - prev.x) + Math.abs(curr.y - prev.y);
+            distanceAtPoint += prevLen;
+            
+            const inDir = LogisticsRenderer.getCardinalDir(prev, curr);
+            const outDir = LogisticsRenderer.getCardinalDir(curr, next);
+            const isTurn = inDir && outDir && (inDir.x !== outDir.x || inDir.y !== outDir.y);
+            if (isTurn) {
+                const nextLen = Math.abs(next.x - curr.x) + Math.abs(next.y - curr.y);
+                const radius = Math.min(TS, prevLen, nextLen);
+                if (radius >= 1) {
+                    corners.push({
+                        currIndex: i,
+                        curr,
+                        entry: { x: curr.x - inDir.x * radius, y: curr.y - inDir.y * radius },
+                        exit: { x: curr.x + outDir.x * radius, y: curr.y + outDir.y * radius },
+                        distAtCorner: distanceAtPoint,
+                        radius
+                    });
+                }
+            }
+        }
+
+        const safeStartOffset = Math.max(0, Math.min(Number(startOffset) || 0, totalPixels * 0.45));
+        const targetDistance = safeStartOffset + clampedProgress * (totalPixels - safeStartOffset);
+
+        // 3. 檢查是否落在 Corner 的圓角區間內
+        let activeCorner = null;
+        for (const corner of corners) {
+            const start = corner.distAtCorner - corner.radius;
+            const end = corner.distAtCorner + corner.radius;
+            if (targetDistance >= start && targetDistance <= end) {
+                activeCorner = corner;
+                break;
+            }
+        }
+
+        if (activeCorner) {
+            const start = activeCorner.distAtCorner - activeCorner.radius;
+            const t = (targetDistance - start) / (2 * activeCorner.radius);
+            
+            // 二次貝氏曲線插值
+            const entry = activeCorner.entry;
+            const control = activeCorner.curr;
+            const exit = activeCorner.exit;
+            
+            const px = (1 - t) * (1 - t) * entry.x + 2 * (1 - t) * t * control.x + t * t * exit.x;
+            const py = (1 - t) * (1 - t) * entry.y + 2 * (1 - t) * t * control.y + t * t * exit.y;
+            
+            // 切線方向作為旋轉角度
+            const tx = 2 * (1 - t) * (control.x - entry.x) + 2 * t * (exit.x - control.x);
+            const ty = 2 * (1 - t) * (control.y - entry.y) + 2 * t * (exit.y - control.y);
+            const angle = Math.atan2(ty, tx);
+            
+            return { x: px, y: py, angle };
+        }
+
+        // 4. 線性插值（直線段，消除過彎前後視覺長度不一致的累積誤差）
+        for (let i = 0; i < segments.length; i++) {
+            const { a, b, len, start } = segments[i];
+            if (targetDistance <= start + len || i === segments.length - 1) {
+                const localDist = targetDistance - start;
+                const localProgress = len > 0 ? localDist / len : 0;
+                return {
                     x: a.x + (b.x - a.x) * localProgress,
                     y: a.y + (b.y - a.y) * localProgress,
                     angle: Math.atan2(b.y - a.y, b.x - a.x)
                 };
-                return LogisticsRenderer.applyCornerVisualCompensation(metricPoints, absoluteTargetDistance, point);
             }
-            targetDistance -= length;
         }
-        const last = metricPoints[metricPoints.length - 1];
-        const prev = metricPoints[metricPoints.length - 2] || last;
+
+        const last = points[points.length - 1];
+        const prev = points[points.length - 2] || last;
         return { x: last.x, y: last.y, angle: Math.atan2(last.y - prev.y, last.x - prev.x) };
     }
 
@@ -2451,19 +2517,12 @@ export class LogisticsRenderer {
             return LogisticsRenderer.getPointOnTransferPath(points, targetDistance / totalLength, 0, transfer);
         }
 
-        const start = LogisticsRenderer.getPointOnTransferPath(points, arcStartDistance / totalLength, 0, transfer);
-        if (!start) return null;
-        const virtualTurnPath = [
-            { x: start.x, y: start.y },
-            { x: nodePoint.x, y: nodePoint.y },
-            {
-                x: nodePoint.x + outDir.x * arcLength,
-                y: nodePoint.y + outDir.y * arcLength
-            }
-        ];
-        return LogisticsRenderer.getPointOnVirtualTransferPathByDistance(
-            virtualTurnPath,
-            targetDistance - arcStartDistance
+        return LogisticsRenderer.getPointOnMergeVisualTurn(
+            nodePoint,
+            inDir,
+            outDir,
+            targetDistance - arcStartDistance,
+            arcLength
         );
     }
 
@@ -2479,31 +2538,36 @@ export class LogisticsRenderer {
         const mergeDistance = LogisticsRenderer.getPathDistanceToPoint(points, nodePoint);
         const localDistance = targetDistance - mergeDistance;
         if (localDistance < -0.001 || localDistance > TS + 0.001) return null;
-        const start = {
-            x: nodePoint.x - Math.sign(inDir.x || 0) * TS,
-            y: nodePoint.y - Math.sign(inDir.y || 0) * TS
-        };
-        const virtualTurnPath = [
-            start,
+        return LogisticsRenderer.getPointOnMergeVisualTurn(
             nodePoint,
-            {
-                x: nodePoint.x + Math.sign(outDir.x || 0) * TS,
-                y: nodePoint.y + Math.sign(outDir.y || 0) * TS
-            }
-        ];
-        const curvePoint = LogisticsRenderer.getPointOnVirtualTransferPathByDistance(
-            virtualTurnPath,
-            TS + Math.max(0, localDistance)
+            inDir,
+            outDir,
+            TS + Math.max(0, localDistance),
+            TS
         );
-        const normalPoint = LogisticsRenderer.getPointOnTransferPath(points, progress, 0, null);
-        if (!curvePoint || !normalPoint) return curvePoint || normalPoint || null;
-        const t = Math.max(0, Math.min(1, localDistance / TS));
-        const blend = t * t * (3 - 2 * t);
-        return {
-            x: curvePoint.x + (normalPoint.x - curvePoint.x) * blend,
-            y: curvePoint.y + (normalPoint.y - curvePoint.y) * blend,
-            angle: blend < 0.999 ? curvePoint.angle : normalPoint.angle
+    }
+
+    static getPointOnMergeVisualTurn(nodePoint, inDir, outDir, logicalDistance, halfLogicalLength) {
+        if (!nodePoint || !inDir || !outDir) return null;
+        const halfLength = Math.max(1, Number(halfLogicalLength) || (GameEngine.TILE_SIZE || 20));
+        const totalLogicalLength = halfLength * 2;
+        const start = {
+            x: nodePoint.x - Math.sign(inDir.x || 0) * halfLength,
+            y: nodePoint.y - Math.sign(inDir.y || 0) * halfLength
         };
+        const end = {
+            x: nodePoint.x + Math.sign(outDir.x || 0) * halfLength,
+            y: nodePoint.y + Math.sign(outDir.y || 0) * halfLength
+        };
+        const virtualTurnPath = [start, { x: nodePoint.x, y: nodePoint.y }, end];
+        const metrics = LogisticsRenderer.getTransferPathMetrics(virtualTurnPath, null);
+        if (!metrics || !Number.isFinite(metrics.totalLength) || metrics.totalLength <= 0) return null;
+        const clamped = Math.max(0, Math.min(totalLogicalLength, Number(logicalDistance) || 0));
+        return LogisticsRenderer.getPointOnMetricPath(
+            metrics.points,
+            metrics.lengths,
+            (clamped / totalLogicalLength) * metrics.totalLength
+        );
     }
 
     static getPointOnVirtualTransferPathByDistance(points, distance, cacheOwner = null) {

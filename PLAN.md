@@ -1,3 +1,26 @@
+# 2026-06-18 建築出貨計時器因起點佔用誤清零造成出貨空隙 Bug 修復計畫
+
+## 核心目標
+1. 解決倉庫/工廠等建築在出貨時，如果因起點被佔用（`canStartTransfer` 返回 `false`）導致出貨失敗，其出貨計時器 `logisticsTimer` 卻已被錯誤清零的 Bug。這會迫使該建築白白浪費一整個出貨週期，導致在途物品之間產生不規則的大幅空隙（如每出貨三個空出一格）。
+2. 改為「成功出貨才扣減計時器」原則：只有在 `itemSpawned === true` 時才將 `logisticsTimer` 扣減 `itemDispatchInterval`。若出貨失敗，計時器保持原值，在下一幀起點空出時可以立刻出貨，實現完美的無縫緊貼排列。
+
+## 實施步驟
+- [ ] 步驟 1：修改 `WorkerSystem.js` 中的 `state.mapEntities.forEach(ent => ...)` 邏輯，延遲並按需扣減 `ent.logisticsTimer`。
+- [ ] 步驟 2：執行 `npm.cmd run test:e2e` 確保全套 10 個測試套件順利通過。
+- [ ] 步驟 3：執行 `npm.cmd run finalize`。
+
+# 2026-06-18 轉彎物品合流後小幅煞車修復計畫
+
+## 核心目標
+1. 解決轉彎合流物品在過彎剛切換到 output 路徑的瞬間，其 progress 被重置為 0，而後方直行車 progress 較高（例如 0.4），導致 Stacking 排序出錯，將直行車誤判為前車，從而對已合流的轉彎車套用 backpressure 物理限速，使其產生小幅度煞車的 Bug。
+2. 實現「Canonical 統一座標系排序與 Stacking 物理限制計算」：在 `WorkerSystem.js` 中對 transfers 進行 Stacking 前的 group 排序時，使用與 `LogisticsTransferQueues.js` 一致的 `useCanonical` 判斷與 `getDistance(canonical)`。
+3. 對於 `useCanonical` 成立的組，排序以 canonical 距離為準，且 `j > 0` 的物理限制計算也在 canonical 座標系上進行，最後再將限制 `limitCanonical` 還原為局部座標系的 `maxDist`。
+
+## 實施步驟
+- [ ] 步驟 1：修改 `WorkerSystem.js` 的 `processAutomatedLogistics` Stacking 計算，引入 `useCanonical` 判斷、`getPointOnPathByDistance` 與 `getDistance`，使用對齊後的 canonical 距離重新排序 `groupTransfers`，並在 canonical 座標系上計算 `physicalLimitCanonical`，還原為局部 `maxDist`。
+- [ ] 步驟 2：執行 `npm.cmd run test:e2e` 確保所有 10 個測試套件順利通過。
+- [ ] 步驟 3：執行 `npm.cmd run finalize`。
+
 # 2026-06-17 物流多線合流後物品無縫接合與避免轉彎車煞車修復計畫
 
 ## 核心目標
