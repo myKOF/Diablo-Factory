@@ -1652,6 +1652,35 @@ export class LogisticsRenderer {
         });
     }
 
+    static renderBuildingPortCells(graphics, entities, scene) {
+        if (!graphics || !Array.isArray(entities) || !window.UIManager) return;
+        const logCfg = UI_CONFIG.LogisticsSystem || {};
+        const parseColor = (c) => scene.hexOrRgba(c).color;
+        const fillColor = parseColor(logCfg.sourcePortCellColor || "#00ff44ff");
+        const strokeColor = parseColor(logCfg.sourcePortCellStrokeColor || "#ffff00ff");
+        const alpha = logCfg.sourcePortCellAlpha ?? 0.85;
+        const strokeAlpha = logCfg.sourcePortCellStrokeAlpha ?? 1;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const drawn = new Set();
+
+        entities.forEach(ent => {
+            if (!window.UIManager.canShowLogisticsPorts?.(ent)) return;
+            const entityId = window.UIManager.getEntityId?.(ent) || `${ent.type1}_${ent.x}_${ent.y}`;
+            const slots = window.UIManager.getBuildingPortSlots?.(ent) || [];
+            slots.forEach(slot => {
+                const rect = window.UIManager.getPortSlotRect?.(slot);
+                if (!rect) return;
+                const key = `${entityId}:${slot.defIndex}:${slot.slotIndex}:${slot.dir}:${Math.round(slot.x)},${Math.round(slot.y)}`;
+                if (drawn.has(key)) return;
+                drawn.add(key);
+                graphics.fillStyle(fillColor, alpha);
+                graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
+                graphics.lineStyle(Math.max(2, Math.round(TS * 0.12)), strokeColor, strokeAlpha);
+                graphics.strokeRect(rect.x, rect.y, rect.w, rect.h);
+            });
+        });
+    }
+
     static drawArrowhead(g, x, y, ux, uy, size) {
         // ux, uy 是單位方向向量
         const scale = Math.max(0.1, Number(UI_CONFIG.LogisticsSystem?.arrowGlobalScale) || 1);

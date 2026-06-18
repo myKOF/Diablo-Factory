@@ -444,7 +444,7 @@ export class LogisticsUI {
 
     static beginLogisticsDragFromBuilding(ent, sourcePort) {
         if (!ent || !sourcePort) return false;
-        if (!window.UIManager.isSelectedBuilding(ent)) return false;
+        if (!window.UIManager.isSelectedBuilding(ent) && !LogisticsUI.isTransportLinePlacementActive()) return false;
         window.UIManager.clearWorldSelectionMarquee();
         LogisticsUI.logisticsSourceEntity = ent;
         LogisticsUI.logisticsSourceLine = null;

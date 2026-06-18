@@ -113,7 +113,13 @@ export class LogisticsLineMergeCoordinator {
                     const outputDir = this.system.getLogisticsLineDirectionAtPoint(outputLine, p);
                     const isSameDirection = inputDir && outputDir && inputDir.x === outputDir.x && inputDir.y === outputDir.y;
 
-                    if (!isSameDirection) {
+                    // 判斷是否為直線順接：只有在同向且接觸點為輸出線的起點時，才被判定為直線順接
+                    const isOutputStart = Array.isArray(outputLine.routePoints) &&
+                        outputLine.routePoints.length >= 1 &&
+                        Math.hypot(outputLine.routePoints[0].x - p.x, outputLine.routePoints[0].y - p.y) < 1;
+                    const isStraightConnection = isSameDirection && isOutputStart;
+
+                    if (!isStraightConnection) {
                         const node = this.system.registerLogisticsMergeNode({
                             inputGroupId: groupAId,
                             outputGroupId: groupBId,
@@ -134,7 +140,13 @@ export class LogisticsLineMergeCoordinator {
                     const outputDir = this.system.getLogisticsLineDirectionAtPoint(outputLine, p);
                     const isSameDirection = inputDir && outputDir && inputDir.x === outputDir.x && inputDir.y === outputDir.y;
 
-                    if (!isSameDirection) {
+                    // 判斷是否為直線順接：只有在同向且接觸點為輸出線的起點時，才被判定為直線順接
+                    const isOutputStart = Array.isArray(outputLine.routePoints) &&
+                        outputLine.routePoints.length >= 1 &&
+                        Math.hypot(outputLine.routePoints[0].x - p.x, outputLine.routePoints[0].y - p.y) < 1;
+                    const isStraightConnection = isSameDirection && isOutputStart;
+
+                    if (!isStraightConnection) {
                         const node = this.system.registerLogisticsMergeNode({
                             inputGroupId: groupBId,
                             outputGroupId: groupAId,

@@ -157,6 +157,11 @@ export class MainScene extends Phaser.Scene {
             const logCfg = UI_CONFIG.LogisticsSystem || { transferItemDepth: 900000 };
             this.logisticsPortGraphics.setDepth((logCfg.transferItemDepth || 900000) - 2);
         }
+        if (!this.buildingPortGraphics) {
+            this.buildingPortGraphics = this.add.graphics();
+            const logCfg = UI_CONFIG.LogisticsSystem || { transferItemDepth: 900000 };
+            this.buildingPortGraphics.setDepth((logCfg.transferItemDepth || 900000) - 3);
+        }
 
         // 相機控制
         this.lastCamX = -9999;
@@ -1285,6 +1290,8 @@ export class MainScene extends Phaser.Scene {
     drawSelectionHighlight() {
         const g = this.selectionGraphics;
         g.clear();
+        const portG = this.buildingPortGraphics || null;
+        if (portG) portG.clear();
 
         // 僅處理建築選取框。單位選取圈已移至 CharacterRenderer.js 以達成 100% 同步
         // 1. [手動選取] 建築選取框 (橘色，由玩家點擊觸發)
@@ -1296,6 +1303,19 @@ export class MainScene extends Phaser.Scene {
                 }
             });
         }
+
+        const selectedPortEntities = (GameEngine.state.selectedBuildingIds || [])
+            .map(id => GameEngine.state.mapEntities.find(e => (e.id === id || `${e.type1}_${e.x}_${e.y}` === id)))
+            .filter(Boolean);
+        const portEntities = LogisticsUI.isTransportLinePlacementActive()
+            ? GameEngine.state.mapEntities.filter(ent => {
+                if (!window.UIManager?.canShowLogisticsPorts?.(ent)) return false;
+                const view = this.cameras.main.worldView;
+                return view.left - 100 < ent.x && view.right + 100 > ent.x &&
+                    view.top - 100 < ent.y && view.bottom + 100 > ent.y;
+            })
+            : selectedPortEntities;
+        LogisticsRenderer.renderBuildingPortCells(portG || g, portEntities, this);
 
         // [核心需求] 支援屍體選取框 (橘色，由玩家點擊觸發)
         const selectedResId = GameEngine.state.selectedResourceId;

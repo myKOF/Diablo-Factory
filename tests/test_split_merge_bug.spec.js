@@ -32,7 +32,7 @@ test('物流線拆分在途物品不誤清且合流點不卡死測試', async ({
         // 支線 A: 點 (110, 110) -> (310, 110) -> (310, 210) （進入合流點）
         // 支線 B: 點 (110, 210) -> (310, 210)
         // 合流後輸出線 C: 點 (310, 210) -> (310, 310)
-        
+
         // 畫輸出線 C
         drawLine(310, 210, 310, 310);
         // 畫支線 B
@@ -126,11 +126,11 @@ test('物流線拆分在途物品不誤清且合流點不卡死測試', async ({
         // 驗證 2: 支線 A 被拆分後，MergeNode 的 inputGroupIds 是否已更新
         const updatedMergeNode = state.logisticsMergeNodes[0];
         const inputGroupsAfterDelete = updatedMergeNode ? updatedMergeNode.inputGroupIds : [];
-        
+
         // 支線 A 後半段應該會被重命名為 newGroupId
         const itemA1 = state.activeTransfers.find(t => t.id === 'item_A1');
         const itemA1NewGroupId = itemA1 ? itemA1.lineId : null;
-        
+
         const isNewGroupInMerge = itemA1NewGroupId ? inputGroupsAfterDelete.includes(itemA1NewGroupId) : false;
         const isOldGroupRemoved = !inputGroupsAfterDelete.includes(groupAId);
 

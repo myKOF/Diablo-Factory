@@ -1509,6 +1509,56 @@ export class UIManager {
         return best;
     }
 
+    static getPortSlotRect(port) {
+        if (!port || !Number.isFinite(port.x) || !Number.isFinite(port.y)) return null;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const width = Math.max(1, Math.round(Number(port.width) || 1));
+        if (port.dir === 'left' || port.dir === 'right') {
+            return {
+                x: port.x - TS / 2,
+                y: port.y - (TS * width) / 2,
+                w: TS,
+                h: TS * width
+            };
+        }
+        return {
+            x: port.x - (TS * width) / 2,
+            y: port.y - TS / 2,
+            w: TS * width,
+            h: TS
+        };
+    }
+
+    static isPointInsidePortSlot(port, worldX, worldY) {
+        const rect = this.getPortSlotRect(port);
+        if (!rect) return false;
+        return worldX >= rect.x && worldX <= rect.x + rect.w &&
+            worldY >= rect.y && worldY <= rect.y + rect.h;
+    }
+
+    static getPortSlotAt(ent, worldX, worldY, preferredDir = null) {
+        const slots = this.getBuildingPortSlots(ent);
+        if (!slots.length) return null;
+        let best = null;
+        let bestScore = Infinity;
+        slots.forEach(slot => {
+            if (!this.isPointInsidePortSlot(slot, worldX, worldY)) return;
+            const dirPenalty = preferredDir && slot.dir !== preferredDir ? GameEngine.TILE_SIZE * 1.2 : 0;
+            const score = Math.hypot(slot.x - worldX, slot.y - worldY) + dirPenalty;
+            if (score < bestScore) {
+                bestScore = score;
+                best = slot;
+            }
+        });
+        return best;
+    }
+
+    static canShowLogisticsPorts(ent) {
+        if (!ent || ent.isUnderConstruction) return false;
+        const cfg = GameEngine.getEntityConfig(ent.type1);
+        return !!(cfg && cfg.logistics && (cfg.logistics.canInput || cfg.logistics.canOutput));
+    }
+
     static resolveCurrentPortSlot(ent, port, fallbackX = null, fallbackY = null) {
         if (!ent || !port) return port || null;
         const slots = this.getBuildingPortSlots(ent);
@@ -1616,10 +1666,10 @@ export class UIManager {
             const cfg = GameEngine.getEntityConfig(ent.type1);
             if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false;
             if (!this.isSelectedBuilding(ent)) return false;
-            return this.isPointInsideEntity(ent, worldX, worldY);
+            return !!this.getPortSlotAt(ent, worldX, worldY);
         });
         if (clickedBuilding && GameEngine.state.buildingMode === 'NONE') {
-            const sourcePort = this.getNearestPortSlot(clickedBuilding, worldX, worldY);
+            const sourcePort = this.getPortSlotAt(clickedBuilding, worldX, worldY);
             if (sourcePort) {
                 this.potentialLogisticsDrag = {
                     entity: clickedBuilding,
@@ -1643,6 +1693,23 @@ export class UIManager {
             return;
         }
         if (LogisticsUI.isTransportLinePlacementActive() && GameEngine.state.buildingMode === 'STAMP') {
+            const portBuilding = GameEngine.state.mapEntities.find(ent => {
+                if (ent.isUnderConstruction) return false;
+                const cfg = GameEngine.getEntityConfig(ent.type1);
+                if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false;
+                return !!this.getPortSlotAt(ent, worldX, worldY);
+            });
+            if (portBuilding) {
+                const sourcePort = this.getPortSlotAt(portBuilding, worldX, worldY);
+                this.potentialLogisticsDrag = {
+                    entity: portBuilding,
+                    sourcePort,
+                    startClientX: e.clientX,
+                    startClientY: e.clientY
+                };
+                return;
+            }
+            if (!clickedLine) return;
             this.potentialTransportLineBuildDrag = {
                 startX: e.clientX,
                 startY: e.clientY,

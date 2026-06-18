@@ -39,10 +39,32 @@ function submitDrag() {
 
     const lastPoint = points[points.length - 1];
     const dragTarget = this.resolveDragTarget(lastPoint.x, lastPoint.y);
-    const targetBuilding = dragTarget.building || drag.targetBuilding;
-    const targetPort = dragTarget.port || drag.targetPort || (targetBuilding ? window.UIManager?.getNearestPortSlot(targetBuilding, points[points.length - 2]?.x || points[0].x, points[points.length - 2]?.y || points[0].y) : null);
+    const targetPort = dragTarget.port || drag.targetPort || null;
+    const targetBuilding = targetPort ? (dragTarget.building || drag.targetBuilding) : null;
     const sourceGroupId = drag.sourceLine?.groupId || drag.sourceLine?.id || null;
-    const touchedTargetLine = this.findTouchedLogisticsLineAt(lastPoint, sourceGroupId);
+    let touchedTargetLine = this.findTouchedLogisticsLineAt(lastPoint, sourceGroupId);
+    // [核心修復] 若預設容差找不到（ghost 末端鄰接但未重疊現有線段），
+    // 以鄰接容差（一格距離）再搜尋一次，覆蓋繞路後末端差一格的情況。
+    let mergePointOverride = null;
+    if (!touchedTargetLine && !targetBuilding) {
+        const TS = GameEngine.TILE_SIZE || 20;
+        touchedTargetLine = this.findTouchedLogisticsLineAt(lastPoint, sourceGroupId, TS * 1.1);
+        if (touchedTargetLine) {
+            // 合流點應對齊到目標線段上最近的端點，而非 ghost 的 lastPoint
+            const pts = Array.isArray(touchedTargetLine.routePoints) ? touchedTargetLine.routePoints : [];
+            let bestDist = Infinity;
+            let bestPt = null;
+            pts.forEach(p => {
+                const d = Math.hypot(p.x - lastPoint.x, p.y - lastPoint.y);
+                if (d < bestDist) { bestDist = d; bestPt = p; }
+            });
+            if (bestPt) {
+                mergePointOverride = { x: bestPt.x, y: bestPt.y };
+                // 追加合流點到路徑末端，使新建線段延伸至目標線段
+                points.push({ ...points[points.length - 1], x: bestPt.x, y: bestPt.y });
+            }
+        }
+    }
     const touchedTargetGroupId = touchedTargetLine ? (touchedTargetLine.groupId || touchedTargetLine.id) : null;
 
     if (window.UIManager) {
@@ -84,7 +106,7 @@ function submitDrag() {
         if (drag.sourceLine && (drag.sourceLine.groupId || drag.sourceLine.id)) {
             const sourceGroupId = drag.sourceLine.groupId || drag.sourceLine.id;
             const lines = (GameEngine.state.logisticsLines || []).filter(l => l && (l.groupId === sourceGroupId || l.id === sourceGroupId));
-            
+
             // 1. 統計所有點的 grid 出現次數以決定物理端點
             const gridCounts = new Map();
             lines.forEach(l => {
@@ -92,13 +114,13 @@ function submitDrag() {
                 if (pts.length < 2) return;
                 const p1 = this.toGrid(pts[0].x, pts[0].y);
                 const p2 = this.toGrid(pts[pts.length - 1].x, pts[pts.length - 1].y);
-                
+
                 const k1 = `${p1.x},${p1.y}`;
                 const k2 = `${p2.x},${p2.y}`;
                 gridCounts.set(k1, (gridCounts.get(k1) || 0) + 1);
                 gridCounts.set(k2, (gridCounts.get(k2) || 0) + 1);
             });
-            
+
             const endpoints = [];
             gridCounts.forEach((count, key) => {
                 if (count === 1) {
@@ -106,7 +128,7 @@ function submitDrag() {
                     endpoints.push({ x: gx, y: gy });
                 }
             });
-            
+
             if (lines.length === 1) {
                 const pts = Array.isArray(lines[0].routePoints) ? lines[0].routePoints : [{ x: lines[0].x, y: lines[0].y }];
                 if (pts.length >= 2) {
@@ -115,14 +137,14 @@ function submitDrag() {
                     endpoints.push(p1, p2);
                 }
             }
-            
+
             // 2. 檢查 drag.startX, drag.startY 對應 of grid 點是否鄰近（距離在一格 20px 以內）任何端點
             const startGrid = this.toGrid(drag.startX, drag.startY);
             const isNearEndpoint = endpoints.some(ep => {
                 const dist = Math.max(Math.abs(ep.x - startGrid.x), Math.abs(ep.y - startGrid.y));
                 return dist <= this.getRouteScale(); // 容許虛擬段造成的偏移（一格對應 routeScale 個 grid 單位）
             });
-            
+
             let isTrueEnd = isNearEndpoint;
             if (isTrueEnd) {
                 const sourceLineKey = this.getLogisticsLineSelectionKey(drag.sourceLine);
@@ -177,6 +199,19 @@ function submitDrag() {
             }
         }
 
+        const getDir = (a, b) => {
+            if (!a || !b) return null;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+            return Math.abs(dx) >= Math.abs(dy)
+                ? { x: Math.sign(dx) || 1, y: 0 }
+                : { x: 0, y: Math.sign(dy) || 1 };
+        };
+        const inputDir = points.length >= 2 ? getDir(points[points.length - 2], points[points.length - 1]) : null;
+        const outputDir = touchedTargetLine ? this.getLogisticsLineDirectionAtPoint(touchedTargetLine, mergePointOverride || lastPoint) : null;
+        const isSameDirection = !!inputDir && !!outputDir && inputDir.x === outputDir.x && inputDir.y === outputDir.y;
+
         const createdLine = this.upsertLogisticsLine({
             lineId: shouldMergeWithSource ? (middleExtensionSplit?.sourceGroupId || sourceGroupId || drag.sourceLine.groupId || drag.sourceLine.id) : null,
             sourceEnt: sourceEntity,
@@ -189,7 +224,7 @@ function submitDrag() {
             conn,
             lineType: transportCfg?.model || transportCfg?.type1 || 'transport_line',
             efficiency: Number(transportCfg?.efficiency) || 0,
-            allowGroupMerge: !touchedTargetGroupId
+            allowGroupMerge: !touchedTargetGroupId || isSameDirection
         });
         let finalGroupId = createdLine?.groupId || null;
         const submitAffectedGroupIds = new Set([
@@ -208,7 +243,7 @@ function submitDrag() {
                 this.registerLogisticsMergeNode({
                     inputGroupId: createdLine.groupId,
                     outputGroupId: touchedTargetGroupId,
-                    point: lastPoint,
+                    point: mergePointOverride || lastPoint,
                     inputLine: createdLine,
                     outputLine: touchedTargetLine
                 });

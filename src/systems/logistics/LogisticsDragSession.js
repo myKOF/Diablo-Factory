@@ -194,7 +194,7 @@ function resolveDragTarget(currentX, currentY) {
         : (this.activeDrag.sourcePort?.dir
             ? window.UIManager?.getOppositeDirection?.(this.activeDrag.sourcePort.dir)
             : null);
-    const targetPort = window.UIManager?.getNearestPortSlot(
+    const targetPort = window.UIManager?.getPortSlotAt(
         targetBuilding,
         currentX,
         currentY,
@@ -202,9 +202,9 @@ function resolveDragTarget(currentX, currentY) {
     );
 
     if (!targetPort) {
-        this.activeDrag.targetBuilding = targetBuilding;
+        this.activeDrag.targetBuilding = null;
         this.activeDrag.targetPort = null;
-        return { x: currentX, y: currentY, building: targetBuilding, port: null };
+        return { x: currentX, y: currentY, building: null, port: null };
     }
 
     this.activeDrag.targetBuilding = targetBuilding;
