@@ -29,7 +29,17 @@ export class LogisticsTopologyQuery {
             changed = false;
             this.system.ensureLogisticsMergeNodeStore(state).forEach(node => {
                 if (!node || !node.outputGroupId || !Array.isArray(node.inputGroupIds)) return;
-                if (!connected.has(node.outputGroupId)) return;
+                const outputConnected = connected.has(node.outputGroupId);
+                const connectedInputs = node.inputGroupIds.filter(inputGroupId =>
+                    inputGroupId &&
+                    connected.has(inputGroupId) &&
+                    this.system.isLogisticsMergeNodeInputConnectionIntact(node, inputGroupId, state)
+                );
+                if (!outputConnected && connectedInputs.length > 0) {
+                    connected.add(node.outputGroupId);
+                    changed = true;
+                }
+                if (!outputConnected && connectedInputs.length === 0) return;
                 node.inputGroupIds.forEach(inputGroupId => {
                     if (!inputGroupId || connected.has(inputGroupId)) return;
                     if (!this.system.isLogisticsMergeNodeInputConnectionIntact(node, inputGroupId, state)) return;
@@ -132,7 +142,7 @@ export class LogisticsTopologyQuery {
             }
 
             const sourceGroupId = line.detachedFromGroupId || null;
-            if (!sourceGroupId || !this.system.isDeletedGapContinuationLine(line) || !groupHasSource.has(sourceGroupId)) return;
+            if (!sourceGroupId || !groupHasSource.has(sourceGroupId)) return;
             if (this.system.isLogisticsDetachedDisplayConnectionIntact(targetGroupId, sourceGroupId, line?.detachedAtKey, state)) {
                 connected.add(sourceGroupId);
                 connected.add(targetGroupId);
@@ -141,6 +151,255 @@ export class LogisticsTopologyQuery {
             const path = this.findLogisticsPhysicalGroupPath(sourceGroupId, targetGroupId, state);
             if (!Array.isArray(path) || path.length === 0) return;
             path.forEach(groupId => connected.add(groupId));
+        });
+        this.getLogisticsGroupsPhysicallyTouchingPorts(state).forEach(groupId => connected.add(groupId));
+        this.getLogisticsPortConnectedPhysicalComponentGroupIds(state).forEach(groupId => connected.add(groupId));
+        return connected;
+    }
+
+    getLogisticsPortConnectedPhysicalComponentGroupIds(state = GameEngine.state) {
+        const connected = new Set();
+        if (!window.UIManager) return connected;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const lines = this.system.getLogisticsLinesForState(state);
+
+        const makePortKey = (port, index) => port
+            ? `${port.dir || 'port'}:${port.slotIndex ?? port.defIndex ?? index ?? 0}`
+            : null;
+        const canConnectOwners = (source, target) => {
+            if (!source || !target) return false;
+            return source.id !== target.id;
+        };
+        const buildRouteGraph = (segments) => {
+            const nodes = new Map();
+            const adj = new Map();
+            const addNode = (point) => {
+                if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+                const key = `${Math.round(point.x)},${Math.round(point.y)}`;
+                if (!nodes.has(key)) nodes.set(key, { x: Math.round(point.x), y: Math.round(point.y) });
+                if (!adj.has(key)) adj.set(key, new Set());
+                return key;
+            };
+            const addEdge = (a, b) => {
+                if (!a || !b || a === b) return;
+                if (!adj.has(a)) adj.set(a, new Set());
+                if (!adj.has(b)) adj.set(b, new Set());
+                adj.get(a).add(b);
+                adj.get(b).add(a);
+            };
+            segments.forEach(line => {
+                const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+                for (let i = 0; i < points.length - 1; i++) {
+                    const a = points[i];
+                    const b = points[i + 1];
+                    if (!a || !b) continue;
+                    const dx = b.x - a.x;
+                    const dy = b.y - a.y;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist < 0.001) {
+                        addNode(a);
+                        continue;
+                    }
+                    const steps = Math.max(1, Math.round(dist / TS));
+                    let prevKey = null;
+                    for (let step = 0; step <= steps; step++) {
+                        const ratio = step / steps;
+                        const key = addNode({ x: a.x + dx * ratio, y: a.y + dy * ratio });
+                        addEdge(prevKey, key);
+                        prevKey = key;
+                    }
+                }
+            });
+            return { nodes, adj };
+        };
+        const hasPath = (adj, startKey, endKey) => {
+            if (!startKey || !endKey || startKey === endKey) return false;
+            const queue = [startKey];
+            const visited = new Set([startKey]);
+            while (queue.length > 0) {
+                const current = queue.shift();
+                const nextKeys = adj.get(current) || new Set();
+                for (const nextKey of nextKeys) {
+                    if (nextKey === endKey) return true;
+                    if (visited.has(nextKey)) continue;
+                    visited.add(nextKey);
+                    queue.push(nextKey);
+                }
+            }
+            return false;
+        };
+        const getPortOwnersNearGraphEndpoints = (graph, wantOutput) => {
+            const owners = [];
+            const seen = new Set();
+            const endpointNodes = Array.from(graph.nodes.entries()).filter(([key]) => {
+                const degree = graph.adj.get(key)?.size || 0;
+                return degree > 0 && degree <= 1;
+            });
+            (state.mapEntities || []).forEach(ent => {
+                if (!ent || ent.isUnderConstruction) return;
+                const cfg = GameEngine.getEntityConfig(ent.type1);
+                if (!cfg?.logistics) return;
+                if (wantOutput && !cfg.logistics.canOutput) return;
+                if (!wantOutput && !cfg.logistics.canInput) return;
+                const entityId = window.UIManager.getEntityId?.(ent) || ent.id || `${ent.type1}_${ent.x}_${ent.y}`;
+                const ports = window.UIManager.getBuildingPortSlots?.(ent) || [];
+                ports.forEach((port, index) => {
+                    if (!port || !Number.isFinite(port.x) || !Number.isFinite(port.y)) return;
+                    const nodeKeys = endpointNodes
+                        .filter(([, cell]) => Math.hypot(cell.x - port.x, cell.y - port.y) <= TS * 0.75)
+                        .map(([nodeKey]) => nodeKey);
+                    if (nodeKeys.length === 0) return;
+                    const portKey = makePortKey(port, index);
+                    const key = `${entityId}:${portKey}:${wantOutput ? 'out' : 'in'}`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    owners.push({ id: entityId, portKey, nodeKeys });
+                });
+            });
+            return owners;
+        };
+
+        this.getLogisticsPhysicalGroupComponents(state).forEach(component => {
+            const groupIds = [...component].filter(Boolean);
+            if (groupIds.length === 0) return;
+            const segments = lines.filter(line => groupIds.includes(line?.groupId || line?.id || null));
+            const graph = buildRouteGraph(segments);
+            if (graph.nodes.size === 0) return;
+            const sourceOwners = getPortOwnersNearGraphEndpoints(graph, true);
+            if (sourceOwners.length === 0) return;
+            const targetOwners = getPortOwnersNearGraphEndpoints(graph, false);
+            if (targetOwners.length === 0) return;
+            const hasCompletePath = sourceOwners.some(source => targetOwners.some(target => {
+                if (!canConnectOwners(source, target)) return false;
+                return source.nodeKeys.some(sourceKey =>
+                    target.nodeKeys.some(targetKey => hasPath(graph.adj, sourceKey, targetKey))
+                );
+            }));
+            if (!hasCompletePath) return;
+            groupIds.forEach(groupId => connected.add(groupId));
+        });
+
+        return connected;
+    }
+
+    getLogisticsGroupsPhysicallyTouchingPorts(state = GameEngine.state) {
+        const connected = new Set();
+        if (!window.UIManager) return connected;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const groups = new Map();
+        this.system.getLogisticsLinesForState(state).forEach(line => {
+            const groupId = line?.groupId || line?.id || null;
+            if (!groupId) return;
+            if (!groups.has(groupId)) groups.set(groupId, []);
+            groups.get(groupId).push(line);
+        });
+
+        const makePortKey = (port, index) => port
+            ? `${port.dir || 'port'}:${port.slotIndex ?? port.defIndex ?? index ?? 0}`
+            : null;
+        const hasPath = (adj, startKey, endKey) => {
+            if (!startKey || !endKey || startKey === endKey) return false;
+            const queue = [startKey];
+            const visited = new Set([startKey]);
+            while (queue.length > 0) {
+                const current = queue.shift();
+                const nextKeys = adj.get(current) || new Set();
+                for (const nextKey of nextKeys) {
+                    if (nextKey === endKey) return true;
+                    if (visited.has(nextKey)) continue;
+                    visited.add(nextKey);
+                    queue.push(nextKey);
+                }
+            }
+            return false;
+        };
+        const buildRouteGraph = (segments) => {
+            const nodes = new Map();
+            const adj = new Map();
+            const addNode = (point) => {
+                if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+                const key = `${Math.round(point.x)},${Math.round(point.y)}`;
+                if (!nodes.has(key)) nodes.set(key, { x: Math.round(point.x), y: Math.round(point.y) });
+                if (!adj.has(key)) adj.set(key, new Set());
+                return key;
+            };
+            const addEdge = (a, b) => {
+                if (!a || !b || a === b) return;
+                if (!adj.has(a)) adj.set(a, new Set());
+                if (!adj.has(b)) adj.set(b, new Set());
+                adj.get(a).add(b);
+                adj.get(b).add(a);
+            };
+            segments.forEach(line => {
+                const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+                for (let i = 0; i < points.length - 1; i++) {
+                    const a = points[i];
+                    const b = points[i + 1];
+                    if (!a || !b) continue;
+                    const dx = b.x - a.x;
+                    const dy = b.y - a.y;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist < 0.001) {
+                        addNode(a);
+                        continue;
+                    }
+                    const steps = Math.max(1, Math.round(dist / TS));
+                    let prevKey = null;
+                    for (let step = 0; step <= steps; step++) {
+                        const ratio = step / steps;
+                        const key = addNode({ x: a.x + dx * ratio, y: a.y + dy * ratio });
+                        addEdge(prevKey, key);
+                        prevKey = key;
+                    }
+                }
+            });
+            return { nodes, adj };
+        };
+        const getPortOwnersNearGraphEndpoints = (graph, wantOutput) => {
+            const owners = [];
+            const seen = new Set();
+            const endpointNodes = Array.from(graph.nodes.entries()).filter(([key]) => {
+                const degree = graph.adj.get(key)?.size || 0;
+                return degree > 0 && degree <= 1;
+            });
+            (state.mapEntities || []).forEach(ent => {
+                if (!ent || ent.isUnderConstruction) return;
+                const cfg = GameEngine.getEntityConfig(ent.type1);
+                if (!cfg?.logistics) return;
+                if (wantOutput && !cfg.logistics.canOutput) return;
+                if (!wantOutput && !cfg.logistics.canInput) return;
+                const entityId = window.UIManager.getEntityId?.(ent) || ent.id || `${ent.type1}_${ent.x}_${ent.y}`;
+                const ports = window.UIManager.getBuildingPortSlots?.(ent) || [];
+                ports.forEach((port, index) => {
+                    if (!port || !Number.isFinite(port.x) || !Number.isFinite(port.y)) return;
+                    const touchingNodeKeys = endpointNodes
+                        .filter(([, cell]) => Math.hypot(cell.x - port.x, cell.y - port.y) <= TS * 0.75)
+                        .map(([nodeKey]) => nodeKey);
+                    if (touchingNodeKeys.length === 0) return;
+                    const portKey = makePortKey(port, index);
+                    const key = `${entityId}:${portKey}:${wantOutput ? 'out' : 'in'}`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    owners.push({ id: entityId, portKey, nodeKeys: touchingNodeKeys });
+                });
+            });
+            return owners;
+        };
+
+        groups.forEach((segments, groupId) => {
+            const graph = buildRouteGraph(segments);
+            if (graph.nodes.size === 0) return;
+            const sourceOwners = getPortOwnersNearGraphEndpoints(graph, true);
+            if (sourceOwners.length === 0) return;
+            const targetOwners = getPortOwnersNearGraphEndpoints(graph, false);
+            if (targetOwners.length === 0) return;
+            const hasCompletePortPath = sourceOwners.some(source => targetOwners.some(target => {
+                if (source.id === target.id) return false;
+                return source.nodeKeys.some(sourceKey =>
+                    target.nodeKeys.some(targetKey => hasPath(graph.adj, sourceKey, targetKey))
+                );
+            }));
+            if (hasCompletePortPath) connected.add(groupId);
         });
         return connected;
     }
@@ -161,7 +420,6 @@ export class LogisticsTopologyQuery {
                 const groupId = line?.groupId || line?.id || null;
                 const detachedFromGroupId = line?.detachedFromGroupId || null;
                 if (!groupId || !detachedFromGroupId) return;
-                if (!this.system.isDeletedGapContinuationLine(line)) return;
                 if (!this.system.isLogisticsDetachedDisplayConnectionIntact(groupId, detachedFromGroupId, line?.detachedAtKey, state)) return;
                 if (connected.has(groupId) && !connected.has(detachedFromGroupId)) {
                     connected.add(detachedFromGroupId);
