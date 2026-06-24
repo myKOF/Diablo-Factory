@@ -137,13 +137,15 @@ function updateDragNow(currentX, currentY) {
         const wx = (gx + offset.x * scale) * gridUnit + gridUnit / 2;
         const wy = (gy + offset.y * scale) * gridUnit + gridUnit / 2;
 
-        // 實體碰撞免除邏輯
-        if (sourceEnt && window.UIManager?.isPointInsideEntity(sourceEnt, wx, wy)) return true;
-        if (targetEnt && window.UIManager?.isPointInsideEntity(targetEnt, wx, wy)) return true;
+        // 實體碰撞免除邏輯：僅免除端口附近區域，防止貫穿建築
+        const sourcePortRadius = (this.activeDrag.sourcePort?.width || 1) + 1;
+        const inSourcePortArea = Math.abs(gx - sourcePortGrid.x) <= sourcePortRadius && Math.abs(gy - sourcePortGrid.y) <= sourcePortRadius;
+        if (inSourcePortArea && sourceEnt && window.UIManager?.isPointInsideEntity(sourceEnt, wx, wy)) return true;
 
-        // 游標下實體免除
-        const bAtCursor = window.UIManager?.getEntityAtPoint?.(currentX, currentY);
-        if (bAtCursor && window.UIManager?.isPointInsideEntity(bAtCursor, wx, wy)) return true;
+        const targetPortRadius = (dragTarget.port?.width || 1) + 1;
+        const inTargetPortArea = targetPortGrid && Math.abs(gx - targetPortGrid.x) <= targetPortRadius && Math.abs(gy - targetPortGrid.y) <= targetPortRadius;
+        if (inTargetPortArea && targetEnt && window.UIManager?.isPointInsideEntity(targetEnt, wx, wy)) return true;
+
         return false;
     };
 
@@ -218,12 +220,16 @@ function resolveDragTarget(currentX, currentY) {
         : (this.activeDrag.sourcePort?.dir
             ? window.UIManager?.getOppositeDirection?.(this.activeDrag.sourcePort.dir)
             : null);
-    const targetPort = window.UIManager?.getPortSlotAt(
+    let targetPort = window.UIManager?.getPortSlotAt(
         targetBuilding,
         currentX,
         currentY,
         preferredDir
     );
+
+    if (!targetPort && window.UIManager?.isPointInsideEntity(targetBuilding, currentX, currentY)) {
+        targetPort = window.UIManager?.getNearestPortSlot(targetBuilding, currentX, currentY, preferredDir);
+    }
 
     if (!targetPort) {
         this.activeDrag.targetBuilding = null;
