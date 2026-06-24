@@ -1,42 +1,60 @@
 const fs = require('fs');
 const path = require('path');
 
-const query = process.argv[2];
+const root = process.cwd();
+const ignoredDirs = new Set(['node_modules', '.git', 'tmp', 'dist']);
+const query = process.argv[2] || '';
+const maxResults = Number(process.argv[3] || 80);
+
 if (!query) {
-    console.error("Please provide a search query");
-    process.exit(1);
+  console.error('Usage: node tools/safe_search.cjs <query> [maxResults]');
+  process.exit(1);
 }
 
-const rootDir = path.resolve(__dirname, '..');
 const results = [];
 
-function searchDir(dir) {
-    const files = fs.readdirSync(dir);
-    for (const file of files) {
-        if (file === 'node_modules' || file === '.git' || file === 'tmp' || file === 'dist') continue;
-        const fullPath = path.join(dir, file);
-        const stat = fs.statSync(fullPath);
-        if (stat.isDirectory()) {
-            searchDir(fullPath);
-        } else if (stat.isFile() && (file.endsWith('.js') || file.endsWith('.cjs') || file.endsWith('.json') || file.endsWith('.html') || file.endsWith('.css'))) {
-            const content = fs.readFileSync(fullPath, 'utf-8');
-            if (content.includes(query)) {
-                let lineNum = 1;
-                const lines = content.split('\n');
-                for (const line of lines) {
-                    if (line.includes(query)) {
-                        results.push({
-                            file: path.relative(rootDir, fullPath),
-                            line: lineNum,
-                            content: line.trim()
-                        });
-                    }
-                    lineNum++;
-                }
-            }
-        }
+function walk(dir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      if (!ignoredDirs.has(entry.name)) {
+        walk(path.join(dir, entry.name));
+      }
+      continue;
     }
+
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const filePath = path.join(dir, entry.name);
+    let text;
+    try {
+      text = fs.readFileSync(filePath, 'utf8');
+    } catch {
+      continue;
+    }
+
+    const lines = text.split(/\r?\n/);
+    lines.forEach((line, index) => {
+      if (line.includes(query)) {
+        const relative = path.relative(root, filePath);
+        const compact = line.trim().slice(0, 180);
+        results.push(`${relative}:${index + 1}: ${compact}`);
+      }
+    });
+
+    if (results.length >= maxResults) {
+      return;
+    }
+  }
 }
 
-searchDir(rootDir);
-console.log(JSON.stringify(results.slice(0, 50), null, 2));
+walk(root);
+console.log(results.slice(0, maxResults).join('\n'));

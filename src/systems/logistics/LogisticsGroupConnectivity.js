@@ -1,3 +1,5 @@
+import { GameEngine } from '../game_systems.js';
+
 export class LogisticsGroupConnectivity {
     constructor(system) {
         this.system = system;
@@ -55,6 +57,38 @@ export class LogisticsGroupConnectivity {
                 }
             }
         }
+
+        // T 字接合：一個群組的端點正好落在另一個群組某線段的「中段」(非端點)，
+        // 例如支線垂直接入主線中段。此時兩端點不重合、接觸方向垂直(既非同向亦非反向)，
+        // 上方的端點對端點與下方的同向重疊判定都不會命中。若不在此辨識，
+        // mergeConnectedGroups 不會嘗試註冊合流節點，支線會被誤判為未接通(灰色)。
+        const onSegmentTolerance = Math.max(1, (GameEngine.TILE_SIZE || 20) * 0.25);
+        const sharedEndpointTolerance = Math.max(1, (GameEngine.TILE_SIZE || 20) * 0.5);
+        const endpointLandsOnOtherInterior = (lines, otherLines) => {
+            for (const line of lines) {
+                const pts = Array.isArray(line?.routePoints) ? line.routePoints : [];
+                if (pts.length < 2) continue;
+                for (const ep of [pts[0], pts[pts.length - 1]]) {
+                    if (!ep || !Number.isFinite(ep.x) || !Number.isFinite(ep.y)) continue;
+                    for (const other of otherLines) {
+                        const opts = Array.isArray(other?.routePoints) ? other.routePoints : [];
+                        for (let i = 0; i < opts.length - 1; i++) {
+                            const a = opts[i];
+                            const b = opts[i + 1];
+                            if (!this.system.isPointOnSegment(ep, a, b, onSegmentTolerance)) continue;
+                            // 端點重合的情況已由上方端點對端點判定處理，這裡只取真正的中段接觸
+                            const nearA = Math.hypot(ep.x - a.x, ep.y - a.y) <= sharedEndpointTolerance;
+                            const nearB = Math.hypot(ep.x - b.x, ep.y - b.y) <= sharedEndpointTolerance;
+                            if (nearA || nearB) continue;
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        };
+        if (endpointLandsOnOtherInterior(primaryLines, secondaryLines)) return true;
+        if (endpointLandsOnOtherInterior(secondaryLines, primaryLines)) return true;
 
         const secondaryCells = new Map();
         secondaryLines.forEach(line => {

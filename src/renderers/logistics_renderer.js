@@ -2489,7 +2489,7 @@ export class LogisticsRenderer {
             const next = points[i + 1];
             const prevLen = Math.abs(curr.x - prev.x) + Math.abs(curr.y - prev.y);
             distanceAtPoint += prevLen;
-            
+
             const inDir = LogisticsRenderer.getCardinalDir(prev, curr);
             const outDir = LogisticsRenderer.getCardinalDir(curr, next);
             const isTurn = inDir && outDir && (inDir.x !== outDir.x || inDir.y !== outDir.y);
@@ -2526,20 +2526,20 @@ export class LogisticsRenderer {
         if (activeCorner) {
             const start = activeCorner.distAtCorner - activeCorner.radius;
             const t = (targetDistance - start) / (2 * activeCorner.radius);
-            
+
             // 二次貝氏曲線插值
             const entry = activeCorner.entry;
             const control = activeCorner.curr;
             const exit = activeCorner.exit;
-            
+
             const px = (1 - t) * (1 - t) * entry.x + 2 * (1 - t) * t * control.x + t * t * exit.x;
             const py = (1 - t) * (1 - t) * entry.y + 2 * (1 - t) * t * control.y + t * t * exit.y;
-            
+
             // 切線方向作為旋轉角度
             const tx = 2 * (1 - t) * (control.x - entry.x) + 2 * t * (exit.x - control.x);
             const ty = 2 * (1 - t) * (control.y - entry.y) + 2 * t * (exit.y - control.y);
             const angle = Math.atan2(ty, tx);
-            
+
             return { x: px, y: py, angle };
         }
 
@@ -3205,7 +3205,7 @@ export class LogisticsRenderer {
                     const np = node.point || { x: node.x, y: node.y };
                     const distLast = Math.hypot(lastPt.x - np.x, lastPt.y - np.y);
                     const distFirst = Math.hypot(firstPt.x - np.x, firstPt.y - np.y);
-                    
+
                     if (isIncluded && (distLast <= matchDist || distFirst <= matchDist)) {
                         if (distFirst < distLast) {
                             isReverseMatch = true;
@@ -3267,7 +3267,7 @@ export class LogisticsRenderer {
                 if (isReverseMatch) {
                     const distStartToFirst = Math.hypot(nextStart.x - firstPt.x, nextStart.y - firstPt.y);
                     const distEndToFirst = Math.hypot(nextEnd.x - firstPt.x, nextEnd.y - firstPt.y);
-                    
+
                     let toPrepend = [...nextRoute];
                     if (distStartToFirst < distEndToFirst) {
                         toPrepend.reverse();

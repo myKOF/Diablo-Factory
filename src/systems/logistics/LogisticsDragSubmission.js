@@ -1,9 +1,29 @@
 import { GameEngine } from '../game_systems.js';
 import { BuildingSystem } from '../BuildingSystem.js';
+import { LogisticsStateActions } from './LogisticsStateActions.js';
 
 function buildSingleSegmentAt(worldX, worldY) {
     GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
     return false;
+}
+
+function revalidateDragRouteContext(routeContext, drag) {
+    if (!routeContext?.isValid || !Array.isArray(routeContext.ghosts) || routeContext.ghosts.length < 2) {
+        return false;
+    }
+    if (!this.router) return false;
+
+    const previousGrid = this.router.grid;
+    this.router.grid = this.createRoutingGrid(GameEngine.state.pathfinding?.grid || [], drag.sourceLine || null);
+    try {
+        return this.router.validateRouteFootprint(
+            routeContext.ghosts,
+            routeContext.routeWidth || drag.routeWidth || 1,
+            () => this.canAffordTransportLine(routeContext.costSegmentCount || Math.max(1, routeContext.ghosts.length - 1))
+        );
+    } finally {
+        this.router.grid = previousGrid;
+    }
 }
 
 function submitDrag() {
@@ -25,6 +45,12 @@ function submitDrag() {
     const buildUndoSnapshot = this.captureLogisticsBuildUndoSnapshot(GameEngine.state);
 
     const drag = this.activeDrag;
+    const routeContext = drag.routeContext || null;
+    if (!revalidateDragRouteContext.call(this, routeContext, drag)) {
+        GameEngine.addLog(`[物流線] 路徑已被佔用，建造取消。`, 'LOGISTICS');
+        this.cancelDrag();
+        return;
+    }
     const TS = GameEngine.TILE_SIZE;
     const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
     const scale = this.getRouteScale();
@@ -38,9 +64,11 @@ function submitDrag() {
     this.applyExtensionTurnArrowOverride(drag, points);
 
     const lastPoint = points[points.length - 1];
-    const dragTarget = this.resolveDragTarget(lastPoint.x, lastPoint.y);
-    const targetPort = dragTarget.port || drag.targetPort || null;
-    const targetBuilding = targetPort ? (dragTarget.building || drag.targetBuilding) : null;
+    const dragTarget = routeContext?.dragTarget || this.resolveDragTarget(lastPoint.x, lastPoint.y);
+    const targetPort = routeContext?.targetPort || dragTarget.port || drag.targetPort || null;
+    const targetBuilding = targetPort
+        ? (routeContext?.targetBuilding || dragTarget.building || drag.targetBuilding)
+        : null;
     const sourceGroupId = drag.sourceLine?.groupId || drag.sourceLine?.id || null;
     let touchedTargetLine = this.findTouchedLogisticsLineAt(lastPoint, sourceGroupId);
     // [核心修復] 若預設容差找不到（ghost 末端鄰接但未重疊現有線段），
@@ -267,10 +295,12 @@ function submitDrag() {
                     (Number(a?.order) || 0) - (Number(b?.order) || 0)
                 )
                 .pop() || this.getLogisticsLineById(finalGroupId);
-            GameEngine.state.selectedLogisticsGroupId = finalGroupId;
-            GameEngine.state.selectedLogisticsLineId = activeSegment
-                ? this.getLogisticsLineSelectionKey(activeSegment)
-                : null;
+            LogisticsStateActions.setSelectedLogistics(GameEngine.state, {
+                groupId: finalGroupId,
+                lineId: activeSegment
+                    ? this.getLogisticsLineSelectionKey(activeSegment)
+                    : null
+            });
             if (window.UIManager) {
                 window.UIManager.activeLogisticsLine = activeSegment || null;
                 window.UIManager.activeLogisticsConnection = null;

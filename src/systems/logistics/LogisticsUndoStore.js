@@ -1,3 +1,5 @@
+import { LogisticsStateActions } from './LogisticsStateActions.js';
+
 export class LogisticsUndoStore {
     constructor(system, getGameEngine) {
         this.system = system;
@@ -276,14 +278,16 @@ export class LogisticsUndoStore {
         const restoredLogisticsLines = this.cloneValue(snapshot.logisticsLines || []);
         const changedGroupIds = this.getChangedLogisticsGroupIds(previousLogisticsLines, restoredLogisticsLines);
 
-        state.logisticsLines = restoredLogisticsLines;
+        LogisticsStateActions.replaceLogisticsLines(state, restoredLogisticsLines);
         state.logisticsMergeNodes = this.cloneValue(snapshot.logisticsMergeNodes || []);
         state.logisticsTurnArrowOverrides = this.cloneValue(snapshot.logisticsTurnArrowOverrides || []);
         state.resources = this.cloneValue(snapshot.resources || {});
-        state.selectedLogisticsLineId = snapshot.selectedLogisticsLineId || null;
-        state.selectedLogisticsGroupId = snapshot.selectedLogisticsGroupId || null;
-        state.selectedLogisticsClickX = snapshot.selectedLogisticsClickX ?? null;
-        state.selectedLogisticsClickY = snapshot.selectedLogisticsClickY ?? null;
+        LogisticsStateActions.setSelectedLogistics(state, {
+            lineId: snapshot.selectedLogisticsLineId || null,
+            groupId: snapshot.selectedLogisticsGroupId || null,
+            clickX: snapshot.selectedLogisticsClickX ?? null,
+            clickY: snapshot.selectedLogisticsClickY ?? null
+        });
 
         const entities = Array.isArray(state.mapEntities) ? state.mapEntities : [];
         (snapshot.mapEntityOutputTargets || []).forEach(saved => {

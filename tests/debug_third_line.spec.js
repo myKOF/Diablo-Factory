@@ -2,7 +2,7 @@ const { test, expect } = require('@playwright/test');
 
 test('偵錯第三條線路接通問題', async ({ page }) => {
     test.setTimeout(60000);
-    
+
     // 監聽 console.log
     page.on('console', msg => {
         console.log(`[瀏覽器日誌] ${msg.text()}`);
@@ -53,7 +53,7 @@ test('偵錯第三條線路接通問題', async ({ page }) => {
             { x: 620, y: 330 },
             { x: 620, y: 450 }
         ];
-        
+
         console.log("建造第一條藍色線路...");
         const line1 = conveyorSystem.upsertLogisticsLine({
             sourceEnt: warehouse,
@@ -94,7 +94,7 @@ test('偵錯第三條線路接通問題', async ({ page }) => {
             { x: 670, y: 400 } // 接到第二條線路
         ];
         console.log("建造第三條灰色線路...");
-        
+
         // 開始模擬 Drag
         conveyorSystem.startDrag(530, 300, warehouse);
         // 更新 Drag 點

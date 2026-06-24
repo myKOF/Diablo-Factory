@@ -29,6 +29,7 @@ import { LogisticsDeletionService } from './logistics/LogisticsDeletionService.j
 import { LogisticsEndpointResolver } from './logistics/LogisticsEndpointResolver.js';
 import { LogisticsConfigCostAdapter } from './logistics/LogisticsConfigCostAdapter.js';
 import { LogisticsRuntimeContext } from './logistics/LogisticsRuntimeContext.js';
+import { LogisticsStateActions } from './logistics/LogisticsStateActions.js';
 
 export class ConveyorSystem {
     constructor() {
@@ -572,18 +573,22 @@ export class ConveyorSystem {
         const centerKey = this.getLogisticsSegmentOccupyKey(line);
         if (!centerKey) return [];
         const routeWidth = Math.max(1, Math.round(Number(line.routeWidth) || 1));
-        const offsets = Array.from({ length: routeWidth }, (_, i) => (i - (routeWidth - 1) / 2) * 2);
         const points = Array.isArray(line.routePoints) ? line.routePoints : [];
         const a = points[0] || { x: line.x, y: line.y };
         const b = points[1] || a;
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const [gx, gy] = centerKey.split(',').map(Number);
-        return offsets.map(offset => {
-            const ox = Math.abs(dx) > Math.abs(dy) ? 0 : offset;
-            const oy = Math.abs(dx) > Math.abs(dy) ? offset : 0;
-            return `${gx + ox},${gy + oy}`;
-        });
+        const dir = Math.abs(dx) >= Math.abs(dy)
+            ? { x: Math.sign(dx) || 1, y: 0 }
+            : { x: 0, y: Math.sign(dy) || 1 };
+        const router = this.routingGridBuilder.getFootprintRouter();
+        return router.getGhostOccupiedCells([{
+            x: gx,
+            y: gy,
+            dirIn: dir,
+            dirOut: dir
+        }], routeWidth).map(cell => `${cell.x},${cell.y}`);
     }
 
     buildGridRoutePoints(points) {
@@ -645,7 +650,7 @@ export class ConveyorSystem {
             filter
         });
 
-        GameEngine.state.logisticsLines = mergedLines;
+        LogisticsStateActions.replaceLogisticsLines(GameEngine.state, mergedLines);
         this.lineMetadata.syncConnection({ conn, groupId, gridPoints, routeWidth, lineType, efficiency, cleanSourcePort, cleanTargetPort });
 
         const { mergedGroupId, affectedGroupIds } = this.lineMergeCoordinator.mergeOverlaps({

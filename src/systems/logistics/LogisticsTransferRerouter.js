@@ -43,6 +43,15 @@ export class LogisticsTransferRerouter {
             if (!ent) return;
             entityById.set(window.UIManager.getEntityId(ent), ent);
         });
+        const getEntityId = (ent) => window.UIManager?.getEntityId?.(ent) || ent?.id || null;
+        const recoverTransferToSource = (transfer) => {
+            if (!transfer || !this.system?.undoStore?.returnTransferToSource) return false;
+            return this.system.undoStore.returnTransferToSource(
+                transfer,
+                Array.isArray(state.mapEntities) ? state.mapEntities : [],
+                getEntityId
+            );
+        };
         const affectedSourceIds = new Set();
         const affectedTargetIds = new Set();
         relevantLines.forEach(line => {
@@ -138,6 +147,7 @@ export class LogisticsTransferRerouter {
             });
 
             if (!currentSeg) {
+                recoverTransferToSource(t);
                 state.activeTransfers.splice(i, 1);
                 continue;
             }
@@ -351,6 +361,7 @@ export class LogisticsTransferRerouter {
             }
 
             if (pathPoints.length < 2) {
+                recoverTransferToSource(t);
                 state.activeTransfers.splice(i, 1);
                 continue;
             }

@@ -1,4 +1,5 @@
 import { GameEngine } from '../game_systems.js';
+import { LogisticsStateActions } from './LogisticsStateActions.js';
 
 function applyExtensionTurnArrowOverride(drag, points) {
     if (!drag?.isLineExtension || !drag.sourceLine || !Array.isArray(points) || points.length < 2) return;
@@ -21,9 +22,9 @@ function applyExtensionTurnArrowOverride(drag, points) {
     const groupId = sourceLine.groupId || sourceLine.id || null;
     const cellKey = `${Math.round(sourceLine.x)},${Math.round(sourceLine.y)}`;
     const clearStateOverride = () => {
-        if (!Array.isArray(GameEngine.state.logisticsTurnArrowOverrides)) return;
-        GameEngine.state.logisticsTurnArrowOverrides = GameEngine.state.logisticsTurnArrowOverrides.filter(item =>
-            item?.overrideKey !== `${groupId || "line"}:${cellKey}`
+        LogisticsStateActions.removeTurnArrowOverride(
+            GameEngine.state,
+            item => item?.overrideKey === `${groupId || "line"}:${cellKey}`
         );
     };
 
@@ -58,17 +59,8 @@ function applyExtensionTurnArrowOverride(drag, points) {
     };
     sourceLine.turnArrowOverride = turnArrowOverride;
 
-    if (!Array.isArray(GameEngine.state.logisticsTurnArrowOverrides)) {
-        GameEngine.state.logisticsTurnArrowOverrides = [];
-    }
     const overrideKey = `${turnArrowOverride.groupId || "line"}:${turnArrowOverride.cellKey}`;
-    const stateOverride = { ...turnArrowOverride, overrideKey };
-    const existingIndex = GameEngine.state.logisticsTurnArrowOverrides.findIndex(item => item?.overrideKey === overrideKey);
-    if (existingIndex >= 0) {
-        GameEngine.state.logisticsTurnArrowOverrides[existingIndex] = stateOverride;
-    } else {
-        GameEngine.state.logisticsTurnArrowOverrides.push(stateOverride);
-    }
+    LogisticsStateActions.upsertTurnArrowOverride(GameEngine.state, { ...turnArrowOverride, overrideKey });
 
     (GameEngine.state.logisticsLines || []).forEach((line) => {
         if (!line) return;

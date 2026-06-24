@@ -60,7 +60,7 @@ export class LogisticsLineMergeCoordinator {
             for (const otherGroupId of otherGroupIds) {
                 if (!this.system.areLogisticsGroupsTouching(activeGroupId, otherGroupId)) continue;
                 if (this.system.areLogisticsGroupsInSameMergeComponent(activeGroupId, otherGroupId)) continue;
-                
+
                 // [修復合流合併 Bug] 優先檢查是否為合流，若是則註冊 MergeNode，而非合併 Group
                 const mergeRegistered = this.tryRegisterMergeNodeForTouchingGroups(activeGroupId, otherGroupId);
                 if (mergeRegistered) {
@@ -117,7 +117,7 @@ export class LogisticsLineMergeCoordinator {
                     const isOutputStart = Array.isArray(outputLine.routePoints) &&
                         outputLine.routePoints.length >= 1 &&
                         Math.hypot(outputLine.routePoints[0].x - p.x, outputLine.routePoints[0].y - p.y) < 1;
-                    const isStraightConnection = isSameDirection && isOutputStart;
+                    const isStraightConnection = isSameDirection && isOutputStart && !inputLine.nextId && !outputLine.prevId;
 
                     if (!isStraightConnection) {
                         const node = this.system.registerLogisticsMergeNode({
@@ -144,7 +144,7 @@ export class LogisticsLineMergeCoordinator {
                     const isOutputStart = Array.isArray(outputLine.routePoints) &&
                         outputLine.routePoints.length >= 1 &&
                         Math.hypot(outputLine.routePoints[0].x - p.x, outputLine.routePoints[0].y - p.y) < 1;
-                    const isStraightConnection = isSameDirection && isOutputStart;
+                    const isStraightConnection = isSameDirection && isOutputStart && !inputLine.nextId && !outputLine.prevId;
 
                     if (!isStraightConnection) {
                         const node = this.system.registerLogisticsMergeNode({

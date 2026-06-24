@@ -1,4 +1,5 @@
 import { GameEngine } from '../game_systems.js';
+import { LogisticsStateActions } from './LogisticsStateActions.js';
 
 function cleanupDeletedLinePreviousTurnOverride(deletedLine, originalGroupId) {
     if (!deletedLine || !originalGroupId) return;
@@ -27,12 +28,10 @@ function cleanupDeletedLinePreviousTurnOverride(deletedLine, originalGroupId) {
     const overrideCellKey = previous.turnArrowOverride.cellKey;
     delete previous.turnArrowOverride;
 
-    if (Array.isArray(GameEngine.state.logisticsTurnArrowOverrides)) {
-        GameEngine.state.logisticsTurnArrowOverrides = GameEngine.state.logisticsTurnArrowOverrides.filter(override => {
-            if (override?.overrideKey === overrideKey) return false;
-            return override?.cellKey !== overrideCellKey;
-        });
-    }
+    LogisticsStateActions.removeTurnArrowOverride(
+        GameEngine.state,
+        override => override?.overrideKey === overrideKey || override?.cellKey === overrideCellKey
+    );
 }
 
 function cleanupLogisticsMergeNodesForDeletedLine(deletedLine) {
@@ -78,6 +77,7 @@ function deleteLogisticsLineById(lineId) {
     this.isProcessingMerge = true;
     try {
         const state = GameEngine.state;
+        const getEntityId = (ent) => window.UIManager?.getEntityId?.(ent) || ent?.id || null;
         const line = this.getLogisticsLineById(lineId);
         if (!line) return false;
         const deleteUndoSnapshot = this.captureLogisticsBuildUndoSnapshot(state);
@@ -94,11 +94,11 @@ function deleteLogisticsLineById(lineId) {
         if (prevSeg) prevSeg.nextId = null;
         if (nextSeg) nextSeg.prevId = null;
 
-        state.logisticsLines = segments.filter(item => {
+        LogisticsStateActions.replaceLogisticsLines(state, segments.filter(item => {
             const isTarget = this.getLogisticsLineSelectionKey(item) === lineKey;
             const isDuplicate = item && item.gridX === lineGridX && item.gridY === lineGridY;
             return !isTarget && !isDuplicate;
-        });
+        }));
         this.cleanupDeletedLinePreviousTurnOverride(line, groupId);
         const mergeCleanupAffectedGroupIds = this.cleanupLogisticsMergeNodesForDeletedLine(line);
 
@@ -158,18 +158,26 @@ function deleteLogisticsLineById(lineId) {
         } else {
             // 如果這個群組已經沒有任何線段，清除 sourceEnt 的輸出紀錄
             if (line.sourceId) {
-                const sourceEnt = state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === line.sourceId);
+                const sourceEnt = state.mapEntities.find(ent => getEntityId(ent) === line.sourceId);
                 if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
                     sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId);
                 }
             }
+            this.undoStore.cleanupInvalidActiveTransfers(
+                state,
+                Array.isArray(state.mapEntities) ? state.mapEntities : [],
+                getEntityId,
+                new Set([groupId, ...mergeCleanupAffectedGroupIds])
+            );
             if (mergeCleanupAffectedGroupIds.size > 0) {
                 this.updateActiveTransfersOnLogisticsChange(state, mergeCleanupAffectedGroupIds);
             }
         }
 
-        if (state.selectedLogisticsLineId === lineKey) state.selectedLogisticsLineId = null;
-        if (state.selectedLogisticsGroupId === line.groupId || state.selectedLogisticsGroupId === line.id) state.selectedLogisticsGroupId = null;
+        LogisticsStateActions.clearSelectedLogisticsIfMatches(state, {
+            lineId: lineKey,
+            groupId: line.groupId || line.id
+        });
         if (window.UIManager.activeLogisticsLine && this.getLogisticsLineSelectionKey(window.UIManager.activeLogisticsLine) === lineKey) window.UIManager.activeLogisticsLine = null;
         if (window.UIManager.activeLogisticsConnection?.lineId === lineKey) window.UIManager.activeLogisticsConnection = null;
         this.recordLogisticsBuildUndoSnapshot(deleteUndoSnapshot, state);
@@ -183,18 +191,32 @@ function deleteLogisticsLineById(lineId) {
 
 function deleteLogisticsLineGroupById(groupId) {
     const state = GameEngine.state;
+    const getEntityId = (ent) => window.UIManager?.getEntityId?.(ent) || ent?.id || null;
     const segments = this.getLogisticsSegmentsByGroupId(groupId);
     if (!segments.length) return false;
     const first = segments[0];
-    state.logisticsLines = this.ensureLogisticsLineStore().filter(item => item.groupId !== groupId && item.id !== groupId);
+    LogisticsStateActions.replaceLogisticsLines(
+        state,
+        this.ensureLogisticsLineStore().filter(item => item.groupId !== groupId && item.id !== groupId)
+    );
     if (first.sourceId) {
-        const sourceEnt = state.mapEntities.find(ent => window.UIManager.getEntityId(ent) === first.sourceId);
+        const sourceEnt = state.mapEntities.find(ent => getEntityId(ent) === first.sourceId);
         if (sourceEnt && Array.isArray(sourceEnt.outputTargets)) {
             sourceEnt.outputTargets = sourceEnt.outputTargets.filter(conn => conn.lineId !== groupId);
         }
     }
-    if (segments.some(line => this.isSelectedLogisticsLine(line))) state.selectedLogisticsLineId = null;
-    if (state.selectedLogisticsGroupId === groupId) state.selectedLogisticsGroupId = null;
+    this.undoStore.cleanupInvalidActiveTransfers(
+        state,
+        Array.isArray(state.mapEntities) ? state.mapEntities : [],
+        getEntityId,
+        new Set([groupId])
+    );
+    if (segments.some(line => this.isSelectedLogisticsLine(line)) || state.selectedLogisticsGroupId === groupId) {
+        LogisticsStateActions.clearSelectedLogisticsIfMatches(state, {
+            lineId: state.selectedLogisticsLineId,
+            groupId
+        });
+    }
     if (window.UIManager.activeLogisticsLine && window.UIManager.activeLogisticsLine.groupId === groupId) window.UIManager.activeLogisticsLine = null;
     if (window.UIManager.activeLogisticsConnection?.groupId === groupId) window.UIManager.activeLogisticsConnection = null;
     this.updateActiveTransfersOnLogisticsChange(state, new Set([groupId]));

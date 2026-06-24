@@ -32,8 +32,16 @@ export class LogisticsSourcePortQuery {
             if (lineId === groupId) return true;
             return this.system.areLogisticsGroupsInSameMergeComponent?.(lineId, groupId, this.gameEngine.state) === true;
         };
+        const belongsToSamePhysicalComponent = (lineId) => {
+            if (!lineId) return false;
+            if (lineId === groupId) return true;
+            const path = this.system.findLogisticsPhysicalGroupPath?.(lineId, groupId, this.gameEngine.state);
+            return Array.isArray(path) && path.length > 0;
+        };
         const conn = sourceEnt.outputTargets.find(item =>
-            item && belongsToSameLogisticsComponent(item.lineId) && samePort(item)
+            item &&
+            (belongsToSameLogisticsComponent(item.lineId) || belongsToSamePhysicalComponent(item.lineId)) &&
+            samePort(item)
         ) || null;
         return conn ? { source: sourceEnt, conn } : null;
     }

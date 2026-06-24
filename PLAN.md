@@ -1,3 +1,16 @@
+# 2026-06-23 物流匯點堵死與產品選擇界面修復計畫
+
+## 核心目標
+1. 修正多條物流線視覺顯示接通，但黃色物品所在路線在匯點前堵死、實際 runtime 未接通的問題。
+2. 修正中間物流線產品選擇界面消失，導致無法設定/顯示產品 filter 的問題。
+3. 區分「顯示接通」與「運輸接通」，避免只靠 physical component 顏色掩蓋缺少 merge node / output route 的實際物流問題。
+
+## 實施步驟
+- [x] 步驟 1：使用 `tools/safe_search.cjs` 盤點產品選擇 UI、filter 來源、merge runtime 與 transfer handoff。
+- [x] 步驟 2：新增紅燈回歸測試，覆蓋同一 physical component 但未註冊 merge node 時不可標示為實際接通，以及 merge component source port/filter UI 查詢。
+- [x] 步驟 3：局部修正拓樸接通判定與產品選擇查詢來源，確保視覺接通與 runtime merge node 一致。
+- [x] 步驟 4：執行物流回歸、端口回歸與 `npm run finalize`。
+
 # 2026-06-23 物流線接通顯示與端口覆蓋補修計畫
 
 ## 核心目標

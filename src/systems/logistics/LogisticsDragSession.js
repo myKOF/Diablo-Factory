@@ -43,6 +43,7 @@ function startDrag(startX, startY, sourceEntity = null, sourcePort = null, sourc
         startGrid: this.toGrid(resolvedStartX, resolvedStartY, startGridDirBias),
         routeWidth,
         isLineExtension,
+        routeContext: null,
         directionLocked: false // [核心新增] 是否已鎖定移動方向
     };
 
@@ -162,6 +163,29 @@ function updateDragNow(currentX, currentY) {
         this.ghosts = [];
         this.isValid = false;
     }
+
+    this.activeDrag.routeContext = {
+        dragTarget,
+        sourcePortGrid,
+        sourceRouteGrid,
+        targetPortGrid,
+        targetRouteGrid,
+        sourcePort: this.activeDrag.sourcePort,
+        targetPort: dragTarget.port || null,
+        sourceEntity: sourceEnt || null,
+        targetBuilding: dragTarget.building || null,
+        routeWidth: this.activeDrag.routeWidth || 1,
+        widthOffsets,
+        bendMode: this.activeDrag.bendMode,
+        routeStartDir,
+        routePath,
+        path,
+        ghosts: this.ghosts,
+        routeKey,
+        lastWorldPoint: { x: currentX, y: currentY },
+        costSegmentCount: Math.max(1, this.ghosts.length - 1),
+        isValid: this.isValid
+    };
 
     GameEngine.state.conveyorGhosts = this.ghosts;
     GameEngine.state.conveyorValid = this.isValid;
