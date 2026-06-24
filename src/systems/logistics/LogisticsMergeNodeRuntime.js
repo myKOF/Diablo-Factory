@@ -515,6 +515,7 @@ export class LogisticsMergeNodeRuntime {
             let occupied = false;
             state.activeTransfers.forEach(other => {
                 if (!other || other === candidate || other.lineId !== outputGroupId) return;
+                if (other._mergeVisualTurn?.outputGroupId === outputGroupId) return;
                 const route = Array.isArray(other.routePoints) ? other.routePoints : [];
                 const total = this.getRouteLength(route);
                 if (total <= 0) return;

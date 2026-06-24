@@ -599,7 +599,7 @@ export class ConveyorSystem {
         return this.segmentBuilder.buildLogisticsSegments(groupId, sourceId, targetId, targetPoint, gridPoints, routeWidth, sourcePort, targetPort, filter, lineType, efficiency);
     }
 
-    upsertLogisticsLine({ lineId = null, sourceEnt, targetEnt = null, targetPoint = null, points = [], routeWidth = 1, sourcePort = null, targetPort = null, conn = null, lineType = 'transport_line', efficiency = 0, allowGroupMerge = true }) {
+    upsertLogisticsLine({ lineId = null, sourceEnt, targetEnt = null, targetPoint = null, points = [], routeWidth = 1, sourcePort = null, targetPort = null, conn = null, lineType = 'transport_line', efficiency = 0, allowGroupMerge = true, splitOnBlockedOverlap = false }) {
         if (this.isProcessingMerge) return null;
         const {
             lines,
@@ -631,7 +631,7 @@ export class ConveyorSystem {
             mergedLines,
             overlapMergeGroupIds,
             blockedOverlapGroupIds
-        } = this.linePlacement.placeSegments({ lines, segments, groupId });
+        } = this.linePlacement.placeSegments({ lines, segments, groupId, splitOnBlockedOverlap });
 
         // [物流延伸修正] 同一群組在多次延伸後，舊段也必須同步最新端點/連線資訊，
         // 否則渲染端在判定 port-to-port 接通時會讀到過期 metadata，導致誤顯示為未接通。

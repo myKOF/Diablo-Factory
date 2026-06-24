@@ -8,7 +8,7 @@ export class LogisticsLinePlacement {
         return this.getGameEngine();
     }
 
-    placeSegments({ lines, segments, groupId }) {
+    placeSegments({ lines, segments, groupId, splitOnBlockedOverlap = false }) {
         const occupied = new Map();
         const occupiedTileCenters = new Map();
         const sameGroup = (seg) => !!seg && ((seg.groupId === groupId) || (seg.id === groupId));
@@ -45,6 +45,21 @@ export class LogisticsLinePlacement {
                 }
             }
             return Array.from(keys);
+        };
+        const getSegmentEndpointTileKeys = (seg) => {
+            const points = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+            if (points.length < 2) return [];
+            return [
+                this.system.snapPointToGridCenter(points[0]),
+                this.system.snapPointToGridCenter(points[points.length - 1])
+            ].map(point => `${point.x},${point.y}`);
+        };
+        const isLineEndpointKey = (line, key) => {
+            const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+            if (points.length < 2) return false;
+            const start = this.system.snapPointToGridCenter(points[0]);
+            const end = this.system.snapPointToGridCenter(points[points.length - 1]);
+            return key === `${start.x},${start.y}` || key === `${end.x},${end.y}`;
         };
         lines.forEach(item => {
             this.system.getLogisticsSegmentOccupiedKeys(item).forEach(key => {
@@ -95,6 +110,17 @@ export class LogisticsLinePlacement {
             const alreadySameRoute = lines.some(item => sameGroup(item) && sameRoute(item, segment));
             if (alreadySameRoute) return;
             const sameDirectionOverlapGroupIds = collectSameDirectionOverlapGroups(segment);
+            const endpointBlockedByOtherInterior = splitOnBlockedOverlap && getSegmentEndpointTileKeys(segment).some((key) => {
+                const hits = occupiedTileCenters.get(key) || [];
+                return hits.some(hit => {
+                    const hitGroupId = getLineGroupId(hit);
+                    return !!hitGroupId && hitGroupId !== groupId && !isLineEndpointKey(hit, key);
+                });
+            });
+            if (endpointBlockedByOtherInterior) {
+                sameDirectionOverlapGroupIds.forEach(id => overlapMergeGroupIds.add(id));
+                return;
+            }
             const overlapsOccupiedLine = keys.some((key) => !!occupied.get(key));
             if (overlapsOccupiedLine) {
                 sameDirectionOverlapGroupIds.forEach(id => overlapMergeGroupIds.add(id));

@@ -1624,9 +1624,42 @@ export class LogisticsRenderer {
     }
 
     static renderSourcePortCells(graphics, state, scene) {
-        // [核心修復] 廢棄靜態快取渲染。
-        // 所有端口顯示邏輯已回歸 MainScene.js 的 renderBuildingPortCells 動態處理，
-        // 確保「只有選中該建築時才顯示端口」，避免全域常駐污染。
+        if (!graphics || !state || !scene) return;
+        const logCfg = UI_CONFIG.LogisticsSystem || {};
+        const parseColor = (c) => scene.hexOrRgba(c).color;
+        const fillColor = parseColor(logCfg.sourcePortCellColor || "#00ff44ff");
+        const strokeColor = parseColor(logCfg.sourcePortCellStrokeColor || "#ffff00ff");
+        const alpha = logCfg.sourcePortCellAlpha ?? 0.85;
+        const strokeAlpha = logCfg.sourcePortCellStrokeAlpha ?? 1;
+        const TS = GameEngine.TILE_SIZE || 20;
+        const drawn = new Set();
+        const drawPort = (port) => {
+            if (!port || !Number.isFinite(port.x) || !Number.isFinite(port.y)) return;
+            const rect = window.UIManager?.getPortSlotRect?.(port) || {
+                x: port.x - TS / 2,
+                y: port.y - TS / 2,
+                w: TS,
+                h: TS
+            };
+            const key = `${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.w)},${Math.round(rect.h)}`;
+            if (drawn.has(key)) return;
+            drawn.add(key);
+            graphics.fillStyle(fillColor, alpha);
+            graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
+            graphics.lineStyle(Math.max(2, Math.round(TS * 0.12)), strokeColor, strokeAlpha);
+            graphics.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        };
+
+        (state.logisticsLines || []).forEach(line => {
+            drawPort(line?.sourcePort);
+            drawPort(line?.targetPort);
+        });
+        (state.mapEntities || []).forEach(ent => {
+            (ent?.outputTargets || []).forEach(target => {
+                drawPort(target?.sourcePort);
+                drawPort(target?.targetPort);
+            });
+        });
     }
 
     static renderBuildingPortCells(graphics, entities, scene) {

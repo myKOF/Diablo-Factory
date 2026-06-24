@@ -12,9 +12,9 @@ function getLogisticsTargetBuildingAt(worldX, worldY, sourceEnt = null) {
         if (!cfg || !cfg.logistics || !cfg.logistics.canInput) return false;
         if (window.UIManager.isPointInsideEntity(ent, worldX, worldY)) return true;
 
-        const portHitRadius = GameEngine.TILE_SIZE * 0.8;
+        // 移除磁吸效果：只有游標精確落在端口格區域內才判定為該建築
         return window.UIManager.getBuildingPortSlots(ent).some(port =>
-            Math.hypot(port.x - worldX, port.y - worldY) <= portHitRadius
+            window.UIManager.isPointInsidePortSlot(port, worldX, worldY)
         );
     }) || null;
 }

@@ -13,12 +13,46 @@ function revalidateDragRouteContext(routeContext, drag) {
     }
     if (!this.router) return false;
 
+    const routeWidth = routeContext.routeWidth || drag.routeWidth || 1;
+    const currentLogisticsKeys = this.collectLogisticsOccupiedKeys(drag.sourceLine || null);
+    const occupiedCells = this.router.getGhostOccupiedCells(
+        routeContext.ghosts.filter(ghost => !ghost.isPortConnector && !ghost.isVirtualEnd),
+        routeWidth
+    );
+    if (!drag.isLineExtension) {
+        const blockedCells = occupiedCells.filter(cell => currentLogisticsKeys.has(`${cell.x},${cell.y}`));
+        if (blockedCells.length > 0) {
+            const ghosts = routeContext.ghosts.filter(ghost => !ghost.isVirtualEnd);
+            const terminalGhost = ghosts
+                .slice()
+                .reverse()
+                .find(ghost => !ghost.isPortConnector) || ghosts[ghosts.length - 1] || null;
+            const TS = GameEngine.TILE_SIZE;
+            const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
+            const scale = this.getRouteScale();
+            const gridUnit = TS / scale;
+            const terminalPoint = terminalGhost ? {
+                x: (terminalGhost.x + offset.x * scale) * gridUnit,
+                y: (terminalGhost.y + offset.y * scale) * gridUnit
+            } : null;
+            const touchedTargetLine = terminalPoint
+                ? this.findTouchedLogisticsLineAt(terminalPoint, drag.sourceLine?.groupId || drag.sourceLine?.id || null)
+                : null;
+            const terminalKeys = terminalGhost
+                ? new Set(this.router.getGhostOccupiedCells([terminalGhost], routeWidth).map(cell => `${cell.x},${cell.y}`))
+                : new Set();
+            if (!touchedTargetLine || blockedCells.some(cell => !terminalKeys.has(`${cell.x},${cell.y}`))) {
+                return false;
+            }
+        }
+    }
+
     const previousGrid = this.router.grid;
     this.router.grid = this.createRoutingGrid(GameEngine.state.pathfinding?.grid || [], drag.sourceLine || null);
     try {
         return this.router.validateRouteFootprint(
             routeContext.ghosts,
-            routeContext.routeWidth || drag.routeWidth || 1,
+            routeWidth,
             () => this.canAffordTransportLine(routeContext.costSegmentCount || Math.max(1, routeContext.ghosts.length - 1))
         );
     } finally {
@@ -115,7 +149,8 @@ function submitDrag() {
         }
         const beforeCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : 0;
         const segmentCostCount = Math.max(1, buildGhosts.length - 1);
-        if (segmentCostCount < 2) {
+        const allowsShortMergeConnector = !!touchedTargetLine;
+        if (segmentCostCount < 2 && !allowsShortMergeConnector) {
             GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
             this.cancelDrag();
             return;
@@ -252,7 +287,8 @@ function submitDrag() {
             conn,
             lineType: transportCfg?.model || transportCfg?.type1 || 'transport_line',
             efficiency: Number(transportCfg?.efficiency) || 0,
-            allowGroupMerge: !touchedTargetGroupId || isSameDirection
+            allowGroupMerge: !touchedTargetGroupId || isSameDirection,
+            splitOnBlockedOverlap: !!drag.isLineExtension && !touchedTargetGroupId
         });
         let finalGroupId = createdLine?.groupId || null;
         const submitAffectedGroupIds = new Set([

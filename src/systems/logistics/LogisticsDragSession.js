@@ -228,7 +228,13 @@ function resolveDragTarget(currentX, currentY) {
     );
 
     if (!targetPort && window.UIManager?.isPointInsideEntity(targetBuilding, currentX, currentY)) {
-        targetPort = window.UIManager?.getNearestPortSlot(targetBuilding, currentX, currentY, preferredDir);
+        // 移除磁吸效果：游標在建築內部但非端口上時，保持上一次已鎖定的端口
+        // 這使虛影停在端口那一格，不會穿透也不會消失
+        const prevBuilding = this.activeDrag.targetBuilding;
+        const prevPort = this.activeDrag.targetPort;
+        if (prevBuilding && prevPort && window.UIManager?.getEntityId?.(prevBuilding) === window.UIManager?.getEntityId?.(targetBuilding)) {
+            targetPort = prevPort;
+        }
     }
 
     if (!targetPort) {

@@ -173,6 +173,153 @@ test('合流 winner 缺少 runtime 時不得使用隨機 fallback', async ({ pag
     expect(result.success, result.error).toBe(true);
 });
 
+test('合流等待主線但主線無可通過物品時必須放行支線', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const state = GameEngine.state;
+        const originalState = JSON.parse(JSON.stringify(state));
+        const previousTileSize = GameEngine.TILE_SIZE;
+
+        try {
+            GameEngine.TILE_SIZE = 20;
+            const node = {
+                id: 'merge_waiting_main_without_car',
+                outputGroupId: 'main_group',
+                inputGroupIds: ['branch_group'],
+                point: { x: 100, y: 100 },
+                currentActiveSlot: 1,
+                roundRobinIndex: 1,
+                zipperTurn: 'main',
+                awaitingMainPass: true
+            };
+            state.logisticsMergeNodes = [node];
+            state.logisticsLines = [{
+                id: 'main_seg',
+                groupId: 'main_group',
+                routePoints: [{ x: 100, y: 100 }, { x: 160, y: 100 }],
+                routeWidth: 1
+            }];
+            state.activeTransfers = [{
+                id: 'branch_ready_item',
+                lineId: 'branch_group',
+                routePoints: [{ x: 100, y: 60 }, { x: 100, y: 100 }],
+                progress: 1,
+                itemType: 'wood'
+            }];
+            state._logisticsMergeAdmissionWinners = {};
+            state._logisticsMergeWaitQueues = {};
+
+            const winnerId = conveyorSystem.getLogisticsMergeAdmissionWinner(node, state, {
+                spacing: 20,
+                readyDistanceFromEnd: 20
+            });
+            if (winnerId !== 'branch_ready_item') {
+                return {
+                    success: false,
+                    error: `主線無可通過物品時應放行支線，winner=${winnerId} node=${JSON.stringify(node)} winners=${JSON.stringify(state._logisticsMergeAdmissionWinners)}`
+                };
+            }
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        } finally {
+            GameEngine.TILE_SIZE = previousTileSize;
+            GameEngine.state = originalState;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('合流過彎中的輸出物品不得永久阻塞下一個支線', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const state = GameEngine.state;
+        const originalState = JSON.parse(JSON.stringify(state));
+        const previousTileSize = GameEngine.TILE_SIZE;
+
+        try {
+            GameEngine.TILE_SIZE = 20;
+            const node = {
+                id: 'merge_visual_turn_blocker',
+                outputGroupId: 'main_group',
+                inputGroupIds: ['branch_group'],
+                point: { x: 100, y: 100 },
+                currentActiveSlot: 0,
+                roundRobinIndex: 0,
+                zipperTurn: 'branch',
+                awaitingMainPass: false
+            };
+            state.logisticsMergeNodes = [node];
+            state.logisticsLines = [{
+                id: 'main_seg',
+                groupId: 'main_group',
+                routePoints: [{ x: 100, y: 100 }, { x: 160, y: 100 }],
+                routeWidth: 1,
+                efficiency: 1
+            }, {
+                id: 'branch_seg',
+                groupId: 'branch_group',
+                routePoints: [{ x: 100, y: 60 }, { x: 100, y: 100 }],
+                routeWidth: 1,
+                efficiency: 1
+            }];
+            state.activeTransfers = [
+                {
+                    id: 'branch_ready_item',
+                    lineId: 'branch_group',
+                    routePoints: [{ x: 100, y: 60 }, { x: 100, y: 100 }],
+                    progress: 1,
+                    itemType: 'wood'
+                },
+                {
+                    id: 'turning_item',
+                    lineId: 'main_group',
+                    routePoints: [{ x: 100, y: 100 }, { x: 160, y: 100 }],
+                    progress: 0.1,
+                    itemType: 'wood',
+                    _mergeVisualTurn: {
+                        x: 100,
+                        y: 100,
+                        outputGroupId: 'main_group',
+                        inDir: { x: 0, y: 1 },
+                        outDir: { x: 1, y: 0 }
+                    }
+                }
+            ];
+            state._logisticsMergeAdmissionWinners = {};
+            state._logisticsMergeWaitQueues = {};
+
+            const changed = conveyorSystem.applyLogisticsMergeNodes(state);
+            const branch = state.activeTransfers.find(transfer => transfer.id === 'branch_ready_item');
+            if (!changed || branch?.lineId !== 'main_group' || branch?.queueBlocked === true) {
+                return {
+                    success: false,
+                    error: `過彎視覺物品不應永久阻塞下一支線，changed=${changed} branch=${JSON.stringify(branch)} node=${JSON.stringify(node)}`
+                };
+            }
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        } finally {
+            GameEngine.TILE_SIZE = previousTileSize;
+            GameEngine.state = originalState;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
 test('刪除運輸中物流線時產品必須退回來源建築', async ({ page }) => {
     test.setTimeout(45000);
     await loadGame(page);
@@ -600,6 +747,482 @@ test('物流延伸跨越其他物流線時不得合併被跨越群組', async ({
             return { success: true };
         } finally {
             Math.random = originalRandom;
+            GameEngine.state = originalState;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('拖曳延伸跨越其他物流線時應建立斷開線段且不註冊合流', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const state = GameEngine.state;
+        const originalState = JSON.parse(JSON.stringify(state));
+        const originalResolveDragTarget = conveyorSystem.resolveDragTarget;
+        const originalRandom = Math.random;
+        const previousTileSize = GameEngine.TILE_SIZE;
+        const originalResolveCurrentPortSlot = window.UIManager?.resolveCurrentPortSlot || null;
+
+        try {
+            Math.random = () => 0.2468;
+            GameEngine.TILE_SIZE = 20;
+            state.pathfinding = {
+                grid: Array.from({ length: 12 }, () => Array.from({ length: 12 }, () => 0))
+            };
+            state.mapOffset = { x: 0, y: 0 };
+            const transportConfig = conveyorSystem.getTransportLineConfig();
+            state.resources = { wood: 9999, stone: 9999, iron: 9999, copper: 9999 };
+            Object.keys(transportConfig?.costs || {}).forEach(resource => {
+                state.resources[resource] = 9999;
+            });
+            const source = {
+                id: 'drag_extension_source',
+                type1: 'warehouse',
+                x: 10,
+                y: 10,
+                outputTargets: []
+            };
+            const sourceLine = {
+                id: 'drag_source_seg',
+                groupId: 'drag_source_group',
+                sourceId: 'drag_extension_source',
+                x: 20,
+                y: 10,
+                gridX: 2,
+                gridY: 1,
+                routePoints: [{ x: 10, y: 10 }, { x: 30, y: 10 }],
+                routeWidth: 1,
+                order: 0,
+                efficiency: 1
+            };
+            const crossedLine = {
+                id: 'drag_crossed_seg',
+                groupId: 'drag_crossed_group',
+                sourceId: 'other_source',
+                x: 50,
+                y: 10,
+                gridX: 5,
+                gridY: 1,
+                routePoints: [{ x: 50, y: -10 }, { x: 50, y: 30 }],
+                routeWidth: 1,
+                order: 0,
+                efficiency: 1
+            };
+            const sourcePort = { x: 30, y: 10, dir: 'right', width: 1, sourceType: 'logistics_line' };
+
+            state.mapEntities = [source];
+            state.logisticsLines = [sourceLine, crossedLine];
+            state.logisticsMergeNodes = [];
+            state.logisticsTurnArrowOverrides = [];
+            state.activeTransfers = [];
+
+            if (window.UIManager) {
+                window.UIManager.resolveCurrentPortSlot = () => sourcePort;
+            }
+            conveyorSystem.resolveDragTarget = (x, y) => {
+                conveyorSystem.activeDrag.targetBuilding = null;
+                conveyorSystem.activeDrag.targetPort = null;
+                return { x, y, building: null, port: null };
+            };
+
+            conveyorSystem.startDrag(sourcePort.x, sourcePort.y, source, sourcePort, sourceLine);
+            conveyorSystem.updateDragNow(90, 10);
+            if (!GameEngine.state.conveyorValid) {
+                return {
+                    success: false,
+                    error: `延伸 preview 應允許跨越後交給 placement 切段，ghosts=${JSON.stringify(GameEngine.state.conveyorGhosts)}`
+                };
+            }
+
+            conveyorSystem.submitDrag();
+
+            const crossedSegments = state.logisticsLines.filter(line => line.id === 'drag_crossed_seg');
+            if (crossedSegments.length !== 1 || crossedSegments[0].groupId !== 'drag_crossed_group') {
+                return {
+                    success: false,
+                    error: `被跨越線不應被合併或改寫：${JSON.stringify(crossedSegments)}`
+                };
+            }
+            const sourceSegments = state.logisticsLines.filter(line => line.groupId === 'drag_source_group');
+            const newSegments = sourceSegments.filter(line => line.id !== 'drag_source_seg');
+            if (newSegments.length === 0) {
+                return {
+                    success: false,
+                    error: `跨越他線時不應取消整次延伸，lines=${JSON.stringify(state.logisticsLines)}`
+                };
+            }
+            if (newSegments.some(line => (line.routePoints || []).some(point => Math.round(point.x) === 50 && Math.round(point.y) === 10))) {
+                return {
+                    success: false,
+                    error: `新線段不應佔用被跨越線交會格：${JSON.stringify(newSegments)}`
+                };
+            }
+            if ((state.logisticsMergeNodes || []).some(node =>
+                node.inputGroupId === 'drag_source_group' || node.outputGroupId === 'drag_crossed_group'
+            )) {
+                return {
+                    success: false,
+                    error: `中途跨越不應註冊合流節點：${JSON.stringify(state.logisticsMergeNodes)}`
+                };
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        } finally {
+            Math.random = originalRandom;
+            conveyorSystem.resolveDragTarget = originalResolveDragTarget;
+            if (window.UIManager) {
+                window.UIManager.resolveCurrentPortSlot = originalResolveCurrentPortSlot;
+            }
+            conveyorSystem.cancelDrag();
+            GameEngine.TILE_SIZE = previousTileSize;
+            GameEngine.state = originalState;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('拖曳延伸接到同向物流線端點時必須合併群組', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const state = GameEngine.state;
+        const originalState = JSON.parse(JSON.stringify(state));
+        const originalResolveDragTarget = conveyorSystem.resolveDragTarget;
+        const originalRandom = Math.random;
+        const previousTileSize = GameEngine.TILE_SIZE;
+        const originalResolveCurrentPortSlot = window.UIManager?.resolveCurrentPortSlot || null;
+
+        try {
+            Math.random = () => 0.1357;
+            GameEngine.TILE_SIZE = 20;
+            state.pathfinding = {
+                grid: Array.from({ length: 12 }, () => Array.from({ length: 12 }, () => 0))
+            };
+            state.mapOffset = { x: 0, y: 0 };
+            const transportConfig = conveyorSystem.getTransportLineConfig();
+            state.resources = { wood: 9999, stone: 9999, iron: 9999, copper: 9999 };
+            Object.keys(transportConfig?.costs || {}).forEach(resource => {
+                state.resources[resource] = 9999;
+            });
+
+            const source = {
+                id: 'merge_endpoint_source',
+                type1: 'warehouse',
+                x: 10,
+                y: 10,
+                outputTargets: []
+            };
+            const sourceLine = {
+                id: 'merge_source_seg',
+                groupId: 'merge_source_group',
+                sourceId: 'merge_endpoint_source',
+                x: 20,
+                y: 10,
+                routePoints: [{ x: 10, y: 10 }, { x: 30, y: 10 }],
+                routeWidth: 1,
+                order: 0,
+                efficiency: 1
+            };
+            const targetLine = {
+                id: 'merge_target_seg',
+                groupId: 'merge_target_group',
+                sourceId: 'other_source',
+                x: 80,
+                y: 10,
+                routePoints: [{ x: 70, y: 10 }, { x: 90, y: 10 }],
+                routeWidth: 1,
+                order: 0,
+                efficiency: 1
+            };
+            const sourcePort = { x: 30, y: 10, dir: 'right', width: 1, sourceType: 'logistics_line' };
+
+            state.mapEntities = [source];
+            state.logisticsLines = [sourceLine, targetLine];
+            state.logisticsMergeNodes = [];
+            state.logisticsTurnArrowOverrides = [];
+            state.activeTransfers = [];
+            if (window.UIManager) {
+                window.UIManager.resolveCurrentPortSlot = () => sourcePort;
+            }
+            conveyorSystem.resolveDragTarget = (x, y) => {
+                conveyorSystem.activeDrag.targetBuilding = null;
+                conveyorSystem.activeDrag.targetPort = null;
+                return { x, y, building: null, port: null };
+            };
+
+            conveyorSystem.startDrag(sourcePort.x, sourcePort.y, source, sourcePort, sourceLine);
+            conveyorSystem.updateDragNow(70, 10);
+            if (!GameEngine.state.conveyorValid) {
+                return {
+                    success: false,
+                    error: `合法端點合併 preview 應為 valid，ghosts=${JSON.stringify(GameEngine.state.conveyorGhosts)}`
+                };
+            }
+
+            conveyorSystem.submitDrag();
+
+            const sourceGroups = new Set(state.logisticsLines.map(line => line.groupId || line.id));
+            if (sourceGroups.has('merge_target_group')) {
+                return {
+                    success: false,
+                    error: `目標群組未被併入來源群組：groups=${JSON.stringify([...sourceGroups])} lines=${JSON.stringify(state.logisticsLines)}`
+                };
+            }
+            const mergedSegments = state.logisticsLines.filter(line => (line.groupId || line.id) === 'merge_source_group');
+            if (mergedSegments.length < 3) {
+                return {
+                    success: false,
+                    error: `合併後來源群組應包含來源、新建、目標段：${JSON.stringify(mergedSegments)}`
+                };
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        } finally {
+            Math.random = originalRandom;
+            conveyorSystem.resolveDragTarget = originalResolveDragTarget;
+            if (window.UIManager) {
+                window.UIManager.resolveCurrentPortSlot = originalResolveCurrentPortSlot;
+            }
+            conveyorSystem.cancelDrag();
+            GameEngine.TILE_SIZE = previousTileSize;
+            GameEngine.state = originalState;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('拖曳支線接到主線中段時必須註冊合流節點', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const state = GameEngine.state;
+        const originalState = JSON.parse(JSON.stringify(state));
+        const originalResolveDragTarget = conveyorSystem.resolveDragTarget;
+        const originalRandom = Math.random;
+        const previousTileSize = GameEngine.TILE_SIZE;
+        const originalResolveCurrentPortSlot = window.UIManager?.resolveCurrentPortSlot || null;
+
+        try {
+            Math.random = () => 0.9753;
+            GameEngine.TILE_SIZE = 20;
+            state.pathfinding = {
+                grid: Array.from({ length: 12 }, () => Array.from({ length: 12 }, () => 0))
+            };
+            state.mapOffset = { x: 0, y: 0 };
+            const transportConfig = conveyorSystem.getTransportLineConfig();
+            state.resources = { wood: 9999, stone: 9999, iron: 9999, copper: 9999 };
+            Object.keys(transportConfig?.costs || {}).forEach(resource => {
+                state.resources[resource] = 9999;
+            });
+
+            const source = {
+                id: 'merge_branch_source',
+                type1: 'warehouse',
+                x: 90,
+                y: 50,
+                outputTargets: []
+            };
+            const branchLine = {
+                id: 'merge_branch_seg',
+                groupId: 'merge_branch_group',
+                sourceId: 'merge_branch_source',
+                x: 90,
+                y: 40,
+                routePoints: [{ x: 90, y: 50 }, { x: 90, y: 30 }],
+                routeWidth: 1,
+                order: 0,
+                efficiency: 1
+            };
+            const mainLine = {
+                id: 'merge_main_seg',
+                groupId: 'merge_main_group',
+                sourceId: 'main_source',
+                targetId: 'main_target',
+                x: 90,
+                y: 10,
+                routePoints: [{ x: 70, y: 10 }, { x: 110, y: 10 }],
+                routeWidth: 1,
+                order: 0,
+                efficiency: 1
+            };
+            const sourcePort = { x: 90, y: 30, dir: 'up', width: 1, sourceType: 'logistics_line' };
+
+            state.mapEntities = [source];
+            state.logisticsLines = [branchLine, mainLine];
+            state.logisticsMergeNodes = [];
+            state.logisticsTurnArrowOverrides = [];
+            state.activeTransfers = [];
+            if (window.UIManager) {
+                window.UIManager.resolveCurrentPortSlot = () => sourcePort;
+            }
+            conveyorSystem.resolveDragTarget = (x, y) => {
+                conveyorSystem.activeDrag.targetBuilding = null;
+                conveyorSystem.activeDrag.targetPort = null;
+                return { x, y, building: null, port: null };
+            };
+
+            conveyorSystem.startDrag(sourcePort.x, sourcePort.y, source, sourcePort, branchLine);
+            conveyorSystem.updateDragNow(90, 10);
+            if (!GameEngine.state.conveyorValid) {
+                return {
+                    success: false,
+                    error: `支線接主線 preview 應為 valid，ghosts=${JSON.stringify(GameEngine.state.conveyorGhosts)}`
+                };
+            }
+
+            conveyorSystem.submitDrag();
+
+            const node = (state.logisticsMergeNodes || []).find(item =>
+                item.inputGroupIds?.includes('merge_branch_group') &&
+                item.outputGroupId === 'merge_main_group'
+            );
+            if (!node) {
+                return {
+                    success: false,
+                    error: `支線接主線中段應註冊合流節點，nodes=${JSON.stringify(state.logisticsMergeNodes)} lines=${JSON.stringify(state.logisticsLines)}`
+                };
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        } finally {
+            Math.random = originalRandom;
+            conveyorSystem.resolveDragTarget = originalResolveDragTarget;
+            if (window.UIManager) {
+                window.UIManager.resolveCurrentPortSlot = originalResolveCurrentPortSlot;
+            }
+            conveyorSystem.cancelDrag();
+            GameEngine.TILE_SIZE = previousTileSize;
+            GameEngine.state = originalState;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('建築端口直接拉到既有物流線時必須建立連接並註冊合流', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const state = GameEngine.state;
+        const originalState = JSON.parse(JSON.stringify(state));
+        const originalResolveDragTarget = conveyorSystem.resolveDragTarget;
+        const originalRandom = Math.random;
+        const previousTileSize = GameEngine.TILE_SIZE;
+        const originalResolveCurrentPortSlot = window.UIManager?.resolveCurrentPortSlot || null;
+
+        try {
+            Math.random = () => 0.8642;
+            GameEngine.TILE_SIZE = 20;
+            state.pathfinding = {
+                grid: Array.from({ length: 12 }, () => Array.from({ length: 12 }, () => 0))
+            };
+            state.mapOffset = { x: 0, y: 0 };
+            const transportConfig = conveyorSystem.getTransportLineConfig();
+            state.resources = { wood: 9999, stone: 9999, iron: 9999, copper: 9999 };
+            Object.keys(transportConfig?.costs || {}).forEach(resource => {
+                state.resources[resource] = 9999;
+            });
+
+            const source = {
+                id: 'port_direct_source',
+                type1: 'warehouse',
+                x: 90,
+                y: 50,
+                outputTargets: []
+            };
+            const mainLine = {
+                id: 'port_direct_main_seg',
+                groupId: 'port_direct_main_group',
+                sourceId: 'main_source',
+                targetId: 'main_target',
+                x: 90,
+                y: 10,
+                routePoints: [{ x: 70, y: 10 }, { x: 110, y: 10 }],
+                routeWidth: 1,
+                order: 0,
+                efficiency: 1
+            };
+            const sourcePort = { x: 90, y: 50, dir: 'up', width: 1 };
+
+            state.mapEntities = [source];
+            state.logisticsLines = [mainLine];
+            state.logisticsMergeNodes = [];
+            state.logisticsTurnArrowOverrides = [];
+            state.activeTransfers = [];
+            if (window.UIManager) {
+                window.UIManager.resolveCurrentPortSlot = () => sourcePort;
+            }
+            conveyorSystem.resolveDragTarget = (x, y) => {
+                conveyorSystem.activeDrag.targetBuilding = null;
+                conveyorSystem.activeDrag.targetPort = null;
+                return { x, y, building: null, port: null };
+            };
+
+            conveyorSystem.startDrag(sourcePort.x, sourcePort.y, source, sourcePort, null);
+            conveyorSystem.updateDragNow(90, 10);
+            if (!GameEngine.state.conveyorValid) {
+                return {
+                    success: false,
+                    error: `端口直拉接既有線 preview 應為 valid，ghosts=${JSON.stringify(GameEngine.state.conveyorGhosts)}`
+                };
+            }
+
+            conveyorSystem.submitDrag();
+
+            const newLines = state.logisticsLines.filter(line => (line.groupId || line.id) !== 'port_direct_main_group');
+            if (newLines.length === 0) {
+                return {
+                    success: false,
+                    error: `端口直拉接既有線不應取消建造，lines=${JSON.stringify(state.logisticsLines)}`
+                };
+            }
+            const node = (state.logisticsMergeNodes || []).find(item =>
+                item.outputGroupId === 'port_direct_main_group'
+            );
+            if (!node) {
+                return {
+                    success: false,
+                    error: `端口直拉接既有線應註冊合流，nodes=${JSON.stringify(state.logisticsMergeNodes)} lines=${JSON.stringify(state.logisticsLines)}`
+                };
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        } finally {
+            Math.random = originalRandom;
+            conveyorSystem.resolveDragTarget = originalResolveDragTarget;
+            if (window.UIManager) {
+                window.UIManager.resolveCurrentPortSlot = originalResolveCurrentPortSlot;
+            }
+            conveyorSystem.cancelDrag();
+            GameEngine.TILE_SIZE = previousTileSize;
             GameEngine.state = originalState;
         }
     });
