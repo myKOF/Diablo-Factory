@@ -1202,12 +1202,6 @@ export class LogisticsRenderer {
             return result;
         };
         const mergeVisualTurnsByGroup = getMergeVisualTurnsByGroup();
-        const mergeVisualTurnCellKeys = new Set();
-        mergeVisualTurnsByGroup.forEach(turns => {
-            (Array.isArray(turns) ? turns : []).forEach(turn => {
-                if (turn?.key) mergeVisualTurnCellKeys.add(turn.key);
-            });
-        });
 
         const primarySelectedGroupId = state.selectedLogisticsGroupId ||
             (state.selectedLogisticsLineId && conveyorSystem?.getLogisticsLineById
@@ -1250,6 +1244,11 @@ export class LogisticsRenderer {
                     groupTurnCellKeys.get(groupKey)
                 );
                 const mergeVisualTurns = mergeVisualTurnsByGroup.get(groupKey) || [];
+                // [交匯點修復] 只跳過「本群組自身」會轉彎的合流格；若該格是別的群組在轉彎，
+                // 本群組（直線穿越）仍須照常繪製方形底格與箭頭，否則直線會在交匯點出現缺口。
+                const mergeVisualTurnCellKeys = new Set(
+                    mergeVisualTurns.map(turn => turn?.key).filter(Boolean)
+                );
                 const useConnectedIdleStyle = isPhysicallyConnected && !isOperating;
                 const effectiveTurnCellKeys = new Set();
                 const roundedBaseSkipCellKeys = new Set(turnCellKeys ? [...turnCellKeys] : []);
