@@ -1255,7 +1255,7 @@ export class LogisticsRenderer {
                 const roundedBaseSkipCellKeys = new Set(turnCellKeys ? [...turnCellKeys] : []);
                 const roundedTurnSkipCellKeys = new Set(roundedBaseSkipCellKeys);
                 mergeVisualTurnCellKeys.forEach(key => {
-                    roundedBaseSkipCellKeys.delete(key);
+                    roundedBaseSkipCellKeys.add(key);
                     roundedTurnSkipCellKeys.add(key);
                 });
                 const detachedSplitArrowCellKeys = LogisticsRenderer.getDetachedSplitArrowCellKeys(groupSegs);
