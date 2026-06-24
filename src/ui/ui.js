@@ -1709,7 +1709,6 @@ export class UIManager {
                 };
                 return;
             }
-            if (!clickedLine) return;
             this.potentialTransportLineBuildDrag = {
                 startX: e.clientX,
                 startY: e.clientY,
