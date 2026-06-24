@@ -1,9 +1,11 @@
 import { LogisticsStateActions } from './LogisticsStateActions.js';
+import { LogisticsTransferRecoveryService } from './LogisticsTransferRecoveryService.js';
 
 export class LogisticsUndoStore {
     constructor(system, getGameEngine) {
         this.system = system;
         this.getGameEngine = getGameEngine;
+        this.transferRecovery = new LogisticsTransferRecoveryService();
     }
 
     get gameEngine() {
@@ -14,24 +16,6 @@ export class LogisticsUndoStore {
         if (value === undefined) return undefined;
         if (value === null) return null;
         return JSON.parse(JSON.stringify(value));
-    }
-
-    getTransferItemType(transfer) {
-        const rawType = transfer?.itemType || transfer?.type || transfer?.resourceType || transfer?.filter || null;
-        return rawType ? String(rawType).trim().toLowerCase() : null;
-    }
-
-    getEntityCapacity(entity, keys) {
-        for (const key of keys) {
-            const value = Number(entity?.[key]);
-            if (Number.isFinite(value) && value >= 0) return value;
-        }
-        return Infinity;
-    }
-
-    getStoredTotal(store) {
-        if (!store || typeof store !== 'object') return 0;
-        return Object.values(store).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
     }
 
     getLineGroupId(line) {
@@ -168,27 +152,13 @@ export class LogisticsUndoStore {
         return lines.some(line => this.getDistanceToLineRoute(position, line) <= tolerance);
     }
 
-    returnTransferToSource(transfer, entities, getEntityId) {
-        const sourceId = transfer?.sourceId || null;
-        const itemType = this.getTransferItemType(transfer);
-        if (!sourceId || !itemType) return false;
-
-        const source = entities.find(ent => sourceId && getEntityId(ent) === sourceId) || null;
-        if (!source) return false;
-
-        const amount = Math.max(1, Math.floor(Number(transfer.amount ?? transfer.quantity ?? 1) || 1));
-        const isStorageSource = !!source.storage || ['warehouse', 'storehouse', 'barn', 'town_center', 'village'].includes(source.type1);
-        const storeKey = isStorageSource ? 'storage' : 'outputBuffer';
-        const capacityKeys = isStorageSource
-            ? ['storageCapacity', 'capacity']
-            : ['outputCapacity', 'bufferCapacity', 'storageCapacity', 'capacity'];
-
-        if (!source[storeKey]) source[storeKey] = {};
-        const capacity = this.getEntityCapacity(source, capacityKeys);
-        if (this.getStoredTotal(source[storeKey]) + amount > capacity) return false;
-
-        source[storeKey][itemType] = (source[storeKey][itemType] || 0) + amount;
-        return true;
+    returnTransferToSource(transfer, entities, getEntityId, state = null) {
+        const result = this.transferRecovery.recoverToSourceOrDestroy(transfer, {
+            state,
+            entities,
+            getEntityId
+        });
+        return result.returned;
     }
 
     cleanupInvalidActiveTransfers(state, entities, getEntityId, changedGroupIds = null) {
@@ -212,11 +182,11 @@ export class LogisticsUndoStore {
             if (!lineId) return true;
             if (changedGroupIds?.has(lineId)) {
                 if (this.isTransferStillOnRestoredLine(transfer, linesByGroupId.get(lineId) || [])) return true;
-                this.returnTransferToSource(transfer, entities, getEntityId);
+                this.returnTransferToSource(transfer, entities, getEntityId, state);
                 return false;
             }
             if (validGroupIds.has(lineId)) return true;
-            this.returnTransferToSource(transfer, entities, getEntityId);
+            this.returnTransferToSource(transfer, entities, getEntityId, state);
             return false;
         });
     }

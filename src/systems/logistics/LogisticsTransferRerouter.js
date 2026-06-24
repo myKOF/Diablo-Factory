@@ -49,7 +49,8 @@ export class LogisticsTransferRerouter {
             return this.system.undoStore.returnTransferToSource(
                 transfer,
                 Array.isArray(state.mapEntities) ? state.mapEntities : [],
-                getEntityId
+                getEntityId,
+                state
             );
         };
         const affectedSourceIds = new Set();

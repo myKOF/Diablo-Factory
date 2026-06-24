@@ -21,9 +21,9 @@
 | 2 | 已完成 | 建立物流狀態 Action 層，收斂直接寫入 `GameEngine.state` 的入口 | State Encapsulation、Event-Driven |
 | 3 | 已完成 | 統一 routeWidth / footprint SSOT，移除 Router 外的手寫 footprint | Router SSOT、routeWidth 規則 |
 | 4 | 已完成 | 統一 ghost preview 與 submitDrag 的驗證上下文 | ghost preview 與 submit 一致 |
-| 5 | 待使用者驗證 | 修正物流延伸跨越與切段規則 | 防穿透與斷點、不可任意合併 |
-| 6 | 未開始 | 合流 winner 單一來源化，移除隨機 fallback | Round-Robin、無絕對優先權 |
-| 7 | 未開始 | 刪除、復原、重路由失敗時回收產品至來源建築或銷毀 | 物品回流與銷毀 |
+| 5 | 已完成 | 修正物流延伸跨越與切段規則 | 防穿透與斷點、不可任意合併 |
+| 6 | 已完成 | 合流 winner 單一來源化，移除隨機 fallback | Round-Robin、無絕對優先權 |
+| 7 | 待使用者驗證 | 刪除、復原、重路由失敗時回收產品至來源建築或銷毀 | 物品回流與銷毀 |
 | 8 | 未開始 | 收斂運輸模型至陣列偏移運輸法 | Performance Critical |
 | 9 | 未開始 | UI / Renderer 解耦與 config-driven 收斂 | Strict Separation、Config-Driven |
 | 10 | 未開始 | 最終 Playwright 驗證與 `npm run finalize` 收尾 | Mandatory Finalization |
@@ -179,17 +179,18 @@
 
 ### 任務 5：修正物流延伸跨越與切段規則
 
-**狀態：待使用者驗證**
+**狀態：已完成**
 
 **目前進度**
 
-- `待使用者驗證`：已檢查使用者自行修正的端口磁吸調整，`resolveDragTarget()` 保留上一個已鎖定端口的行為與 `routeContext` 不衝突。
-- `待使用者驗證`：已補回 submit 前物流 footprint 佔用比對，並保留一般建造遇佔用時拒絕建造。
-- `待使用者驗證`：已修正建築端口直接拉到既有物流線時被 submit 前佔用驗證誤擋的問題；終點接線可合併，中途重疊仍拒絕。
-- `待使用者驗證`：延伸建造跨越其他物流線時，不再取消整次建造；會交由 placement 切掉交會段，保留被跨越點後方的斷開線段。
-- `待使用者驗證`：新增「拖曳延伸跨越其他物流線時應建立斷開線段且不註冊合流」Playwright 回歸測試。
-- `待使用者驗證`：新增「拖曳延伸接到同向物流線端點時必須合併群組」、「拖曳支線接到主線中段時必須註冊合流節點」、「建築端口直接拉到既有物流線時必須建立連接並註冊合流」Playwright 回歸測試。
-- `待使用者驗證`：已恢復 `renderSourcePortCells()` 依物流線 metadata 繪製 source / target port cell，修正端口可點擊但選擇框消失的問題。
+- `已完成`：已檢查使用者自行修正的端口磁吸調整，`resolveDragTarget()` 保留上一個已鎖定端口的行為與 `routeContext` 不衝突。
+- `已完成`：已補回 submit 前物流 footprint 佔用比對，並保留一般建造遇佔用時拒絕建造。
+- `已完成`：已修正建築端口直接拉到既有物流線時被 submit 前佔用驗證誤擋的問題；終點接線可合併，中途重疊仍拒絕。
+- `已完成`：延伸建造跨越其他物流線時，不再取消整次建造；會交由 placement 切掉交會段，保留被跨越點後方的斷開線段。
+- `已完成`：新增「拖曳延伸跨越其他物流線時應建立斷開線段且不註冊合流」Playwright 回歸測試。
+- `已完成`：新增「拖曳延伸接到同向物流線端點時必須合併群組」、「拖曳支線接到主線中段時必須註冊合流節點」、「建築端口直接拉到既有物流線時必須建立連接並註冊合流」Playwright 回歸測試。
+- `已完成`：使用者已驗證第 5 項合併、切段、端點接續、端口直拉接線與端口選擇框顯示。
+- `已完成`：已恢復 `renderSourcePortCells()` 依物流線 metadata 繪製 source / target port cell，並接回 `MainScene.drawSelectionHighlight()` 實際渲染流程，修正端口可點擊但選擇框消失的問題。
 
 **目的**
 
@@ -216,15 +217,16 @@
 
 ### 任務 6：合流 winner 單一來源化
 
-**狀態：未開始**
+**狀態：已完成**
 
 **目前進度**
 
-- `待使用者驗證`：`LogisticsTransferQueues` 已移除缺少 runtime 時的 `Math.random()` winner fallback。
-- `待使用者驗證`：已修正 `_mergeVisualTurn` 過彎中的輸出物品被 output entry 判定為佔用，導致下一個支線在匯合點前永久堵住的問題。
-- `待使用者驗證`：新增「合流等待主線但主線無可通過物品時必須放行支線」與「合流過彎中的輸出物品不得永久阻塞下一個支線」Playwright 回歸測試。
-- `未開始`：`WorkerSystem` 內重複 winner fallback 尚未收斂。
-- `未開始`：確認 `_logisticsMergeAdmissionWinners` 僅由 runtime 寫入。
+- `已完成`：`LogisticsTransferQueues` 已移除缺少 runtime 時的 `Math.random()` winner fallback。
+- `已完成`：已修正 `_mergeVisualTurn` 過彎中的輸出物品被 output entry 判定為佔用，導致下一個支線在匯合點前永久堵住的問題。
+- `已完成`：新增「合流等待主線但主線無可通過物品時必須放行支線」與「合流過彎中的輸出物品不得永久阻塞下一個支線」Playwright 回歸測試。
+- `已完成`：`WorkerSystem` 內重複 winner fallback 已移除；缺少 runtime winner 時回傳 null 並讓輸入等待，不再使用 `Math.random()`。
+- `已完成`：新增「WorkerSystem 合流 winner 缺少 runtime 時不得使用隨機 fallback」Playwright 回歸測試。
+- `待後續任務處理`：`_logisticsMergeAdmissionWinners` 的全域寫入點已收斂到 runtime 路徑；若第 8 項重構運輸模型，需重新檢查 transport array 與 winner state 的交界。
 
 **目的**
 
@@ -251,13 +253,14 @@
 
 ### 任務 7：刪除、復原、重路由失敗時回收產品
 
-**狀態：未開始**
+**狀態：待使用者驗證**
 
 **目前進度**
 
 - `待使用者驗證`：刪除整組物流線時，失效 transfer 會退回來源建築。
 - `待使用者驗證`：重路由失敗並移除 active transfer 前，會先退回來源建築。
-- `未開始`：獨立 `LogisticsTransferRecoveryService` 尚未建立；目前先復用 `LogisticsUndoStore.returnTransferToSource()`。
+- `待使用者驗證`：已建立獨立 `LogisticsTransferRecoveryService`，統一處理退回來源與滿載銷毀。
+- `待使用者驗證`：來源不存在或來源容量滿時，產品會銷毀並寫入 `state.destroyedLogisticsTransfers` 供追蹤。
 
 **目的**
 
@@ -282,6 +285,7 @@
 - 刪線時產品回到來源建築。
 - 來源滿載時產品被銷毀。
 - undo 導致路線斷裂時也走相同流程。
+- Playwright：`tests/logistics/protocol_alignment.spec.js` 18 項通過。
 
 ### 任務 8：收斂運輸模型至陣列偏移運輸法
 

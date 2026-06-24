@@ -173,6 +173,110 @@ test('合流 winner 缺少 runtime 時不得使用隨機 fallback', async ({ pag
     expect(result.success, result.error).toBe(true);
 });
 
+test('WorkerSystem 合流 winner 缺少 runtime 時不得使用隨機 fallback', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { WorkerSystem } = await import('/src/systems/WorkerSystem.js');
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const originalRandom = Math.random;
+        const originalMethods = {
+            getLogisticsMergeAdmissionWinner: conveyorSystem.getLogisticsMergeAdmissionWinner,
+            getLogisticsMergeNodeForInputTransfer: conveyorSystem.getLogisticsMergeNodeForInputTransfer,
+            isLogisticsMergeInputTransfer: conveyorSystem.isLogisticsMergeInputTransfer,
+            getLogisticsMergeThroughYieldLimit: conveyorSystem.getLogisticsMergeThroughYieldLimit,
+            applyLogisticsMergeNodes: conveyorSystem.applyLogisticsMergeNodes
+        };
+        const node = {
+            id: 'worker_merge_without_runtime',
+            outputGroupId: 'output',
+            inputGroupIds: ['input_a', 'input_b'],
+            point: { x: 100, y: 0 }
+        };
+        const state = {
+            mapEntities: [],
+            logisticsMergeNodes: [node],
+            logisticsLines: [
+                { id: 'input_a_line', groupId: 'input_a', routePoints: [{ x: 0, y: 0 }, { x: 100, y: 0 }], routeWidth: 1, efficiency: 1 },
+                { id: 'input_b_line', groupId: 'input_b', routePoints: [{ x: 0, y: 20 }, { x: 100, y: 20 }], routeWidth: 1, efficiency: 1 },
+                { id: 'output_line', groupId: 'output', routePoints: [{ x: 100, y: 0 }, { x: 140, y: 0 }], routeWidth: 1, efficiency: 1 }
+            ],
+            activeTransfers: [
+                {
+                    id: 'worker_item_a',
+                    lineId: 'input_a',
+                    routePoints: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+                    progress: 1,
+                    targetId: 'target',
+                    efficiency: 1
+                },
+                {
+                    id: 'worker_item_b',
+                    lineId: 'input_b',
+                    routePoints: [{ x: 0, y: 20 }, { x: 100, y: 20 }],
+                    progress: 1,
+                    targetId: 'target',
+                    efficiency: 1
+                }
+            ]
+        };
+        const engine = {
+            TILE_SIZE: 20,
+            state,
+            getEntityConfig: () => ({ efficiency: 1 }),
+            addLog: () => {}
+        };
+
+        try {
+            Math.random = () => {
+                throw new Error('WorkerSystem 合流 winner 不得使用 Math.random fallback');
+            };
+            conveyorSystem.getLogisticsMergeAdmissionWinner = undefined;
+            conveyorSystem.getLogisticsMergeNodeForInputTransfer = (transfer) =>
+                node.inputGroupIds.includes(transfer?.lineId) ? node : null;
+            conveyorSystem.isLogisticsMergeInputTransfer = (transfer) =>
+                node.inputGroupIds.includes(transfer?.lineId);
+            conveyorSystem.getLogisticsMergeThroughYieldLimit = () => Infinity;
+            conveyorSystem.applyLogisticsMergeNodes = () => false;
+
+            const workerSystem = new WorkerSystem(state, engine);
+            workerSystem.processAutomatedLogistics(state, 0.1);
+
+            const randomWinnerState = state._logisticsMergeAdmissionWinners || null;
+            if (randomWinnerState) {
+                return {
+                    success: false,
+                    error: `WorkerSystem 不應建立隨機 winner 狀態：${JSON.stringify(randomWinnerState)}`
+                };
+            }
+            const allWaiting = state.activeTransfers.every(transfer => transfer.queueBlocked === true);
+            if (!allWaiting) {
+                return {
+                    success: false,
+                    error: `缺少 runtime winner 時，WorkerSystem 應讓所有輸入等待：${JSON.stringify(state.activeTransfers)}`
+                };
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        } finally {
+            Math.random = originalRandom;
+            conveyorSystem.getLogisticsMergeAdmissionWinner = originalMethods.getLogisticsMergeAdmissionWinner;
+            conveyorSystem.getLogisticsMergeNodeForInputTransfer = originalMethods.getLogisticsMergeNodeForInputTransfer;
+            conveyorSystem.isLogisticsMergeInputTransfer = originalMethods.isLogisticsMergeInputTransfer;
+            conveyorSystem.getLogisticsMergeThroughYieldLimit = originalMethods.getLogisticsMergeThroughYieldLimit;
+            conveyorSystem.applyLogisticsMergeNodes = originalMethods.applyLogisticsMergeNodes;
+            GameEngine.state._logisticsMergeAdmissionWinners = undefined;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
 test('合流等待主線但主線無可通過物品時必須放行支線', async ({ page }) => {
     test.setTimeout(45000);
     await loadGame(page);
@@ -510,6 +614,110 @@ test('刪除群組中段導致重路由失敗時產品必須退回來源建築',
 
             if (state.activeTransfers.some(item => item.id === 'live_item_lost_by_reroute')) {
                 return { success: false, error: '已回收產品不應仍留在 activeTransfers' };
+            }
+
+            return { success: true };
+        } finally {
+            GameEngine.state = originalState;
+            if (window.UIManager) {
+                window.UIManager.activeLogisticsLine = uiBackup.activeLogisticsLine;
+                window.UIManager.activeLogisticsConnection = uiBackup.activeLogisticsConnection;
+            }
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('來源滿載時刪除運輸中物流線必須銷毀產品', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const state = GameEngine.state;
+        const originalState = JSON.parse(JSON.stringify(state));
+        const uiBackup = {
+            activeLogisticsLine: window.UIManager?.activeLogisticsLine || null,
+            activeLogisticsConnection: window.UIManager?.activeLogisticsConnection || null
+        };
+
+        try {
+            const source = {
+                id: 'full_source_building',
+                type1: 'warehouse',
+                x: 0,
+                y: 0,
+                storage: { wood: 1 },
+                storageCapacity: 1,
+                outputBuffer: {},
+                outputTargets: [{ id: 'full_target_building', lineId: 'full_delete_group', filter: 'wood' }]
+            };
+            const target = {
+                id: 'full_target_building',
+                type1: 'factory',
+                x: 100,
+                y: 0,
+                inputBuffer: {}
+            };
+
+            state.mapEntities = [source, target];
+            state.destroyedLogisticsTransfers = [];
+            state.logisticsMergeNodes = [];
+            state.logisticsTurnArrowOverrides = [];
+            state.logisticsLines = [{
+                id: 'full_delete_segment',
+                groupId: 'full_delete_group',
+                sourceId: 'full_source_building',
+                targetId: 'full_target_building',
+                x: 20,
+                y: 0,
+                gridX: 20,
+                gridY: 0,
+                routePoints: [{ x: 0, y: 0 }, { x: 40, y: 0 }],
+                routeWidth: 1,
+                order: 0,
+                efficiency: 1
+            }];
+            state.activeTransfers = [{
+                id: 'live_item_destroyed_when_full',
+                lineId: 'full_delete_group',
+                sourceId: 'full_source_building',
+                targetId: 'full_target_building',
+                itemType: 'wood',
+                routePoints: [{ x: 0, y: 0 }, { x: 40, y: 0 }],
+                progress: 0.5,
+                efficiency: 1
+            }];
+            state.selectedLogisticsLineId = conveyorSystem.getLogisticsLineSelectionKey(state.logisticsLines[0]);
+            state.selectedLogisticsGroupId = 'full_delete_group';
+
+            const deleted = conveyorSystem.deleteLogisticsLineById(state.selectedLogisticsLineId);
+            if (!deleted) {
+                return { success: false, error: '刪除物流線 API 回傳 false' };
+            }
+
+            if (Number(source.storage.wood || 0) !== 1 || Number(source.outputBuffer.wood || 0) !== 0) {
+                return {
+                    success: false,
+                    error: `來源滿載時不應溢出回填，outputBuffer=${JSON.stringify(source.outputBuffer)} storage=${JSON.stringify(source.storage)}`
+                };
+            }
+
+            if (state.activeTransfers.some(item => item.id === 'live_item_destroyed_when_full')) {
+                return { success: false, error: '已銷毀產品不應仍留在 activeTransfers' };
+            }
+
+            const destroyed = Array.isArray(state.destroyedLogisticsTransfers)
+                ? state.destroyedLogisticsTransfers.find(item => item.transferId === 'live_item_destroyed_when_full')
+                : null;
+            if (!destroyed || destroyed.reason !== 'source_full') {
+                return {
+                    success: false,
+                    error: `來源滿載時必須留下銷毀紀錄，destroyed=${JSON.stringify(state.destroyedLogisticsTransfers)}`
+                };
             }
 
             return { success: true };

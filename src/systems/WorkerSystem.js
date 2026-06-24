@@ -2474,38 +2474,7 @@ export class WorkerSystem {
                     readyDistanceFromEnd: spacing
                 });
             }
-            const mergePoint = node.point || { x: node.x, y: node.y };
-            const key = `${node.outputGroupId || "output"}:${Math.round(mergePoint.x || 0)},${Math.round(mergePoint.y || 0)}`;
-            const contendersByLine = new Map();
-            state.activeTransfers.forEach(other => {
-                if (!other || !node.inputGroupIds.includes(other.lineId)) return;
-                if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
-                const otherTotal = getTransferRouteMetrics(other).totalPixels;
-                if (otherTotal <= 0) return;
-                const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
-                if (otherDistance < otherTotal - spacing - 0.1) return;
-                const current = contendersByLine.get(other.lineId);
-                if (!current || otherDistance > current.distance || (
-                    Math.abs(otherDistance - current.distance) <= 0.1 &&
-                    String(other.id || "") < String(current.transfer.id || "")
-                )) {
-                    contendersByLine.set(other.lineId, { transfer: other, distance: otherDistance });
-                }
-            });
-            const contenders = Array.from(contendersByLine.values())
-                .map(item => item.transfer)
-                .filter(item => item?.id)
-                .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-            if (contenders.length <= 1) return contenders[0]?.id || null;
-            const signature = contenders.map(item => item.id).join("|");
-            if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
-            const previous = state._logisticsMergeAdmissionWinners[key];
-            if (previous && previous.signature === signature && contenders.some(item => item.id === previous.winnerId)) {
-                return previous.winnerId;
-            }
-            const winner = contenders[Math.floor(Math.random() * contenders.length)];
-            state._logisticsMergeAdmissionWinners[key] = { signature, winnerId: winner.id };
-            return winner.id;
+            return null;
         };
         const getMergeInputMaxDistance = (transfer, totalLength, spacing) => {
             if (!conveyorSystem || typeof conveyorSystem.getLogisticsMergeNodeForInputTransfer !== 'function') {

@@ -1330,6 +1330,7 @@ export class MainScene extends Phaser.Scene {
                     view.top - 100 < ent.y && view.bottom + 100 > ent.y;
             })
             : selectedPortEntities;
+        LogisticsRenderer.renderSourcePortCells(portG || g, GameEngine.state, this);
         LogisticsRenderer.renderBuildingPortCells(portG || g, portEntities, this);
 
         // [核心需求] 支援屍體選取框 (橘色，由玩家點擊觸發)

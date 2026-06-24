@@ -102,6 +102,56 @@ test('靜態物流端口 overlay 同時重畫 source 與 target port cell', asyn
     expect(result).toBeGreaterThanOrEqual(2);
 });
 
+test('主場景選取高亮流程必須重畫物流端口 overlay', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => typeof window.GAME_STATE !== 'undefined', null, { timeout: 15000 });
+
+    const result = await page.evaluate(async () => {
+        const { MainScene } = await import('/src/scenes/MainScene.js');
+        const { LogisticsRenderer } = await import('/src/renderers/logistics_renderer.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const originalRenderer = LogisticsRenderer.renderSourcePortCells;
+        const originalSelected = GameEngine.state.selectedBuildingIds;
+        const originalEntities = GameEngine.state.mapEntities;
+        try {
+            let callCount = 0;
+            LogisticsRenderer.renderSourcePortCells = () => {
+                callCount += 1;
+            };
+            GameEngine.state.selectedBuildingIds = [];
+            GameEngine.state.mapEntities = [];
+
+            const scene = new MainScene();
+            const graphics = {
+                clear() {},
+                lineStyle() {},
+                strokeRect() {},
+                fillStyle() {},
+                fillRect() {}
+            };
+            scene.selectionGraphics = graphics;
+            scene.buildingPortGraphics = graphics;
+            scene.cameras = {
+                main: {
+                    worldView: { left: 0, right: 200, top: 0, bottom: 200 }
+                }
+            };
+            scene.drawSingleSelectionBox = () => {};
+            scene.updateResourceFX = () => {};
+
+            scene.drawSelectionHighlight();
+            return callCount;
+        } finally {
+            LogisticsRenderer.renderSourcePortCells = originalRenderer;
+            GameEngine.state.selectedBuildingIds = originalSelected;
+            GameEngine.state.mapEntities = originalEntities;
+        }
+    });
+
+    expect(result).toBeGreaterThanOrEqual(1);
+});
+
 test('缺少 metadata 但物理連到輸出與輸入 port 的群組仍標示接通', async ({ page }) => {
     await page.goto('/');
     await page.waitForFunction(() => typeof window.GAME_STATE !== 'undefined', null, { timeout: 15000 });
