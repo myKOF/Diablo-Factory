@@ -192,55 +192,7 @@ export class WorkerSystem {
 
         switch (v.state) {
             case 'MOVING_TO_FACTORY':
-                if (!v.factoryTarget) { v.state = 'IDLE'; break; }
-                const factoryIgnoreEnts = [...ignoreEnts, v.factoryTarget];
-
-                // [核心優化] 派駐位置放寬：判定是否碰到建築模型範圍
-                const fp = this.engine.getFootprint(v.factoryTarget.type1);
-                const halfW = (fp.uw * 20) / 2;
-                const halfH = (fp.uh * 20) / 2;
-
-                // [調試] 檢查抵達距離與判定
-                const dist = Math.hypot(v.x - v.factoryTarget.x, v.y - v.factoryTarget.y);
-                const isTouching =
-                    v.x >= v.factoryTarget.x - halfW - 40 &&
-                    v.x <= v.factoryTarget.x + halfW + 40 &&
-                    v.y >= v.factoryTarget.y - halfH - 40 &&
-                    v.y <= v.factoryTarget.y + halfH + 40;
-
-                if (isTouching) {
-                    console.log(`[物流調試] 工人 ${v.id} 判定抵達 ${v.factoryTarget.type1}。距離: ${dist.toFixed(1)}`);
-                    const targetBuilding = v.factoryTarget;
-                    const entered = this.tryEnterLogisticsBuilding(v, targetBuilding, 'target');
-
-                    if (entered) {
-                        if (this.state.selectedUnitIds) {
-                            this.state.selectedUnitIds = this.state.selectedUnitIds.filter(id => id !== v.id);
-                        }
-                    } else {
-                        v.assignedWarehouseId = null;
-                        v.factoryTarget = null;
-                        v.state = 'IDLE';
-                        v.pathTarget = null;
-                        v.fullPath = null;
-                        v.commandCenter = null;
-                        v.visible = true;
-                        if (v.sprite && typeof v.sprite.setVisible === 'function') v.sprite.setVisible(true);
-                        if (v.gameObject && typeof v.gameObject.setVisible === 'function') v.gameObject.setVisible(true);
-
-                        const scatterAngle = Math.random() * Math.PI * 2;
-                        const scatterDist = 30 + Math.random() * 50;
-                        v.idleTarget = {
-                            x: v.x + Math.cos(scatterAngle) * scatterDist,
-                            y: v.y + Math.sin(scatterAngle) * scatterDist
-                        };
-
-                        this.engine.addLog(`[物流] ${targetBuilding.name || targetBuilding.type1} 目前沒有可用派駐空位，${v.configName || '工人'} 在門口待命。`, 'LOGISTICS');
-                    }
-                } else {
-                    const approach = this.getBuildingApproachPoint(v, v.factoryTarget, 30);
-                    this.moveDetailed(v, approach.x, approach.y, moveSpeed, deltaTime, factoryIgnoreEnts);
-                }
+                this.handleStateMovingToFactory(v, deltaTime, ignoreEnts, moveSpeed);
                 break;
             case 'WORKING_IN_FACTORY':
                 // 工人進入工廠後隱藏實體，專心提供產能
@@ -256,21 +208,7 @@ export class WorkerSystem {
                 v.cargoAmount = 0;
                 break;
             case 'IDLE':
-                if (v.vTint !== 0xffffff) v.vTint = 0xffffff;
-                if (v.idleTarget) {
-                    this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, deltaTime, ignoreEnts);
-                    if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 10) {
-                        v.idleTarget = null;
-                        v.commandCenter = null;
-                        v.isPlayerLocked = false;
-                        v._isRallyMovement = false;
-                        v.rallySourceBuildingId = null;
-                        v.waitTimer = 1 + Math.random() * 2;
-                        v.pathTarget = null;
-                        v.fullPath = null;
-                        v.pathIndex = 0;
-                    }
-                }
+                this.handleStateIdle(v, deltaTime, ignoreEnts, moveSpeed);
                 break;
             case 'CHASE':
                 if (v.idleTarget) {
@@ -282,402 +220,19 @@ export class WorkerSystem {
                 v.fullPath = null;
                 break;
             case 'MOVING_TO_RESOURCE':
-                let searchX = v.x, searchY = v.y;
-                if (v.assignedWarehouseId) {
-                    const w = this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.assignedWarehouseId);
-                    if (w) { searchX = w.x; searchY = w.y; }
-                }
-
-                let target = v.targetId;
-                const isEntityResource = target && (target.type1 === 'farmland' || target.type1 === 'tree_plantation');
-
-                if (!target || (target.gx === undefined && !isEntityResource)) {
-                    if (typeof target === 'string') {
-                        const ent = this.state.mapEntities.find(e => e.id === target);
-                        if (ent) target = ent;
-                        else target = ResourceSystem.findNearestResource(this.state, 20, searchX, searchY, v.type, v.id);
-                    } else {
-                        target = ResourceSystem.findNearestResource(this.state, 20, searchX, searchY, v.type, v.id);
-                    }
-                } else if (target.gx !== undefined) {
-                    const res = this.state.mapData.getResource(target.gx, target.gy);
-                    if (!res || res.amount <= 0) target = ResourceSystem.findNearestResource(this.state, 20, searchX, searchY, v.type, v.id);
-                } else if (isEntityResource) {
-                    if (target.amount <= 0) target = ResourceSystem.findNearestResource(this.state, 20, searchX, searchY, v.type, v.id);
-                }
-
-                if (target) {
-                    if (!ignoreEnts.includes(target)) ignoreEnts.push(target);
-                    if (!v.gatherPoint || v._lastTargetId !== (target.id || `${target.gx}_${target.gy}`)) {
-                        v._lastTargetId = (target.id || `${target.gx}_${target.gy}`);
-                        this.engine.addLog(`[尋路更新] ${v.configName || '工人'} 定位目標資源...`, 'PATH');
-
-                        if (target.type1 === 'farmland' || target.type1 === 'tree_plantation') {
-                            v.gatherPoint = {
-                                x: target.x + (Math.random() - 0.5) * 50,
-                                y: target.y + (Math.random() - 0.5) * 50
-                            };
-                        } else {
-                            let rRadius = 25;
-                            const rCfg = this.state.resourceConfigs.find(c => c.type === (target.resourceType || target.type1));
-                            if (rCfg && rCfg.pixel_size) {
-                                rRadius = (Math.max(rCfg.pixel_size.w, rCfg.pixel_size.h) / 2) + 15;
-                            }
-                            let baseAngle = Math.atan2(v.y - target.y, v.x - target.x);
-                            baseAngle += (Math.random() - 0.5) * 2.8;
-                            v.gatherPoint = {
-                                x: target.x + Math.cos(baseAngle) * rRadius,
-                                y: target.y + Math.sin(baseAngle) * rRadius
-                            };
-                        }
-                    }
-
-                    const distToGather = Math.hypot(v.gatherPoint.x - v.x, v.gatherPoint.y - v.y);
-                    if (distToGather < 15) {
-                        if (v.cargo > 0) {
-                            v.nextStateAfterDeposit = 'MOVING_TO_RESOURCE';
-                            v.nextTargetAfterDeposit = target;
-                            v.nextTypeAfterDeposit = v.type;
-                            v.state = 'MOVING_TO_BASE';
-                            v.pathTarget = null;
-                            v.gatherPoint = null;
-                        } else {
-                            this.engine.addLog(`[任務啟動] ${v.configName || '工人'} 已抵達資源點並開始採集 ${target.name || target.type1}`, 'TASK');
-                            v.state = 'GATHERING'; v.targetId = target; v.gatherTimer = 0; v.pathTarget = null;
-                            v.commandCenter = null;
-                            v.gatherPoint = null;
-                        }
-                    } else {
-                        if (!v._lastLogPath || v._lastLogPath !== (target.id || 'target')) {
-                            this.engine.addLog(`[尋路目標] ${v.configName || '工人'} 正在前往目標 (${Math.round(v.gatherPoint.x)}, ${Math.round(v.gatherPoint.y)})`, 'PATH');
-                            v._lastLogPath = (target.id || 'target');
-                        }
-                        this.moveDetailed(v, v.gatherPoint.x, v.gatherPoint.y, moveSpeed, deltaTime, ignoreEnts);
-                    }
-                } else { v.state = 'IDLE'; v.pathTarget = null; v.gatherPoint = null; v.workOffset = null; v.vTint = 0xffffff; }
+                this.handleStateMovingToResource(v, deltaTime, ignoreEnts, moveSpeed);
                 break;
             case 'GATHERING':
-                v.gatherTimer += deltaTime;
-                const harvestTime = this.getGatheringProductionTime(v);
-                if (!v.targetId) {
-                    v.state = 'IDLE';
-                    v.pathTarget = null;
-                    v.isPlayerLocked = false;
-                    break;
-                }
-
-                if (v.gatherTimer >= harvestTime) {
-                    const harvestTotal = this.getWorkerCollectionAmount(v, 1);
-
-                    if (v.targetId.gx !== undefined && v.targetId.gy !== undefined) {
-                        const resBeforeConsume = this.state.mapData.getResource(v.targetId.gx, v.targetId.gy);
-                        if (resBeforeConsume && resBeforeConsume.type) v.targetId._lastResType = resBeforeConsume.type;
-                        const consumed = this.state.mapData.consumeResource(v.targetId.gx, v.targetId.gy, harvestTotal);
-                        v.cargo = consumed;
-                        let targetCargoType = v.type || 'food';
-                        const res = this.state.mapData.getResource(v.targetId.gx, v.targetId.gy);
-                        if (v.targetId.gx !== undefined) {
-                            const tType = res ? res.type : v.targetId._lastResType;
-                            v.targetId._lastResType = tType;
-                            if (tType) {
-                                const typeName = ResourceSystem.getResourceTypeName(tType);
-                                const cfg = this.state.resourceConfigs.find(c => c.type === typeName);
-                                if (cfg && cfg.ingredients && Object.keys(cfg.ingredients).length > 0) {
-                                    targetCargoType = Object.keys(cfg.ingredients)[0];
-                                }
-                            }
-                        }
-                        v.cargoType = targetCargoType;
-                        this.state.renderVersion++;
-
-                        if (consumed <= 0) {
-                            v.targetId = null;
-                            v.gatherPoint = null;
-                            v.state = 'MOVING_TO_RESOURCE';
-                            v.vTint = 0xffffff;
-                        } else {
-                            v.state = 'MOVING_TO_BASE';
-                        }
-                        v.pathTarget = null;
-                        v.gatherTimer = 0;
-                    } else {
-                        const targetEnt = (typeof v.targetId === 'string') ?
-                            this.state.mapEntities.find(e => e.id === v.targetId) :
-                            (this.state.mapEntities.includes(v.targetId) ? v.targetId : null);
-
-                        if (targetEnt) {
-                            const canTake = Math.min(harvestTotal, targetEnt.amount);
-                            targetEnt.amount -= canTake;
-                            this.state.renderVersion++;
-
-                            if (targetEnt.type1 === 'corpse') {
-                                this.engine.addLog(`[戰鬥資訊] 採集屍體資源：${v.configName || '工人'} 正在採集 ${targetEnt.name || '屍體'} (獲得 ${targetEnt.resType} x${canTake})`, 'GATHER');
-                                v.cargo += canTake;
-                                v.cargoType = targetEnt.resType || 'FOOD';
-                                if (v.cargo >= 5 || targetEnt.amount <= 0) {
-                                    this.engine.addLog(`[採集完成] ${v.configName || '工人'} 已採得充足 ${v.cargoType.toUpperCase()}，正在返回基地`, 'TASK');
-                                    v.state = 'MOVING_TO_BASE';
-                                    if (targetEnt.amount <= 0) v._lastTaskWasCorpse = true;
-                                }
-                            } else {
-                                const outputType = targetEnt.type1 === 'farmland' ? 'food' : 'wood';
-                                if (!targetEnt.outputBuffer) targetEnt.outputBuffer = {};
-                                targetEnt.outputBuffer[outputType] = (targetEnt.outputBuffer[outputType] || 0) + canTake;
-                                if (window.UIManager) window.UIManager.updateValues(true);
-                                v.cargo = 0;
-                                v.cargoType = null;
-                            }
-
-                            v.gatherTimer = 0;
-                            if (targetEnt.amount <= 0) {
-                                this.engine.addLog(`${targetEnt.name || '資源點'} 已採集完畢。`, 'SYSTEM');
-                                if (targetEnt.type1 === 'corpse') {
-                                    this.state.mapEntities = this.state.mapEntities.filter(e => e !== targetEnt);
-                                    if (this.engine.updatePathfindingGrid) this.engine.updatePathfindingGrid();
-                                    this.state.renderVersion++;
-                                    v._lastTaskWasCorpse = true;
-                                } else {
-                                    targetEnt.isUnderConstruction = true;
-                                    targetEnt.buildProgress = 0;
-                                    targetEnt.name = "施工中 (" + (targetEnt.type1 === 'farmland' ? "農田" : "樹木田") + ")";
-                                    if (this.engine.updatePathfindingGrid) this.engine.updatePathfindingGrid();
-                                }
-                                v.targetId = null;
-                                v.gatherPoint = null;
-
-                                if (targetEnt.type1 !== 'corpse') {
-                                    this.restoreVillagerTask(v);
-                                } else if (v.state !== 'MOVING_TO_BASE') {
-                                    v.state = 'IDLE';
-                                }
-                            }
-                        } else {
-                            v.state = 'IDLE';
-                            v.targetId = null;
-                        }
-                    }
-                }
+                this.handleStateGathering(v, deltaTime);
                 break;
             case 'MOVING_TO_BASE':
-                if (!v.targetBase) {
-                    const nearestTC = this.state.mapEntities.find(e => e.type1 === 'town_center' || e.type1 === 'village');
-                    if (nearestTC) {
-                        v.targetBase = nearestTC;
-                        v.pathTarget = null;
-                    } else {
-                        v.state = 'IDLE'; v.pathTarget = null;
-                    }
-                    break;
-                }
-
-                const cfgB = this.engine.getBuildingConfig(v.targetBase.type1, v.targetBase.lv || 1);
-                let depositDist = 25;
-                let uw = 1, uh = 1;
-                if (cfgB && cfgB.size) {
-                    const m = cfgB.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
-                    if (m) {
-                        uw = parseInt(m[1]);
-                        uh = parseInt(m[2]);
-                    }
-                }
-
-                const baseId = v.targetBase.id || `${v.targetBase.type1}_${v.targetBase.x}_${v.targetBase.y}`;
-                if (!v.depositPoint || v._lastBaseId !== baseId) {
-                    v._lastBaseId = baseId;
-                    const pts = [];
-                    const w = uw * 20 + 20;
-                    const h = uh * 20 + 20;
-                    const bx = v.targetBase.x;
-                    const by = v.targetBase.y;
-
-                    const steps = 4;
-                    for (let i = 0; i < steps; i++) pts.push({ x: bx - w / 2 + (w / steps) * i, y: by - h / 2 });
-                    for (let i = 0; i < steps; i++) pts.push({ x: bx + w / 2, y: by - h / 2 + (h / steps) * i });
-                    for (let i = 0; i < steps; i++) pts.push({ x: bx + w / 2 - (w / steps) * i, y: by + h / 2 });
-                    for (let i = 0; i < steps; i++) pts.push({ x: bx - w / 2, y: by + h / 2 - (h / steps) * i });
-
-                    let nearestPt = { x: bx, y: by };
-                    let minDistSq = Infinity;
-                    for (const p of pts) {
-                        const dSq = (p.x - v.x) ** 2 + (p.y - v.y) ** 2;
-                        if (dSq < minDistSq) {
-                            minDistSq = dSq;
-                            nearestPt = p;
-                        }
-                    }
-
-                    if (!v.workOffset) {
-                        const idNumInv = parseInt((v.id || "0").replace(/[^0-9]/g, '')) || 0;
-                        const angleInv = (idNumInv * 137.5) * (Math.PI / 180);
-                        v.workOffset = { x: Math.cos(angleInv) * 15, y: Math.sin(angleInv) * 15 };
-                    }
-                    v.depositPoint = {
-                        x: nearestPt.x + v.workOffset.x,
-                        y: nearestPt.y + v.workOffset.y
-                    };
-                }
-
-                const distB = Math.hypot(v.depositPoint.x - v.x, v.depositPoint.y - v.y);
-                if (distB < depositDist) {
-                    const depositAmount = (v.cargoAmount || 0) > 0 ? v.cargoAmount : v.cargo;
-                    const depositType = v.cargoType || v.type;
-                    const assignedDepositTarget = (!v.manualDepositTarget && v.targetBase && !v.targetBase.gx)
-                        ? v.targetBase
-                        : null;
-                    const didDeposit = v.manualDepositTarget
-                        ? ResourceSystem.depositResourceToBuilding(this.state, this.engine, v.manualDepositTarget, depositType, depositAmount, this.engine.addLog.bind(this.engine))
-                        : assignedDepositTarget
-                            ? ResourceSystem.depositResourceToBuilding(this.state, this.engine, assignedDepositTarget, depositType, depositAmount, this.engine.addLog.bind(this.engine))
-                            : (ResourceSystem.depositResource(this.state, depositType, depositAmount, this.engine.addLog.bind(this.engine)) !== false);
-                    if (!didDeposit) {
-                        this.engine.addLog(`[存放失敗] ${v.manualDepositTarget?.name || '目標建築'} 無法存放 ${String(depositType || '').toUpperCase()}。`, 'TASK');
-                    }
-                    v.cargo = 0; v.cargoAmount = 0; v.cargoType = null; v.pathTarget = null;
-                    v.depositPoint = null; v._lastBaseId = null;
-                    v.commandCenter = null;
-                    v.vTint = 0xffffff;
-                    if (v.manualDepositTarget) {
-                        v.manualDepositTarget = null;
-                        v.manualDepositTargetId = null;
-                        v.state = 'IDLE';
-                        v.isPlayerLocked = true;
-                        this.engine.addLog(`[存入完成] ${v.configName || '工人'} 已完成手動存放，目前待命。`, 'TASK');
-                    } else if (v.nextStateAfterDeposit) {
-                        v.state = v.nextStateAfterDeposit;
-                        v.nextStateAfterDeposit = null;
-                        if (v.nextTypeAfterDeposit) { v.type = v.nextTypeAfterDeposit; v.nextTypeAfterDeposit = null; }
-                        if (v.nextTargetAfterDeposit) { v.targetId = v.nextTargetAfterDeposit; v.nextTargetAfterDeposit = null; }
-                        this.engine.addLog(`[存入完成] ${v.configName || '工人'} 任務恢復，前往資源點`, 'TASK');
-                    } else if (v.isRecalled || v._lastTaskWasCorpse) {
-                        v.state = 'IDLE';
-                        v.isRecalled = false;
-                        v.idleTarget = null;
-                        v.isPlayerLocked = v._lastTaskWasCorpse;
-                        v._lastTaskWasCorpse = false;
-                        if (v.isPlayerLocked) this.engine.addLog(`[存入完成] ${v.configName || '工人'} 已存完屍體資源，目前原地待命`, 'TASK');
-                    } else {
-                        v.state = 'MOVING_TO_RESOURCE';
-                        this.engine.addLog(`[存入完成] ${v.configName || '工人'} 已清空背包，繼續採集`, 'TASK');
-                    }
-                } else {
-                    this.moveDetailed(v, v.depositPoint.x, v.depositPoint.y, moveSpeed, deltaTime, ignoreEnts);
-                }
+                this.handleStateMovingToBase(v, deltaTime, ignoreEnts, moveSpeed);
                 break;
             case 'MOVING_TO_CONSTRUCTION':
-                if (!v.constructionTarget || !this.state.mapEntities.includes(v.constructionTarget) || !v.constructionTarget.isUnderConstruction) {
-                    v.constructionTarget = null;
-                    v.pathTarget = null;
-                    if (!this.assignNextConstructionTask(v)) {
-                        this.restoreVillagerTask(v);
-                    }
-                    return;
-                }
-
-                const idNumC = parseInt((v.id || "0").replace(/[^0-9]/g, '')) || 0;
-                const fpC = this.getFootprint(v.constructionTarget.type1);
-                const halfWC = (fpC.uw * 20) / 2;
-                const halfHC = (fpC.uh * 20) / 2;
-
-                if (!v._stableConstructionTarget || Math.hypot(v.x - (v._lastUnitPosX || 0), v.y - (v._lastUnitPosY || 0)) > 50) {
-                    const dxC = v.x - v.constructionTarget.x;
-                    const dyC = v.y - v.constructionTarget.y;
-                    let txC = v.constructionTarget.x, tyC = v.constructionTarget.y;
-
-                    if (Math.abs(dxC) > Math.abs(dyC)) {
-                        txC = dxC > 0 ? (v.constructionTarget.x + halfWC + 10) : (v.constructionTarget.x - halfWC - 10);
-                        const spreadY = (idNumC % 5 - 2) * (halfHC * 0.7);
-                        tyC = v.constructionTarget.y + spreadY;
-                    } else {
-                        tyC = dyC > 0 ? (v.constructionTarget.y + halfHC + 10) : (v.constructionTarget.y - halfHC - 10);
-                        const spreadX = (idNumC % 5 - 2) * (halfWC * 0.7);
-                        txC = v.constructionTarget.x + spreadX;
-                    }
-                    v._stableConstructionTarget = { x: txC, y: tyC };
-                    v._lastUnitPosX = v.x;
-                    v._lastUnitPosY = v.y;
-                }
-
-                const txC_pos = v._stableConstructionTarget.x;
-                const tyC_pos = v._stableConstructionTarget.y;
-
-                const distC = Math.hypot(txC_pos - v.x, tyC_pos - v.y);
-                const buildingDist = Math.hypot(v.constructionTarget.x - v.x, v.constructionTarget.y - v.y);
-                if (distC < 35 || buildingDist < (Math.max(halfWC, halfHC) + 15)) {
-                    v.state = 'CONSTRUCTING';
-                    v.pathTarget = null;
-                    v.commandCenter = null;
-                    v._stableConstructionTarget = null;
-                } else {
-                    this.moveDetailed(v, txC_pos, tyC_pos, moveSpeed, deltaTime, ignoreEnts);
-                }
+                if (this.handleStateMovingToConstruction(v, deltaTime, ignoreEnts, moveSpeed)) return;
                 break;
             case 'CONSTRUCTING':
-                if (!v.constructionTarget || !this.state.mapEntities.includes(v.constructionTarget) || !v.constructionTarget.isUnderConstruction) {
-                    v.constructionTarget = null;
-                    if (!this.assignNextConstructionTask(v)) {
-                        this.restoreVillagerTask(v);
-                    }
-                    return;
-                }
-
-                v.constructionTarget.name = "施工中";
-                v.constructionTarget.buildProgress += deltaTime;
-                const targetBuildTime = Math.max(0.1, v.constructionTarget.buildTime || 5);
-
-                if (v.constructionTarget.buildProgress >= targetBuildTime) {
-                    const finishedBuilding = v.constructionTarget;
-                    finishedBuilding.isUnderConstruction = false;
-                    this.state.renderVersion++;
-                    const type1 = finishedBuilding.type1;
-                    const bCfg = this.engine.getBuildingConfig(type1, 1);
-                    finishedBuilding.name = bCfg ? bCfg.name : type1;
-
-                    if (type1 === 'farmland' || type1 === 'tree_plantation') {
-                        finishedBuilding.resourceType = (type1 === 'farmland' ? 'FOOD' : 'WOOD');
-                        finishedBuilding.amount = bCfg ? (bCfg.resourceValue || 500) : 500;
-                    }
-
-                    if (type1 === 'farmhouse') this.state.buildings.farmhouse++;
-                    this.engine.addLog(`建造完成：${finishedBuilding.name}。`);
-
-                    if (this.engine.updatePathfindingGrid) this.engine.updatePathfindingGrid();
-
-                    const allUnitsForUnstuck = [...this.state.units.villagers, ...(this.state.units.npcs || [])];
-                    allUnitsForUnstuck.forEach(vi => {
-                        const ignore = [vi.targetId, vi.targetBase].filter(Boolean);
-                        if (this.isColliding(vi.x, vi.y, ignore) === finishedBuilding) {
-                            this.resolveStuck(vi);
-                        }
-                    });
-
-                    if (['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(type1)) {
-                        v.assignedWarehouseId = (finishedBuilding.id || `${finishedBuilding.type1}_${finishedBuilding.x}_${finishedBuilding.y}`);
-                        v.type = (type1 === 'timber_factory' ? 'WOOD' : (type1 === 'stone_factory' ? 'STONE' : (type1 === 'barn' ? 'FOOD' : 'GOLD')));
-                        v.state = 'MOVING_TO_RESOURCE';
-                        v.targetId = null; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
-                        this.engine.addLog(`建造者已自動轉為 ${finishedBuilding.name} 的專職員工。`);
-                    } else if (type1 === 'farmland' || type1 === 'tree_plantation') {
-                        v.assignedWarehouseId = (finishedBuilding.id || `${finishedBuilding.type1}_${finishedBuilding.x}_${finishedBuilding.y}`);
-                        v.type = (type1 === 'farmland' ? 'FOOD' : 'WOOD');
-                        v.state = 'MOVING_TO_RESOURCE'; v.targetId = finishedBuilding; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
-                        v.workOffset = { x: (Math.random() - 0.5) * 50, y: (Math.random() - 0.5) * 50 };
-                        this.engine.addLog(`建造者前往${type1 === 'farmland' ? '農田' : '樹木田'}內部開始工作。`);
-                    } else {
-                        if (!this.assignNextConstructionTask(v)) {
-                            this.restoreVillagerTask(v);
-                            v.constructionTarget = null;
-                            if (v.state === 'IDLE') {
-                                const angle = Math.random() * Math.PI * 2;
-                                const dist = 30 + Math.random() * 40;
-                                v.idleTarget = {
-                                    x: v.x + Math.cos(angle) * dist,
-                                    y: v.y + Math.sin(angle) * dist
-                                };
-                            }
-                            this.engine.addLog(`建造清單已清空，工人們嘗試散開並待命。`);
-                        }
-                    }
-                }
+                if (this.handleStateConstructing(v, deltaTime, ignoreEnts, moveSpeed)) return;
                 break;
         }
 
@@ -712,6 +267,483 @@ export class WorkerSystem {
 
         // 已移除冗餘的 MOVING_TO_BASE 邏輯，相關功能已整合至 switch 狀態機中。
     }
+
+    // ── [階段二重構] 狀態機 helper：原 switch(v.state) 各 case 邏輯原封不動搬移 ──
+    // 約定：handler 回傳 true 代表「需提前結束 updateVillagerMovement（跳過後置碰撞處理）」，
+    // 對應原本 case 內的 `return;`；其餘原本的 `break;` 一律改為 `return;`（離開 handler 後續跑後置處理）。
+    handleStateMovingToFactory(v, deltaTime, ignoreEnts, moveSpeed) {
+        if (!v.factoryTarget) { v.state = 'IDLE'; return; }
+        const factoryIgnoreEnts = [...ignoreEnts, v.factoryTarget];
+
+        // [核心優化] 派駐位置放寬：判定是否碰到建築模型範圍
+        const fp = this.engine.getFootprint(v.factoryTarget.type1);
+        const halfW = (fp.uw * 20) / 2;
+        const halfH = (fp.uh * 20) / 2;
+
+        // [調試] 檢查抵達距離與判定
+        const dist = Math.hypot(v.x - v.factoryTarget.x, v.y - v.factoryTarget.y);
+        const isTouching =
+            v.x >= v.factoryTarget.x - halfW - 40 &&
+            v.x <= v.factoryTarget.x + halfW + 40 &&
+            v.y >= v.factoryTarget.y - halfH - 40 &&
+            v.y <= v.factoryTarget.y + halfH + 40;
+
+        if (isTouching) {
+            console.log(`[物流調試] 工人 ${v.id} 判定抵達 ${v.factoryTarget.type1}。距離: ${dist.toFixed(1)}`);
+            const targetBuilding = v.factoryTarget;
+            const entered = this.tryEnterLogisticsBuilding(v, targetBuilding, 'target');
+
+            if (entered) {
+                if (this.state.selectedUnitIds) {
+                    this.state.selectedUnitIds = this.state.selectedUnitIds.filter(id => id !== v.id);
+                }
+            } else {
+                v.assignedWarehouseId = null;
+                v.factoryTarget = null;
+                v.state = 'IDLE';
+                v.pathTarget = null;
+                v.fullPath = null;
+                v.commandCenter = null;
+                v.visible = true;
+                if (v.sprite && typeof v.sprite.setVisible === 'function') v.sprite.setVisible(true);
+                if (v.gameObject && typeof v.gameObject.setVisible === 'function') v.gameObject.setVisible(true);
+
+                const scatterAngle = Math.random() * Math.PI * 2;
+                const scatterDist = 30 + Math.random() * 50;
+                v.idleTarget = {
+                    x: v.x + Math.cos(scatterAngle) * scatterDist,
+                    y: v.y + Math.sin(scatterAngle) * scatterDist
+                };
+
+                this.engine.addLog(`[物流] ${targetBuilding.name || targetBuilding.type1} 目前沒有可用派駐空位，${v.configName || '工人'} 在門口待命。`, 'LOGISTICS');
+            }
+        } else {
+            const approach = this.getBuildingApproachPoint(v, v.factoryTarget, 30);
+            this.moveDetailed(v, approach.x, approach.y, moveSpeed, deltaTime, factoryIgnoreEnts);
+        }
+    }
+
+    handleStateIdle(v, deltaTime, ignoreEnts, moveSpeed) {
+        if (v.vTint !== 0xffffff) v.vTint = 0xffffff;
+        if (v.idleTarget) {
+            this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, deltaTime, ignoreEnts);
+            if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 10) {
+                v.idleTarget = null;
+                v.commandCenter = null;
+                v.isPlayerLocked = false;
+                v._isRallyMovement = false;
+                v.rallySourceBuildingId = null;
+                v.waitTimer = 1 + Math.random() * 2;
+                v.pathTarget = null;
+                v.fullPath = null;
+                v.pathIndex = 0;
+            }
+        }
+    }
+
+    handleStateMovingToResource(v, deltaTime, ignoreEnts, moveSpeed) {
+        let searchX = v.x, searchY = v.y;
+        if (v.assignedWarehouseId) {
+            const w = this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.assignedWarehouseId);
+            if (w) { searchX = w.x; searchY = w.y; }
+        }
+
+        let target = v.targetId;
+        const isEntityResource = target && (target.type1 === 'farmland' || target.type1 === 'tree_plantation');
+
+        if (!target || (target.gx === undefined && !isEntityResource)) {
+            if (typeof target === 'string') {
+                const ent = this.state.mapEntities.find(e => e.id === target);
+                if (ent) target = ent;
+                else target = ResourceSystem.findNearestResource(this.state, 20, searchX, searchY, v.type, v.id);
+            } else {
+                target = ResourceSystem.findNearestResource(this.state, 20, searchX, searchY, v.type, v.id);
+            }
+        } else if (target.gx !== undefined) {
+            const res = this.state.mapData.getResource(target.gx, target.gy);
+            if (!res || res.amount <= 0) target = ResourceSystem.findNearestResource(this.state, 20, searchX, searchY, v.type, v.id);
+        } else if (isEntityResource) {
+            if (target.amount <= 0) target = ResourceSystem.findNearestResource(this.state, 20, searchX, searchY, v.type, v.id);
+        }
+
+        if (target) {
+            if (!ignoreEnts.includes(target)) ignoreEnts.push(target);
+            if (!v.gatherPoint || v._lastTargetId !== (target.id || `${target.gx}_${target.gy}`)) {
+                v._lastTargetId = (target.id || `${target.gx}_${target.gy}`);
+                this.engine.addLog(`[尋路更新] ${v.configName || '工人'} 定位目標資源...`, 'PATH');
+
+                if (target.type1 === 'farmland' || target.type1 === 'tree_plantation') {
+                    v.gatherPoint = {
+                        x: target.x + (Math.random() - 0.5) * 50,
+                        y: target.y + (Math.random() - 0.5) * 50
+                    };
+                } else {
+                    let rRadius = 25;
+                    const rCfg = this.state.resourceConfigs.find(c => c.type === (target.resourceType || target.type1));
+                    if (rCfg && rCfg.pixel_size) {
+                        rRadius = (Math.max(rCfg.pixel_size.w, rCfg.pixel_size.h) / 2) + 15;
+                    }
+                    let baseAngle = Math.atan2(v.y - target.y, v.x - target.x);
+                    baseAngle += (Math.random() - 0.5) * 2.8;
+                    v.gatherPoint = {
+                        x: target.x + Math.cos(baseAngle) * rRadius,
+                        y: target.y + Math.sin(baseAngle) * rRadius
+                    };
+                }
+            }
+
+            const distToGather = Math.hypot(v.gatherPoint.x - v.x, v.gatherPoint.y - v.y);
+            if (distToGather < 15) {
+                if (v.cargo > 0) {
+                    v.nextStateAfterDeposit = 'MOVING_TO_RESOURCE';
+                    v.nextTargetAfterDeposit = target;
+                    v.nextTypeAfterDeposit = v.type;
+                    v.state = 'MOVING_TO_BASE';
+                    v.pathTarget = null;
+                    v.gatherPoint = null;
+                } else {
+                    this.engine.addLog(`[任務啟動] ${v.configName || '工人'} 已抵達資源點並開始採集 ${target.name || target.type1}`, 'TASK');
+                    v.state = 'GATHERING'; v.targetId = target; v.gatherTimer = 0; v.pathTarget = null;
+                    v.commandCenter = null;
+                    v.gatherPoint = null;
+                }
+            } else {
+                if (!v._lastLogPath || v._lastLogPath !== (target.id || 'target')) {
+                    this.engine.addLog(`[尋路目標] ${v.configName || '工人'} 正在前往目標 (${Math.round(v.gatherPoint.x)}, ${Math.round(v.gatherPoint.y)})`, 'PATH');
+                    v._lastLogPath = (target.id || 'target');
+                }
+                this.moveDetailed(v, v.gatherPoint.x, v.gatherPoint.y, moveSpeed, deltaTime, ignoreEnts);
+            }
+        } else { v.state = 'IDLE'; v.pathTarget = null; v.gatherPoint = null; v.workOffset = null; v.vTint = 0xffffff; }
+    }
+
+    handleStateGathering(v, deltaTime) {
+        v.gatherTimer += deltaTime;
+        const harvestTime = this.getGatheringProductionTime(v);
+        if (!v.targetId) {
+            v.state = 'IDLE';
+            v.pathTarget = null;
+            v.isPlayerLocked = false;
+            return;
+        }
+
+        if (v.gatherTimer >= harvestTime) {
+            const harvestTotal = this.getWorkerCollectionAmount(v, 1);
+
+            if (v.targetId.gx !== undefined && v.targetId.gy !== undefined) {
+                const resBeforeConsume = this.state.mapData.getResource(v.targetId.gx, v.targetId.gy);
+                if (resBeforeConsume && resBeforeConsume.type) v.targetId._lastResType = resBeforeConsume.type;
+                const consumed = this.state.mapData.consumeResource(v.targetId.gx, v.targetId.gy, harvestTotal);
+                v.cargo = consumed;
+                let targetCargoType = v.type || 'food';
+                const res = this.state.mapData.getResource(v.targetId.gx, v.targetId.gy);
+                if (v.targetId.gx !== undefined) {
+                    const tType = res ? res.type : v.targetId._lastResType;
+                    v.targetId._lastResType = tType;
+                    if (tType) {
+                        const typeName = ResourceSystem.getResourceTypeName(tType);
+                        const cfg = this.state.resourceConfigs.find(c => c.type === typeName);
+                        if (cfg && cfg.ingredients && Object.keys(cfg.ingredients).length > 0) {
+                            targetCargoType = Object.keys(cfg.ingredients)[0];
+                        }
+                    }
+                }
+                v.cargoType = targetCargoType;
+                this.state.renderVersion++;
+
+                if (consumed <= 0) {
+                    v.targetId = null;
+                    v.gatherPoint = null;
+                    v.state = 'MOVING_TO_RESOURCE';
+                    v.vTint = 0xffffff;
+                } else {
+                    v.state = 'MOVING_TO_BASE';
+                }
+                v.pathTarget = null;
+                v.gatherTimer = 0;
+            } else {
+                const targetEnt = (typeof v.targetId === 'string') ?
+                    this.state.mapEntities.find(e => e.id === v.targetId) :
+                    (this.state.mapEntities.includes(v.targetId) ? v.targetId : null);
+
+                if (targetEnt) {
+                    const canTake = Math.min(harvestTotal, targetEnt.amount);
+                    targetEnt.amount -= canTake;
+                    this.state.renderVersion++;
+
+                    if (targetEnt.type1 === 'corpse') {
+                        this.engine.addLog(`[戰鬥資訊] 採集屍體資源：${v.configName || '工人'} 正在採集 ${targetEnt.name || '屍體'} (獲得 ${targetEnt.resType} x${canTake})`, 'GATHER');
+                        v.cargo += canTake;
+                        v.cargoType = targetEnt.resType || 'FOOD';
+                        if (v.cargo >= 5 || targetEnt.amount <= 0) {
+                            this.engine.addLog(`[採集完成] ${v.configName || '工人'} 已採得充足 ${v.cargoType.toUpperCase()}，正在返回基地`, 'TASK');
+                            v.state = 'MOVING_TO_BASE';
+                            if (targetEnt.amount <= 0) v._lastTaskWasCorpse = true;
+                        }
+                    } else {
+                        const outputType = targetEnt.type1 === 'farmland' ? 'food' : 'wood';
+                        if (!targetEnt.outputBuffer) targetEnt.outputBuffer = {};
+                        targetEnt.outputBuffer[outputType] = (targetEnt.outputBuffer[outputType] || 0) + canTake;
+                        if (window.UIManager) window.UIManager.updateValues(true);
+                        v.cargo = 0;
+                        v.cargoType = null;
+                    }
+
+                    v.gatherTimer = 0;
+                    if (targetEnt.amount <= 0) {
+                        this.engine.addLog(`${targetEnt.name || '資源點'} 已採集完畢。`, 'SYSTEM');
+                        if (targetEnt.type1 === 'corpse') {
+                            this.state.mapEntities = this.state.mapEntities.filter(e => e !== targetEnt);
+                            if (this.engine.updatePathfindingGrid) this.engine.updatePathfindingGrid();
+                            this.state.renderVersion++;
+                            v._lastTaskWasCorpse = true;
+                        } else {
+                            targetEnt.isUnderConstruction = true;
+                            targetEnt.buildProgress = 0;
+                            targetEnt.name = "施工中 (" + (targetEnt.type1 === 'farmland' ? "農田" : "樹木田") + ")";
+                            if (this.engine.updatePathfindingGrid) this.engine.updatePathfindingGrid();
+                        }
+                        v.targetId = null;
+                        v.gatherPoint = null;
+
+                        if (targetEnt.type1 !== 'corpse') {
+                            this.restoreVillagerTask(v);
+                        } else if (v.state !== 'MOVING_TO_BASE') {
+                            v.state = 'IDLE';
+                        }
+                    }
+                } else {
+                    v.state = 'IDLE';
+                    v.targetId = null;
+                }
+            }
+        }
+    }
+
+    handleStateMovingToBase(v, deltaTime, ignoreEnts, moveSpeed) {
+        if (!v.targetBase) {
+            const nearestTC = this.state.mapEntities.find(e => e.type1 === 'town_center' || e.type1 === 'village');
+            if (nearestTC) {
+                v.targetBase = nearestTC;
+                v.pathTarget = null;
+            } else {
+                v.state = 'IDLE'; v.pathTarget = null;
+            }
+            return;
+        }
+
+        const cfgB = this.engine.getBuildingConfig(v.targetBase.type1, v.targetBase.lv || 1);
+        let depositDist = 25;
+        let uw = 1, uh = 1;
+        if (cfgB && cfgB.size) {
+            const m = cfgB.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/);
+            if (m) {
+                uw = parseInt(m[1]);
+                uh = parseInt(m[2]);
+            }
+        }
+
+        const baseId = v.targetBase.id || `${v.targetBase.type1}_${v.targetBase.x}_${v.targetBase.y}`;
+        if (!v.depositPoint || v._lastBaseId !== baseId) {
+            v._lastBaseId = baseId;
+            const pts = [];
+            const w = uw * 20 + 20;
+            const h = uh * 20 + 20;
+            const bx = v.targetBase.x;
+            const by = v.targetBase.y;
+
+            const steps = 4;
+            for (let i = 0; i < steps; i++) pts.push({ x: bx - w / 2 + (w / steps) * i, y: by - h / 2 });
+            for (let i = 0; i < steps; i++) pts.push({ x: bx + w / 2, y: by - h / 2 + (h / steps) * i });
+            for (let i = 0; i < steps; i++) pts.push({ x: bx + w / 2 - (w / steps) * i, y: by + h / 2 });
+            for (let i = 0; i < steps; i++) pts.push({ x: bx - w / 2, y: by + h / 2 - (h / steps) * i });
+
+            let nearestPt = { x: bx, y: by };
+            let minDistSq = Infinity;
+            for (const p of pts) {
+                const dSq = (p.x - v.x) ** 2 + (p.y - v.y) ** 2;
+                if (dSq < minDistSq) {
+                    minDistSq = dSq;
+                    nearestPt = p;
+                }
+            }
+
+            if (!v.workOffset) {
+                const idNumInv = parseInt((v.id || "0").replace(/[^0-9]/g, '')) || 0;
+                const angleInv = (idNumInv * 137.5) * (Math.PI / 180);
+                v.workOffset = { x: Math.cos(angleInv) * 15, y: Math.sin(angleInv) * 15 };
+            }
+            v.depositPoint = {
+                x: nearestPt.x + v.workOffset.x,
+                y: nearestPt.y + v.workOffset.y
+            };
+        }
+
+        const distB = Math.hypot(v.depositPoint.x - v.x, v.depositPoint.y - v.y);
+        if (distB < depositDist) {
+            const depositAmount = (v.cargoAmount || 0) > 0 ? v.cargoAmount : v.cargo;
+            const depositType = v.cargoType || v.type;
+            const assignedDepositTarget = (!v.manualDepositTarget && v.targetBase && !v.targetBase.gx)
+                ? v.targetBase
+                : null;
+            const didDeposit = v.manualDepositTarget
+                ? ResourceSystem.depositResourceToBuilding(this.state, this.engine, v.manualDepositTarget, depositType, depositAmount, this.engine.addLog.bind(this.engine))
+                : assignedDepositTarget
+                    ? ResourceSystem.depositResourceToBuilding(this.state, this.engine, assignedDepositTarget, depositType, depositAmount, this.engine.addLog.bind(this.engine))
+                    : (ResourceSystem.depositResource(this.state, depositType, depositAmount, this.engine.addLog.bind(this.engine)) !== false);
+            if (!didDeposit) {
+                this.engine.addLog(`[存放失敗] ${v.manualDepositTarget?.name || '目標建築'} 無法存放 ${String(depositType || '').toUpperCase()}。`, 'TASK');
+            }
+            v.cargo = 0; v.cargoAmount = 0; v.cargoType = null; v.pathTarget = null;
+            v.depositPoint = null; v._lastBaseId = null;
+            v.commandCenter = null;
+            v.vTint = 0xffffff;
+            if (v.manualDepositTarget) {
+                v.manualDepositTarget = null;
+                v.manualDepositTargetId = null;
+                v.state = 'IDLE';
+                v.isPlayerLocked = true;
+                this.engine.addLog(`[存入完成] ${v.configName || '工人'} 已完成手動存放，目前待命。`, 'TASK');
+            } else if (v.nextStateAfterDeposit) {
+                v.state = v.nextStateAfterDeposit;
+                v.nextStateAfterDeposit = null;
+                if (v.nextTypeAfterDeposit) { v.type = v.nextTypeAfterDeposit; v.nextTypeAfterDeposit = null; }
+                if (v.nextTargetAfterDeposit) { v.targetId = v.nextTargetAfterDeposit; v.nextTargetAfterDeposit = null; }
+                this.engine.addLog(`[存入完成] ${v.configName || '工人'} 任務恢復，前往資源點`, 'TASK');
+            } else if (v.isRecalled || v._lastTaskWasCorpse) {
+                v.state = 'IDLE';
+                v.isRecalled = false;
+                v.idleTarget = null;
+                v.isPlayerLocked = v._lastTaskWasCorpse;
+                v._lastTaskWasCorpse = false;
+                if (v.isPlayerLocked) this.engine.addLog(`[存入完成] ${v.configName || '工人'} 已存完屍體資源，目前原地待命`, 'TASK');
+            } else {
+                v.state = 'MOVING_TO_RESOURCE';
+                this.engine.addLog(`[存入完成] ${v.configName || '工人'} 已清空背包，繼續採集`, 'TASK');
+            }
+        } else {
+            this.moveDetailed(v, v.depositPoint.x, v.depositPoint.y, moveSpeed, deltaTime, ignoreEnts);
+        }
+    }
+
+    handleStateMovingToConstruction(v, deltaTime, ignoreEnts, moveSpeed) {
+        if (!v.constructionTarget || !this.state.mapEntities.includes(v.constructionTarget) || !v.constructionTarget.isUnderConstruction) {
+            v.constructionTarget = null;
+            v.pathTarget = null;
+            if (!this.assignNextConstructionTask(v)) {
+                this.restoreVillagerTask(v);
+            }
+            return true;
+        }
+
+        const idNumC = parseInt((v.id || "0").replace(/[^0-9]/g, '')) || 0;
+        const fpC = this.getFootprint(v.constructionTarget.type1);
+        const halfWC = (fpC.uw * 20) / 2;
+        const halfHC = (fpC.uh * 20) / 2;
+
+        if (!v._stableConstructionTarget || Math.hypot(v.x - (v._lastUnitPosX || 0), v.y - (v._lastUnitPosY || 0)) > 50) {
+            const dxC = v.x - v.constructionTarget.x;
+            const dyC = v.y - v.constructionTarget.y;
+            let txC = v.constructionTarget.x, tyC = v.constructionTarget.y;
+
+            if (Math.abs(dxC) > Math.abs(dyC)) {
+                txC = dxC > 0 ? (v.constructionTarget.x + halfWC + 10) : (v.constructionTarget.x - halfWC - 10);
+                const spreadY = (idNumC % 5 - 2) * (halfHC * 0.7);
+                tyC = v.constructionTarget.y + spreadY;
+            } else {
+                tyC = dyC > 0 ? (v.constructionTarget.y + halfHC + 10) : (v.constructionTarget.y - halfHC - 10);
+                const spreadX = (idNumC % 5 - 2) * (halfWC * 0.7);
+                txC = v.constructionTarget.x + spreadX;
+            }
+            v._stableConstructionTarget = { x: txC, y: tyC };
+            v._lastUnitPosX = v.x;
+            v._lastUnitPosY = v.y;
+        }
+
+        const txC_pos = v._stableConstructionTarget.x;
+        const tyC_pos = v._stableConstructionTarget.y;
+
+        const distC = Math.hypot(txC_pos - v.x, tyC_pos - v.y);
+        const buildingDist = Math.hypot(v.constructionTarget.x - v.x, v.constructionTarget.y - v.y);
+        if (distC < 35 || buildingDist < (Math.max(halfWC, halfHC) + 15)) {
+            v.state = 'CONSTRUCTING';
+            v.pathTarget = null;
+            v.commandCenter = null;
+            v._stableConstructionTarget = null;
+        } else {
+            this.moveDetailed(v, txC_pos, tyC_pos, moveSpeed, deltaTime, ignoreEnts);
+        }
+    }
+
+    handleStateConstructing(v, deltaTime, ignoreEnts, moveSpeed) {
+        if (!v.constructionTarget || !this.state.mapEntities.includes(v.constructionTarget) || !v.constructionTarget.isUnderConstruction) {
+            v.constructionTarget = null;
+            if (!this.assignNextConstructionTask(v)) {
+                this.restoreVillagerTask(v);
+            }
+            return true;
+        }
+
+        v.constructionTarget.name = "施工中";
+        v.constructionTarget.buildProgress += deltaTime;
+        const targetBuildTime = Math.max(0.1, v.constructionTarget.buildTime || 5);
+
+        if (v.constructionTarget.buildProgress >= targetBuildTime) {
+            const finishedBuilding = v.constructionTarget;
+            finishedBuilding.isUnderConstruction = false;
+            this.state.renderVersion++;
+            const type1 = finishedBuilding.type1;
+            const bCfg = this.engine.getBuildingConfig(type1, 1);
+            finishedBuilding.name = bCfg ? bCfg.name : type1;
+
+            if (type1 === 'farmland' || type1 === 'tree_plantation') {
+                finishedBuilding.resourceType = (type1 === 'farmland' ? 'FOOD' : 'WOOD');
+                finishedBuilding.amount = bCfg ? (bCfg.resourceValue || 500) : 500;
+            }
+
+            if (type1 === 'farmhouse') this.state.buildings.farmhouse++;
+            this.engine.addLog(`建造完成：${finishedBuilding.name}。`);
+
+            if (this.engine.updatePathfindingGrid) this.engine.updatePathfindingGrid();
+
+            const allUnitsForUnstuck = [...this.state.units.villagers, ...(this.state.units.npcs || [])];
+            allUnitsForUnstuck.forEach(vi => {
+                const ignore = [vi.targetId, vi.targetBase].filter(Boolean);
+                if (this.isColliding(vi.x, vi.y, ignore) === finishedBuilding) {
+                    this.resolveStuck(vi);
+                }
+            });
+
+            if (['timber_factory', 'stone_factory', 'barn', 'gold_mining_factory'].includes(type1)) {
+                v.assignedWarehouseId = (finishedBuilding.id || `${finishedBuilding.type1}_${finishedBuilding.x}_${finishedBuilding.y}`);
+                v.type = (type1 === 'timber_factory' ? 'WOOD' : (type1 === 'stone_factory' ? 'STONE' : (type1 === 'barn' ? 'FOOD' : 'GOLD')));
+                v.state = 'MOVING_TO_RESOURCE';
+                v.targetId = null; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
+                this.engine.addLog(`建造者已自動轉為 ${finishedBuilding.name} 的專職員工。`);
+            } else if (type1 === 'farmland' || type1 === 'tree_plantation') {
+                v.assignedWarehouseId = (finishedBuilding.id || `${finishedBuilding.type1}_${finishedBuilding.x}_${finishedBuilding.y}`);
+                v.type = (type1 === 'farmland' ? 'FOOD' : 'WOOD');
+                v.state = 'MOVING_TO_RESOURCE'; v.targetId = finishedBuilding; v.gatherTimer = 0; v.pathTarget = null; v.prevTask = null; v.constructionTarget = null;
+                v.workOffset = { x: (Math.random() - 0.5) * 50, y: (Math.random() - 0.5) * 50 };
+                this.engine.addLog(`建造者前往${type1 === 'farmland' ? '農田' : '樹木田'}內部開始工作。`);
+            } else {
+                if (!this.assignNextConstructionTask(v)) {
+                    this.restoreVillagerTask(v);
+                    v.constructionTarget = null;
+                    if (v.state === 'IDLE') {
+                        const angle = Math.random() * Math.PI * 2;
+                        const dist = 30 + Math.random() * 40;
+                        v.idleTarget = {
+                            x: v.x + Math.cos(angle) * dist,
+                            y: v.y + Math.sin(angle) * dist
+                        };
+                    }
+                    this.engine.addLog(`建造清單已清空，工人們嘗試散開並待命。`);
+                }
+            }
+        }
+    }
+
 
     handleManualDepositCommand(v, clickedTarget) {
         if (!v || !clickedTarget || !v.config || v.config.type !== 'villagers') return false;
