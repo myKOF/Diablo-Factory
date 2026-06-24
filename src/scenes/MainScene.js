@@ -888,10 +888,7 @@ export class MainScene extends Phaser.Scene {
         if (hasStaticContent) {
             if (this._lastLogisticsRenderSignature !== signature) {
                 LogisticsRenderer.render(this.logisticsGraphics, state, this, { drawTransfers: false, drawBuildPreview: false });
-                if (this.logisticsPortGraphics && typeof LogisticsRenderer.renderSourcePortCells === 'function') {
-                    LogisticsRenderer.renderSourcePortCells(this.logisticsPortGraphics, state, this);
-                    this._logisticsPortLayerWasDrawn = true;
-                }
+                if (this.logisticsPortGraphics) this.logisticsPortGraphics.clear();
                 this._lastLogisticsRenderSignature = signature;
                 this._logisticsLayerWasDrawn = true;
             }

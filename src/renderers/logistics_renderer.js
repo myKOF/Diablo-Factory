@@ -1624,95 +1624,9 @@ export class LogisticsRenderer {
     }
 
     static renderSourcePortCells(graphics, state, scene) {
-        if (!graphics) return;
-        graphics.clear();
-        const logCfg = UI_CONFIG.LogisticsSystem || {};
-        const parseColor = (c) => scene.hexOrRgba(c).color;
-        const fillColor = parseColor(logCfg.sourcePortCellColor || "#00ff44ff");
-        const strokeColor = parseColor(logCfg.sourcePortCellStrokeColor || "#ffff00ff");
-        const alpha = logCfg.sourcePortCellAlpha ?? 0.85;
-        const strokeAlpha = logCfg.sourcePortCellStrokeAlpha ?? 1;
-        const TS = GameEngine.TILE_SIZE || 20;
-        const drawn = new Set();
-        const drawRect = (rect, fill, stroke, fillA, strokeA) => {
-            graphics.fillStyle(fill, fillA);
-            graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
-            graphics.lineStyle(Math.max(2, Math.round(TS * 0.12)), stroke, strokeA);
-            graphics.strokeRect(rect.x, rect.y, rect.w, rect.h);
-        };
-        const drawBaseBuildingPorts = () => {
-            if (!window.UIManager) return;
-            const baseFill = 0xffeb3b;
-            const baseStroke = 0xf57f17;
-            (state.mapEntities || []).forEach(ent => {
-                if (!window.UIManager.canShowLogisticsPorts?.(ent)) return;
-                if (!window.UIManager.isSelectedBuilding?.(ent)) return;
-                const entityId = window.UIManager.getEntityId?.(ent) || `${ent.type1}_${ent.x}_${ent.y}`;
-                const slots = window.UIManager.getBuildingPortSlots?.(ent) || [];
-                slots.forEach(slot => {
-                    const rect = window.UIManager.getPortSlotRect?.(slot);
-                    if (!rect) return;
-                    const key = `${entityId}:${slot.defIndex}:${slot.slotIndex}:${slot.dir}:${Math.round(slot.x)},${Math.round(slot.y)}:base`;
-                    if (drawn.has(key)) return;
-                    drawn.add(key);
-                    drawRect(rect, baseFill, baseStroke, 0.95, 1);
-                });
-            });
-        };
-        const getPortCellInfo = (line, port) => {
-            if (!line || !port || !Number.isFinite(port.x) || !Number.isFinite(port.y)) return null;
-            const points = Array.isArray(line.routePoints) ? line.routePoints : [];
-            if (points.length < 2) return null;
-            const endpoints = [
-                { point: points[0], neighbor: points[1] },
-                { point: points[points.length - 1], neighbor: points[points.length - 2] }
-            ].filter(item => item.point && item.neighbor);
-            let portCell = null;
-            let bestDist = Infinity;
-            endpoints.forEach(item => {
-                const dist = Math.hypot(item.point.x - port.x, item.point.y - port.y);
-                if (dist <= TS * 1.1 && dist < bestDist) {
-                    bestDist = dist;
-                    portCell = item;
-                }
-            });
-            if (!portCell) return null;
-            const width = Math.max(1, Math.round(Number(line.routeWidth) || 1));
-            const rect = {
-                x: portCell.point.x - (TS * width) / 2,
-                y: portCell.point.y - TS / 2,
-                w: TS * width,
-                h: TS
-            };
-            const next = portCell.neighbor;
-            const horizontal = Math.abs((next?.x || portCell.point.x) - portCell.point.x) >= Math.abs((next?.y || portCell.point.y) - portCell.point.y);
-            if (!horizontal) {
-                rect.x = portCell.point.x - TS / 2;
-                rect.y = portCell.point.y - (TS * width) / 2;
-                rect.w = TS;
-                rect.h = TS * width;
-            }
-            return {
-                point: { x: portCell.point.x, y: portCell.point.y },
-                rect
-            };
-        };
-        const drawInfo = (info, line, role) => {
-            if (!info) return;
-            const key = `${Math.round(info.point.x)},${Math.round(info.point.y)}:${line.groupId || line.id}:${role}`;
-            if (drawn.has(key)) return;
-            drawn.add(key);
-            const rect = info.rect;
-            drawRect(rect, fillColor, strokeColor, alpha, strokeAlpha);
-        };
-
-        drawBaseBuildingPorts();
-        (state.logisticsLines || []).forEach(line => {
-            drawInfo(conveyorSystem?.getLogisticsSourcePortCellInfo?.(line), line, 'source');
-            const conn = conveyorSystem?.getLogisticsSourcePortConnection?.(line)?.conn || null;
-            const targetPort = line?.targetPort || conn?.targetPort || null;
-            drawInfo(getPortCellInfo(line, targetPort), line, 'target');
-        });
+        // [核心修復] 廢棄靜態快取渲染。
+        // 所有端口顯示邏輯已回歸 MainScene.js 的 renderBuildingPortCells 動態處理，
+        // 確保「只有選中該建築時才顯示端口」，避免全域常駐污染。
     }
 
     static renderBuildingPortCells(graphics, entities, scene) {
