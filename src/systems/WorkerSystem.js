@@ -4,6 +4,13 @@ import { SynthesisSystem } from "./SynthesisSystem.js";
 import { BattleSystem } from "./BattleSystem.js";
 import { LogisticsTransferSystem } from "./logistics/LogisticsTransferSystem.js";
 
+// [階段四] 基礎座標單位（與 GameEngine.TILE_SIZE 保持一致），供本檔內部共用，取代散落的寫死 20。
+const TILE_SIZE = 20;
+
+// [階段四] 兩點歐氏距離工具，取代重複出現的 Math.hypot(a.x - b.x, a.y - b.y)。
+function getDistance(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+}
 
 
 /**
@@ -17,6 +24,9 @@ export class WorkerSystem {
         this.engine = engineContext;
         // [階段一重構] 物流運輸職責已抽離至 LogisticsTransferSystem，WorkerSystem 僅保留工人行為。
         this.logisticsSystem = new LogisticsTransferSystem(state, engineContext);
+
+        // [階段三優化] 每幀重建的 id→entity 對照表，供 getEntityById 做 O(1) 查找。
+        this._entityMap = null;
 
         // 工廠類型定義
         this.FACTORY_TYPES = ['timber_processing_plant', 'smelting_plant', 'tank_workshop', 'stone_processing_plant'];
@@ -40,6 +50,8 @@ export class WorkerSystem {
      * 更新所有工人的狀態與移動
      */
     update(dt) {
+        // [階段三優化] 於每幀開頭建立 id→entity 對照表，供本幀所有 getEntityById 做 O(1) 查找。
+        this._entityMap = this.buildEntityMap();
         // [階段一重構] 輸送帶推進與自動物流改由物流系統統一驅動。
         this.logisticsSystem.update(dt);
         const selectedIds = new Set(this.state.selectedUnitIds || []);
@@ -75,9 +87,31 @@ export class WorkerSystem {
         return this.logisticsSystem.processAutomatedLogistics(state, dt);
     }
 
-    updateVillagerMovement(v, deltaTime) {
-        const TILE_SIZE = 20; // 基礎座標單位 (與 GameEngine.TILE_SIZE 保持一致)
+    /**
+     * [階段三優化] 重建 id→entity 對照表（以 canonical key 為鍵，first-wins 與 find 行為一致）。
+     */
+    buildEntityMap() {
+        const map = new Map();
+        const ents = this.state.mapEntities || [];
+        for (const e of ents) {
+            const key = e.id || `${e.type1}_${e.x}_${e.y}`;
+            if (!map.has(key)) map.set(key, e);
+        }
+        return map;
+    }
 
+    /**
+     * [階段三優化] 以 O(1) 取得實體；對照表未建立或本幀後新增的實體則退回線性查找，
+     * 維持與原 `mapEntities.find(e => (e.id || ...) === id)` 完全一致的回傳。
+     */
+    getEntityById(id) {
+        if (!id) return undefined;
+        const hit = this._entityMap && this._entityMap.get(id);
+        if (hit) return hit;
+        return (this.state.mapEntities || []).find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === id);
+    }
+
+    updateVillagerMovement(v, deltaTime) {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
         if (v.config.type !== 'villagers') {
             const oldX = v.x, oldY = v.y;
@@ -87,7 +121,7 @@ export class WorkerSystem {
             if (v.idleTarget) {
                 if (v.state !== 'CHASE' && v.state !== 'ATTACK' && v.state !== 'GATHERING') v.state = 'MOVING';
                 this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, deltaTime);
-                if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 5) {
+                if (getDistance(v, v.idleTarget) < 5) {
                     v.idleTarget = null;
                     v.commandCenter = null;
                     if (v.state === 'MOVING') v.state = 'IDLE';
@@ -144,7 +178,7 @@ export class WorkerSystem {
         }
 
         if (v.assignedWarehouseId) {
-            const w = this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.assignedWarehouseId);
+            const w = this.getEntityById(v.assignedWarehouseId);
             if (w && !w.isUnderConstruction) { v.targetBase = w; }
             else { v.assignedWarehouseId = null; v.targetBase = ResourceSystem.findNearestDepositPoint(this.state, v.x, v.y, v.cargoType || 'WOOD') || { x: 960, y: 560 }; }
         } else {
@@ -158,16 +192,16 @@ export class WorkerSystem {
         if (v.state === 'MOVING_TO_BASE' && v.targetBase) ignoreEnts.push(v.targetBase);
         if (v.state === 'TRANSPORTING_LOGISTICS' || v.state === 'RETURNING_TO_FACTORY') {
             const logisticsTarget = v.logisticsTargetId
-                ? this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.logisticsTargetId)
+                ? this.getEntityById(v.logisticsTargetId)
                 : null;
             const logisticsHome = v.logisticsHomeId
-                ? this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.logisticsHomeId)
+                ? this.getEntityById(v.logisticsHomeId)
                 : null;
             if (logisticsTarget) ignoreEnts.push(logisticsTarget);
             if (logisticsHome && logisticsHome !== logisticsTarget) ignoreEnts.push(logisticsHome);
         }
         if (v._isRallyMovement && v.rallySourceBuildingId) {
-            const rallySource = this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.rallySourceBuildingId);
+            const rallySource = this.getEntityById(v.rallySourceBuildingId);
             if (rallySource) ignoreEnts.push(rallySource);
         }
 
@@ -202,7 +236,8 @@ export class WorkerSystem {
                 break;
             case 'TRANSPORTING_LOGISTICS':
             case 'RETURNING_TO_FACTORY':
-                // 強制召回還在外面跑的舊版搬運工
+                // [階段四] TODO: 'TRANSPORTING_LOGISTICS' / 'RETURNING_TO_FACTORY' 已不再由任何程式碼產生（全庫無賦值點）。
+                // 此處保留為相容舊存檔的遷移防護：把殘留的舊版搬運工召回工廠。待確認無舊存檔依賴後可整段移除。
                 v.state = 'WORKING_IN_FACTORY';
                 v.cargoType = null;
                 v.cargoAmount = 0;
@@ -277,11 +312,11 @@ export class WorkerSystem {
 
         // [核心優化] 派駐位置放寬：判定是否碰到建築模型範圍
         const fp = this.engine.getFootprint(v.factoryTarget.type1);
-        const halfW = (fp.uw * 20) / 2;
-        const halfH = (fp.uh * 20) / 2;
+        const halfW = (fp.uw * TILE_SIZE) / 2;
+        const halfH = (fp.uh * TILE_SIZE) / 2;
 
         // [調試] 檢查抵達距離與判定
-        const dist = Math.hypot(v.x - v.factoryTarget.x, v.y - v.factoryTarget.y);
+        const dist = getDistance(v, v.factoryTarget);
         const isTouching =
             v.x >= v.factoryTarget.x - halfW - 40 &&
             v.x <= v.factoryTarget.x + halfW + 40 &&
@@ -327,7 +362,7 @@ export class WorkerSystem {
         if (v.vTint !== 0xffffff) v.vTint = 0xffffff;
         if (v.idleTarget) {
             this.moveDetailed(v, v.idleTarget.x, v.idleTarget.y, moveSpeed, deltaTime, ignoreEnts);
-            if (Math.hypot(v.x - v.idleTarget.x, v.y - v.idleTarget.y) < 10) {
+            if (getDistance(v, v.idleTarget) < 10) {
                 v.idleTarget = null;
                 v.commandCenter = null;
                 v.isPlayerLocked = false;
@@ -344,7 +379,7 @@ export class WorkerSystem {
     handleStateMovingToResource(v, deltaTime, ignoreEnts, moveSpeed) {
         let searchX = v.x, searchY = v.y;
         if (v.assignedWarehouseId) {
-            const w = this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === v.assignedWarehouseId);
+            const w = this.getEntityById(v.assignedWarehouseId);
             if (w) { searchX = w.x; searchY = w.y; }
         }
 
@@ -392,7 +427,7 @@ export class WorkerSystem {
                 }
             }
 
-            const distToGather = Math.hypot(v.gatherPoint.x - v.x, v.gatherPoint.y - v.y);
+            const distToGather = getDistance(v.gatherPoint, v);
             if (distToGather < 15) {
                 if (v.cargo > 0) {
                     v.nextStateAfterDeposit = 'MOVING_TO_RESOURCE';
@@ -547,8 +582,8 @@ export class WorkerSystem {
         if (!v.depositPoint || v._lastBaseId !== baseId) {
             v._lastBaseId = baseId;
             const pts = [];
-            const w = uw * 20 + 20;
-            const h = uh * 20 + 20;
+            const w = uw * TILE_SIZE + 20;
+            const h = uh * TILE_SIZE + 20;
             const bx = v.targetBase.x;
             const by = v.targetBase.y;
 
@@ -579,7 +614,7 @@ export class WorkerSystem {
             };
         }
 
-        const distB = Math.hypot(v.depositPoint.x - v.x, v.depositPoint.y - v.y);
+        const distB = getDistance(v.depositPoint, v);
         if (distB < depositDist) {
             const depositAmount = (v.cargoAmount || 0) > 0 ? v.cargoAmount : v.cargo;
             const depositType = v.cargoType || v.type;
@@ -638,8 +673,8 @@ export class WorkerSystem {
 
         const idNumC = parseInt((v.id || "0").replace(/[^0-9]/g, '')) || 0;
         const fpC = this.getFootprint(v.constructionTarget.type1);
-        const halfWC = (fpC.uw * 20) / 2;
-        const halfHC = (fpC.uh * 20) / 2;
+        const halfWC = (fpC.uw * TILE_SIZE) / 2;
+        const halfHC = (fpC.uh * TILE_SIZE) / 2;
 
         if (!v._stableConstructionTarget || Math.hypot(v.x - (v._lastUnitPosX || 0), v.y - (v._lastUnitPosY || 0)) > 50) {
             const dxC = v.x - v.constructionTarget.x;
@@ -664,7 +699,7 @@ export class WorkerSystem {
         const tyC_pos = v._stableConstructionTarget.y;
 
         const distC = Math.hypot(txC_pos - v.x, tyC_pos - v.y);
-        const buildingDist = Math.hypot(v.constructionTarget.x - v.x, v.constructionTarget.y - v.y);
+        const buildingDist = getDistance(v.constructionTarget, v);
         if (distC < 35 || buildingDist < (Math.max(halfWC, halfHC) + 15)) {
             v.state = 'CONSTRUCTING';
             v.pathTarget = null;
@@ -841,9 +876,9 @@ export class WorkerSystem {
 
     assignNextConstructionTask(v) {
         if (!v || v.config?.type !== 'villagers') return false;
-        const visionRadius = (v.field_vision || 15) * 20 * 2;
+        const visionRadius = (v.field_vision || 15) * TILE_SIZE * 2;
         let projects = this.state.mapEntities.filter(e =>
-            e && e.isUnderConstruction && Math.hypot(v.x - e.x, v.y - e.y) <= visionRadius
+            e && e.isUnderConstruction && getDistance(v, e) <= visionRadius
         );
         if (projects.length === 0) {
             projects = this.state.mapEntities.filter(e => e && e.isUnderConstruction);
@@ -964,13 +999,13 @@ export class WorkerSystem {
         if (!this.state.pathfinding) return;
         const isSelected = this.state.selectedUnitIds && this.state.selectedUnitIds.includes(v.id);
         const oldX = v.x, oldY = v.y;
-        const gx = Math.floor(v.x / 20);
-        const gy = Math.floor(v.y / 20);
+        const gx = Math.floor(v.x / TILE_SIZE);
+        const gy = Math.floor(v.y / TILE_SIZE);
         const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 100, true, true);
 
         if (nearest) {
-            v.x = nearest.x * 20 + 10 + (Math.random() - 0.5) * 4;
-            v.y = nearest.y * 20 + 10 + (Math.random() - 0.5) * 4;
+            v.x = nearest.x * TILE_SIZE + 10 + (Math.random() - 0.5) * 4;
+            v.y = nearest.y * TILE_SIZE + 10 + (Math.random() - 0.5) * 4;
             v.fullPath = null;
             v.pathIndex = 0;
             v.pathTarget = null;
@@ -981,16 +1016,16 @@ export class WorkerSystem {
             v.rallySourceBuildingId = null;
 
             if (v.idleTarget) {
-                const d = Math.hypot(v.idleTarget.x - v.x, v.idleTarget.y - v.y);
+                const d = getDistance(v.idleTarget, v);
                 if (d < 60) v.idleTarget = { x: v.x, y: v.y };
             } else if (v.gatherPoint) {
-                const d = Math.hypot(v.gatherPoint.x - v.x, v.gatherPoint.y - v.y);
+                const d = getDistance(v.gatherPoint, v);
                 if (d < 50) v.gatherPoint = { x: v.x, y: v.y };
             } else if (v.depositPoint) {
-                const d = Math.hypot(v.depositPoint.x - v.x, v.depositPoint.y - v.y);
+                const d = getDistance(v.depositPoint, v);
                 if (d < 50) v.depositPoint = { x: v.x, y: v.y };
             } else if (v._stableConstructionTarget) {
-                const d = Math.hypot(v._stableConstructionTarget.x - v.x, v._stableConstructionTarget.y - v.y);
+                const d = getDistance(v._stableConstructionTarget, v);
                 if (d < 50) v._stableConstructionTarget = { x: v.x, y: v.y };
             }
 
@@ -1049,8 +1084,8 @@ export class WorkerSystem {
                         if (!ent._collisionW) {
                             const match = cfg.size ? cfg.size.match(/\{[ ]*(\d+)[ ]*,[ ]*(\d+)[ ]*\}/) : null;
                             const uw = match ? parseInt(match[1]) : 1, uh = match ? parseInt(match[2]) : 1;
-                            ent._collisionW = uw * 20;
-                            ent._collisionH = uh * 20;
+                            ent._collisionW = uw * TILE_SIZE;
+                            ent._collisionH = uh * TILE_SIZE;
                         }
 
                         const collCfg = UI_CONFIG.BuildingCollision || { buffer: 10, feetOffset: 8 };
@@ -1070,8 +1105,8 @@ export class WorkerSystem {
         }
 
         if (this.state.mapData) {
-            const searchGx = Math.floor(x / 20);
-            const searchGy = Math.floor(y / 20);
+            const searchGx = Math.floor(x / TILE_SIZE);
+            const searchGy = Math.floor(y / TILE_SIZE);
 
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
@@ -1082,7 +1117,7 @@ export class WorkerSystem {
                         const cfg = this.state.resourceConfigs.find(c => c.type === ResourceSystem.getResourceTypeName(res.type) && c.lv === level);
 
                         if (cfg && cfg.pixel_size) {
-                            const rx = gx * 20 + 10, ry = gy * 20 + 10;
+                            const rx = gx * TILE_SIZE + 10, ry = gy * TILE_SIZE + 10;
                             const pw = cfg.pixel_size.w, ph = cfg.pixel_size.h;
                             if (x > rx - pw / 2 && x < rx + pw / 2 && y > ry - ph / 2 && y < ry + ph / 2) {
                                 const isTarget = ignoreEnts && ignoreEnts.some(ign =>
@@ -1297,8 +1332,8 @@ export class WorkerSystem {
     isTouchingBuilding(v, building, padding = 40) {
         if (!building) return false;
         const fp = this.engine.getFootprint(building.type1 || building.type);
-        const halfW = (fp.uw * 20) / 2;
-        const halfH = (fp.uh * 20) / 2;
+        const halfW = (fp.uw * TILE_SIZE) / 2;
+        const halfH = (fp.uh * TILE_SIZE) / 2;
         return (
             v.x >= building.x - halfW - padding &&
             v.x <= building.x + halfW + padding &&
@@ -1313,8 +1348,8 @@ export class WorkerSystem {
         const collCfg = UI_CONFIG.BuildingCollision || { buffer: 10, feetOffset: 8 };
         const logicY = building.y - (collCfg.feetOffset || 0);
         const clearance = Math.max(padding, (collCfg.buffer || 0) + Math.max((v.width || 20) / 2, 10));
-        const halfW = (fp.uw * 20) / 2;
-        const halfH = (fp.uh * 20) / 2;
+        const halfW = (fp.uw * TILE_SIZE) / 2;
+        const halfH = (fp.uh * TILE_SIZE) / 2;
         const left = building.x - halfW - clearance;
         const right = building.x + halfW + clearance;
         const top = logicY - halfH - clearance;
@@ -1436,14 +1471,14 @@ export class WorkerSystem {
         let guidePoint = pointAtDistance(currentDistance + lookAhead);
 
         if (this.state.pathfinding) {
-            const gx = Math.floor(guidePoint.x / 20);
-            const gy = Math.floor(guidePoint.y / 20);
+            const gx = Math.floor(guidePoint.x / TILE_SIZE);
+            const gy = Math.floor(guidePoint.y / TILE_SIZE);
             if (!this.state.pathfinding.isValidAndWalkable(gx, gy, true)) {
                 const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 12, true, true);
                 if (nearest) {
                     guidePoint = {
-                        x: nearest.x * 20 + 10,
-                        y: nearest.y * 20 + 10
+                        x: nearest.x * TILE_SIZE + 10,
+                        y: nearest.y * TILE_SIZE + 10
                     };
                 }
             }
@@ -1489,7 +1524,7 @@ export class WorkerSystem {
             ? (v.factoryTarget.id || `${v.factoryTarget.type1}_${v.factoryTarget.x}_${v.factoryTarget.y}`)
             : null);
         const building = v.factoryTarget || (buildingId
-            ? this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === buildingId)
+            ? this.getEntityById(buildingId)
             : null);
 
         if (building) {
@@ -1760,7 +1795,7 @@ export class WorkerSystem {
         const cfg = this.engine.getBuildingConfig(building.type1, building.lv || 1);
 
         if (role === 'target' && previousBuildingId && previousBuildingId !== buildingId) {
-            const previousBuilding = this.state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === previousBuildingId);
+            const previousBuilding = this.getEntityById(previousBuildingId);
             if (previousBuilding) {
                 previousBuilding.targetWorkerCount = Math.max(0, (previousBuilding.targetWorkerCount || 0) - 1);
                 if (previousBuilding.assignedWorkers) {

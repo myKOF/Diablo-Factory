@@ -14,7 +14,7 @@ import { BuildingMenuUI } from "./BuildingMenuUI.js";
 export class UIManager {
     static uiLayer;
     static dragGhost = null;
-    
+
     static get logisticsSourceEntity() { return LogisticsUI.logisticsSourceEntity; }
     static set logisticsSourceEntity(val) { LogisticsUI.logisticsSourceEntity = val; }
     static get logisticsSourceLine() { return LogisticsUI.logisticsSourceLine; }
@@ -27,7 +27,7 @@ export class UIManager {
     static set isLogisticsDragging(val) { LogisticsUI.isLogisticsDragging = val; }
     static get potentialLogisticsDrag() { return LogisticsUI.potentialLogisticsDrag; }
     static set potentialLogisticsDrag(val) { LogisticsUI.potentialLogisticsDrag = val; }
-    
+
     static activeWarehouseEntity = null;
     static activeBuilding = null;
     static uiPositions = {};
@@ -2293,11 +2293,11 @@ export class UIManager {
         if (!tip || tip.style.display === "none") return;
         const margin = 12;
         const rect = tip.getBoundingClientRect();
-        
+
         // 優先顯示於游標左上角
         let left = event.clientX - rect.width - margin;
         let top = event.clientY - rect.height - margin;
-        
+
         // 如果左邊超出界面，改為顯示在游標右側
         if (left < 6) {
             left = event.clientX + margin;
@@ -2306,7 +2306,7 @@ export class UIManager {
         if (left + rect.width > window.innerWidth - 6) {
             left = window.innerWidth - rect.width - 6;
         }
-        
+
         // 如果上方超出界面，改為顯示在游標下方
         if (top < 6) {
             top = event.clientY + margin;
@@ -2315,7 +2315,7 @@ export class UIManager {
         if (top + rect.height > window.innerHeight - 6) {
             top = window.innerHeight - rect.height - 6;
         }
-        
+
         tip.style.left = `${Math.max(6, left)}px`;
         tip.style.top = `${Math.max(6, top)}px`;
     }

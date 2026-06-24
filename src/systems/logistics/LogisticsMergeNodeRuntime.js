@@ -206,6 +206,10 @@ export class LogisticsMergeNodeRuntime {
         if (!node || !Array.isArray(node.inputGroupIds) || node.inputGroupIds.length === 0) return null;
         const spacing = Number.isFinite(options.spacing) ? options.spacing : (this.gameEngine.TILE_SIZE || 20);
         this.releaseClearedMergeOccupant(node, state, spacing);
+        // [死鎖解除] 迴圈中兩個合流閘門可能互相等待對方「主線通過」而永遠卡死。
+        // 當 apply() 偵測到本節點停滯過久並設定 _forceBreak 時，本輪放棄等待主線、
+        // 直接讓 selectReadyInputSlot 選出一台輸入 winner，打破環狀互鎖。
+        if (node._forceBreak) node.awaitingMainPass = false;
         const readyDistanceFromEnd = Number.isFinite(options.readyDistanceFromEnd)
             ? options.readyDistanceFromEnd
             : spacing;
@@ -215,7 +219,7 @@ export class LogisticsMergeNodeRuntime {
             .join("|");
         const key = this.getMergeNodeKey(node);
         if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
-        if (this.isThroughSlotDue(node) && this.findReadyThroughTransfer(node, state, spacing)) {
+        if (!node._forceBreak && this.isThroughSlotDue(node) && this.findReadyThroughTransfer(node, state, spacing)) {
             state._logisticsMergeAdmissionWinners[key] = {
                 signature,
                 winnerId: null,
@@ -512,6 +516,9 @@ export class LogisticsMergeNodeRuntime {
         };
         const getOutputEntryState = (candidate, node) => {
             this.releaseClearedMergeOccupant(node, state, minTransferSpacing);
+            // [死鎖解除] 停滯過久時，本輪允許 winner 越過出口佔用，打破環狀互鎖；
+            // 容許短暫貼近，後續間距/排隊邏輯會自然收斂。
+            if (node._forceBreak) return { occupied: false };
             const outputGroupId = node.outputGroupId;
             const mergePoint = node.point || { x: node.x, y: node.y };
             let occupied = false;

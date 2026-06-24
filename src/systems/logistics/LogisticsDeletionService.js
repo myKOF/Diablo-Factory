@@ -39,17 +39,21 @@ function cleanupLogisticsMergeNodesForDeletedLine(deletedLine) {
     const points = Array.isArray(deletedLine?.routePoints) ? deletedLine.routePoints : [];
     if (points.length === 0) return new Set();
     const TS = GameEngine.TILE_SIZE || 20;
-    const tolerance = TS * 0.25; // 緊密判定：只在非常靠近合流點時才移除節點，避免中段拆分誤判
+    const tolerance = TS * 0.25; 
     const nodes = this.ensureLogisticsMergeNodeStore(state);
     const removedNodes = nodes.filter(node => {
         const point = node?.point || (Number.isFinite(node?.x) && Number.isFinite(node?.y) ? { x: node.x, y: node.y } : null);
         if (!point) return false;
-        return points.some(routePoint =>
-            routePoint &&
-            Number.isFinite(routePoint.x) &&
-            Number.isFinite(routePoint.y) &&
-            Math.hypot(routePoint.x - point.x, routePoint.y - point.y) <= tolerance
-        );
+        
+        // 如果傳入了 clickedPoint，優先使用它來判定是否點擊了合流點
+        if (deletedLine.clickedPoint && Number.isFinite(deletedLine.clickedPoint.x)) {
+            return Math.hypot(deletedLine.clickedPoint.x - point.x, deletedLine.clickedPoint.y - point.y) <= tolerance;
+        }
+
+        const lineCenter = { x: deletedLine.x, y: deletedLine.y };
+        return Number.isFinite(lineCenter.x) &&
+            Number.isFinite(lineCenter.y) &&
+            Math.hypot(lineCenter.x - point.x, lineCenter.y - point.y) <= tolerance;
     });
     if (removedNodes.length === 0) return new Set();
 
@@ -84,36 +88,62 @@ function deleteLogisticsLineById(lineId) {
         const lineKey = this.getLogisticsLineSelectionKey(line);
         const groupId = line.groupId || line.id;
 
-        const lineGridX = line.gridX;
-        const lineGridY = line.gridY;
+        const groupSegments = this.getLogisticsSegmentsByGroupId(groupId);
+        let targetSegments = [line];
+        const clickX = state.selectedLogisticsClickX;
+        const clickY = state.selectedLogisticsClickY;
+        let clickedPoint = null;
 
-        // DLL 指標斷開
+        if (clickX != null && clickY != null) {
+            const TS = GameEngine.TILE_SIZE || 20;
+            const cx = Math.floor(clickX / TS) * TS + TS / 2;
+            const cy = Math.floor(clickY / TS) * TS + TS / 2;
+            clickedPoint = { x: cx, y: cy };
+            line.clickedPoint = clickedPoint;
+            
+            // 找出此群組中，所有端點或路徑點接觸到該網格中心的線段
+            const segmentsAtClick = groupSegments.filter(seg => {
+                const pts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
+                return pts.some(p => Math.abs(p.x - cx) < 1 && Math.abs(p.y - cy) < 1);
+            });
+            if (segmentsAtClick.length > 0) {
+                targetSegments = segmentsAtClick;
+            }
+        }
+
+        // DLL 指標斷開 - 為所有目標線段斷開
         const segments = this.ensureLogisticsLineStore();
-        const prevSeg = segments.find(s => s && s.nextId === line.id);
-        const nextSeg = segments.find(s => s && s.prevId === line.id);
-        if (prevSeg) prevSeg.nextId = null;
-        if (nextSeg) nextSeg.prevId = null;
+        targetSegments.forEach(targetSeg => {
+            const prevSeg = segments.find(s => s && s.nextId === targetSeg.id);
+            const nextSeg = segments.find(s => s && s.prevId === targetSeg.id);
+            if (prevSeg) prevSeg.nextId = null;
+            if (nextSeg) nextSeg.prevId = null;
+        });
 
-        LogisticsStateActions.replaceLogisticsLines(state, segments.filter(item => {
-            const isTarget = this.getLogisticsLineSelectionKey(item) === lineKey;
-            const isDuplicate = item && item.gridX === lineGridX && item.gridY === lineGridY;
-            return !isTarget && !isDuplicate;
-        }));
-        this.cleanupDeletedLinePreviousTurnOverride(line, groupId);
-        const mergeCleanupAffectedGroupIds = this.cleanupLogisticsMergeNodesForDeletedLine(line);
+        const targetSegmentIds = new Set(targetSegments.map(s => s.id));
+        state.logisticsLines = segments.filter(item => !targetSegmentIds.has(item.id));
+        
+        targetSegments.forEach(seg => this.cleanupDeletedLinePreviousTurnOverride(seg, groupId));
+        const mergeCleanupAffectedGroupIds = new Set();
+        targetSegments.forEach(seg => {
+            const affected = this.cleanupLogisticsMergeNodesForDeletedLine(seg);
+            affected.forEach(id => mergeCleanupAffectedGroupIds.add(id));
+        });
 
         // [核心修正 v3] 使用「order 值直接分割」取代不可靠的 BFS 端點連通判定。
         const getSequenceOrder = (seg) =>
             Number.isFinite(seg?.splitSequenceOrder) ? seg.splitSequenceOrder
                 : (Number.isFinite(seg?.order) ? seg.order : 0);
 
-        const deletedOrder = getSequenceOrder(line);
+        const minOrder = Math.min(...targetSegments.map(getSequenceOrder));
+        const maxOrder = Math.max(...targetSegments.map(getSequenceOrder));
+        
         const remainingSegments = this.getLogisticsSegmentsByGroupId(groupId);
 
         if (remainingSegments.length > 0) {
             // 依 order 值將剩餘線段分為前半段與後半段
-            const frontSegments = remainingSegments.filter(seg => getSequenceOrder(seg) < deletedOrder);
-            const backSegments = remainingSegments.filter(seg => getSequenceOrder(seg) >= deletedOrder);
+            const frontSegments = remainingSegments.filter(seg => getSequenceOrder(seg) < minOrder);
+            const backSegments = remainingSegments.filter(seg => getSequenceOrder(seg) > maxOrder);
 
             if (frontSegments.length > 0 && backSegments.length > 0) {
                 const newGroupId = `log_group_${Date.now()}_${Math.floor(Math.random() * 10000)}`;

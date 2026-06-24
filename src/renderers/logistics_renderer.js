@@ -1703,9 +1703,9 @@ export class LogisticsRenderer {
                 const key = `${entityId}:${slot.defIndex}:${slot.slotIndex}:${slot.dir}:${Math.round(slot.x)},${Math.round(slot.y)}`;
                 if (drawn.has(key)) return;
                 drawn.add(key);
-                
+
                 const connected = isPortConnected(entityId, slot);
-                
+
                 graphics.fillStyle(connected ? fillColor : disconnectedFillColor, alpha);
                 graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
                 graphics.lineStyle(Math.max(2, Math.round(TS * 0.12)), connected ? strokeColor : disconnectedStrokeColor, strokeAlpha);

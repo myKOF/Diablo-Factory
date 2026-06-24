@@ -34,11 +34,11 @@ export class LogisticsUI {
         if (!tip || tip.style.display === "none") return;
         const margin = 12;
         const rect = tip.getBoundingClientRect();
-        
+
         // 優先顯示於游標左上角
         let left = event.clientX - rect.width - margin;
         let top = event.clientY - rect.height - margin;
-        
+
         // 如果左邊超出界面，改為顯示在游標右側
         if (left < 6) {
             left = event.clientX + margin;
@@ -47,7 +47,7 @@ export class LogisticsUI {
         if (left + rect.width > window.innerWidth - 6) {
             left = window.innerWidth - rect.width - 6;
         }
-        
+
         // 如果上方超出界面，改為顯示在游標下方
         if (top < 6) {
             top = event.clientY + margin;
@@ -56,7 +56,7 @@ export class LogisticsUI {
         if (top + rect.height > window.innerHeight - 6) {
             top = window.innerHeight - rect.height - 6;
         }
-        
+
         tip.style.left = `${Math.max(6, left)}px`;
         tip.style.top = `${Math.max(6, top)}px`;
     }
@@ -357,7 +357,7 @@ export class LogisticsUI {
                     if (timeA !== timeB) return timeA - timeB;
                     return (a.order || 0) - (b.order || 0);
                 });
-            
+
             const points = [];
             groupLines.forEach(l => {
                 if (Array.isArray(l.routePoints) && l.routePoints.length > 0) {
@@ -366,7 +366,7 @@ export class LogisticsUI {
                     points.push({ x: l.x, y: l.y });
                 }
             });
-            
+
             if (points.length > 0) {
                 points.forEach((p, index) => {
                     GameEngine.addLog(`物流線位置${index} (${Math.round(p.x)},${Math.round(p.y)})`, 'LOGISTICS');
@@ -488,11 +488,11 @@ export class LogisticsUI {
         const state = GameEngine.state;
         const selectedLineId = state.selectedLogisticsLineId;
         const selectedGroupId = state.selectedLogisticsGroupId;
-        
+
         if (!selectedLineId && !selectedGroupId) return false;
 
         let deleted = false;
-        
+
         if (selectedGroupId) {
             deleted = conveyorSystem.deleteLogisticsLineGroupById(selectedGroupId);
         } else if (selectedLineId) {
