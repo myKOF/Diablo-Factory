@@ -3,6 +3,7 @@ import { ResourceSystem } from "./ResourceSystem.js";
 import { SynthesisSystem } from "./SynthesisSystem.js";
 import { BattleSystem } from "./BattleSystem.js";
 import { conveyorSystem } from "./ConveyorSystem.js";
+import { LogisticsTransportArrayState } from "./logistics/LogisticsTransportArrayState.js";
 
 function annotateRoutePoints(points) {
     if (!Array.isArray(points) || points.length < 3) return;
@@ -36,6 +37,7 @@ export class WorkerSystem {
     constructor(state, engineContext) {
         this.state = state;
         this.engine = engineContext;
+        this.transportArrayState = new LogisticsTransportArrayState(() => this.engine?.TILE_SIZE || 20);
 
         // 工廠類型定義
         this.FACTORY_TYPES = ['timber_processing_plant', 'smelting_plant', 'tank_workshop', 'stone_processing_plant'];
@@ -1789,6 +1791,9 @@ export class WorkerSystem {
             targetId: conn.id,
             itemType,
             progress: 0,
+            transportIndex: 0,
+            transportOffset: 0,
+            transportCellSize: this.engine?.TILE_SIZE || 20,
             lineId: conn.lineId || null,
             efficiency: Number(conn.efficiency) || 0,
             routePoints
@@ -2396,8 +2401,18 @@ export class WorkerSystem {
             transfer._logicRouteMetrics = metrics;
             return metrics;
         };
-        const getRouteLengthInTiles = (transfer) => {
-            return getTransferRouteMetrics(transfer).totalTiles;
+        const getCellSize = () => this.engine?.TILE_SIZE || 20;
+        const getTransferDistance = (transfer) => {
+            const metrics = getTransferRouteMetrics(transfer);
+            return this.transportArrayState.getTransferDistance(transfer, metrics.totalPixels, getCellSize());
+        };
+        const syncTransferArrayPosition = (transfer) => {
+            const metrics = getTransferRouteMetrics(transfer);
+            this.transportArrayState.syncTransferFromArrayState(transfer, metrics.totalPixels, getCellSize());
+        };
+        const setTransferDistance = (transfer, distance) => {
+            const metrics = getTransferRouteMetrics(transfer);
+            this.transportArrayState.setTransferDistance(transfer, distance, metrics.totalPixels, getCellSize());
         };
         const getStorageAmount = (ent, itemType) => {
             const key = String(itemType || '').toLowerCase();
@@ -2437,7 +2452,7 @@ export class WorkerSystem {
                 if (!Array.isArray(active.routePoints) || active.routePoints.length < 2) return false;
                 if (getTransferPathKey(active) !== key) return false;
                 const activeTotal = getTransferRouteMetrics(active).totalPixels || totalLength;
-                const activeDistance = Math.max(0, Math.min(1, Number(active.progress) || 0)) * activeTotal;
+                const activeDistance = this.transportArrayState.getTransferDistance(active, activeTotal, cellSize);
                 return activeDistance < cellSize;
             });
         };
@@ -2500,15 +2515,15 @@ export class WorkerSystem {
                 const otherMetrics = getTransferRouteMetrics(other);
                 const otherTotal = otherMetrics.totalPixels;
                 if (otherTotal <= 0) return;
-                const otherProgress = Math.max(0, Math.min(1, Number(other.progress) || 0));
+                const otherDistanceNow = this.transportArrayState.getTransferDistance(other, otherTotal, getCellSize());
                 const otherMaxAllowed = other.maxAllowedProgress !== undefined ? other.maxAllowedProgress : 1.0;
-                const otherQueueHeld = other.queueBlocked === true && otherProgress >= otherMaxAllowed - 0.0001;
-                const projectedProgress = otherQueueHeld
-                    ? otherProgress
-                    : Math.min(otherMaxAllowed, otherProgress + stepDt * (getTransferSpeed(other) / Math.max(1, otherMetrics.totalTiles)));
-                const otherDistance = projectedProgress * otherTotal;
+                const otherMaxDistance = otherMaxAllowed * otherTotal;
+                const otherQueueHeld = other.queueBlocked === true && otherDistanceNow >= otherMaxDistance - 0.0001;
+                const projectedDistance = otherQueueHeld
+                    ? otherDistanceNow
+                    : Math.min(otherMaxDistance, otherDistanceNow + stepDt * getTransferSpeed(other) * getCellSize());
                 const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
-                const distFromMerge = otherDistance - mergeDistance;
+                const distFromMerge = projectedDistance - mergeDistance;
                 const followingMainMayOverlapTurn = node.zipperTurn === 'branch' &&
                     node.awaitingMainPass !== true &&
                     distFromMerge < -0.01;
@@ -2534,6 +2549,7 @@ export class WorkerSystem {
         const subSteps = Math.max(1, Math.ceil(deltaTime / LOGISTICS_SUB_DT - 1e-6));
         stepDt = deltaTime / subSteps;
         for (let _subStep = 0; _subStep < subSteps; _subStep++) {
+        state.activeTransfers.forEach(syncTransferArrayPosition);
 
         if (conveyorSystem && typeof conveyorSystem.applyBlockedTransferQueues === 'function') {
             conveyorSystem.applyBlockedTransferQueues(state);
@@ -2552,7 +2568,7 @@ export class WorkerSystem {
             transfersByPath.get(key).push(t);
         });
 
-        const cellSize = this.engine?.TILE_SIZE || 20;
+        const cellSize = getCellSize();
 
         const isMergeInputTransfer = (transfer) => conveyorSystem &&
             typeof conveyorSystem.isLogisticsMergeInputTransfer === 'function' &&
@@ -2727,10 +2743,9 @@ export class WorkerSystem {
             const queueHeld = t.queueBlocked === true && t.progress >= maxAllowed - 0.0001;
 
             if (!queueHeld && t.progress < maxAllowed) {
-                t.progress += stepDt * (getTransferSpeed(t) / getRouteLengthInTiles(t));
-                if (t.progress > maxAllowed) {
-                    t.progress = maxAllowed;
-                }
+                const metrics = getTransferRouteMetrics(t);
+                const distanceDelta = stepDt * getTransferSpeed(t) * getCellSize();
+                this.transportArrayState.advanceTransfer(t, distanceDelta, metrics.totalPixels, maxAllowed, getCellSize());
             } else if (t.progress > maxAllowed) {
                 // 移動階段只標記阻塞；最終佔位由 LogisticsTransferQueues 統一裁決。
                 t.queueBlocked = true;
@@ -2809,7 +2824,7 @@ export class WorkerSystem {
                     }
                     state.activeTransfers.splice(i, 1);
                 } else {
-                    t.progress = 1;
+                    setTransferDistance(t, getTransferRouteMetrics(t).totalPixels);
                 }
             }
         }

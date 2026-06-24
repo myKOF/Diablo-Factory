@@ -801,6 +801,8 @@ export const UI_CONFIG = {
         depth: 150,                      // 渲染深度 (位於地面之上，單位之下)
         sourcePortCellColor: "#00ff44ff",
         sourcePortCellStrokeColor: "#ffff00ff",
+        disconnectedPortCellColor: "#888888ff", // 建築端口未接通顏色
+        disconnectedPortCellStrokeColor: "#aaaaaaff", // 建築端口未接通邊框顏色
         sourcePortCellAlpha: 0.85,
         sourcePortCellStrokeAlpha: 1,
         transferItemDepth: 900000        // 運輸中物品層深度 (高於建築/單位，低於大多數標籤)

@@ -1,3 +1,5 @@
+import { logisticsTransportArrayState } from './LogisticsTransportArrayState.js';
+
 export class LogisticsMergeNodeRuntime {
     constructor(system, getGameEngine) {
         this.system = system;
@@ -543,13 +545,18 @@ export class LogisticsMergeNodeRuntime {
         const stopBeforeMergePoint = (transfer) => {
             const total = this.getRouteLength(transfer.routePoints);
             if (total <= 0) {
-                transfer.progress = 1;
+                logisticsTransportArrayState.setTransferDistance(transfer, minTransferSpacing, minTransferSpacing, minTransferSpacing);
                 return;
             }
             const current = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
             const waitDistance = Math.max(0, total - minTransferSpacing);
             // [只停不退] 物品只能停止或前進，嚴禁往回推；已越過等待線者停在原地。
-            transfer.progress = Math.max(0, Math.min(1, Math.max(waitDistance, Math.min(current, total)) / total));
+            logisticsTransportArrayState.setTransferDistance(
+                transfer,
+                Math.max(waitDistance, Math.min(current, total)),
+                total,
+                minTransferSpacing
+            );
         };
         const getMergeAdmissionWinner = (node) => {
             return this.getLogisticsMergeAdmissionWinner(node, state, {
@@ -621,7 +628,7 @@ export class LogisticsMergeNodeRuntime {
             this.commitLogisticsMergeAdmission(node, transfer.id, state);
             transfer.lineId = node.outputGroupId;
             transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
-            transfer.progress = 0;
+            logisticsTransportArrayState.setTransferDistance(transfer, 0, this.getRouteLength(transfer.routePoints), minTransferSpacing);
             // 路線已切換，舊路線上的排隊距離殘值必須清除，避免排隊邏輯誤判位置。
             delete transfer._queuedDistance;
             transfer.sourceId = outputSeg?.sourceId || transfer.sourceId || null;

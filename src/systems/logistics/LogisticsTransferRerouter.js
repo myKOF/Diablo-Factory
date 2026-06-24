@@ -12,6 +12,7 @@ import {
     findShortestNodePath,
     getReachableNodes
 } from './LogisticsRouteGraph.js';
+import { logisticsTransportArrayState } from './LogisticsTransportArrayState.js';
 
 export class LogisticsTransferRerouter {
     constructor(system, getGameEngine) {
@@ -369,8 +370,8 @@ export class LogisticsTransferRerouter {
 
             const projDist = getPathDistanceToPoint(pathPoints, currentPos, pathMetricsCache);
             const totalLen = getPathTotalLength(pathPoints, pathMetricsCache);
-            t.progress = totalLen > 0 ? Math.max(0, Math.min(1, projDist / totalLen)) : 1;
             t.routePoints = pathPoints;
+            logisticsTransportArrayState.setTransferDistance(t, totalLen > 0 ? projDist : 0, totalLen, TS);
             t.sourceId = currentSeg.sourceId || null;
             t.targetId = currentSeg.targetId || null;
             t.efficiency = Number(currentSeg.efficiency) || 0;

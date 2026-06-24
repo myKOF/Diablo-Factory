@@ -3,6 +3,7 @@ import {
     getPathTotalLength,
     getPointOnPathByDistance
 } from './LogisticsPathMetrics.js';
+import { logisticsTransportArrayState } from './LogisticsTransportArrayState.js';
 
 export class LogisticsTransferQueues {
     constructor(system, getGameEngine) {
@@ -227,7 +228,7 @@ export class LogisticsTransferQueues {
                 if (!(stopBeforeSuppressedEndpoint && currentDistance > breakpointLimit)) {
                     nextDistance = Math.max(nextDistance, Math.min(currentDistance, totalLength));
                 }
-                transfer.progress = Math.max(0, Math.min(1, nextDistance / totalLength));
+                logisticsTransportArrayState.setTransferDistance(transfer, nextDistance, totalLength, TS);
                 transfer._queuedDistance = nextDistance;
                 if (transfer.targetId || isMergeInput) {
                     delete transfer.blockedOnBrokenLine;

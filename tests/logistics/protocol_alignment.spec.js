@@ -733,6 +733,184 @@ test('來源滿載時刪除運輸中物流線必須銷毀產品', async ({ page 
     expect(result.success, result.error).toBe(true);
 });
 
+test('WorkerSystem 運輸推進必須以 index/offset 為位置來源', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { WorkerSystem } = await import('/src/systems/WorkerSystem.js');
+
+        const state = {
+            mapEntities: [],
+            logisticsLines: [{
+                id: 'array_line_a',
+                groupId: 'array_group',
+                routePoints: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+                routeWidth: 1,
+                efficiency: 4
+            }],
+            logisticsMergeNodes: [],
+            activeTransfers: [{
+                id: 'array_transfer',
+                lineId: 'array_group',
+                itemType: 'wood',
+                routePoints: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+                progress: 0,
+                transportIndex: 1,
+                transportOffset: 0,
+                targetId: null,
+                efficiency: 4
+            }]
+        };
+        const engine = {
+            TILE_SIZE: 20,
+            state,
+            getEntityConfig: () => ({ efficiency: 4 }),
+            addLog: () => {}
+        };
+
+        const workerSystem = new WorkerSystem(state, engine);
+        workerSystem.processAutomatedLogistics(state, 0.25);
+
+        const transfer = state.activeTransfers[0];
+        if (!transfer) {
+            return { success: false, error: '測試 transfer 不應送達或被移除' };
+        }
+        if (transfer.transportIndex !== 2 || Math.abs(Number(transfer.transportOffset) || 0) > 0.001) {
+            return {
+                success: false,
+                error: `運輸位置必須從 index=1 offset=0 前進到 index=2 offset=0，actual=${JSON.stringify({
+                    transportIndex: transfer.transportIndex,
+                    transportOffset: transfer.transportOffset,
+                    progress: transfer.progress
+                })}`
+            };
+        }
+        if (Math.abs(Number(transfer.progress) - 0.4) > 0.001) {
+            return {
+                success: false,
+                error: `progress 應只作為 index/offset 的相容鏡像，expected=0.4 actual=${transfer.progress}`
+            };
+        }
+        return { success: true };
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('物流渲染進度必須優先讀取 index/offset', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { LogisticsRenderer } = await import('/src/renderers/logistics_renderer.js');
+        if (typeof LogisticsRenderer.resolveTransferProgress !== 'function') {
+            return { success: false, error: 'LogisticsRenderer 缺少 resolveTransferProgress()' };
+        }
+        const transfer = {
+            progress: 0,
+            transportIndex: 2,
+            transportOffset: 0.5,
+            transportCellSize: 20,
+            routePoints: [{ x: 0, y: 0 }, { x: 100, y: 0 }]
+        };
+        const progress = LogisticsRenderer.resolveTransferProgress(transfer, transfer.routePoints, 20);
+        if (Math.abs(progress - 0.5) > 0.001) {
+            return {
+                success: false,
+                error: `renderer 應以 index/offset 解析進度，expected=0.5 actual=${progress}`
+            };
+        }
+        return { success: true };
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('物流重路由後必須同步 index/offset 位置來源', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { LogisticsTransferRerouter } = await import('/src/systems/logistics/LogisticsTransferRerouter.js');
+        const { logisticsTransportArrayState } = await import('/src/systems/logistics/LogisticsTransportArrayState.js');
+
+        const uiBackup = window.UIManager;
+        try {
+            window.UIManager = {
+                ...(window.UIManager || {}),
+                getEntityId: (entity) => entity?.id || null,
+                getBuildingPortSlots: () => [],
+                resolveCurrentPortSlot: () => null,
+                getNearestPortSlot: () => null
+            };
+
+            const state = {
+                mapEntities: [],
+                logisticsLines: [{
+                    id: 'reroute_line',
+                    groupId: 'reroute_group',
+                    routePoints: [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }],
+                    routeWidth: 1,
+                    efficiency: 4
+                }],
+                logisticsMergeNodes: [],
+                activeTransfers: [{
+                    id: 'reroute_transfer',
+                    lineId: 'reroute_group',
+                    itemType: 'wood',
+                    routePoints: [{ x: 0, y: 0 }, { x: 100, y: 0 }],
+                    progress: 0.5,
+                    transportIndex: 9,
+                    transportOffset: 0,
+                    transportCellSize: 20,
+                    transportRouteKey: '0,0|100,0'
+                }]
+            };
+            const system = {
+                snapPointToGridCenter: (point) => ({
+                    x: Math.round(point.x / 20) * 20,
+                    y: Math.round(point.y / 20) * 20
+                }),
+                orderLogisticsSegmentsByDirection: (segments) => segments,
+                applyLogisticsMergeNodes: () => false,
+                applyBlockedTransferQueues: () => {},
+                undoStore: { returnTransferToSource: () => false }
+            };
+            const rerouter = new LogisticsTransferRerouter(system, () => ({ TILE_SIZE: 20 }));
+
+            rerouter.updateOnLogisticsChange(state, new Set(['reroute_group']));
+
+            const transfer = state.activeTransfers[0];
+            const expectedRouteKey = logisticsTransportArrayState.getRouteKey(transfer.routePoints);
+            if (transfer.transportRouteKey !== expectedRouteKey) {
+                return {
+                    success: false,
+                    error: `重路由後 transportRouteKey 未同步，actual=${transfer.transportRouteKey} expected=${expectedRouteKey}`
+                };
+            }
+            const distance = logisticsTransportArrayState.getTransferDistance(transfer, 200, 20);
+            if (Math.abs(distance - 50) > 0.001 || Math.abs(transfer.progress - 0.25) > 0.001) {
+                return {
+                    success: false,
+                    error: `重路由後應保留投影位置 50px，actual=${JSON.stringify({
+                        distance,
+                        progress: transfer.progress,
+                        transportIndex: transfer.transportIndex,
+                        transportOffset: transfer.transportOffset
+                    })}`
+                };
+            }
+
+            return { success: true };
+        } finally {
+            window.UIManager = uiBackup;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
 test('物流線 routeWidth footprint 必須與 ConveyorRouter 一致', async ({ page }) => {
     test.setTimeout(45000);
     await loadGame(page);

@@ -1668,10 +1668,31 @@ export class LogisticsRenderer {
         const parseColor = (c) => scene.hexOrRgba(c).color;
         const fillColor = parseColor(logCfg.sourcePortCellColor || "#00ff44ff");
         const strokeColor = parseColor(logCfg.sourcePortCellStrokeColor || "#ffff00ff");
+        const disconnectedFillColor = parseColor(logCfg.disconnectedPortCellColor || "#888888ff");
+        const disconnectedStrokeColor = parseColor(logCfg.disconnectedPortCellStrokeColor || "#aaaaaaff");
         const alpha = logCfg.sourcePortCellAlpha ?? 0.85;
         const strokeAlpha = logCfg.sourcePortCellStrokeAlpha ?? 1;
         const TS = GameEngine.TILE_SIZE || 20;
         const drawn = new Set();
+
+        const lines = GameEngine.state?.logisticsLines || [];
+        const isPortConnected = (entityId, slot) => {
+            return lines.some(line => {
+                if (line.sourceId === entityId && line.sourcePort) {
+                    if ((line.sourcePort.dir || null) === (slot.dir || null) &&
+                        (line.sourcePort.slotIndex ?? line.sourcePort.defIndex ?? null) === (slot.slotIndex ?? slot.defIndex ?? null)) {
+                        return true;
+                    }
+                }
+                if (line.targetId === entityId && line.targetPort) {
+                    if ((line.targetPort.dir || null) === (slot.dir || null) &&
+                        (line.targetPort.slotIndex ?? line.targetPort.defIndex ?? null) === (slot.slotIndex ?? slot.defIndex ?? null)) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+        };
 
         entities.forEach(ent => {
             if (!window.UIManager.canShowLogisticsPorts?.(ent)) return;
@@ -1683,9 +1704,12 @@ export class LogisticsRenderer {
                 const key = `${entityId}:${slot.defIndex}:${slot.slotIndex}:${slot.dir}:${Math.round(slot.x)},${Math.round(slot.y)}`;
                 if (drawn.has(key)) return;
                 drawn.add(key);
-                graphics.fillStyle(fillColor, alpha);
+                
+                const connected = isPortConnected(entityId, slot);
+                
+                graphics.fillStyle(connected ? fillColor : disconnectedFillColor, alpha);
                 graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
-                graphics.lineStyle(Math.max(2, Math.round(TS * 0.12)), strokeColor, strokeAlpha);
+                graphics.lineStyle(Math.max(2, Math.round(TS * 0.12)), connected ? strokeColor : disconnectedStrokeColor, strokeAlpha);
                 graphics.strokeRect(rect.x, rect.y, rect.w, rect.h);
             });
         });

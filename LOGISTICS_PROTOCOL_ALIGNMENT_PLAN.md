@@ -23,8 +23,8 @@
 | 4 | 已完成 | 統一 ghost preview 與 submitDrag 的驗證上下文 | ghost preview 與 submit 一致 |
 | 5 | 已完成 | 修正物流延伸跨越與切段規則 | 防穿透與斷點、不可任意合併 |
 | 6 | 已完成 | 合流 winner 單一來源化，移除隨機 fallback | Round-Robin、無絕對優先權 |
-| 7 | 待使用者驗證 | 刪除、復原、重路由失敗時回收產品至來源建築或銷毀 | 物品回流與銷毀 |
-| 8 | 未開始 | 收斂運輸模型至陣列偏移運輸法 | Performance Critical |
+| 7 | 已完成 | 刪除、復原、重路由失敗時回收產品至來源建築或銷毀 | 物品回流與銷毀 |
+| 8 | 待使用者驗證 | 收斂運輸模型至陣列偏移運輸法 | Performance Critical |
 | 9 | 未開始 | UI / Renderer 解耦與 config-driven 收斂 | Strict Separation、Config-Driven |
 | 10 | 未開始 | 最終 Playwright 驗證與 `npm run finalize` 收尾 | Mandatory Finalization |
 
@@ -253,14 +253,15 @@
 
 ### 任務 7：刪除、復原、重路由失敗時回收產品
 
-**狀態：待使用者驗證**
+**狀態：已完成**
 
 **目前進度**
 
-- `待使用者驗證`：刪除整組物流線時，失效 transfer 會退回來源建築。
-- `待使用者驗證`：重路由失敗並移除 active transfer 前，會先退回來源建築。
-- `待使用者驗證`：已建立獨立 `LogisticsTransferRecoveryService`，統一處理退回來源與滿載銷毀。
-- `待使用者驗證`：來源不存在或來源容量滿時，產品會銷毀並寫入 `state.destroyedLogisticsTransfers` 供追蹤。
+- `已完成`：刪除整組物流線時，失效 transfer 會退回來源建築。
+- `已完成`：重路由失敗並移除 active transfer 前，會先退回來源建築。
+- `已完成`：已建立獨立 `LogisticsTransferRecoveryService`，統一處理退回來源與滿載銷毀。
+- `已完成`：來源不存在或來源容量滿時，產品會銷毀並寫入 `state.destroyedLogisticsTransfers` 供追蹤。
+- `已完成`：使用者已確認第 7 項可繼續。
 
 **目的**
 
@@ -289,7 +290,18 @@
 
 ### 任務 8：收斂運輸模型至陣列偏移運輸法
 
-**狀態：未開始**
+**狀態：待使用者驗證**
+
+**目前進度**
+
+- `待使用者驗證`：已由 sub agent 只讀盤點 `WorkerSystem`、`TransportLogic`、`LogisticsTransferQueues`、`LogisticsMergeNodeRuntime`、`logistics_renderer` 中逐 transfer progress 更新與渲染耦合點。
+- `待使用者驗證`：已新增 `LogisticsTransportArrayState`，集中提供 `index/offset` 與相容 `progress` view 的距離轉換。
+- `待使用者驗證`：`WorkerSystem` 新建 transfer 時即帶 `transportIndex` / `transportOffset`；每幀推進改由 distance delta 更新 index/offset，`progress` 僅作相容鏡像。
+- `待使用者驗證`：`LogisticsTransferQueues` 與 `LogisticsMergeNodeRuntime` 的排隊裁決、等待線與合流切換寫入改走 transport array adapter。
+- `待使用者驗證`：`LogisticsRenderer.renderTransfers()` 改由 `resolveTransferProgress()` 優先讀取 index/offset，避免 renderer 直接依賴舊 progress SSOT。
+- `待使用者驗證`：已修正物流線接通/重算後，`LogisticsTransferRerouter` 只更新 `progress` 與 `routePoints` 卻未同步 `transportIndex` / `transportOffset`，導致下一幀用舊 array 位置覆蓋新投影位置的問題。
+- `待使用者驗證`：新增「WorkerSystem 運輸推進必須以 index/offset 為位置來源」與「物流渲染進度必須優先讀取 index/offset」Playwright 回歸測試。
+- `待使用者驗證`：新增「物流重路由後必須同步 index/offset 位置來源」Playwright 回歸測試。
 
 **目的**
 
@@ -297,8 +309,9 @@
 
 **預計檔案**
 
-- 修改：`src/systems/logistics/TransportLogic.js`
+- 新增：`src/systems/logistics/LogisticsTransportArrayState.js`
 - 修改：`src/systems/logistics/LogisticsTransferQueues.js`
+- 修改：`src/systems/logistics/LogisticsMergeNodeRuntime.js`
 - 修改：`src/systems/WorkerSystem.js`
 - 修改：`src/renderers/logistics_renderer.js`
 
@@ -313,6 +326,8 @@
 
 - 大量物品運輸時無逐物件獨立 update callback。
 - 合流、堵塞、送達行為與既有功能一致。
+- Playwright：`tests/logistics/protocol_alignment.spec.js` 21 項通過。
+- Playwright：`tests/logistics/logistics_merge_connection_regression.spec.js` 12 項通過。
 
 ### 任務 9：UI / Renderer 解耦與 config-driven 收斂
 
