@@ -1,8 +1,15 @@
 import { conveyorSystem } from '../ConveyorSystem.js';
+import { buildSelectedGroupDebugGraphRoutes } from './LogisticsRouteGraph.js';
 
 export class LogisticsRenderModel {
     constructor(system = conveyorSystem) {
         this.system = system;
+    }
+
+    // [P2a] debug overlay 路線拓樸（BFS 可達性 / 線性鏈分解）抽至系統層的純函式，
+    // 渲染器經此 facade 取用，不再於渲染層持有圖演算法。
+    buildDebugGraphRoutes(groupSegs, tileSize = 20) {
+        return buildSelectedGroupDebugGraphRoutes(groupSegs, tileSize);
     }
 
     getMergeConnectedGroupIds(groupId, state) {
