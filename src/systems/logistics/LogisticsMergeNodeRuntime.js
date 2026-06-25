@@ -1,4 +1,5 @@
 import { logisticsTransportArrayState } from './LogisticsTransportArrayState.js';
+import { routeEuclideanLength, routeAlongDistanceToPoint, routePerpDistanceToPoint } from './LogisticsRouteCache.js';
 
 export class LogisticsMergeNodeRuntime {
     constructor(system, getGameEngine) {
@@ -11,15 +12,8 @@ export class LogisticsMergeNodeRuntime {
     }
 
     getRouteLength(route) {
-        if (!Array.isArray(route) || route.length < 2) return 0;
-        let total = 0;
-        for (let i = 0; i < route.length - 1; i++) {
-            const a = route[i];
-            const b = route[i + 1];
-            if (!a || !b) continue;
-            total += Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0));
-        }
-        return total;
+        // [效能] 以 routePoints 參照記憶化(見 LogisticsRouteCache),合流邏輯每 tick 對同路徑重算數百次。
+        return routeEuclideanLength(route);
     }
 
     getMergeGateSpacing() {
@@ -460,51 +454,13 @@ export class LogisticsMergeNodeRuntime {
         return limit;
     }
 
+    // [效能] 以 (route 參照, point) 記憶化(見 LogisticsRouteCache);純函式故結果不變。
     getPathDistanceToPoint(points, point) {
-        if (!Array.isArray(points) || points.length < 2 || !point) return 0;
-        let bestDist = Infinity;
-        let bestPathDist = 0;
-        let total = 0;
-        for (let i = 0; i < points.length - 1; i++) {
-            const a = points[i];
-            const b = points[i + 1];
-            const dx = b.x - a.x;
-            const dy = b.y - a.y;
-            const len = Math.hypot(dx, dy);
-            const lenSq = dx * dx + dy * dy;
-            if (lenSq > 0) {
-                const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
-                const proj = { x: a.x + dx * t, y: a.y + dy * t };
-                const dist = Math.hypot(point.x - proj.x, point.y - proj.y);
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    bestPathDist = total + len * t;
-                }
-            }
-            total += len;
-        }
-        return bestPathDist;
+        return routeAlongDistanceToPoint(points, point);
     }
 
     getPathPointDistance(points, point) {
-        if (!Array.isArray(points) || points.length < 2 || !point) return Infinity;
-        let bestDist = Infinity;
-        for (let i = 0; i < points.length - 1; i++) {
-            const a = points[i];
-            const b = points[i + 1];
-            if (!a || !b) continue;
-            const dx = b.x - a.x;
-            const dy = b.y - a.y;
-            const lenSq = dx * dx + dy * dy;
-            if (lenSq <= 0) {
-                bestDist = Math.min(bestDist, Math.hypot((point.x || 0) - (a.x || 0), (point.y || 0) - (a.y || 0)));
-                continue;
-            }
-            const t = Math.max(0, Math.min(1, (((point.x || 0) - (a.x || 0)) * dx + ((point.y || 0) - (a.y || 0)) * dy) / lenSq));
-            const proj = { x: (a.x || 0) + dx * t, y: (a.y || 0) + dy * t };
-            bestDist = Math.min(bestDist, Math.hypot((point.x || 0) - proj.x, (point.y || 0) - proj.y));
-        }
-        return bestDist;
+        return routePerpDistanceToPoint(points, point);
     }
 
     isPointOnTransferPath(points, point, tolerance = 0.5) {
@@ -559,31 +515,7 @@ export class LogisticsMergeNodeRuntime {
         const MERGE_GRIDLOCK_TICKS = 30;
 
         let changed = false;
-        const getPathDistanceToPoint = (points, point) => {
-            if (!Array.isArray(points) || points.length < 2 || !point) return 0;
-            let bestDist = Infinity;
-            let bestPathDist = 0;
-            let total = 0;
-            for (let i = 0; i < points.length - 1; i++) {
-                const a = points[i];
-                const b = points[i + 1];
-                const dx = b.x - a.x;
-                const dy = b.y - a.y;
-                const len = Math.hypot(dx, dy);
-                const lenSq = dx * dx + dy * dy;
-                if (lenSq > 0) {
-                    const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
-                    const proj = { x: a.x + dx * t, y: a.y + dy * t };
-                    const dist = Math.hypot(point.x - proj.x, point.y - proj.y);
-                    if (dist < bestDist) {
-                        bestDist = dist;
-                        bestPathDist = total + len * t;
-                    }
-                }
-                total += len;
-            }
-            return bestPathDist;
-        };
+        const getPathDistanceToPoint = routeAlongDistanceToPoint; // [效能] 記憶化(見 LogisticsRouteCache)
         const getOutputEntryState = (candidate, node) => {
             this.releaseClearedMergeOccupant(node, state, minTransferSpacing);
             // [死鎖解除] 停滯過久時，本輪允許 winner 越過出口佔用，打破環狀互鎖；

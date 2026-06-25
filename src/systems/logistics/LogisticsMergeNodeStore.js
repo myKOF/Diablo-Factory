@@ -8,8 +8,8 @@ export class LogisticsMergeNodeStore {
         this._topoValidCache = null;
     }
 
-    beginTopologyCache() { this._topoValidCache = new Map(); }
-    endTopologyCache() { this._topoValidCache = null; }
+    beginTopologyCache() { this._topoValidCache = new Map(); this._outputRouteCache = new Map(); }
+    endTopologyCache() { this._topoValidCache = null; this._outputRouteCache = null; }
 
     // 與 transfer 無關的拓樸有效性檢查（輸入連線完整、輸入線確實進入、輸出線確實離開合流點）。
     isNodeInputTopologyValid(node, inputGroupId, state) {
@@ -407,6 +407,21 @@ export class LogisticsMergeNodeStore {
     }
 
     getLogisticsMergeNodeOutputRoute(node) {
+        if (!node?.outputGroupId) return null;
+        // [效能] 輸出路由僅依節點+拓樸,與 transfer 無關,卻在 runtime 逐 transfer 呼叫(內含 O(段×25) 的
+        // orderByDirection)。於拓樸快取窗口內 per node 記憶化。
+        const cache = this._outputRouteCache;
+        if (cache) {
+            const ck = node.id || node.nodeId || node.cellKey || node;
+            if (cache.has(ck)) return cache.get(ck);
+            const computed = this._computeLogisticsMergeNodeOutputRoute(node);
+            cache.set(ck, computed);
+            return computed;
+        }
+        return this._computeLogisticsMergeNodeOutputRoute(node);
+    }
+
+    _computeLogisticsMergeNodeOutputRoute(node) {
         if (!node?.outputGroupId) return null;
         const point = node.point || { x: node.x, y: node.y };
         const segments = this.system.getLogisticsSegmentsByGroupId(node.outputGroupId);

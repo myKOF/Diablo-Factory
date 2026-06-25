@@ -4,6 +4,7 @@ import {
     getPointOnPathByDistance
 } from './LogisticsPathMetrics.js';
 import { logisticsTransportArrayState } from './LogisticsTransportArrayState.js';
+import { routePointsSignature } from './LogisticsRouteCache.js';
 
 export class LogisticsTransferQueues {
     constructor(system, getGameEngine) {
@@ -104,7 +105,7 @@ export class LogisticsTransferQueues {
         const routeSignature = (transfer) => {
             const points = transfer.routePoints || [];
             if (!Array.isArray(points) || points.length < 2) return null;
-            return points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|");
+            return routePointsSignature(points); // [效能] 以路徑參照記憶化
         };
         const routeSignatureLineIds = new Map();
         state.activeTransfers.forEach(transfer => {

@@ -1,25 +1,17 @@
+import { routePointsSignature, routeManhattanLength } from './LogisticsRouteCache.js';
+
 export class LogisticsTransportArrayState {
     constructor(getCellSize = () => 20) {
         this.getCellSize = getCellSize;
     }
 
+    // [效能] 以 routePoints 參照記憶化(見 LogisticsRouteCache),避免每 tick 重建相同字串/長度。
     getRouteKey(points) {
-        if (!Array.isArray(points)) return '';
-        return points
-            .map(point => `${Math.round(Number(point?.x) || 0)},${Math.round(Number(point?.y) || 0)}`)
-            .join('|');
+        return routePointsSignature(points);
     }
 
     getRouteTotalPixels(points) {
-        if (!Array.isArray(points) || points.length < 2) return 0;
-        let total = 0;
-        for (let i = 0; i < points.length - 1; i++) {
-            const a = points[i];
-            const b = points[i + 1];
-            total += Math.abs((Number(b?.x) || 0) - (Number(a?.x) || 0)) +
-                Math.abs((Number(b?.y) || 0) - (Number(a?.y) || 0));
-        }
-        return total;
+        return routeManhattanLength(points);
     }
 
     hasArrayPosition(transfer) {

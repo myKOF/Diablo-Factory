@@ -1,6 +1,7 @@
 import { UI_CONFIG } from "../../ui/ui_config.js";
 import { ResourceSystem } from "../ResourceSystem.js";
 import { conveyorSystem } from "../ConveyorSystem.js";
+import { routePointsSignature, routeAlongDistanceToPoint } from "./LogisticsRouteCache.js";
 import { LogisticsTransportArrayState } from "./LogisticsTransportArrayState.js";
 
 function annotateRoutePoints(points) {
@@ -696,7 +697,7 @@ export class LogisticsTransferSystem {
         const getTransferRouteSignature = (transfer) => {
             const points = transfer?.routePoints || [];
             if (!Array.isArray(points) || points.length < 2) return null;
-            return points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|");
+            return routePointsSignature(points); // [效能] 以路徑參照記憶化
         };
         const routeSignatureLineIds = new Map();
         (state.activeTransfers || []).forEach(transfer => {
@@ -723,31 +724,8 @@ export class LogisticsTransferSystem {
                 return activeDistance < cellSize;
             });
         };
-        const getPathDistanceToPoint = (points, point) => {
-            if (!Array.isArray(points) || points.length < 2 || !point) return 0;
-            let bestDist = Infinity;
-            let bestPathDist = 0;
-            let total = 0;
-            for (let j = 0; j < points.length - 1; j++) {
-                const a = points[j];
-                const b = points[j + 1];
-                const dx = b.x - a.x;
-                const dy = b.y - a.y;
-                const len = Math.abs(dx) + Math.abs(dy);
-                const lenSq = dx * dx + dy * dy;
-                if (lenSq > 0) {
-                    const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
-                    const proj = { x: a.x + dx * t, y: a.y + dy * t };
-                    const dist = Math.hypot(point.x - proj.x, point.y - proj.y);
-                    if (dist < bestDist) {
-                        bestDist = dist;
-                        bestPathDist = total + len * t;
-                    }
-                }
-                total += len;
-            }
-            return bestPathDist;
-        };
+        // [效能] 記憶化(見 LogisticsRouteCache);物流路徑為正交,逐段 |dx|+|dy| 與 hypot 相同。
+        const getPathDistanceToPoint = routeAlongDistanceToPoint;
         // [效能] getLogisticsMergeNodeForInputTransfer 每次都要掃 nodes×lines（getSegmentsByGroupId
         // 與 doesLogisticsGroupContainConnectionPoint 皆為 O(lines)），但合流拓樸與各 transfer 路徑在
         // 單次 processAutomatedLogistics 內不變（applyLogisticsMergeNodes 只動排程狀態、不動拓樸）。
