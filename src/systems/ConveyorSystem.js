@@ -67,7 +67,7 @@ export class ConveyorSystem {
         this.dragSubmission = new LogisticsDragSubmission(this);
         this.pathAdapters = new LogisticsPathAdapters(this);
         this.extensionCoordinator = new LogisticsExtensionCoordinator(this);
-        this.mergeNodeStore = new LogisticsMergeNodeStore(this);
+        this.mergeNodeStore = new LogisticsMergeNodeStore(this, () => GameEngine);
         this.topologyQuery = new LogisticsTopologyQuery(this);
         this.deletionService = new LogisticsDeletionService(this);
         this.endpointResolver = new LogisticsEndpointResolver(this);

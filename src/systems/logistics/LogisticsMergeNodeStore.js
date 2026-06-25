@@ -1,11 +1,16 @@
-import { GameEngine } from '../game_systems.js';
-
+// [Web Worker 解耦] 不再於模組頂層 import GameEngine(否則整棵 game_systems/Phaser/DOM 樹被拉進 worker)。
+// 改由建構子注入 getGameEngine,提供 { state, TILE_SIZE };主執行緒傳 () => GameEngine,worker 傳假引擎。
 export class LogisticsMergeNodeStore {
-    constructor(system) {
+    constructor(system, getGameEngine = null) {
         this.system = system;
+        this.getGameEngine = getGameEngine;
         // [效能] 合流節點「拓樸有效性」記憶化快取：僅在計算窗口(beginTopologyCache/endTopologyCache)內生效。
         // 鍵為 (node, inputGroupId)，值與 transfer 狀態無關，純依線段/節點拓樸；窗口外一律即時計算。
         this._topoValidCache = null;
+    }
+
+    get gameEngine() {
+        return this.getGameEngine ? this.getGameEngine() : null;
     }
 
     beginTopologyCache() { this._topoValidCache = new Map(); this._outputRouteCache = new Map(); }
@@ -28,7 +33,7 @@ export class LogisticsMergeNodeStore {
     }
 
     getMergeDirectionTolerance() {
-        return Math.max(1, (GameEngine.TILE_SIZE || 20) * 0.75);
+        return Math.max(1, (this.gameEngine.TILE_SIZE || 20) * 0.75);
     }
 
     isPointNear(a, b, tolerance = this.getMergeDirectionTolerance()) {
@@ -84,7 +89,7 @@ export class LogisticsMergeNodeStore {
             outputLines.some(line => this.canLineLeaveMergePoint(line, point));
     }
 
-    ensureLogisticsMergeNodeStore(state = GameEngine.state) {
+    ensureLogisticsMergeNodeStore(state = this.gameEngine.state) {
         if (!state) return [];
         if (!Array.isArray(state.logisticsMergeNodes)) state.logisticsMergeNodes = [];
         return state.logisticsMergeNodes;
@@ -150,7 +155,7 @@ export class LogisticsMergeNodeStore {
         };
 
         // 物理切分穿過合流點的線段
-        const state = GameEngine.state;
+        const state = this.gameEngine.state;
         const allLines = this.system.getLogisticsLinesForState(state);
         const targetGroupLines = allLines.filter(line => line && (line.groupId === outputGroupId || line.id === outputGroupId));
         for (const seg of targetGroupLines) {
@@ -220,7 +225,7 @@ export class LogisticsMergeNodeStore {
                 this.system.recalculateLogisticsGroupEndpoints(newGroupId);
                 finalOutputGroupId = newGroupId;
 
-                const ts = (GameEngine.TILE_SIZE || 20) * 0.75;
+                const ts = (this.gameEngine.TILE_SIZE || 20) * 0.75;
                 const isPointOnSegments = (point, segs) => {
                     if (!point) return false;
                     return segs.some(seg => {
@@ -433,7 +438,7 @@ export class LogisticsMergeNodeStore {
         for (let i = 0; i < ordered.length; i++) {
             const points = Array.isArray(ordered[i]?.routePoints) ? ordered[i].routePoints : [];
             for (let p = 0; p < points.length - 1; p++) {
-                if (this.system.isPointOnSegment(point, points[p], points[p + 1], GameEngine.TILE_SIZE * 0.35)) {
+                if (this.system.isPointOnSegment(point, points[p], points[p + 1], this.gameEngine.TILE_SIZE * 0.35)) {
                     startIndex = i;
                     startPoint = { x: point.x, y: point.y };
                     break;
@@ -481,12 +486,12 @@ export class LogisticsMergeNodeStore {
         return route;
     }
 
-    getLogisticsMergeNodeForInputTransfer(transfer, state = GameEngine.state) {
+    getLogisticsMergeNodeForInputTransfer(transfer, state = this.gameEngine.state) {
         const lineId = transfer?.lineId || null;
         if (!lineId) return null;
         const route = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
         const endPoint = route[route.length - 1] || null;
-        const TS = GameEngine.TILE_SIZE || 20;
+        const TS = this.gameEngine.TILE_SIZE || 20;
         return this.system.ensureLogisticsMergeNodeStore(state).find(node => {
             if (!node || !Array.isArray(node.inputGroupIds) || !node.inputGroupIds.includes(lineId)) return false;
             if (!node.outputGroupId) return false;
@@ -498,7 +503,7 @@ export class LogisticsMergeNodeStore {
         }) || null;
     }
 
-    isLogisticsMergeInputTransfer(transfer, state = GameEngine.state) {
+    isLogisticsMergeInputTransfer(transfer, state = this.gameEngine.state) {
         return !!this.getLogisticsMergeNodeForInputTransfer(transfer, state);
     }
 }
