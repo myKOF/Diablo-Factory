@@ -139,7 +139,8 @@ test('MapGenerator 行為回歸基準', async ({ page }) => {
                 ok(allZero, 'updatePathfindingGrid 無碰撞物時矩陣全 0（全可通行）');
             }
 
-            // (d) 非整除維度：尋路矩陣採 ceil 才能完整覆蓋地圖外緣（199/20 → ceil=10；floor 會少一排=9）
+            // (d) 非整除維度：尋路矩陣維度必須與 generateMap/mapData 同一公式（floor），
+            //     兩者才能以同一 mapOffset 疊合而不產生幽靈邊緣格。199/20 → floor=9。
             {
                 const state = {
                     pathfinding: { setGrid(m) { this.grid = m; } },
@@ -151,9 +152,23 @@ test('MapGenerator 行為回歸基準', async ({ page }) => {
                     units: { villagers: [], npcs: [] }
                 };
                 MapGenerator.updatePathfindingGrid(state, { TILE_SIZE: 20, getEntityConfig: () => null });
-                eq(state.pathfinding.grid.length, 10, 'updatePathfindingGrid 非整除高度 rows=ceil(199/20)=10（非 floor 的 9）');
-                eq(state.pathfinding.grid[0].length, 10, 'updatePathfindingGrid 非整除寬度 cols=ceil(199/20)=10（非 floor 的 9）');
+                eq(state.pathfinding.grid.length, 9, 'updatePathfindingGrid 非整除高度 rows=floor(199/20)=9（與 generateMap 同公式）');
+                eq(state.pathfinding.grid[0].length, 9, 'updatePathfindingGrid 非整除寬度 cols=floor(199/20)=9（與 generateMap 同公式）');
             }
+        }
+
+        // --- getGridDimensions：地圖網格維度的「單一真實來源」（generateMap 與 updatePathfindingGrid 共用）---
+        // 領域不變量：維度公式只能有一處定義，否則兩網格在非整除地圖會分歧。採 floor（對齊權威 mapData）。
+        {
+            const dvz = MapGenerator.getGridDimensions({ systemConfig: { map_size: { w: 3200, h: 2000 } } }, { TILE_SIZE: 20 });
+            eq(dvz.cols, 160, 'getGridDimensions 整除寬度 cols=160');
+            eq(dvz.rows, 100, 'getGridDimensions 整除高度 rows=100');
+            const nd = MapGenerator.getGridDimensions({ systemConfig: { map_size: { w: 199, h: 159 } } }, { TILE_SIZE: 20 });
+            eq(nd.cols, 9, 'getGridDimensions 非整除寬度 cols=floor(199/20)=9');
+            eq(nd.rows, 7, 'getGridDimensions 非整除高度 rows=floor(159/20)=7');
+            const def = MapGenerator.getGridDimensions({ systemConfig: {} }, { TILE_SIZE: 20 });
+            eq(def.cols, 160, 'getGridDimensions 缺 map_size → 預設寬 3200 → cols=160');
+            eq(def.rows, 100, 'getGridDimensions 缺 map_size → 預設高 2000 → rows=100');
         }
 
         // --- generateMap：最小確定性子集（resourceConfigs=[] 且無 NPC 鍵 → 僅放 3 核心建築）---
@@ -221,6 +236,29 @@ test('MapGenerator 行為回歸基準', async ({ page }) => {
             // 7) 重新生成會重建 mapEntities（不累加殘留），體現「重生即重置」
             MapGenerator.generateMap(state, engine);
             eq(state.mapEntities.length, 3, 'generateMap 重生時重置 mapEntities（不累加）');
+        }
+
+        // --- 跨方法一致性不變量：尋路碰撞矩陣維度 == 權威 mapData 網格維度 ---
+        // 兩者以同一 mapOffset 疊合同一座標空間；維度分歧會在非整除地圖產生「幽靈邊緣格」
+        // （尋路可走、但無對應地圖資料）。用非整除地圖驅動 generateMap→updatePathfindingGrid 全流程驗證。
+        {
+            const state = {
+                systemConfig: { map_size: { w: 199, h: 159 }, no_resources_range: { w: 40, h: 40 } }, // 皆非 TS(20) 整除
+                buildingConfigsByType: {}, resourceConfigs: [], resources: {},
+                units: { villagers: [], npcs: [] }, idToNameMap: {},
+                pathfinding: { setGrid(m) { this.grid = m; } }
+            };
+            const engine = {
+                TILE_SIZE: 20,
+                getFootprint: () => ({ uw: 1, uh: 1 }),
+                getEntityConfig: () => null,
+                spawnNPC: () => {},
+                updatePathfindingGrid: (s, e) => MapGenerator.updatePathfindingGrid(s, e), // 走真實實作
+                updateSpatialGrid: () => {}
+            };
+            MapGenerator.generateMap(state, engine);
+            eq(state.pathfinding.grid.length, state.mapData.rows, '一致性：尋路矩陣 rows == mapData.rows（兩網格同尺寸，無幽靈邊緣）');
+            eq(state.pathfinding.grid[0].length, state.mapData.cols, '一致性：尋路矩陣 cols == mapData.cols（兩網格同尺寸，無幽靈邊緣）');
         }
 
         return { fails };

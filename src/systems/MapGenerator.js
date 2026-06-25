@@ -2,6 +2,21 @@ import { UI_CONFIG } from "../ui/ui_config.js";
 import { MapDataSystem } from "./MapDataSystem.js";
 
 export class MapGenerator {
+    /**
+     * 地圖網格維度的「單一真實來源」。generateMap 與 updatePathfindingGrid 共用，
+     * 確保資源資料網格(mapData)與尋路碰撞矩陣永遠同尺寸、以同一 mapOffset 對齊。
+     * 採 floor：尋路矩陣是疊在權威 mapData 之上的覆蓋層，必須與其逐格對齊，不應多出無資料的邊緣格。
+     * @returns {{cols:number, rows:number}}
+     */
+    static getGridDimensions(state, engine) {
+        const mapCfg = (state.systemConfig && state.systemConfig.map_size) || { w: 3200, h: 2000 };
+        const TS = engine.TILE_SIZE;
+        return {
+            cols: Math.floor(mapCfg.w / TS),
+            rows: Math.floor(mapCfg.h / TS)
+        };
+    }
+
     static updateSpatialGrid(state, engine) {
         const grid = state.spatialGrid;
         grid.cells.clear();
@@ -23,10 +38,9 @@ export class MapGenerator {
         const mapCfg = state.systemConfig.map_size || { w: 3200, h: 2000 };
         const safeCfg = state.systemConfig.no_resources_range || { w: 240, h: 240 };
 
-        // 定義地圖格網 (Tiles)
+        // 定義地圖格網 (Tiles)。維度走單一真實來源，與 updatePathfindingGrid 共用同一公式。
         const TS = engine.TILE_SIZE;
-        const cols = Math.floor(mapCfg.w / TS);
-        const rows = Math.floor(mapCfg.h / TS);
+        const { cols, rows } = MapGenerator.getGridDimensions(state, engine);
 
         // 將村莊中心 (960, 560) 近似地圖中央
         const minGX = Math.floor(960 / TS) - Math.floor(cols / 2);
@@ -305,10 +319,9 @@ export class MapGenerator {
     static updatePathfindingGrid(state, engine) {
         if (!state.pathfinding) return;
 
-        const mapCfg = state.systemConfig.map_size || { w: 3200, h: 2000 };
+        // 維度走單一真實來源（與 generateMap/mapData 同公式 floor），確保兩網格逐格對齊、無幽靈邊緣格。
         const TS = engine.TILE_SIZE;
-        const cols = Math.ceil(mapCfg.w / TS);
-        const rows = Math.ceil(mapCfg.h / TS);
+        const { cols, rows } = MapGenerator.getGridDimensions(state, engine);
 
         // 初始化全 0 (可通行)
         const matrix = Array.from({ length: rows }, () => new Array(cols).fill(0));
