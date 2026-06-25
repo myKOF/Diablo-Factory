@@ -200,7 +200,7 @@ export class ConfigManager {
                     }
                 }
             }
-        } catch (e) { }
+        } catch (e) { console.error("加載 npc_data.csv 失敗:", e); }
     }
 
     static async loadSystemConfig(state) {
@@ -257,7 +257,7 @@ export class ConfigManager {
                     state.systemConfig[type] = isNaN(num) ? val : num;
                 }
             }
-        } catch (e) { }
+        } catch (e) { console.error("加載 system_config.csv 失敗:", e); }
     }
 
     static async loadStringsConfig(state) {
@@ -343,7 +343,7 @@ export class ConfigManager {
                     pixel_size: pixelSize
                 });
             }
-        } catch (e) { }
+        } catch (e) { console.error("加載 resources_data.csv 失敗:", e); }
     }
 
     static async loadIngredientConfig(state) {
