@@ -173,13 +173,14 @@ export class LogisticsMergeNodeStore {
                 const backHead = backSegments[0];
                 if (frontTail) frontTail.nextId = null;
                 if (backHead) backHead.prevId = null;
+                const downstreamTargetMeta = backSegments.find(seg => seg?.targetId || seg?.targetPort || seg?.targetPoint) || null;
                 backSegments.forEach(seg => {
                     seg.groupId = newGroupId;
                     seg.sourceId = null;
-                    seg.targetId = null;
                     seg.sourcePort = null;
-                    seg.targetPort = null;
-                    seg.targetPoint = null;
+                    if (!seg.targetId && downstreamTargetMeta?.targetId) seg.targetId = downstreamTargetMeta.targetId;
+                    if (!seg.targetPort && downstreamTargetMeta?.targetPort) seg.targetPort = downstreamTargetMeta.targetPort;
+                    if (!seg.targetPoint && downstreamTargetMeta?.targetPoint) seg.targetPoint = downstreamTargetMeta.targetPoint;
                     seg.detachedFromGroupId = outputGroupId;
                     seg.detachedAtKey = cellKey;
                 });
@@ -312,6 +313,15 @@ export class LogisticsMergeNodeStore {
             this.system.getLogisticsSegmentsByGroupId(outputGroupId).forEach(line => this.system.clearSuppressedLogisticsConnectionCell(line, snapped));
         }
         this.system.reassignDeletedGapContinuationToMergeInput(inputGroupId, finalOutputGroupId, snapped);
+        if (typeof this.system.updateActiveTransfersOnLogisticsChange === 'function') {
+            this.system.updateActiveTransfersOnLogisticsChange(state, new Set([
+                inputGroupId,
+                outputGroupId,
+                finalOutputGroupId,
+                ultimateOutputGroupId,
+                ...ultimateInputGroupIds
+            ].filter(Boolean)));
+        }
         return node;
     }
 

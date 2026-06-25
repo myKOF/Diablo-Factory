@@ -374,6 +374,10 @@ function recalculateLogisticsGroupEndpoints(groupId) {
         .flatMap(ent => (Array.isArray(ent.outputTargets) ? ent.outputTargets : []).map(conn => ({ ent, conn })))
         .find(item => item.conn?.lineId === groupId) || null;
     const existingMeta = groupSegments.find(seg => seg && (seg.sourceId || seg.targetId || seg.sourcePort || seg.targetPort)) || null;
+    const storedTargetPort = cloneLogisticsPort(storedConnection?.conn?.targetPort);
+    const existingTargetPort = cloneLogisticsPort(existingMeta?.targetPort);
+    const preservedTargetPort = [storedTargetPort, existingTargetPort].find(hasLogisticsPortPosition) || null;
+    const preservedTargetId = storedConnection?.conn?.id || existingMeta?.targetId || null;
 
     if (!sourceEnt) {
         const storedSourcePort = cloneLogisticsPort(storedConnection?.conn?.sourcePort);
@@ -389,10 +393,6 @@ function recalculateLogisticsGroupEndpoints(groupId) {
     }
 
     if (!targetEnt) {
-        const storedTargetPort = cloneLogisticsPort(storedConnection?.conn?.targetPort);
-        const existingTargetPort = cloneLogisticsPort(existingMeta?.targetPort);
-        const preservedTargetPort = [storedTargetPort, existingTargetPort].find(hasLogisticsPortPosition) || null;
-        const preservedTargetId = storedConnection?.conn?.id || existingMeta?.targetId || null;
         if (preservedTargetId && preservedTargetPort && this.doesLogisticsGroupContainConnectionPoint(groupId, preservedTargetPort, TS * 0.75, state)) {
             targetEnt = findEntityById(preservedTargetId);
             targetPort = preservedTargetPort;
@@ -400,7 +400,10 @@ function recalculateLogisticsGroupEndpoints(groupId) {
     }
 
     const sourceId = sourceEnt ? (window.UIManager?.getEntityId(sourceEnt) || sourceEnt.id) : null;
-    const targetId = targetEnt ? (window.UIManager?.getEntityId(targetEnt) || targetEnt.id) : null;
+    const hasEntityList = Array.isArray(state.mapEntities) && state.mapEntities.length > 0;
+    const targetId = targetEnt
+        ? (window.UIManager?.getEntityId(targetEnt) || targetEnt.id)
+        : (!hasEntityList && targetPort && preservedTargetId ? preservedTargetId : null);
 
     // 更新該群組所有線段的連線資訊
     groupSegments.forEach(seg => {

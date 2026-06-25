@@ -228,7 +228,10 @@ export class LogisticsMergeNodeRuntime {
             .join("|");
         const key = this.getMergeNodeKey(node);
         if (!state._logisticsMergeAdmissionWinners) state._logisticsMergeAdmissionWinners = {};
-        if (!node._forceBreak && this.isThroughSlotDue(node) && this.findReadyThroughTransfer(node, state, spacing)) {
+        const readyThroughTransfer = !node._forceBreak && this.isThroughSlotDue(node)
+            ? this.findReadyThroughTransfer(node, state, spacing)
+            : null;
+        if (readyThroughTransfer) {
             state._logisticsMergeAdmissionWinners[key] = {
                 signature,
                 winnerId: null,
@@ -238,6 +241,10 @@ export class LogisticsMergeNodeRuntime {
             node.zipperTurn = 'main';
             node.awaitingMainPass = true;
             return null;
+        }
+        if (node.awaitingMainPass === true && !readyThroughTransfer) {
+            node.awaitingMainPass = false;
+            node.zipperTurn = 'branch';
         }
         const queuedAdmission = this.getQueuedAdmissionSlot(node, state, slots);
         if (queuedAdmission.winnerId) {
@@ -527,6 +534,10 @@ export class LogisticsMergeNodeRuntime {
         if (!nodes.length || !Array.isArray(state?.activeTransfers) || state.activeTransfers.length === 0) return false;
         const minTransferSpacing = this.getMergeGateSpacing();
         const admittedNodeKeys = new Set();
+        // [死鎖解除] 連續多輪「閘門前有等待輸入、卻一台都放行不出」即判定環狀死鎖（迴圈中兩閘門互等）。
+        // 正常合流數輪內就會放行而歸零，永遠到不了此門檻；只有真死鎖才會累積觸發 _forceBreak。
+        const nodesWithGateCandidate = new Set();
+        const MERGE_GRIDLOCK_TICKS = 30;
 
         let changed = false;
         const getPathDistanceToPoint = (points, point) => {
@@ -657,7 +668,9 @@ export class LogisticsMergeNodeRuntime {
                 delete transfer.blockedOnBrokenLine;
                 return;
             }
-            const outputSeg = this.system.getLogisticsSegmentsByGroupId(node.outputGroupId)[0] || null;
+            const outputSegments = this.system.getLogisticsSegmentsByGroupId(node.outputGroupId);
+            const outputSeg = outputSegments[0] || null;
+            const outputTargetSeg = outputSegments.find(seg => seg?.targetId || seg?.targetPort) || outputSeg;
             const inputGroupId = transfer.lineId;
             const mergePoint = node.point || { x: node.x, y: node.y };
             const inputPoints = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
@@ -680,7 +693,8 @@ export class LogisticsMergeNodeRuntime {
             // 路線已切換，舊路線上的排隊距離殘值必須清除，避免排隊邏輯誤判位置。
             delete transfer._queuedDistance;
             transfer.sourceId = outputSeg?.sourceId || transfer.sourceId || null;
-            transfer.targetId = outputSeg?.targetId || null;
+            transfer.targetId = outputTargetSeg?.targetId || null;
+            transfer.targetPort = outputTargetSeg?.targetPort || null;
             transfer.efficiency = Number(outputSeg?.efficiency) || Number(transfer.efficiency) || 0;
             if (inputDir && outputDir && (inputDir.x !== outputDir.x || inputDir.y !== outputDir.y)) {
                 transfer._mergeVisualTurn = {

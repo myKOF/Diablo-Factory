@@ -304,7 +304,7 @@ function submitDrag() {
                 submitAffectedGroupIds.add(reconnectedGroupId);
                 submitAffectedGroupIds.add(touchedTargetGroupId);
             } else {
-                this.registerLogisticsMergeNode({
+                const mergeNode = this.registerLogisticsMergeNode({
                     inputGroupId: createdLine.groupId,
                     outputGroupId: touchedTargetGroupId,
                     point: mergePointOverride || lastPoint,
@@ -312,6 +312,8 @@ function submitDrag() {
                     outputLine: touchedTargetLine
                 });
                 submitAffectedGroupIds.add(touchedTargetGroupId);
+                if (mergeNode?.outputGroupId) submitAffectedGroupIds.add(mergeNode.outputGroupId);
+                (mergeNode?.inputGroupIds || []).forEach(groupId => submitAffectedGroupIds.add(groupId));
             }
         }
         const afterCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : beforeCount;

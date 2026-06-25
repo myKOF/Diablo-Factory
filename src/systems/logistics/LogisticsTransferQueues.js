@@ -101,7 +101,23 @@ export class LogisticsTransferQueues {
             if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
             return totalLength;
         };
+        const routeSignature = (transfer) => {
+            const points = transfer.routePoints || [];
+            if (!Array.isArray(points) || points.length < 2) return null;
+            return points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|");
+        };
+        const routeSignatureLineIds = new Map();
+        state.activeTransfers.forEach(transfer => {
+            const signature = routeSignature(transfer);
+            if (!signature) return;
+            if (!routeSignatureLineIds.has(signature)) routeSignatureLineIds.set(signature, new Set());
+            routeSignatureLineIds.get(signature).add(transfer.lineId || "");
+        });
         const pathKey = (transfer) => {
+            const signature = routeSignature(transfer);
+            if (signature && (routeSignatureLineIds.get(signature)?.size || 0) > 1) {
+                return `route:${signature}`;
+            }
             if (transfer.lineId) return `line:${transfer.lineId}`;
             const points = transfer.routePoints || [];
             const first = points[0];

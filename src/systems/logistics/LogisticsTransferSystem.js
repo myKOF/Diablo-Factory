@@ -664,6 +664,10 @@ export class LogisticsTransferSystem {
             return true;
         };
         const getTransferPathKey = (transfer) => {
+            const signature = getTransferRouteSignature(transfer);
+            if (signature && (routeSignatureLineIds.get(signature)?.size || 0) > 1) {
+                return `route:${signature}`;
+            }
             if (transfer?.lineId) return `line:${transfer.lineId}`;
             const points = transfer?.routePoints || [];
             const first = points[0];
@@ -674,6 +678,18 @@ export class LogisticsTransferSystem {
                 last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"
             ].join("|");
         };
+        const getTransferRouteSignature = (transfer) => {
+            const points = transfer?.routePoints || [];
+            if (!Array.isArray(points) || points.length < 2) return null;
+            return points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|");
+        };
+        const routeSignatureLineIds = new Map();
+        (state.activeTransfers || []).forEach(transfer => {
+            const signature = getTransferRouteSignature(transfer);
+            if (!signature) return;
+            if (!routeSignatureLineIds.has(signature)) routeSignatureLineIds.set(signature, new Set());
+            routeSignatureLineIds.get(signature).add(transfer.lineId || "");
+        });
         const canStartTransfer = (transfer) => {
             if (!transfer || !Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) return true;
             const key = getTransferPathKey(transfer);
@@ -683,7 +699,10 @@ export class LogisticsTransferSystem {
             return !state.activeTransfers.some(active => {
                 if (!active || active.id === transfer.id) return false;
                 if (!Array.isArray(active.routePoints) || active.routePoints.length < 2) return false;
-                if (getTransferPathKey(active) !== key) return false;
+                const samePathKey = getTransferPathKey(active) === key;
+                const sameRouteSignature = getTransferRouteSignature(active) &&
+                    getTransferRouteSignature(active) === getTransferRouteSignature(transfer);
+                if (!samePathKey && !sameRouteSignature) return false;
                 const activeTotal = getTransferRouteMetrics(active).totalPixels || totalLength;
                 const activeDistance = this.transportArrayState.getTransferDistance(active, activeTotal, cellSize);
                 return activeDistance < cellSize;

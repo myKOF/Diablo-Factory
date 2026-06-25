@@ -1,3 +1,36 @@
+# 2026-06-25 同建築第二端口接入後終點延遲堵死補修計畫
+
+## 核心目標
+1. 重現同一建築第一條物流線已接通運輸時，第二個端口再拉線接入主線後，終點端口約數秒後堵死的情境。
+2. 追蹤同源多 `outputTargets` 經合流切分後的派貨路徑、合流 winner 與終點交付狀態，找出延遲堵死根因。
+3. 局部修正物流 runtime / merge node / transfer queue，不改 Router footprint 與渲染層職責。
+
+## 實施步驟
+- [x] 步驟 1：新增同建築雙端口接入主線的紅燈回歸測試。
+- [x] 步驟 2：以測試資料定位同源多輸出合流後堵死的根因。
+- [x] 步驟 3：局部修正並保持既有物流合流回歸通過。
+- [x] 步驟 4：執行相關 Playwright 回歸與 `npm run finalize`。
+
+# 2026-06-25 第二條物流線接入後終點端口堵死修復計畫
+
+## 核心目標
+1. 修正第一條物流線已接通並正常運輸時，接入第二條線後，主線在終點端口前直接堵死的問題。
+2. 確認合流/接入造成的 topology 重算不會破壞原本 target port handoff、output route 或終點消費判定。
+3. 僅局部修正物流 runtime / merge node / transfer handoff 根因，保留既有 Router footprint、群組與渲染職責分離。
+
+## 實施步驟
+- [x] 步驟 1：使用 `tools/safe_search.cjs` 盤點終點端口 handoff、merge node runtime、transfer queue 與接通狀態重算流程。
+- [x] 步驟 2：新增紅燈回歸測試，重現「已接通主線運輸中，第二條線接入後終點端口不應堵死」。
+- [x] 步驟 3：局部修正堵塞根因，確保接入第二條線後主線物品仍能交付到終點端口。
+- [x] 步驟 4：執行相關回歸與 `npm run finalize`，回報 Debug 渲染耗時與 Draw Calls。
+
+## 延遲堵死補查
+- [x] 步驟 5：針對「接入後 5~10 秒才堵死」新增雙來源持續派貨回歸，觀察 merge scheduler 是否在數輪後卡住。
+- [x] 步驟 6：修正合流排程/終點回壓的延遲死鎖根因。
+- [x] 步驟 7：重跑物流回歸與 `npm run finalize`。
+- [x] 步驟 8：補查支線物品切入多段 output group 後 `targetId` 被第一段空 metadata 清掉的延遲堵塞根因，並修正終點 metadata 繼承。
+- [x] 步驟 9：補查不同 `lineId` 但同一物理路徑的物品未共用 stacking 分組，導致接入線物品穿越主線堵塞物品的重疊根因，並改以共享 route signature 合併排隊分組。
+
 # 2026-06-23 物流匯點堵死與產品選擇界面修復計畫
 
 ## 核心目標
