@@ -190,16 +190,6 @@ export class WorkerSystem {
         if ((v.state === 'GATHERING' || v.state === 'MOVING_TO_RESOURCE') && v.targetId) ignoreEnts.push(v.targetId);
         if ((v.state === 'CONSTRUCTING' || v.state === 'MOVING_TO_CONSTRUCTION') && v.constructionTarget) ignoreEnts.push(v.constructionTarget);
         if (v.state === 'MOVING_TO_BASE' && v.targetBase) ignoreEnts.push(v.targetBase);
-        if (v.state === 'TRANSPORTING_LOGISTICS' || v.state === 'RETURNING_TO_FACTORY') {
-            const logisticsTarget = v.logisticsTargetId
-                ? this.getEntityById(v.logisticsTargetId)
-                : null;
-            const logisticsHome = v.logisticsHomeId
-                ? this.getEntityById(v.logisticsHomeId)
-                : null;
-            if (logisticsTarget) ignoreEnts.push(logisticsTarget);
-            if (logisticsHome && logisticsHome !== logisticsTarget) ignoreEnts.push(logisticsHome);
-        }
         if (v._isRallyMovement && v.rallySourceBuildingId) {
             const rallySource = this.getEntityById(v.rallySourceBuildingId);
             if (rallySource) ignoreEnts.push(rallySource);
@@ -233,14 +223,6 @@ export class WorkerSystem {
                 v.visible = false;
                 if (v.sprite && typeof v.sprite.setVisible === 'function') v.sprite.setVisible(false);
                 if (v.gameObject && typeof v.gameObject.setVisible === 'function') v.gameObject.setVisible(false);
-                break;
-            case 'TRANSPORTING_LOGISTICS':
-            case 'RETURNING_TO_FACTORY':
-                // [階段四] TODO: 'TRANSPORTING_LOGISTICS' / 'RETURNING_TO_FACTORY' 已不再由任何程式碼產生（全庫無賦值點）。
-                // 此處保留為相容舊存檔的遷移防護：把殘留的舊版搬運工召回工廠。待確認無舊存檔依賴後可整段移除。
-                v.state = 'WORKING_IN_FACTORY';
-                v.cargoType = null;
-                v.cargoAmount = 0;
                 break;
             case 'IDLE':
                 this.handleStateIdle(v, deltaTime, ignoreEnts, moveSpeed);
@@ -1380,135 +1362,6 @@ export class WorkerSystem {
     }
 
 
-    placeWorkerAtLogisticsEndpoint(v, source, target, endpoint) {
-        const line = this.logisticsSystem.getLogisticsLinePoints(source, target);
-        if (!line) return;
-        const point = endpoint === 'target' ? line.end : line.start;
-        v.x = point.x;
-        v.y = point.y;
-        v.renderX = point.x;
-        v.renderY = point.y;
-        v.pathTarget = null;
-        v.fullPath = null;
-        v.pathIndex = 0;
-        v._lastRequestedTarget = null;
-        v._pathRequestId = (v._pathRequestId || 0) + 1;
-        v.isFindingPath = false;
-        v._lastPathTime = 0;
-        v._stuckFrames = 0;
-        v.commandCenter = null;
-        v.idleTarget = null;
-        if (v.sprite && typeof v.sprite.setPosition === 'function') v.sprite.setPosition(point.x, point.y);
-        if (v.gameObject && typeof v.gameObject.setPosition === 'function') v.gameObject.setPosition(point.x, point.y);
-    }
-
-    moveAlongLogisticsLine(v, source, target, destination, speed, dt, ignoreEnts = []) {
-        const line = this.logisticsSystem.getLogisticsLinePoints(source, target);
-        if (!line) return null;
-        const basePoints = Array.isArray(line.points) && line.points.length >= 2
-            ? line.points.map(p => ({ x: p.x, y: p.y }))
-            : [line.start, line.end];
-        const points = destination === 'source' ? basePoints.slice().reverse() : basePoints;
-        const to = points[points.length - 1];
-        if (!to || points.length < 2) return to || null;
-
-        const segmentLengths = [];
-        let totalLength = 0;
-        for (let i = 0; i < points.length - 1; i++) {
-            const dx = points[i + 1].x - points[i].x;
-            const dy = points[i + 1].y - points[i].y;
-            const len = Math.hypot(dx, dy);
-            segmentLengths.push(len);
-            totalLength += len;
-        }
-        if (totalLength <= 0.01) return to;
-
-        const nearestDistanceOnPolyline = (x, y) => {
-            let bestDistSq = Number.POSITIVE_INFINITY;
-            let bestAlong = 0;
-            let along = 0;
-            for (let i = 0; i < points.length - 1; i++) {
-                const a = points[i];
-                const b = points[i + 1];
-                const sx = b.x - a.x;
-                const sy = b.y - a.y;
-                const lenSq = sx * sx + sy * sy;
-                if (lenSq <= 0.0001) {
-                    along += segmentLengths[i] || 0;
-                    continue;
-                }
-                const t = Math.max(0, Math.min(1, ((x - a.x) * sx + (y - a.y) * sy) / lenSq));
-                const px = a.x + sx * t;
-                const py = a.y + sy * t;
-                const dSq = (x - px) * (x - px) + (y - py) * (y - py);
-                if (dSq < bestDistSq) {
-                    bestDistSq = dSq;
-                    bestAlong = along + (segmentLengths[i] || 0) * t;
-                }
-                along += segmentLengths[i] || 0;
-            }
-            return bestAlong;
-        };
-
-        const pointAtDistance = (distance) => {
-            let remain = Math.max(0, Math.min(totalLength, distance));
-            for (let i = 0; i < points.length - 1; i++) {
-                const segLen = segmentLengths[i] || 0;
-                const a = points[i];
-                const b = points[i + 1];
-                if (segLen <= 0.0001) continue;
-                if (remain <= segLen) {
-                    const t = remain / segLen;
-                    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-                }
-                remain -= segLen;
-            }
-            return { ...to };
-        };
-
-        const currentDistance = nearestDistanceOnPolyline(v.x, v.y);
-        const lookAhead = Math.min(120, Math.max(50, speed * 0.9));
-        let guidePoint = pointAtDistance(currentDistance + lookAhead);
-
-        if (this.state.pathfinding) {
-            const gx = Math.floor(guidePoint.x / TILE_SIZE);
-            const gy = Math.floor(guidePoint.y / TILE_SIZE);
-            if (!this.state.pathfinding.isValidAndWalkable(gx, gy, true)) {
-                const nearest = this.state.pathfinding.getNearestWalkableTile(gx, gy, 12, true, true);
-                if (nearest) {
-                    guidePoint = {
-                        x: nearest.x * TILE_SIZE + 10,
-                        y: nearest.y * TILE_SIZE + 10
-                    };
-                }
-            }
-        }
-
-        this.moveDetailed(v, guidePoint.x, guidePoint.y, speed, dt, ignoreEnts);
-        v.pathTarget = null;
-
-        return to;
-    }
-
-    pickLogisticsConnectionForWorker(v, factory, outputTargets, canUse) {
-        if (!factory || !Array.isArray(outputTargets) || outputTargets.length === 0) return null;
-        const usableTargets = outputTargets
-            .map((conn, index) => ({ conn, index }))
-            .filter(({ conn }) => canUse(conn));
-        if (usableTargets.length === 0) return null;
-
-        const factoryId = factory.id || `${factory.type1}_${factory.x}_${factory.y}`;
-        const assignedWorkers = this.state.units.villagers
-            .filter(worker => worker.assignedWarehouseId === factoryId && this.isLogisticsWorkerForBuilding(worker, factoryId))
-            .sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
-        const workerIndex = Math.max(0, assignedWorkers.findIndex(worker => worker.id === v.id));
-        const preferredIndex = outputTargets.length > 0 ? workerIndex % outputTargets.length : 0;
-        const preferred = usableTargets.find(({ index }) => index === preferredIndex) || usableTargets[workerIndex % usableTargets.length];
-
-        preferred.conn._balancedIndex = preferred.index;
-        return preferred.conn;
-    }
-
     getAssignedCountForBuilding(building, excludeVillagerId = null) {
         if (!building) return 0;
         const buildingId = building.id || `${building.type1}_${building.x}_${building.y}`;
@@ -1572,7 +1425,7 @@ export class WorkerSystem {
         if (!v || v.assignedWarehouseId !== buildingId) return false;
         return v._assignmentRole === 'transport' ||
             v.logisticsHomeId === buildingId ||
-            ['MOVING_TO_FACTORY', 'WORKING_IN_FACTORY', 'TRANSPORTING_LOGISTICS', 'RETURNING_TO_FACTORY'].includes(v.state);
+            ['MOVING_TO_FACTORY', 'WORKING_IN_FACTORY'].includes(v.state);
     }
 
     shouldWorkerTransportForGatheringBuilding(v, entity) {
@@ -1592,7 +1445,7 @@ export class WorkerSystem {
     canSwitchGatheringAssignmentRole(v) {
         if (!v) return false;
         if ((v.cargo || 0) > 0 || (v.cargoAmount || 0) > 0) return false;
-        return !['TRANSPORTING_LOGISTICS', 'RETURNING_TO_FACTORY', 'MOVING_TO_BASE'].includes(v.state);
+        return !['MOVING_TO_BASE'].includes(v.state);
     }
 
     assignWorkerToGathering(v, entity, buildingId) {

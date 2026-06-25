@@ -13,9 +13,7 @@ export class CharacterRenderer {
             'MOVING_TO_FACTORY',
             'MOVING_TO_RESOURCE',
             'MOVING_TO_BASE',
-            'MOVING_TO_CONSTRUCTION',
-            'TRANSPORTING_LOGISTICS',
-            'RETURNING_TO_FACTORY'
+            'MOVING_TO_CONSTRUCTION'
         ].includes(state);
     }
 
