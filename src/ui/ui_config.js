@@ -758,6 +758,38 @@ export const UI_CONFIG = {
         workerEfficiencyText: "生產效率: {0}%" // 效率顯示文字格式，{0} 會被替換為百分比數字
     },
 
+    // -- 物流線互動 UI (LogisticsUI) --------------------------
+    LogisticsUI: {
+        tooltip: {
+            zIndex: 3000,                         // 物流提示框層級，需高於一般面板
+            background: "rgba(12,12,12,0.96)",    // 提示框背景色
+            color: "#f5f5f5",                     // 提示框文字顏色
+            border: "2px solid #f5f5f5",          // 提示框外框樣式
+            padding: "6px 9px",                   // 提示框內距
+            fontSize: "16px",                     // 提示框文字大小
+            lineHeight: "1.35",                   // 提示框行高
+            whiteSpace: "nowrap",                 // 提示框維持單行顯示
+            boxShadow: "0 3px 8px rgba(0,0,0,0.55)", // 提示框陰影
+            margin: 12,                           // 提示框與游標距離
+            viewportPadding: 6                    // 提示框與視窗邊界最小距離
+        },
+        menu: {
+            zIndex: 2000,                         // 物流選單層級，需高於遊戲畫面
+            padding: "15px",                      // 選單內距
+            gap: "10px",                          // 選單項目間距
+            background: "rgba(20,20,20,0.95)",    // 選單背景色
+            border: "2px solid #4caf50",          // 選單邊框樣式
+            borderRadius: "8px",                  // 選單圓角
+            boxShadow: "0 4px 15px rgba(0,0,0,0.8)", // 選單陰影
+            pointerEvents: "auto",                // 選單可接收點擊事件
+            defaultWidth: 420,                    // 尚未完成排版時計算位置用的預設寬度
+            defaultHeight: 220,                   // 物流連線選單的預設高度
+            lineMenuDefaultHeight: 180,           // 單線段選單的預設高度
+            rightPadding: 24,                     // 選單與右側視窗邊界距離
+            viewportPadding: 16                   // 選單與視窗邊界最小距離
+        }
+    },
+
     // -- 物流線相關設置 (LogisticsSystem) --------------------------
     LogisticsSystem: {
         // --- 物流線顏色 ---

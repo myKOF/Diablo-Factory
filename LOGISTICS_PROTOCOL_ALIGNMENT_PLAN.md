@@ -24,11 +24,33 @@
 | 5 | 已完成 | 修正物流延伸跨越與切段規則 | 防穿透與斷點、不可任意合併 |
 | 6 | 已完成 | 合流 winner 單一來源化，移除隨機 fallback | Round-Robin、無絕對優先權 |
 | 7 | 已完成 | 刪除、復原、重路由失敗時回收產品至來源建築或銷毀 | 物品回流與銷毀 |
-| 8 | 待使用者驗證 | 收斂運輸模型至陣列偏移運輸法 | Performance Critical |
-| 9 | 未開始 | UI / Renderer 解耦與 config-driven 收斂 | Strict Separation、Config-Driven |
-| 10 | 未開始 | 最終 Playwright 驗證與 `npm run finalize` 收尾 | Mandatory Finalization |
+| 8 | 已完成 | 收斂運輸模型至陣列偏移運輸法 | Performance Critical |
+| 9 | 已完成 | UI / Renderer 解耦與 config-driven 收斂 | Strict Separation、Config-Driven |
+| 10 | 已完成 | 最終 Playwright 驗證與 `npm run finalize` 收尾 | Mandatory Finalization |
 
 ## 詳細計劃
+
+### 後續修復：運輸中接入端口線造成匯合堵死
+
+**狀態：待使用者驗證**
+
+**目前進度**
+
+- `待使用者驗證`：已定位根因為 `LogisticsMergeNodeRuntime` 的出口佔用檢查只用投影距離，當 output transfer 的目前路徑已不再穿越該匯合點時，仍會被誤判為佔住匯合點。
+- `待使用者驗證`：新增「合流拓樸變更後未穿越匯合點的輸出物品不得堵死支線」Playwright 回歸測試，先確認修復前會失敗。
+- `待使用者驗證`：`LogisticsMergeNodeRuntime` 新增路徑到匯合點的實際距離檢查；`findReadyThroughTransfer()`、`getMergeThroughYieldLimit()`、`releaseClearedMergeOccupant()`、出口佔用檢查都會忽略未實際穿越該匯合點的 output transfer。
+- `待使用者驗證`：第二輪定位到另一類堵塞：排程輪到主線 through 時，若該主線 transfer 已被 `queueBlocked` / `blockedOnBrokenLine` 回壓，仍被當成可通過主線車，導致支線永久等待。
+- `待使用者驗證`：新增「合流拓樸變更後被回壓的主線 through 車不得讓支線永久等待」Playwright 回歸測試，先確認修復前會失敗。
+- `待使用者驗證`：`findReadyThroughTransfer()` 已排除 `queueBlocked` 與 `blockedOnBrokenLine` 的 through transfer，讓排程可改放行已到匯合點的支線。
+- `驗證紀錄`：`npm.cmd run test:e2e -- tests/logistics/merge_deadlock.spec.js tests/logistics/merge_nodes.spec.js tests/logistics/merge_stacking.spec.js tests/logistics/merge_visual_speed.spec.js tests/logistics/protocol_alignment.spec.js` 通過 29 項。
+- `驗證紀錄`：`npm.cmd run test:e2e -- tests/logistics` 通過 46 項。
+- `驗證紀錄`：`npm.cmd run finalize` 成功。
+- `驗證紀錄`：第二輪修正後，合流/協議測試通過 30 項，完整物流測試通過 47 項，`npm.cmd run finalize` 成功。
+- `待使用者驗證`：第三輪定位「從建築拉出懸空(無目標)支線交匯主線中段後上游堆積堵死」。決定性重現條件：支線無目標 id（剛從建築拉出），主線中段切分後上游成為合流輸入。根因有兩處：
+  1. `getOrderedLogisticsSegmentRoutePoints()` 的連續性檢查比較的是「各線段起點稀疏骨架」間距，任一線段長度 > 1.75 格就被誤判為斷裂而回傳 null，使合流上游派發拿不到「止於合流點」的路徑、改走跨越合流點直通目標的完整路徑而無法被 admit。已改為驗證相鄰線段首尾相接。
+  2. `LogisticsMergeNodeRuntime.getReadyInputSlots()` 只檢查「物品在輸入 group 且接近自己路徑終點」，未檢查終點是否真的在合流點；完整路徑直通物品(終點在建築)被誤選為 winner，但 `apply()` 的端點檢查會忽略它，導致真正的輸入永遠等待一個不會被服務的 winner。已加上「路徑終點需鄰近合流點」的一致性檢查。
+- `待使用者驗證`：新增 `tests/logistics/merge_dangling_branch_repro.spec.js`，先確認修復前送達數凍結、修復後持續送達。
+- `驗證紀錄`：第三輪修正後 `npm.cmd run test:e2e -- tests/logistics` 50 通過、1 既有失敗（`接通路徑轉彎格不得直接跳過方形底圖`，為 `logistics_renderer.js` 既有改動的 source 檢查，與本次修正無關，移除本次改動後仍失敗）。
 
 ### 任務 1：建立物流回歸測試基線
 
@@ -290,7 +312,7 @@
 
 ### 任務 8：收斂運輸模型至陣列偏移運輸法
 
-**狀態：待使用者驗證**
+**狀態：已完成**
 
 **目前進度**
 
@@ -302,6 +324,8 @@
 - `待使用者驗證`：已修正物流線接通/重算後，`LogisticsTransferRerouter` 只更新 `progress` 與 `routePoints` 卻未同步 `transportIndex` / `transportOffset`，導致下一幀用舊 array 位置覆蓋新投影位置的問題。
 - `待使用者驗證`：新增「WorkerSystem 運輸推進必須以 index/offset 為位置來源」與「物流渲染進度必須優先讀取 index/offset」Playwright 回歸測試。
 - `待使用者驗證`：新增「物流重路由後必須同步 index/offset 位置來源」Playwright 回歸測試。
+- `待使用者驗證`：已修正同一匯合 cell 拓樸變更時沿用舊 `awaitingMainPass`、`currentOccupant`、winner cache 與 wait queue，導致接通其它路線後既有匯合點立即堵死的問題。
+- `待使用者驗證`：新增「匯合拓樸變更時不得沿用舊排程等待狀態」Playwright 回歸測試。
 
 **目的**
 
@@ -326,12 +350,24 @@
 
 - 大量物品運輸時無逐物件獨立 update callback。
 - 合流、堵塞、送達行為與既有功能一致。
-- Playwright：`tests/logistics/protocol_alignment.spec.js` 21 項通過。
+- Playwright：`tests/logistics/protocol_alignment.spec.js` 22 項通過。
 - Playwright：`tests/logistics/logistics_merge_connection_regression.spec.js` 12 項通過。
 
 ### 任務 9：UI / Renderer 解耦與 config-driven 收斂
 
-**狀態：未開始**
+**狀態：已完成**
+
+**目前進度**
+
+- `待使用者驗證`：新增 `src/systems/logistics/LogisticsRenderModel.js`，集中 renderer 所需的物流資料查詢入口。
+- `待使用者驗證`：`src/renderers/logistics_renderer.js` 已移除對 `ConveyorSystem.js` / `conveyorSystem` 的直接依賴，改透過 `logisticsRenderModel` 取得群組、路線、匯合節點與 preview segment 資料。
+- `待使用者驗證`：`src/ui/ui_config.js` 新增 `LogisticsUI.tooltip` 與 `LogisticsUI.menu` 設定。
+- `待使用者驗證`：`src/ui/LogisticsUI.js` tooltip/menu 樣式已改由 `UI_CONFIG.LogisticsUI` 套用，移除 `cssText` 硬編碼。
+- `待使用者驗證`：新增 Playwright 規則測試「物流 renderer 必須透過 RenderModel 讀取系統資料」與「物流 UI tooltip 與 menu 樣式必須讀取 UI_CONFIG」。
+- `已完成`：使用者已驗證第 9 項沒有問題。
+- `已知暫緩`：第四條件接通後匯合點堵塞依使用者指示暫跳，後續若恢復處理需另開定位計劃。
+- `驗證紀錄`：`npm.cmd run test:e2e -- tests/logistics/protocol_alignment.spec.js -g "物流 renderer|物流 UI"` 通過 2 項。
+- `驗證限制`：完整 `tests/logistics/protocol_alignment.spec.js` 執行超過 120 秒 timeout，留待任務 10 收尾時再跑完整驗證。
 
 **目的**
 
@@ -359,7 +395,16 @@
 
 ### 任務 10：最終驗證與收尾
 
-**狀態：未開始**
+**狀態：已完成**
+
+**目前進度**
+
+- `待使用者驗證`：`npm.cmd run test:e2e -- tests/logistics/protocol_alignment.spec.js` 通過 24 項。
+- `待使用者驗證`：`npm.cmd run test:e2e -- tests/logistics` 通過 45 項。
+- `待使用者驗證`：`tests/logistics/building_port_cells.spec.js` 已依 AGENTS「場景建造」規則更新測試名稱與期望：非建造模式仍需端口精準命中，建造模式可從空白處拉獨立線段。
+- `待使用者驗證`：`npm.cmd run finalize` 成功。
+- `效能回報`：Debug 渲染檢查耗時 0.2ms；單幀 WebGL Draw Calls 取樣 4。
+- `已完成`：使用者已人工驗證第 10 項收尾測試一切正常。
 
 **目的**
 

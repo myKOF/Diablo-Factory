@@ -5,6 +5,154 @@ async function loadGame(page) {
     await page.waitForFunction(() => typeof window.GAME_STATE !== 'undefined', null, { timeout: 30000 });
 }
 
+test('物流 renderer 必須透過 RenderModel 讀取系統資料', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        try {
+            const rendererSource = await fetch('/src/renderers/logistics_renderer.js').then(res => res.text());
+            if (rendererSource.includes('ConveyorSystem.js') || rendererSource.includes('conveyorSystem')) {
+                return { success: false, error: 'logistics_renderer.js 不得直接 import 或呼叫 conveyorSystem' };
+            }
+            if (!rendererSource.includes('LogisticsRenderModel.js') || !rendererSource.includes('logisticsRenderModel')) {
+                return { success: false, error: 'logistics_renderer.js 應透過 LogisticsRenderModel 取得物流渲染資料' };
+            }
+
+            const { logisticsRenderModel } = await import('/src/systems/logistics/LogisticsRenderModel.js');
+            const requiredMethods = [
+                'getMergeConnectedGroupIds',
+                'getDisplayConnectedGroupIds',
+                'ensureMergeNodeStore',
+                'getSegmentsByGroupId',
+                'getLineById',
+                'getLineRoute',
+                'getConnectionRoute',
+                'getConnectionTransferRoute',
+                'buildPreviewSegments',
+                'getMergeNodeForInputTransfer',
+                'getMergeNodeOutputRoute',
+                'getGroupRoutePoints'
+            ];
+            const missingMethods = requiredMethods.filter(name => typeof logisticsRenderModel[name] !== 'function');
+            if (missingMethods.length > 0) {
+                return { success: false, error: `LogisticsRenderModel 缺少 renderer 所需方法：${missingMethods.join(', ')}` };
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('接通路徑轉彎格不得直接跳過方形底圖', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const rendererSource = await fetch('/src/renderers/logistics_renderer.js').then(res => res.text());
+        const unsafeBaseSkip = /const\s+roundedBaseSkipCellKeys\s*=\s*new\s+Set\s*\(\s*turnCellKeys/.test(rendererSource);
+
+        return {
+            success: !unsafeBaseSkip,
+            error: unsafeBaseSkip
+                ? 'connectedCellPaths 的 turnCellKeys 不可直接初始化 roundedBaseSkipCellKeys，否則接通後 180 度迴轉末端會少一格底圖'
+                : ''
+        };
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('接通路徑轉彎格不得直接跳過普通箭頭', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const rendererSource = await fetch('/src/renderers/logistics_renderer.js').then(res => res.text());
+        const unsafeArrowSkip = /turnCellKeys\.forEach\(key\s*=>\s*\{[\s\S]*ordinaryArrowSkipCellKeys\.add\(key\)/.test(rendererSource);
+
+        return {
+            success: !unsafeArrowSkip,
+            error: unsafeArrowSkip
+                ? 'connectedCellPaths 的 turnCellKeys 不可直接加入 ordinaryArrowSkipCellKeys，否則沒有轉角箭頭補位的接通格會少普通箭頭'
+                : ''
+        };
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('接通路徑轉彎圓角被跳過時必須補畫方形底圖', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const rendererSource = await fetch('/src/renderers/logistics_renderer.js').then(res => res.text());
+        const unsafeTurnRectReturn = /if\s*\(\s*rect\.isTurn\s*\)\s*return;/.test(rendererSource);
+        const hasSkippedTurnBaseGuard = /shouldDrawSkippedTurnBase/.test(rendererSource);
+
+        return {
+            success: !unsafeTurnRectReturn && hasSkippedTurnBaseGuard,
+            error: unsafeTurnRectReturn
+                ? '轉彎格不能一律因 rect.isTurn 跳過底圖；當圓角被 skip 時必須補畫方形底圖'
+                : '缺少 skipped turn base 補畫保護'
+        };
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('物流 UI tooltip 與 menu 樣式必須讀取 UI_CONFIG', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        try {
+            const uiSource = await fetch('/src/ui/LogisticsUI.js').then(res => res.text());
+            if (uiSource.includes('cssText')) {
+                return { success: false, error: 'LogisticsUI 不得以 cssText 寫死 tooltip/menu 樣式' };
+            }
+
+            const { UI_CONFIG } = await import('/src/ui/ui_config.js');
+            const { LogisticsUI } = await import('/src/ui/LogisticsUI.js');
+            const cfg = UI_CONFIG.LogisticsUI || {};
+            document.getElementById('logistics_tooltip')?.remove();
+
+            const tip = LogisticsUI.getLogisticsTooltipEl();
+            if (tip.style.zIndex !== String(cfg.tooltip.zIndex) ||
+                tip.style.padding !== cfg.tooltip.padding ||
+                tip.style.fontSize !== cfg.tooltip.fontSize) {
+                return {
+                    success: false,
+                    error: `tooltip 樣式未對齊 UI_CONFIG：z=${tip.style.zIndex} padding=${tip.style.padding} font=${tip.style.fontSize}`
+                };
+            }
+
+            const menu = document.createElement('div');
+            LogisticsUI.applyLogisticsMenuStyle(menu);
+            if (menu.style.zIndex !== String(cfg.menu.zIndex) ||
+                menu.style.padding !== cfg.menu.padding ||
+                menu.style.gap !== cfg.menu.gap ||
+                menu.style.borderRadius !== cfg.menu.borderRadius) {
+                return {
+                    success: false,
+                    error: `menu 樣式未對齊 UI_CONFIG：z=${menu.style.zIndex} padding=${menu.style.padding} gap=${menu.style.gap} radius=${menu.style.borderRadius}`
+                };
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
 test('物流狀態必須透過 Action 層集中更新', async ({ page }) => {
     test.setTimeout(45000);
     await loadGame(page);
@@ -410,6 +558,170 @@ test('合流過彎中的輸出物品不得永久阻塞下一個支線', async ({
                 return {
                     success: false,
                     error: `過彎視覺物品不應永久阻塞下一支線，changed=${changed} branch=${JSON.stringify(branch)} node=${JSON.stringify(node)}`
+                };
+            }
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        } finally {
+            GameEngine.TILE_SIZE = previousTileSize;
+            GameEngine.state = originalState;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('合流拓樸變更後未穿越匯合點的輸出物品不得堵死支線', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const state = GameEngine.state;
+        const originalState = JSON.parse(JSON.stringify(state));
+        const previousTileSize = GameEngine.TILE_SIZE;
+
+        try {
+            GameEngine.TILE_SIZE = 20;
+            const node = {
+                id: 'merge_changed_topology_with_stale_output',
+                outputGroupId: 'main_group',
+                inputGroupIds: ['branch_group', 'new_port_group'],
+                point: { x: 100, y: 100 },
+                currentActiveSlot: 2,
+                roundRobinIndex: 2,
+                zipperTurn: 'main',
+                awaitingMainPass: true
+            };
+            state.logisticsMergeNodes = [node];
+            state.logisticsLines = [{
+                id: 'main_seg',
+                groupId: 'main_group',
+                routePoints: [{ x: 100, y: 100 }, { x: 180, y: 100 }],
+                routeWidth: 1,
+                efficiency: 1
+            }, {
+                id: 'branch_seg',
+                groupId: 'branch_group',
+                routePoints: [{ x: 100, y: 60 }, { x: 100, y: 100 }],
+                routeWidth: 1,
+                efficiency: 1
+            }, {
+                id: 'new_port_seg',
+                groupId: 'new_port_group',
+                routePoints: [{ x: 60, y: 140 }, { x: 100, y: 100 }],
+                routeWidth: 1,
+                efficiency: 1
+            }];
+            state.activeTransfers = [{
+                id: 'branch_ready_item',
+                lineId: 'branch_group',
+                routePoints: [{ x: 100, y: 60 }, { x: 100, y: 100 }],
+                progress: 1,
+                itemType: 'wood'
+            }, {
+                id: 'stale_output_item',
+                lineId: 'main_group',
+                // 拓樸重算後仍掛在 output group，但其目前 route 已經不穿越匯合點。
+                routePoints: [{ x: 140, y: 100 }, { x: 180, y: 100 }],
+                progress: 0,
+                itemType: 'wood'
+            }];
+            state._logisticsMergeAdmissionWinners = {};
+            state._logisticsMergeWaitQueues = {};
+
+            const changed = conveyorSystem.applyLogisticsMergeNodes(state);
+            const branch = state.activeTransfers.find(transfer => transfer.id === 'branch_ready_item');
+            if (!changed || branch?.lineId !== 'main_group' || branch?.queueBlocked === true) {
+                return {
+                    success: false,
+                    error: `未穿越匯合點的 output 物品不應堵死支線，changed=${changed} branch=${JSON.stringify(branch)} node=${JSON.stringify(node)} winners=${JSON.stringify(state._logisticsMergeAdmissionWinners)}`
+                };
+            }
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        } finally {
+            GameEngine.TILE_SIZE = previousTileSize;
+            GameEngine.state = originalState;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('合流拓樸變更後被回壓的主線 through 車不得讓支線永久等待', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const state = GameEngine.state;
+        const originalState = JSON.parse(JSON.stringify(state));
+        const previousTileSize = GameEngine.TILE_SIZE;
+
+        try {
+            GameEngine.TILE_SIZE = 20;
+            const node = {
+                id: 'merge_waiting_blocked_through',
+                outputGroupId: 'main_group',
+                inputGroupIds: ['branch_group', 'new_port_group'],
+                point: { x: 100, y: 100 },
+                currentActiveSlot: 2,
+                roundRobinIndex: 2,
+                zipperTurn: 'main',
+                awaitingMainPass: true
+            };
+            state.logisticsMergeNodes = [node];
+            state.logisticsLines = [{
+                id: 'main_seg',
+                groupId: 'main_group',
+                routePoints: [{ x: 60, y: 100 }, { x: 100, y: 100 }, { x: 180, y: 100 }],
+                routeWidth: 1,
+                efficiency: 1
+            }, {
+                id: 'branch_seg',
+                groupId: 'branch_group',
+                routePoints: [{ x: 100, y: 60 }, { x: 100, y: 100 }],
+                routeWidth: 1,
+                efficiency: 1
+            }, {
+                id: 'new_port_seg',
+                groupId: 'new_port_group',
+                routePoints: [{ x: 60, y: 140 }, { x: 100, y: 100 }],
+                routeWidth: 1,
+                efficiency: 1
+            }];
+            state.activeTransfers = [{
+                id: 'branch_ready_item',
+                lineId: 'branch_group',
+                routePoints: [{ x: 100, y: 60 }, { x: 100, y: 100 }],
+                progress: 1,
+                itemType: 'wood'
+            }, {
+                id: 'blocked_through_item',
+                lineId: 'main_group',
+                routePoints: [{ x: 60, y: 100 }, { x: 100, y: 100 }, { x: 180, y: 100 }],
+                progress: 0.25,
+                itemType: 'wood',
+                queueBlocked: true
+            }];
+            state._logisticsMergeAdmissionWinners = {};
+            state._logisticsMergeWaitQueues = {};
+
+            const winnerId = conveyorSystem.getLogisticsMergeAdmissionWinner(node, state, {
+                spacing: 20,
+                readyDistanceFromEnd: 20
+            });
+            if (winnerId !== 'branch_ready_item') {
+                return {
+                    success: false,
+                    error: `被回壓的 through 車不應讓支線永久等待，winner=${winnerId} node=${JSON.stringify(node)} winners=${JSON.stringify(state._logisticsMergeAdmissionWinners)} transfers=${JSON.stringify(state.activeTransfers)}`
                 };
             }
             return { success: true };
@@ -905,6 +1217,125 @@ test('物流重路由後必須同步 index/offset 位置來源', async ({ page }
             return { success: true };
         } finally {
             window.UIManager = uiBackup;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('匯合拓樸變更時不得沿用舊排程等待狀態', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { LogisticsMergeNodeStore } = await import('/src/systems/logistics/LogisticsMergeNodeStore.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const originalState = GameEngine.state;
+        try {
+            const state = {
+                logisticsMergeNodes: [{
+                    id: 'merge_100,100_output_group',
+                    nodeId: 'merge_100,100_output_group',
+                    type: 'logistics_merge',
+                    cellKey: '100,100',
+                    x: 100,
+                    y: 100,
+                    point: { x: 100, y: 100 },
+                    inputGroupIds: ['old_input'],
+                    outputGroupId: 'output_group',
+                    currentActiveSlot: 1,
+                    roundRobinIndex: 1,
+                    zipperTurn: 'main',
+                    awaitingMainPass: true,
+                    lastAdmittedTransferId: 'stale_transfer',
+                    currentOccupant: {
+                        transferId: 'stale_transfer',
+                        inputGroupId: 'old_input',
+                        outputGroupId: 'output_group'
+                    },
+                    incomingQueues: { old_input: ['stale_transfer'] },
+                    inputDirections: {}
+                }],
+                _logisticsMergeAdmissionWinners: {
+                    'output_group:100,100': {
+                        signature: 'stale_transfer',
+                        winnerId: 'stale_transfer',
+                        committed: false
+                    }
+                },
+                _logisticsMergeWaitQueues: {
+                    'output_group:100,100': {
+                        queue: ['stale_transfer'],
+                        incomingQueues: { old_input: ['stale_transfer'] },
+                        lastServed: 'old_input',
+                        currentOccupant: {
+                            transferId: 'stale_transfer',
+                            inputGroupId: 'old_input',
+                            outputGroupId: 'output_group'
+                        }
+                    }
+                },
+                logisticsLines: [
+                    { id: 'old_input_line', groupId: 'old_input', routePoints: [{ x: 60, y: 100 }, { x: 100, y: 100 }] },
+                    { id: 'new_input_line', groupId: 'new_input', routePoints: [{ x: 100, y: 60 }, { x: 100, y: 100 }] },
+                    { id: 'output_line', groupId: 'output_group', routePoints: [{ x: 100, y: 100 }, { x: 160, y: 100 }] }
+                ]
+            };
+            GameEngine.state = state;
+
+            const system = {
+                ensureLogisticsMergeNodeStore: () => state.logisticsMergeNodes,
+                snapPointToGridCenter: (point) => ({ x: Math.round(point.x / 20) * 20, y: Math.round(point.y / 20) * 20 }),
+                getLogisticsLinesForState: () => state.logisticsLines,
+                getLogisticsSegmentsByGroupId: (groupId) => state.logisticsLines.filter(line => line.groupId === groupId || line.id === groupId),
+                orderLogisticsSegmentsByDirection: (segments) => segments,
+                isPointOnSegment: (point, start, end, tolerance = 0.1) => {
+                    const dx = end.x - start.x;
+                    const dy = end.y - start.y;
+                    const lenSq = dx * dx + dy * dy;
+                    if (lenSq <= 0) return Math.hypot(point.x - start.x, point.y - start.y) <= tolerance;
+                    const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lenSq));
+                    const proj = { x: start.x + dx * t, y: start.y + dy * t };
+                    return Math.hypot(point.x - proj.x, point.y - proj.y) <= tolerance;
+                },
+                recalculateLogisticsGroupEndpoints: () => {},
+                getLogisticsLineDirectionAtPoint: () => ({ x: 1, y: 0 }),
+                clearSuppressedLogisticsConnectionCell: () => {},
+                reassignDeletedGapContinuationToMergeInput: () => false
+            };
+            const store = new LogisticsMergeNodeStore(system);
+
+            const node = store.registerLogisticsMergeNode({
+                inputGroupId: 'new_input',
+                outputGroupId: 'output_group',
+                point: { x: 100, y: 100 },
+                inputLine: state.logisticsLines[1],
+                outputLine: state.logisticsLines[2]
+            });
+
+            if (!node) return { success: false, error: '測試 merge node 未建立' };
+            const staleAdmission = state._logisticsMergeAdmissionWinners?.['output_group:100,100'];
+            const staleQueue = state._logisticsMergeWaitQueues?.['output_group:100,100'];
+            if (node.awaitingMainPass === true || node.currentOccupant || node.lastAdmittedTransferId || node.incomingQueues?.old_input || staleAdmission || staleQueue) {
+                return {
+                    success: false,
+                    error: `拓樸變更後不應沿用舊排程等待狀態：${JSON.stringify({
+                        inputGroupIds: node.inputGroupIds,
+                        currentActiveSlot: node.currentActiveSlot,
+                        awaitingMainPass: node.awaitingMainPass,
+                        currentOccupant: node.currentOccupant,
+                        lastAdmittedTransferId: node.lastAdmittedTransferId,
+                        incomingQueues: node.incomingQueues,
+                        staleAdmission,
+                        staleQueue
+                    })}`
+                };
+            }
+
+            return { success: true };
+        } finally {
+            GameEngine.state = originalState;
         }
     });
 

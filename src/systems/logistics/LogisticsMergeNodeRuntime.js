@@ -142,11 +142,18 @@ export class LogisticsMergeNodeRuntime {
     getReadyInputSlots(node, state, readyDistanceFromEnd) {
         const slots = new Map();
         if (!node || !Array.isArray(node.inputGroupIds) || !Array.isArray(state?.activeTransfers)) return slots;
+        const mergePoint = node.point || { x: node.x, y: node.y };
+        const endTolerance = (this.gameEngine.TILE_SIZE || 20) * 1.5;
         state.activeTransfers.forEach(transfer => {
             if (!transfer || !node.inputGroupIds.includes(transfer.lineId)) return;
             const route = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
             const total = this.getRouteLength(route);
             if (total <= 0) return;
+            // [合流輸入辨識一致性] 僅當物品路徑「止於合流點」時才算合流輸入候選；
+            // 跨越合流點直通目標的完整路徑物品(終點在建築而非合流點)不得成為 winner，
+            // 否則 apply() 因端點檢查忽略它，真正的輸入會永遠等待一個不會被服務的 winner 而堵死。
+            const endPoint = route[route.length - 1];
+            if (!endPoint || Math.hypot((endPoint.x || 0) - (mergePoint.x || 0), (endPoint.y || 0) - (mergePoint.y || 0)) > endTolerance) return;
             const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
             if (distance < total - readyDistanceFromEnd - 0.1) return;
             const current = slots.get(transfer.lineId);
@@ -182,9 +189,11 @@ export class LogisticsMergeNodeRuntime {
         let best = null;
         state.activeTransfers.forEach(transfer => {
             if (!transfer || transfer.lineId !== node.outputGroupId || transfer._mergeVisualTurn) return;
+            if (transfer.queueBlocked === true || transfer.blockedOnBrokenLine === true) return;
             const route = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
             const total = this.getRouteLength(route);
             if (total <= 0) return;
+            if (!this.isPointOnTransferPath(route, mergePoint)) return;
             const mergeDistance = this.getPathDistanceToPoint(route, mergePoint);
             if (mergeDistance <= 0.1) return;
             const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
@@ -359,6 +368,7 @@ export class LogisticsMergeNodeRuntime {
         nodes.forEach(node => {
             const isLastAdmitted = node.lastAdmittedTransferId === transfer.id;
             const mergePoint = node.point || { x: node.x, y: node.y };
+            if (!this.isPointOnTransferPath(route, mergePoint)) return;
             const mergeDistance = this.getPathDistanceToPoint(route, mergePoint);
             const distFromMerge = distance - mergeDistance;
             if (isLastAdmitted && distFromMerge >= -0.1 && distFromMerge < spacing - 0.1) {
@@ -450,6 +460,31 @@ export class LogisticsMergeNodeRuntime {
         return bestPathDist;
     }
 
+    getPathPointDistance(points, point) {
+        if (!Array.isArray(points) || points.length < 2 || !point) return Infinity;
+        let bestDist = Infinity;
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            if (!a || !b) continue;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const lenSq = dx * dx + dy * dy;
+            if (lenSq <= 0) {
+                bestDist = Math.min(bestDist, Math.hypot((point.x || 0) - (a.x || 0), (point.y || 0) - (a.y || 0)));
+                continue;
+            }
+            const t = Math.max(0, Math.min(1, (((point.x || 0) - (a.x || 0)) * dx + ((point.y || 0) - (a.y || 0)) * dy) / lenSq));
+            const proj = { x: (a.x || 0) + dx * t, y: (a.y || 0) + dy * t };
+            bestDist = Math.min(bestDist, Math.hypot((point.x || 0) - proj.x, (point.y || 0) - proj.y));
+        }
+        return bestDist;
+    }
+
+    isPointOnTransferPath(points, point, tolerance = 0.5) {
+        return this.getPathPointDistance(points, point) <= tolerance;
+    }
+
     releaseClearedMergeOccupant(node, state, spacing) {
         const queueState = this.getMergeWaitQueueState(node, state);
         const occupant = node.currentOccupant || queueState.currentOccupant || null;
@@ -467,6 +502,11 @@ export class LogisticsMergeNodeRuntime {
         const total = this.getRouteLength(route);
         if (total <= 0) return false;
         const mergePoint = node.point || { x: node.x, y: node.y };
+        if (!this.isPointOnTransferPath(route, mergePoint)) {
+            node.currentOccupant = null;
+            queueState.currentOccupant = null;
+            return true;
+        }
         const currentDistance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
         const mergeDistance = this.getPathDistanceToPoint(route, mergePoint);
         // 只要物品已越過合流點，立即釋放佔用鎖定；
@@ -528,6 +568,7 @@ export class LogisticsMergeNodeRuntime {
                 const route = Array.isArray(other.routePoints) ? other.routePoints : [];
                 const total = this.getRouteLength(route);
                 if (total <= 0) return;
+                if (!this.isPointOnTransferPath(route, mergePoint)) return;
                 const otherDist = Math.max(0, Math.min(1, Number(other.progress) || 0)) * total;
                 const mergeNodeDistInOther = getPathDistanceToPoint(route, mergePoint);
                 const distFromMerge = otherDist - mergeNodeDistInOther;

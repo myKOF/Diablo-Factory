@@ -2,16 +2,18 @@ const fs = require('fs');
 const path = require('path');
 
 const root = process.cwd();
-const ignoredDirs = new Set(['node_modules', '.git', 'tmp', 'dist']);
-const query = process.argv[2] || '';
-const maxResults = Number(process.argv[3] || 80);
+const pattern = process.argv[2];
+const limit = Number(process.argv[3] || 80);
+const ignoreDirs = new Set(['node_modules', '.git', 'tmp', 'dist']);
+const textExts = new Set(['.js', '.cjs', '.mjs', '.json', '.html', '.css', '.md', '.ts']);
 
-if (!query) {
-  console.error('Usage: node tools/safe_search.cjs <query> [maxResults]');
+if (!pattern) {
+  console.error('Usage: node tools/safe_search.cjs <pattern> [limit]');
   process.exit(1);
 }
 
 const results = [];
+const needle = pattern.toLowerCase();
 
 function walk(dir) {
   let entries;
@@ -22,39 +24,41 @@ function walk(dir) {
   }
 
   for (const entry of entries) {
+    if (results.length >= limit) return;
+    if (entry.isDirectory() && ignoreDirs.has(entry.name)) continue;
+
+    const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (!ignoredDirs.has(entry.name)) {
-        walk(path.join(dir, entry.name));
-      }
+      walk(full);
       continue;
     }
 
-    if (!entry.isFile()) {
-      continue;
-    }
+    if (!entry.isFile()) continue;
+    if (!textExts.has(path.extname(entry.name).toLowerCase())) continue;
 
-    const filePath = path.join(dir, entry.name);
     let text;
     try {
-      text = fs.readFileSync(filePath, 'utf8');
+      text = fs.readFileSync(full, 'utf8');
     } catch {
       continue;
     }
 
     const lines = text.split(/\r?\n/);
-    lines.forEach((line, index) => {
-      if (line.includes(query)) {
-        const relative = path.relative(root, filePath);
-        const compact = line.trim().slice(0, 180);
-        results.push(`${relative}:${index + 1}: ${compact}`);
+    for (let i = 0; i < lines.length; i += 1) {
+      if (lines[i].toLowerCase().includes(needle)) {
+        results.push({
+          file: path.relative(root, full),
+          line: i + 1,
+          text: lines[i].trim().slice(0, 160),
+        });
+        if (results.length >= limit) return;
       }
-    });
-
-    if (results.length >= maxResults) {
-      return;
     }
   }
 }
 
 walk(root);
-console.log(results.slice(0, maxResults).join('\n'));
+
+for (const result of results) {
+  console.log(`${result.file}:${result.line}: ${result.text}`);
+}

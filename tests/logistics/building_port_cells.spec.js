@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-test('建築物流線只能從端口格起拖且只能精準連到端口格', async ({ page }) => {
+test('建築物流線端口必須精準命中，建造模式可從空白處拉獨立線段', async ({ page }) => {
     test.setTimeout(45000);
     await page.goto('/');
     await page.waitForFunction(() => typeof window.GAME_STATE !== 'undefined', null, { timeout: 15000 });
@@ -107,7 +107,7 @@ test('建築物流線只能從端口格起拖且只能精準連到端口格', as
                     exactTarget.port?.dir === 'left' &&
                     exactTarget.building?.id === target.id &&
                     buildModePortStartedDrag &&
-                    !buildModeGroundStartedDrag,
+                    buildModeGroundStartedDrag,
                 centerStartedDrag,
                 portStartedDrag,
                 centerTargetHasPort: !!centerTarget.port,

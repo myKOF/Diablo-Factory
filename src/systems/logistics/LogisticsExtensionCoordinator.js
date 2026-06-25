@@ -28,9 +28,33 @@ function applyExtensionTurnArrowOverride(drag, points) {
         );
     };
 
+    let isStartExtension = false;
+    let isEndExtension = false;
+    if (groupId && typeof this.getLogisticsSegmentsByGroupId === 'function') {
+        const groupSegments = this.getLogisticsSegmentsByGroupId(groupId);
+        if (Array.isArray(groupSegments) && groupSegments.length > 0) {
+            const TS = GameEngine.TILE_SIZE || 20;
+            const extensionStart = points[0];
+            const getRoute = (seg) => Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+            const ordered = typeof this.orderLogisticsSegmentsByDirection === 'function' 
+                ? this.orderLogisticsSegmentsByDirection(groupSegments)
+                : groupSegments;
+            const firstRoute = getRoute(ordered[0]);
+            const lastRoute = getRoute(ordered[ordered.length - 1]);
+            const groupStart = firstRoute[0] || null;
+            const groupEnd = lastRoute[lastRoute.length - 1] || null;
+            if (groupStart && extensionStart) {
+                isStartExtension = Math.hypot(extensionStart.x - groupStart.x, extensionStart.y - groupStart.y) <= TS * 0.75;
+            }
+            if (groupEnd && extensionStart) {
+                isEndExtension = Math.hypot(extensionStart.x - groupEnd.x, extensionStart.y - groupEnd.y) <= TS * 0.75;
+            }
+        }
+    }
+
     const isSame = originalDir.x === extensionDir.x && originalDir.y === extensionDir.y;
     const isOpposite = originalDir.x === -extensionDir.x && originalDir.y === -extensionDir.y;
-    if (isSame || isOpposite) {
+    if (isSame || isOpposite || isStartExtension || isEndExtension) {
         delete sourceLine.turnArrowOverride;
         clearStateOverride();
         return;

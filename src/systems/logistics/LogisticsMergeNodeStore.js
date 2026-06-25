@@ -118,7 +118,14 @@ export class LogisticsMergeNodeStore {
         if (inputGroupId === outputGroupId) return null;
         if (!this.canRegisterMergeDirection({ inputGroupId, outputGroupId, point: snapped, inputLine, outputLine })) return null;
         const previousInputDirections = {};
+        const previousCellNodes = [];
         const previousSchedulerState = {};
+        const getTopologySignature = (outputGroupIdValue, inputGroupIdsValue) => {
+            const inputs = Array.from(inputGroupIdsValue || [])
+                .filter(Boolean)
+                .sort();
+            return `${outputGroupIdValue || ''}<=${inputs.join('|')}`;
+        };
 
         // 物理切分穿過合流點的線段
         const state = GameEngine.state;
@@ -189,23 +196,8 @@ export class LogisticsMergeNodeStore {
 
         nodes.forEach(node => {
             if (node && node.cellKey === cellKey) {
+                previousCellNodes.push(node);
                 allGroups.add(node.outputGroupId);
-                [
-                    'currentActiveSlot',
-                    'roundRobinIndex',
-                    'lastServed',
-                    'hasCommittedAdmission',
-                    'admissionCommitCount',
-                    'zipperTurn',
-                    'awaitingMainPass',
-                    'lastThroughTransferId',
-                    'currentOccupant',
-                    'incomingQueues'
-                ].forEach(key => {
-                    if (previousSchedulerState[key] === undefined && node[key] !== undefined) {
-                        previousSchedulerState[key] = node[key];
-                    }
-                });
                 if (node.inputDirections && typeof node.inputDirections === 'object') {
                     Object.assign(previousInputDirections, node.inputDirections);
                 }
@@ -240,6 +232,34 @@ export class LogisticsMergeNodeStore {
         allGroups.forEach(groupId => {
             if (groupId !== ultimateOutputGroupId) ultimateInputGroupIds.add(groupId);
         });
+
+        const newTopologySignature = getTopologySignature(ultimateOutputGroupId, ultimateInputGroupIds);
+        const matchingPreviousNode = previousCellNodes.find(node =>
+            getTopologySignature(node?.outputGroupId, node?.inputGroupIds || []) === newTopologySignature
+        ) || null;
+        if (!matchingPreviousNode) {
+            const runtimeKey = `${ultimateOutputGroupId || 'output'}:${Math.round(snapped.x)},${Math.round(snapped.y)}`;
+            if (state?._logisticsMergeAdmissionWinners) delete state._logisticsMergeAdmissionWinners[runtimeKey];
+            if (state?._logisticsMergeWaitQueues) delete state._logisticsMergeWaitQueues[runtimeKey];
+        }
+        if (matchingPreviousNode) {
+            [
+                'currentActiveSlot',
+                'roundRobinIndex',
+                'lastServed',
+                'hasCommittedAdmission',
+                'admissionCommitCount',
+                'zipperTurn',
+                'awaitingMainPass',
+                'lastThroughTransferId',
+                'currentOccupant',
+                'incomingQueues'
+            ].forEach(key => {
+                if (matchingPreviousNode[key] !== undefined) {
+                    previousSchedulerState[key] = matchingPreviousNode[key];
+                }
+            });
+        }
 
         const filteredNodes = nodes.filter(node => !node || node.cellKey !== cellKey);
         nodes.length = 0;

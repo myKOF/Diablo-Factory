@@ -11,12 +11,56 @@ export class LogisticsUI {
     static isLogisticsDragging = false;
     static potentialLogisticsDrag = null;
 
+    static getLogisticsUIConfig() {
+        return UI_CONFIG.LogisticsUI || {};
+    }
+
+    static applyStyle(el, styles) {
+        if (!el || !styles) return;
+        Object.entries(styles).forEach(([key, value]) => {
+            if (value !== undefined && value !== null) {
+                el.style[key] = String(value);
+            }
+        });
+    }
+
+    static applyLogisticsMenuStyle(menu) {
+        const cfg = LogisticsUI.getLogisticsUIConfig().menu || {};
+        LogisticsUI.applyStyle(menu, {
+            position: "absolute",
+            zIndex: cfg.zIndex ?? 2000,
+            padding: cfg.padding ?? "15px",
+            display: "flex",
+            flexDirection: "column",
+            gap: cfg.gap ?? "10px",
+            background: cfg.background ?? "rgba(20,20,20,0.95)",
+            border: cfg.border ?? "2px solid #4caf50",
+            borderRadius: cfg.borderRadius ?? "8px",
+            boxShadow: cfg.boxShadow ?? "0 4px 15px rgba(0,0,0,0.8)",
+            pointerEvents: cfg.pointerEvents ?? "auto"
+        });
+    }
+
     static getLogisticsTooltipEl() {
         let tip = document.getElementById("logistics_tooltip");
         if (!tip) {
+            const cfg = LogisticsUI.getLogisticsUIConfig().tooltip || {};
             tip = document.createElement("div");
             tip.id = "logistics_tooltip";
-            tip.style.cssText = "position:absolute; z-index:3000; display:none; pointer-events:none; background:rgba(12,12,12,0.96); color:#f5f5f5; border:2px solid #f5f5f5; padding:6px 9px; font-size:16px; line-height:1.35; white-space:nowrap; box-shadow:0 3px 8px rgba(0,0,0,0.55);";
+            LogisticsUI.applyStyle(tip, {
+                position: "absolute",
+                zIndex: cfg.zIndex ?? 3000,
+                display: "none",
+                pointerEvents: "none",
+                background: cfg.background ?? "rgba(12,12,12,0.96)",
+                color: cfg.color ?? "#f5f5f5",
+                border: cfg.border ?? "2px solid #f5f5f5",
+                padding: cfg.padding ?? "6px 9px",
+                fontSize: cfg.fontSize ?? "16px",
+                lineHeight: cfg.lineHeight ?? "1.35",
+                whiteSpace: cfg.whiteSpace ?? "nowrap",
+                boxShadow: cfg.boxShadow ?? "0 3px 8px rgba(0,0,0,0.55)"
+            });
             document.body.appendChild(tip);
         }
         return tip;
@@ -32,7 +76,9 @@ export class LogisticsUI {
     static moveLogisticsTooltip(event) {
         const tip = document.getElementById("logistics_tooltip");
         if (!tip || tip.style.display === "none") return;
-        const margin = 12;
+        const cfg = LogisticsUI.getLogisticsUIConfig().tooltip || {};
+        const margin = cfg.margin ?? 12;
+        const viewportPadding = cfg.viewportPadding ?? 6;
         const rect = tip.getBoundingClientRect();
 
         // 優先顯示於游標左上角
@@ -40,25 +86,25 @@ export class LogisticsUI {
         let top = event.clientY - rect.height - margin;
 
         // 如果左邊超出界面，改為顯示在游標右側
-        if (left < 6) {
+        if (left < viewportPadding) {
             left = event.clientX + margin;
         }
         // 如果右邊也超出界面，強制靠右對齊
-        if (left + rect.width > window.innerWidth - 6) {
-            left = window.innerWidth - rect.width - 6;
+        if (left + rect.width > window.innerWidth - viewportPadding) {
+            left = window.innerWidth - rect.width - viewportPadding;
         }
 
         // 如果上方超出界面，改為顯示在游標下方
-        if (top < 6) {
+        if (top < viewportPadding) {
             top = event.clientY + margin;
         }
         // 如果下方也超出界面，強制靠下對齊
-        if (top + rect.height > window.innerHeight - 6) {
-            top = window.innerHeight - rect.height - 6;
+        if (top + rect.height > window.innerHeight - viewportPadding) {
+            top = window.innerHeight - rect.height - viewportPadding;
         }
 
-        tip.style.left = `${Math.max(6, left)}px`;
-        tip.style.top = `${Math.max(6, top)}px`;
+        tip.style.left = `${Math.max(viewportPadding, left)}px`;
+        tip.style.top = `${Math.max(viewportPadding, top)}px`;
     }
 
     static hideLogisticsTooltip() {
@@ -85,7 +131,7 @@ export class LogisticsUI {
         let menu = document.getElementById("logistics_menu");
         if (!menu) {
             menu = document.createElement("div"); menu.id = "logistics_menu"; menu.className = "panel glass-panel";
-            menu.style.cssText = `position: absolute; z-index: 2000; padding: 15px; display: flex; flex-direction: column; gap: 10px; background: rgba(20,20,20,0.95); border: 2px solid #4caf50; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); pointer-events: auto;`;
+            LogisticsUI.applyLogisticsMenuStyle(menu);
             window.UIManager.uiLayer.appendChild(menu);
             window.UIManager.makeDraggable(menu, "logistics_menu");
         }
@@ -171,11 +217,13 @@ export class LogisticsUI {
             menu.style.left = savedPos.left;
             menu.style.top = savedPos.top;
         } else {
-            const menuWidth = menu.offsetWidth || 420;
-            const menuHeight = menu.offsetHeight || 220;
-            const rightPadding = 24;
-            const x = Math.max(16, window.innerWidth - menuWidth - rightPadding);
-            const y = Math.max(16, Math.round((window.innerHeight - menuHeight) / 2));
+            const menuCfg = LogisticsUI.getLogisticsUIConfig().menu || {};
+            const viewportPadding = menuCfg.viewportPadding ?? 16;
+            const menuWidth = menu.offsetWidth || menuCfg.defaultWidth || 420;
+            const menuHeight = menu.offsetHeight || menuCfg.defaultHeight || 220;
+            const rightPadding = menuCfg.rightPadding ?? 24;
+            const x = Math.max(viewportPadding, window.innerWidth - menuWidth - rightPadding);
+            const y = Math.max(viewportPadding, Math.round((window.innerHeight - menuHeight) / 2));
             menu.style.left = `${x}px`;
             menu.style.top = `${y}px`;
         }
@@ -194,7 +242,7 @@ export class LogisticsUI {
         let menu = document.getElementById("logistics_menu");
         if (!menu) {
             menu = document.createElement("div"); menu.id = "logistics_menu"; menu.className = "panel glass-panel";
-            menu.style.cssText = `position: absolute; z-index: 2000; padding: 15px; display: flex; flex-direction: column; gap: 10px; background: rgba(20,20,20,0.95); border: 2px solid #4caf50; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); pointer-events: auto;`;
+            LogisticsUI.applyLogisticsMenuStyle(menu);
             window.UIManager.uiLayer.appendChild(menu);
             window.UIManager.makeDraggable(menu, "logistics_menu");
         }
@@ -217,11 +265,13 @@ export class LogisticsUI {
             menu.style.left = savedPos.left;
             menu.style.top = savedPos.top;
         } else {
-            const menuWidth = menu.offsetWidth || 420;
-            const menuHeight = menu.offsetHeight || 180;
-            const rightPadding = 24;
-            const x = Math.max(16, window.innerWidth - menuWidth - rightPadding);
-            const y = Math.max(16, Math.round((window.innerHeight - menuHeight) / 2));
+            const menuCfg = LogisticsUI.getLogisticsUIConfig().menu || {};
+            const viewportPadding = menuCfg.viewportPadding ?? 16;
+            const menuWidth = menu.offsetWidth || menuCfg.defaultWidth || 420;
+            const menuHeight = menu.offsetHeight || menuCfg.lineMenuDefaultHeight || 180;
+            const rightPadding = menuCfg.rightPadding ?? 24;
+            const x = Math.max(viewportPadding, window.innerWidth - menuWidth - rightPadding);
+            const y = Math.max(viewportPadding, Math.round((window.innerHeight - menuHeight) / 2));
             menu.style.left = `${x}px`;
             menu.style.top = `${y}px`;
         }

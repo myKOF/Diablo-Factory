@@ -1,8 +1,13 @@
 import { GameEngine } from "../systems/game_systems.js";
 import { UI_CONFIG } from "../ui/ui_config.js";
-import { conveyorSystem } from "../systems/ConveyorSystem.js";
+import { logisticsTransportArrayState } from "../systems/logistics/LogisticsTransportArrayState.js";
+import { logisticsRenderModel } from "../systems/logistics/LogisticsRenderModel.js";
 
 export class LogisticsRenderer {
+    static resolveTransferProgress(transfer, routePoints = transfer?.routePoints, cellSize = GameEngine.TILE_SIZE) {
+        return logisticsTransportArrayState.resolveProgress(transfer, routePoints, cellSize);
+    }
+
     static render(graphics, state, scene, options = {}) {
         graphics.clear();
         const logCfg = UI_CONFIG.LogisticsSystem || {
@@ -133,7 +138,7 @@ export class LogisticsRenderer {
             const endpointKey = end ? `${Math.round(end.x)},${Math.round(end.y)}` : null;
             return !!endpointKey && !isDetachedSplitCell(line, endpointKey);
         };
-        const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null, skipBaseCellKeys = null, skipRoundedTurnCellKeys = null) => {
+        const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null, skipBaseCellKeys = null, skipRoundedTurnCellKeys = null, skippedTurnBaseCellKeys = null) => {
             const baseThickness = logCfg.lineThickness || 3;
             const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE);
             const usePortToPortStyle = !!isPortToPort && !!isConnected;
@@ -151,6 +156,11 @@ export class LogisticsRenderer {
                     if (key) roundedSkipCellKeys.add(key);
                 });
             }
+            const shouldDrawSkippedTurnBase = (rect) =>
+                !!rect?.isTurn &&
+                !!rect.cellKey &&
+                skippedTurnBaseCellKeys?.has(rect.cellKey) &&
+                !skipBaseCellKeys?.has(rect.cellKey);
             LogisticsRenderer.drawLogisticsRoundedTurnSegments(
                 graphics,
                 points,
@@ -161,7 +171,7 @@ export class LogisticsRenderer {
             );
             graphics.fillStyle(parseColor(normalColor), normalAlpha);
             getRenderableLogisticsCellRects(points, widthTiles, false, line).forEach(rect => {
-                if (rect.isTurn) return;
+                if (rect.isTurn && !shouldDrawSkippedTurnBase(rect)) return;
                 if (skipBaseCellKeys?.has(rect.cellKey)) return;
                 const baseKey = rect.cellKey || `${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.w)},${Math.round(rect.h)}`;
                 if (renderedLogisticsBaseCellKeys.has(baseKey)) return;
@@ -193,9 +203,9 @@ export class LogisticsRenderer {
                     graphics.fillStyle(parseColor(selColor), selAlpha);
                     const selectedGroupId = GameEngine.state.selectedLogisticsGroupId;
                     const groupKey = line ? (line.groupId || line.id) : null;
-                    const selectedGroupIds = selectedGroupId && conveyorSystem?.getLogisticsMergeConnectedGroupIds
-                        ? conveyorSystem.getLogisticsMergeConnectedGroupIds(selectedGroupId, state)
-                        : new Set(selectedGroupId ? [selectedGroupId] : []);
+                    const selectedGroupIds = selectedGroupId
+                        ? logisticsRenderModel.getMergeConnectedGroupIds(selectedGroupId, state)
+                        : new Set();
                     const isGroupSelection = !!groupKey && selectedGroupIds.has(groupKey);
                     if (isGroupSelection) {
                         LogisticsRenderer.drawLogisticsRoundedTurnSegments(
@@ -208,7 +218,7 @@ export class LogisticsRenderer {
                         );
                         graphics.fillStyle(parseColor(selColor), selAlpha);
                         rects.forEach(rect => {
-                            if (rect.isTurn) return;
+                            if (rect.isTurn && !shouldDrawSkippedTurnBase(rect)) return;
                             if (skipBaseCellKeys?.has(rect.cellKey)) return;
                             graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
                         });
@@ -317,9 +327,9 @@ export class LogisticsRenderer {
             if (isSelected && line) {
                 const selectedGroupId = GameEngine.state.selectedLogisticsGroupId;
                 const groupKey = line.groupId || line.id;
-                const selectedGroupIds = selectedGroupId && conveyorSystem?.getLogisticsMergeConnectedGroupIds
-                    ? conveyorSystem.getLogisticsMergeConnectedGroupIds(selectedGroupId, state)
-                    : new Set(selectedGroupId ? [selectedGroupId] : []);
+                const selectedGroupIds = selectedGroupId
+                    ? logisticsRenderModel.getMergeConnectedGroupIds(selectedGroupId, state)
+                    : new Set();
                 selectedLogisticsOutlineJobs.push({
                     points,
                     widthTiles,
@@ -501,17 +511,15 @@ export class LogisticsRenderer {
             if (!Array.isArray(segments) || segments.length === 0) return;
 
             let allConnectedGroupSegs = segments;
-            if (conveyorSystem && typeof conveyorSystem.getLogisticsMergeConnectedGroupIds === 'function') {
-                const connectedGroupIds = conveyorSystem.getLogisticsMergeConnectedGroupIds(groupKey, state);
-                if (connectedGroupIds && connectedGroupIds.size > 0) {
-                    const allSegs = [];
-                    connectedGroupIds.forEach(gid => {
-                        const segs = groupSegments.get(gid) || [];
-                        allSegs.push(...segs);
-                    });
-                    if (allSegs.length > 0) {
-                        allConnectedGroupSegs = allSegs;
-                    }
+            const connectedGroupIds = logisticsRenderModel.getMergeConnectedGroupIds(groupKey, state);
+            if (connectedGroupIds && connectedGroupIds.size > 0) {
+                const allSegs = [];
+                connectedGroupIds.forEach(gid => {
+                    const segs = groupSegments.get(gid) || [];
+                    allSegs.push(...segs);
+                });
+                if (allSegs.length > 0) {
+                    allConnectedGroupSegs = allSegs;
                 }
             }
 
@@ -977,17 +985,10 @@ export class LogisticsRenderer {
             if (connected) portToPortConnectedGroupIds.add(groupKey);
         });
 
-        if (conveyorSystem && typeof conveyorSystem.getLogisticsDisplayConnectedGroupIds === 'function') {
-            const propagatedConnectedGroups = conveyorSystem.getLogisticsDisplayConnectedGroupIds(portToPortConnectedGroupIds, state);
-            propagatedConnectedGroups.forEach(groupKey => {
-                if (groupKey) portToPortConnectedGroupIds.add(groupKey);
-            });
-        } else if (conveyorSystem && typeof conveyorSystem.getLogisticsGroupsConnectedThroughMergeNodes === 'function') {
-            const propagatedConnectedGroups = conveyorSystem.getLogisticsGroupsConnectedThroughMergeNodes(portToPortConnectedGroupIds, state);
-            propagatedConnectedGroups.forEach(groupKey => {
-                if (groupKey) portToPortConnectedGroupIds.add(groupKey);
-            });
-        }
+        const propagatedConnectedGroups = logisticsRenderModel.getDisplayConnectedGroupIds(portToPortConnectedGroupIds, state);
+        propagatedConnectedGroups.forEach(groupKey => {
+            if (groupKey) portToPortConnectedGroupIds.add(groupKey);
+        });
 
         const hasLogisticsTransportFilter = (groupKey, groupSegs) => {
             if (Array.isArray(groupSegs) && groupSegs.some(line => !!line?.filter)) return true;
@@ -1021,9 +1022,7 @@ export class LogisticsRenderer {
         };
         const getMergeVisualTurnsByGroup = () => {
             const result = new Map();
-            const nodes = conveyorSystem?.ensureLogisticsMergeNodeStore
-                ? conveyorSystem.ensureLogisticsMergeNodeStore(state)
-                : (state.logisticsMergeNodes || []);
+            const nodes = logisticsRenderModel.ensureMergeNodeStore(state);
             const routeCache = new Map();
             const nodeSnap = GameEngine.TILE_SIZE * 1.25;
             const keyOfPoint = (point) => `${Math.round(point.x)},${Math.round(point.y)}`;
@@ -1046,10 +1045,8 @@ export class LogisticsRenderer {
                 if (!targetGroupId) return [];
                 if (routeCache.has(targetGroupId)) return routeCache.get(targetGroupId);
                 const routes = [];
-                if (conveyorSystem?.getLogisticsSegmentsByGroupId) {
-                    LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(conveyorSystem.getLogisticsSegmentsByGroupId(targetGroupId))
-                        .forEach(route => routes.push(route));
-                }
+                LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(logisticsRenderModel.getSegmentsByGroupId(targetGroupId))
+                    .forEach(route => routes.push(route));
                 LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(getStateGroupSegments(targetGroupId))
                     .forEach(route => routes.push(route));
                 routeCache.set(targetGroupId, routes);
@@ -1204,9 +1201,7 @@ export class LogisticsRenderer {
         const mergeVisualTurnsByGroup = getMergeVisualTurnsByGroup();
 
         const primarySelectedGroupId = state.selectedLogisticsGroupId ||
-            (state.selectedLogisticsLineId && conveyorSystem?.getLogisticsLineById
-                ? conveyorSystem.getLogisticsLineById(state.selectedLogisticsLineId)?.groupId
-                : null);
+            (state.selectedLogisticsLineId ? logisticsRenderModel.getLineById(state.selectedLogisticsLineId)?.groupId : null);
 
         const drawnCanonicalGroups = new Set();
         if (Array.isArray(state.logisticsLines)) {
@@ -1218,9 +1213,7 @@ export class LogisticsRenderer {
                 const segmentRoutes = groupSegs
                     .map(line => ({
                         line,
-                        route: conveyorSystem && typeof conveyorSystem.getLogisticsLineRoute === 'function'
-                            ? conveyorSystem.getLogisticsLineRoute(line)
-                            : null
+                        route: logisticsRenderModel.getLineRoute(line)
                     }))
                     .filter(item => item.route?.points?.length >= 2);
                 if (segmentRoutes.length === 0) return;
@@ -1238,10 +1231,9 @@ export class LogisticsRenderer {
                     !!representative?.targetId &&
                     representative.sourceId === representative.targetId;
                 const connectedCellPaths = isSelfConnectedGroup ? [] : rawConnectedCellPaths;
-                const pathTurnCellKeys = getPathTurnCellKeys(connectedCellPaths);
+                const groupOnlyTurnCellKeys = groupTurnCellKeys.get(groupKey);
                 const turnCellKeys = LogisticsRenderer.mergeTurnCellKeys(
-                    pathTurnCellKeys,
-                    groupTurnCellKeys.get(groupKey)
+                    groupOnlyTurnCellKeys
                 );
                 const mergeVisualTurns = mergeVisualTurnsByGroup.get(groupKey) || [];
                 // [交匯點修復] 只跳過「本群組自身」會轉彎的合流格；若該格是別的群組在轉彎，
@@ -1252,7 +1244,7 @@ export class LogisticsRenderer {
                 const useConnectedIdleStyle = isPhysicallyConnected && !isOperating;
                 const effectiveTurnCellKeys = new Set();
                 const roundedBaseSkipCellKeys = new Set(turnCellKeys ? [...turnCellKeys] : []);
-                const roundedTurnSkipCellKeys = new Set(roundedBaseSkipCellKeys);
+                const roundedTurnSkipCellKeys = new Set(turnCellKeys ? [...turnCellKeys] : []);
                 mergeVisualTurnCellKeys.forEach(key => {
                     roundedBaseSkipCellKeys.add(key);
                     roundedTurnSkipCellKeys.add(key);
@@ -1269,8 +1261,8 @@ export class LogisticsRenderer {
                     effectiveTurnCellKeys.add(override.cellKey);
                 });
                 const ordinaryArrowSkipCellKeys = new Set(effectiveTurnCellKeys);
-                if (turnCellKeys) {
-                    turnCellKeys.forEach(key => {
+                if (groupOnlyTurnCellKeys) {
+                    groupOnlyTurnCellKeys.forEach(key => {
                         if (key) ordinaryArrowSkipCellKeys.add(key);
                     });
                 }
@@ -1305,10 +1297,8 @@ export class LogisticsRenderer {
                 }
                 segmentRoutes.forEach(({ line, route }) => {
                     // [核心修正] 單擊時僅高亮被點擊的那一段，而不是用 some 讓整個群組都高亮
-                    const isLineSelected = conveyorSystem && typeof conveyorSystem.isSelectedLogisticsLine === 'function'
-                        ? conveyorSystem.isSelectedLogisticsLine(line)
-                        : state.selectedLogisticsLineId === line.id;
-                    drawLogisticsRoute(route.points, route.width || widthTiles, isLineSelected, isConnected, line, useConnectedIdleStyle, ordinaryArrowSkipCellKeys, roundedBaseSkipCellKeys, roundedTurnSkipCellKeys);
+                    const isLineSelected = logisticsRenderModel.isSelectedLine(line, state);
+                    drawLogisticsRoute(route.points, route.width || widthTiles, isLineSelected, isConnected, line, useConnectedIdleStyle, ordinaryArrowSkipCellKeys, roundedBaseSkipCellKeys, roundedTurnSkipCellKeys, null);
                 });
                 if (isPortToPortCandidate && useConnectedIdleStyle) {
                     segmentRoutes.forEach(({ route }) => {
@@ -1351,11 +1341,9 @@ export class LogisticsRenderer {
                         detachedSplitArrowCellKeys
                     );
                 }
-                const isGroupSelected = conveyorSystem && typeof conveyorSystem.isSelectedLogisticsLine === 'function'
-                    ? (state.selectedLogisticsGroupId
-                        ? (conveyorSystem.getLogisticsMergeConnectedGroupIds?.(state.selectedLogisticsGroupId, state) || new Set([state.selectedLogisticsGroupId])).has(groupKey)
-                        : groupSegs.some(line => conveyorSystem.isSelectedLogisticsLine(line)))
-                    : groupSegs.some(line => state.selectedLogisticsLineId === line.id);
+                const isGroupSelected = state.selectedLogisticsGroupId
+                    ? logisticsRenderModel.getMergeConnectedGroupIds(state.selectedLogisticsGroupId, state).has(groupKey)
+                    : groupSegs.some(line => logisticsRenderModel.isSelectedLine(line, state));
 
                 const isPrimarySelected = (groupKey === primarySelectedGroupId);
 
@@ -1560,9 +1548,7 @@ export class LogisticsRenderer {
                         if (conn.lineId) return;
                         const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
                         if (target) {
-                            const route = (conveyorSystem && typeof conveyorSystem.getConnectionRoute === 'function')
-                                ? conveyorSystem.getConnectionRoute(ent, target, conn)
-                                : null;
+                            const route = logisticsRenderModel.getConnectionRoute(ent, target, conn);
                             const points = route && Array.isArray(route.points) && route.points.length >= 2
                                 ? route.points
                                 : [{ x: ent.x, y: ent.y }, { x: target.x, y: target.y }];
@@ -1591,9 +1577,8 @@ export class LogisticsRenderer {
                     // 1. 取得完整且連續的幾何路由路徑
                     const outputTargets = Array.isArray(source.outputTargets) ? source.outputTargets : [];
                     const conn = outputTargets.find(c => c.id === t.targetId);
-                    const routeInfo = (conveyorSystem && typeof conveyorSystem.getConnectionTransferRoute === 'function')
-                        ? conveyorSystem.getConnectionTransferRoute(source, target, conn)
-                        : { points: [{ x: source.x, y: source.y }, { x: target.x, y: target.y }] };
+                    const routeInfo = logisticsRenderModel.getConnectionTransferRoute(source, target, conn) ||
+                        { points: [{ x: source.x, y: source.y }, { x: target.x, y: target.y }] };
 
                     const points = routeInfo.points;
                     if (Array.isArray(points)) {
@@ -1817,15 +1802,17 @@ export class LogisticsRenderer {
             let px, py;
             if (Array.isArray(routePoints) && routePoints.length >= 2) {
                 LogisticsRenderer.annotateRoutePoints(routePoints);
-                const pathPoint = LogisticsRenderer.getPointOnMergeTransferPath(routePoints, t.progress, t, state) ||
-                    LogisticsRenderer.getPointOnTransferPath(routePoints, t.progress, 0, t);
+                const transferProgress = LogisticsRenderer.resolveTransferProgress(t, routePoints, GameEngine.TILE_SIZE);
+                const pathPoint = LogisticsRenderer.getPointOnMergeTransferPath(routePoints, transferProgress, t, state) ||
+                    LogisticsRenderer.getPointOnTransferPath(routePoints, transferProgress, 0, t);
                 if (!pathPoint) return;
                 px = pathPoint.x;
                 py = pathPoint.y;
                 t._renderAngle = Number.isFinite(pathPoint.angle) ? pathPoint.angle : (t._renderAngle || 0);
             } else if (source && target) {
-                px = source.x + (target.x - source.x) * t.progress;
-                py = source.y + (target.y - source.y) * t.progress;
+                const transferProgress = LogisticsRenderer.resolveTransferProgress(t, null, GameEngine.TILE_SIZE);
+                px = source.x + (target.x - source.x) * transferProgress;
+                py = source.y + (target.y - source.y) * transferProgress;
                 t._renderAngle = Math.atan2(target.y - source.y, target.x - source.x);
             } else {
                 return;
@@ -1942,21 +1929,10 @@ export class LogisticsRenderer {
             isPortConnector: point.isPortConnector
         }));
         let ghostPoints = rawGhostPoints;
-        if (conveyorSystem && typeof conveyorSystem.buildGridRoutePoints === 'function' && typeof conveyorSystem.buildLogisticsSegments === 'function') {
-            const gridPoints = conveyorSystem.buildGridRoutePoints(rawGhostPoints);
-            const segments = conveyorSystem.buildLogisticsSegments(
-                '__preview__',
-                null,
-                null,
-                null,
-                gridPoints,
-                routeWidth,
-                null,
-                null,
-                null
-            );
+        {
+            const segments = logisticsRenderModel.buildPreviewSegments(rawGhostPoints, routeWidth);
             const routePoints = [];
-            segments.forEach((segment, index) => {
+            (segments || []).forEach((segment, index) => {
                 const segPoints = Array.isArray(segment.routePoints) ? segment.routePoints : [];
                 if (segPoints.length < 2) return;
                 if (index === 0) routePoints.push({ x: segPoints[0].x, y: segPoints[0].y });
@@ -2286,9 +2262,7 @@ export class LogisticsRenderer {
         if (routePoints) return routePoints;
         if (!directConn) return routePoints;
 
-        const transferRoute = (conveyorSystem && typeof conveyorSystem.getConnectionTransferRoute === 'function')
-            ? conveyorSystem.getConnectionTransferRoute(source, target, directConn)
-            : null;
+        const transferRoute = logisticsRenderModel.getConnectionTransferRoute(source, target, directConn);
         return routePoints || (transferRoute && Array.isArray(transferRoute.points) && transferRoute.points.length >= 2
             ? transferRoute.points.map(p => ({ x: p.x, y: p.y }))
             : (!directConn.lineId && Array.isArray(directConn.routePoints) && directConn.routePoints.length >= 2
@@ -2549,9 +2523,7 @@ export class LogisticsRenderer {
         );
         if (outputTurnPoint) return outputTurnPoint;
 
-        const node = conveyorSystem?.getLogisticsMergeNodeForInputTransfer
-            ? conveyorSystem.getLogisticsMergeNodeForInputTransfer(transfer, state)
-            : null;
+        const node = logisticsRenderModel.getMergeNodeForInputTransfer(transfer, state);
         if (!node) return null;
         const nodePoint = node.point || { x: node.x, y: node.y };
         if (!nodePoint || !Number.isFinite(nodePoint.x) || !Number.isFinite(nodePoint.y)) return null;
@@ -2652,9 +2624,7 @@ export class LogisticsRenderer {
         if (storedDir && Number.isFinite(storedDir.x) && Number.isFinite(storedDir.y)) {
             return { x: Math.sign(storedDir.x), y: Math.sign(storedDir.y) };
         }
-        const route = conveyorSystem?.getLogisticsMergeNodeOutputRoute
-            ? conveyorSystem.getLogisticsMergeNodeOutputRoute(node)
-            : null;
+        const route = logisticsRenderModel.getMergeNodeOutputRoute(node);
         if (Array.isArray(route) && route.length >= 2) {
             return LogisticsRenderer.getCardinalDir(route[0], route[1]);
         }
@@ -3052,9 +3022,7 @@ export class LogisticsRenderer {
         const TS = GameEngine.TILE_SIZE || 20;
         const matchDist = TS * 2.5;
         const physicalFallbackDist = Math.max(1, TS * 0.35);
-        const nodes = conveyorSystem?.ensureLogisticsMergeNodeStore
-            ? conveyorSystem.ensureLogisticsMergeNodeStore(state)
-            : (state.logisticsMergeNodes || []);
+        const nodes = logisticsRenderModel.ensureMergeNodeStore(state);
         const getStateGroupSegments = (targetGroupId) => {
             if (!targetGroupId) return [];
             return (Array.isArray(state.logisticsLines) ? state.logisticsLines : [])
@@ -3137,10 +3105,8 @@ export class LogisticsRenderer {
             for (const candidateGroupId of groups) {
                 if (candidateGroupId === currentGroupId || visitedGroupIds.has(candidateGroupId)) continue;
                 const candidateRoutes = [];
-                if (conveyorSystem?.getLogisticsGroupRoutePoints) {
-                    const systemRoute = conveyorSystem.getLogisticsGroupRoutePoints(candidateGroupId, anchorPoint);
-                    if (Array.isArray(systemRoute) && systemRoute.length >= 2) candidateRoutes.push(systemRoute);
-                }
+                const systemRoute = logisticsRenderModel.getGroupRoutePoints(candidateGroupId, anchorPoint);
+                if (Array.isArray(systemRoute) && systemRoute.length >= 2) candidateRoutes.push(systemRoute);
                 LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(getStateGroupSegments(candidateGroupId))
                     .forEach(route => candidateRoutes.push(route));
                 for (const points of candidateRoutes) {
@@ -3192,20 +3158,18 @@ export class LogisticsRenderer {
                     lastPt = currentRoute[currentRoute.length - 1];
                     nextGroupId = mergeNode.outputGroupId;
                     const outputRouteCandidates = [];
-                    if (conveyorSystem?.getLogisticsMergeNodeOutputRoute) {
-                        const outputRoute = conveyorSystem.getLogisticsMergeNodeOutputRoute(mergeNode);
-                        if (Array.isArray(outputRoute) && outputRoute.length >= 2) outputRouteCandidates.push(outputRoute);
+                    const outputRoute = logisticsRenderModel.getMergeNodeOutputRoute(mergeNode);
+                    if (Array.isArray(outputRoute) && outputRoute.length >= 2) {
+                        outputRouteCandidates.push(outputRoute);
                     } else if (state.logisticsMergeNodeStore && typeof state.logisticsMergeNodeStore.getLogisticsMergeNodeOutputRoute === 'function') {
                         const outputRoute = state.logisticsMergeNodeStore.getLogisticsMergeNodeOutputRoute(mergeNode);
                         if (Array.isArray(outputRoute) && outputRoute.length >= 2) outputRouteCandidates.push(outputRoute);
                     }
 
-                    if (conveyorSystem?.getLogisticsSegmentsByGroupId && conveyorSystem?.getLogisticsGroupRoutePoints) {
-                        const nextSegs = conveyorSystem.getLogisticsSegmentsByGroupId(nextGroupId);
-                        if (nextSegs && nextSegs.length > 0) {
-                            const groupRoute = conveyorSystem.getLogisticsGroupRoutePoints(nextGroupId, mergeNode.point || { x: mergeNode.x, y: mergeNode.y });
-                            if (Array.isArray(groupRoute) && groupRoute.length >= 2) outputRouteCandidates.push(groupRoute);
-                        }
+                    const nextSegs = logisticsRenderModel.getSegmentsByGroupId(nextGroupId);
+                    if (nextSegs && nextSegs.length > 0) {
+                        const groupRoute = logisticsRenderModel.getGroupRoutePoints(nextGroupId, mergeNode.point || { x: mergeNode.x, y: mergeNode.y });
+                        if (Array.isArray(groupRoute) && groupRoute.length >= 2) outputRouteCandidates.push(groupRoute);
                     }
                     LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(getStateGroupSegments(nextGroupId))
                         .forEach(stateRoute => outputRouteCandidates.push(stateRoute));
@@ -3330,9 +3294,8 @@ export class LogisticsRenderer {
                 : null;
             const sortedInputGroupIds = [...mergeNode.inputGroupIds].sort((aId, bId) => {
                 const getScore = (groupId) => {
-                    const inputSegs = conveyorSystem?.getLogisticsSegmentsByGroupId
-                        ? conveyorSystem.getLogisticsSegmentsByGroupId(groupId)
-                        : getStateGroupSegments(groupId);
+                    const modelInputSegs = logisticsRenderModel.getSegmentsByGroupId(groupId);
+                    const inputSegs = modelInputSegs.length > 0 ? modelInputSegs : getStateGroupSegments(groupId);
                     let maxScore = 0;
                     LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(inputSegs).forEach(inputRoute => {
                         const orientedInputRoute = orientRouteToEndAt(inputRoute, nodePoint);
@@ -3351,9 +3314,8 @@ export class LogisticsRenderer {
             });
 
             sortedInputGroupIds.forEach(inputGroupId => {
-                const inputSegs = conveyorSystem?.getLogisticsSegmentsByGroupId
-                    ? conveyorSystem.getLogisticsSegmentsByGroupId(inputGroupId)
-                    : getStateGroupSegments(inputGroupId);
+                const modelInputSegs = logisticsRenderModel.getSegmentsByGroupId(inputGroupId);
+                const inputSegs = modelInputSegs.length > 0 ? modelInputSegs : getStateGroupSegments(inputGroupId);
                 let hasMerged = false;
                 LogisticsRenderer.buildSelectedGroupDebugGraphRoutes(inputSegs).forEach(inputRoute => {
                     const orientedInputRoute = orientRouteToEndAt(inputRoute, nodePoint);

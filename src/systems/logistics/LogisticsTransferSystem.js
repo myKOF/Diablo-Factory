@@ -205,8 +205,18 @@ export class LogisticsTransferSystem {
         const lastEndpoint = lastSeg?.routePoints?.[lastSeg.routePoints.length - 1];
         if (lastEndpoint) pushPoint(lastEndpoint);
 
-        for (let i = 1; i < points.length; i++) {
-            if (Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y) > TS * 1.75) {
+        // [修正] 連續性檢查改為驗證相鄰線段首尾相接，而非比較稀疏節點間距。
+        // 舊檢查比較的是各線段起點(+最後終點)組成的稀疏骨架，只要任一線段長度
+        // 超過 1.75 格，相鄰骨架點間距就會 > TS*1.75 而被誤判為斷裂並回傳 null。
+        // 這會讓合流切分後的上游 group(含多格線段)拿不到「止於合流點」的正確路徑，
+        // 派發改走跨越合流點的完整路徑而無法被 admit，造成上游回堵堵死。
+        for (let i = 0; i < ordered.length - 1; i++) {
+            const aPts = ordered[i]?.routePoints;
+            const bPts = ordered[i + 1]?.routePoints;
+            const aEnd = Array.isArray(aPts) && aPts.length ? aPts[aPts.length - 1] : null;
+            const bStart = Array.isArray(bPts) && bPts.length ? bPts[0] : null;
+            if (!aEnd || !bStart) return null;
+            if (Math.hypot(aEnd.x - bStart.x, aEnd.y - bStart.y) > TS * 1.75) {
                 return null;
             }
         }
