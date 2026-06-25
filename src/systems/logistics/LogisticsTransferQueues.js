@@ -30,6 +30,23 @@ export class LogisticsTransferQueues {
         const pointKey = (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y)
             ? `${point.x},${point.y}`
             : null;
+        // [P2b 合流桶] 將 activeTransfers 依 lineId 分桶一次，取代 getMergeInputMaxDistance 內
+        // 逐台掃描全部 activeTransfers 比對 lineId 的 O(N²) 掃描。本 pass 不變更任何 transfer.lineId，
+        // 故快照桶與原逐台掃描所迭代的 other 集合（與順序）完全等價。
+        const transfersByLineId = new Map();
+        (state.activeTransfers || []).forEach(transfer => {
+            if (!transfer) return;
+            const lineId = transfer.lineId;
+            if (!lineId) return;
+            let bucket = transfersByLineId.get(lineId);
+            if (!bucket) { bucket = []; transfersByLineId.set(lineId, bucket); }
+            bucket.push(transfer);
+        });
+        // [P2b 合流輸出群組集合] 取代 isMergeOutputTransfer 內逐節點 some() 掃描。
+        const mergeOutputGroupIds = new Set();
+        (Array.isArray(state.logisticsMergeNodes) ? state.logisticsMergeNodes : []).forEach(node => {
+            if (node?.outputGroupId) mergeOutputGroupIds.add(node.outputGroupId);
+        });
         const hasSuppressedTerminalEndpoint = (transfer) => {
             const lineId = transfer?.lineId || null;
             const points = Array.isArray(transfer?.routePoints) ? transfer.routePoints : [];
@@ -45,8 +62,7 @@ export class LogisticsTransferQueues {
         };
         const isMergeOutputTransfer = (transfer) => {
             const lineId = transfer?.lineId || null;
-            if (!lineId || !Array.isArray(state.logisticsMergeNodes)) return false;
-            return state.logisticsMergeNodes.some(node => node?.outputGroupId === lineId);
+            return !!lineId && mergeOutputGroupIds.has(lineId);
         };
         const getMergeAdmissionWinner = (node) => {
             if (!node || !Array.isArray(node.inputGroupIds)) return null;
@@ -75,9 +91,8 @@ export class LogisticsTransferQueues {
             }
 
             const distancesFromMerge = [];
-            state.activeTransfers.forEach(other => {
-                if (!other || other === transfer) return;
-                if (other.lineId !== node.outputGroupId) return;
+            (transfersByLineId.get(node.outputGroupId) || []).forEach(other => {
+                if (other === transfer) return;
                 if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
                 const otherTotal = getPathTotalLength(other.routePoints, pathMetricsCache);
                 if (otherTotal <= 0) return;

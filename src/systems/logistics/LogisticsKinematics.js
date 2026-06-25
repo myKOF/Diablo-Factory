@@ -110,6 +110,9 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
         }
         return null;
     };
+    // [P2b 合流桶] 子步掃描用的 lineId 分桶；於閉包作用域宣告（getMergeInputMaxDistance 捕獲此 let），
+    // 每子步在 transfersByPath 同一輪重建後即可查表，取代逐台掃描全部 activeTransfers 的 O(N²)。
+    let transfersByLineId = new Map();
     const getMergeInputMaxDistance = (transfer, totalLength, spacing) => {
         if (!simSystem || typeof simSystem.getLogisticsMergeNodeForInputTransfer !== 'function') return totalLength;
         const node = getMergeNodeForTransfer(transfer);
@@ -123,9 +126,8 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
             return computeMergeInputMaxDistance(totalLength, spacing, false, node, []);
         }
         const distancesFromMerge = [];
-        state.activeTransfers.forEach(other => {
-            if (!other || other === transfer) return;
-            if (other.lineId !== node.outputGroupId) return;
+        (transfersByLineId.get(node.outputGroupId) || []).forEach(other => {
+            if (other === transfer) return;
             if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
             const otherTotal = getTransferRouteMetrics(other).totalPixels;
             if (otherTotal <= 0) return;
@@ -153,11 +155,20 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
         if (simSystem && typeof simSystem.applyBlockedTransferQueues === 'function') simSystem.applyBlockedTransferQueues(state);
 
         const transfersByPath = new Map();
+        // [P2b 合流桶] 每子步重建 lineId 分桶（併入此輪建表）；lineId 僅在子步末端
+        // applyLogisticsMergeNodes 內變更，掃描 pass 期間桶恆穩定，與原逐台掃描等價。
+        transfersByLineId = new Map();
         state.activeTransfers.forEach(t => {
             if (!t) return;
             const key = getTransferPathKey(t);
             if (!transfersByPath.has(key)) transfersByPath.set(key, []);
             transfersByPath.get(key).push(t);
+            const lineId = t.lineId;
+            if (lineId) {
+                let bucket = transfersByLineId.get(lineId);
+                if (!bucket) { bucket = []; transfersByLineId.set(lineId, bucket); }
+                bucket.push(t);
+            }
         });
 
         const cellSize = getCellSize();
