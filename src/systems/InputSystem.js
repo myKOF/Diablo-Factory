@@ -1,5 +1,6 @@
 import { GameEngine } from "./game_systems.js";
 import { UI_CONFIG } from "../ui/ui_config.js";
+import { ResourceSystem } from "./ResourceSystem.js";
 
 /**
  * InputSystem: 簡約邏輯穩定版
@@ -369,22 +370,8 @@ export class InputSystem {
                     const gx = searchGx + dx, gy = searchGy + dy;
                     const res = GameEngine.state.mapData.getResource(gx, gy);
                     if (!res) continue;
-                    const typeMap = { 
-                        1: 'SCENE_WOOD', 
-                        2: 'SCENE_STONE', 
-                        3: 'SCENE_FRUIT', 
-                        4: 'SCENE_GOLD_MINE',
-                        5: 'SCENE_IRON_MINE',
-                        6: 'SCENE_COAL_MINE',
-                        7: 'SCENE_MAGIC_HERB',
-                        8: 'SCENE_WOLF_CORPSE',
-                        9: 'SCENE_BEAR_CORPSE',
-                        10: 'SCENE_CRYSTAL_MINE',
-                        11: 'SCENE_COPPER_MINE',
-                        12: 'SCENE_SILVER_MINE',
-                        13: 'SCENE_MITHRIL_MINE'
-                    };
-                    const typeName = typeMap[res.type];
+                    // [P3] 使用 ResourceSystem 的權威對照表，取代此處重複內嵌的 resType→SCENE 名稱表。
+                    const typeName = ResourceSystem.RESOURCE_TYPE_MAP[res.type];
                     const cfg = GameEngine.state.resourceConfigs.find(c => c.type === typeName && c.lv === (res.level || 1));
                     if (!cfg) continue;
                     const ms = cfg.model_size || { x: 1, y: 1 };
@@ -414,9 +401,138 @@ export class InputSystem {
                     const offX = (c - (colsNum - 1) / 2) * spacing, offY = (r - (colsNum - 1) / 2) * spacing;
                     const offsetPointer = { worldX: pointer.worldX + offX, worldY: pointer.worldY + offY };
                     // [核心優化] 傳入原始點 pointer.worldX/Y 作為視覺指示座標，避免多單位時地面光圈過多
-                    scene.handleRightClickCommand(unit, offsetPointer, clickedEnemy || clickedEntity, { x: pointer.worldX, y: pointer.worldY });
+                    this.handleRightClickCommand(unit, offsetPointer, clickedEnemy || clickedEntity, { x: pointer.worldX, y: pointer.worldY });
                 });
             }
         }
+    }
+
+    // [P3] 單位右鍵指令的 FSM 變更原位於 MainScene；其僅讀寫 GameEngine 狀態與 unit 物件、
+    // 不依賴任何 scene 成員，本即輸入指令邏輯，故移入 InputSystem 與 handleUnitMove 同居。
+    handleRightClickCommand(unit, pointer, clickedTarget = null, cmdCenter = null) {
+        console.log(`[Command] ${unit.configName} (${unit.id}) right-click cmd at ${pointer.worldX.toFixed(0)}, ${pointer.worldY.toFixed(0)}`);
+        // [最終防護] 若正處於建造預覽狀態，或按下鼠標時正處於建造預覽狀態，屏蔽所有指令
+        if (GameEngine.state.placingType || GameEngine.state.rightClickStartedInPlacementMode) return;
+
+        // 單位狀態檢查
+        const unitType = unit.config ? unit.config.type : '';
+        const unitCamp = (unit.config && unit.config.camp) || unit.camp || 'player';
+        if (unitType === 'wolf' || unitType === 'bear' || unitCamp === 'neutral') return; // 非玩家控制單位不處理
+
+        // [核心新增] 加工廠派駐系統連動：先檢查是否為派駐指令，或是否需要解除當前派駐狀態
+        if (GameEngine.workerSystem && unit.config.type === 'villagers') {
+            const depositHandled = GameEngine.workerSystem.handleManualDepositCommand(unit, clickedTarget);
+            if (depositHandled) return;
+
+            const handled = GameEngine.workerSystem.handleWorkerCommand(unit, clickedTarget);
+            if (handled) return; // 如果是工廠派駐相關操作，則中止後續的移動/採集邏輯
+        }
+
+        const wx = pointer.worldX, wy = pointer.worldY;
+        const TS = GameEngine.TILE_SIZE;
+        const pf = GameEngine.state.pathfinding;
+
+        let finalTx = wx, finalTy = wy;
+        let isAttackCommand = false;
+
+        // 1. 識別目標類別
+        if (clickedTarget) {
+            const isResource = !!(clickedTarget.gx !== undefined && clickedTarget.gy !== undefined) ||
+                (clickedTarget.resourceType) ||
+                (clickedTarget.type1 === 'farmland' || clickedTarget.type1 === 'tree_plantation');
+            const isEnemy = (clickedTarget.config && (clickedTarget.config.camp === 'enemy' || clickedTarget.config.camp === 'neutral')) ||
+                clickedTarget.camp === 'enemy' || clickedTarget.camp === 'neutral' || clickedTarget.isEnemy;
+
+
+            // [核心修復] 不再強制強制切換為目標中心座標。使用帶有偏移的點擊座標 (wx, wy) 作為基準，
+            // 如此一來即便多個單位同時點擊同一建築，也會因為各自不同的偏移量而散開至合法點位。
+            finalTx = wx;
+            finalTy = wy;
+
+            if (isEnemy) {
+                // 我方單位右鍵點敵方：移動至攻擊範圍內開始攻擊敵人
+                isAttackCommand = true;
+                unit.targetId = clickedTarget.id;
+                unit.forceFocus = true;
+                unit.state = 'CHASE';
+                // 追擊目標座標亦可以維持帶偏移，達成環繞攻擊效果
+                unit.idleTarget = { x: finalTx, y: finalTy };
+                unit.isPlayerLocked = true;
+                unit.chaseFrame = 999;
+                GameEngine.addLog(`[命令] ${unit.configName} 鎖定目標 ${clickedTarget.configName || '敵人'} 並進入追擊。`, 'INPUT');
+            } else if (clickedTarget.isUnderConstruction && unit.config.type === 'villagers') {
+                // 我方工人右鍵點施工中建築：開始建造 (一人一間配給邏輯由外層 dispatcher 處理)
+                unit.state = 'MOVING_TO_CONSTRUCTION';
+                unit.constructionTarget = clickedTarget;
+                unit.targetId = null;
+                unit.pathTarget = null;
+                unit.isPlayerLocked = true;
+
+                GameEngine.addLog(`[命令] 工人 ${unit.id} 前往建設 ${clickedTarget.name || clickedTarget.type1}。`, 'INPUT');
+                return;
+            } else if (isResource && unit.config.type === 'villagers') {
+                // 我方工人右鍵點資源：採集該資源
+                unit.state = 'MOVING_TO_RESOURCE';
+                unit.type = clickedTarget.resourceType || clickedTarget.type1 || clickedTarget.type;
+                unit.targetId = clickedTarget;
+                unit.pathTarget = null;
+                unit.isPlayerLocked = true;
+                GameEngine.addLog(`[命令] ${unit.configName} 前往採集 ${unit.type}。`, 'INPUT');
+                return; // 採集進入獨立流程
+            } else {
+                // 其它情況：點資源(非工人)、障礙、友軍建築
+                // 移動至該目標位置附近合法點位
+                if (pf) {
+                    const gx = Math.floor(finalTx / TS);
+                    const gy = Math.floor(finalTy / TS);
+                    if (!pf.isValidAndWalkable(gx, gy, true)) {
+                        const nearestArr = pf.getNearestWalkableTile(gx, gy, 50, true);
+                        if (nearestArr) {
+                            finalTx = nearestArr.x * TS + TS / 2;
+                            finalTy = nearestArr.y * TS + TS / 2;
+                        }
+                    }
+                }
+                unit.targetId = null;
+                unit.forceFocus = false;
+                GameEngine.addLog(`[命令] ${unit.configName} 移動至目標附近。`, 'INPUT');
+            }
+        } else {
+            // 我方單位右鍵點地板：移動至該位置
+            if (pf) {
+                const gx = Math.floor(wx / TS);
+                const gy = Math.floor(wy / TS);
+                if (!pf.isValidAndWalkable(gx, gy, true)) {
+                    const nearestArr = pf.getNearestWalkableTile(gx, gy, 50, true);
+                    if (nearestArr) {
+                        finalTx = nearestArr.x * TS + TS / 2;
+                        finalTy = nearestArr.y * TS + TS / 2;
+                    }
+                }
+            }
+
+            unit.targetId = null;
+            unit.forceFocus = false;
+            unit.pathTarget = null;
+            unit.constructionTarget = null;
+            unit.assignedWarehouseId = null;
+            GameEngine.addLog(`[命令] ${unit.configName} 移動至地面。`, 'INPUT');
+        }
+
+        // 2. 執行通用移動狀態設定
+        if (!isAttackCommand) {
+            unit.state = 'IDLE';
+        }
+
+        // 核心修復：只有當新目標與舊目標距離大於一定閾值時，才清除舊路徑。
+        const distToExisting = unit.idleTarget ? Math.hypot(unit.idleTarget.x - finalTx, unit.idleTarget.y - finalTy) : 999;
+        if (distToExisting > 10) {
+            unit.pathTarget = null;
+            unit.fullPath = null;
+        }
+
+        unit.idleTarget = { x: finalTx, y: finalTy };
+        unit.commandCenter = cmdCenter || { x: finalTx, y: finalTy }; // 儲存視覺中心點
+        unit.isPlayerLocked = true;
     }
 }
