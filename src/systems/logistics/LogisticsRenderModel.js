@@ -1,5 +1,6 @@
 import { conveyorSystem } from '../ConveyorSystem.js';
 import { buildSelectedGroupDebugGraphRoutes } from './LogisticsRouteGraph.js';
+import { buildSelectedGroupDebugRoutePoints } from './LogisticsDebugRouteStitcher.js';
 
 export class LogisticsRenderModel {
     constructor(system = conveyorSystem) {
@@ -10,6 +11,13 @@ export class LogisticsRenderModel {
     // 渲染器經此 facade 取用，不再於渲染層持有圖演算法。
     buildDebugGraphRoutes(groupSegs, tileSize = 20) {
         return buildSelectedGroupDebugGraphRoutes(groupSegs, tileSize);
+    }
+
+    // [P2a] debug overlay 路線續接器（合流續接 / 實體 fallback / 回填）抽至系統層；
+    // 以 this 作為 renderModel 注入，本 facade 提供續接器所需的 ensureMergeNodeStore /
+    // getGroupRoutePoints / getMergeNodeOutputRoute / getSegmentsByGroupId 介面。
+    getSelectedGroupDebugRoutePoints(state, groupKey, groupSegs, tileSize = 20) {
+        return buildSelectedGroupDebugRoutePoints(state, groupKey, groupSegs, this, tileSize);
     }
 
     getMergeConnectedGroupIds(groupId, state) {
