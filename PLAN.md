@@ -1,3 +1,16 @@
+# 2026-06-25 物流線連續延伸建造流程改造計畫
+
+## 核心目標
+1. 物流線完成一次建造後，不退出延伸流程，而是自動以剛建好物流線末端作為新起點建立虛影。
+2. 新虛影不需要持續按住左鍵，會跟隨滑標移動；玩家在場景任意處再次左鍵點擊即可提交下一段延伸。
+3. 保留既有 Router footprint、ConveyorSystem group merge/split、turnArrowOverride 與 submit/preview 一致性，不新增第二套碰撞或路由規則。
+
+## 實施步驟
+- [x] 步驟 1：使用 `tools/safe_search.cjs` 定位 `startDrag`、`updateDrag`、`submitDrag` 與滑標事件分流。
+- [x] 步驟 2：局部擴充 ConveyorSystem 的建造狀態，讓提交後可從上一段末端自動啟動免按壓延伸虛影。
+- [x] 步驟 3：確保左鍵點擊提交、右鍵/取消仍可清除虛影，且 preview 與 submit 共用既有路由驗證。
+- [x] 步驟 4：執行語法/收尾檢查與 `npm run finalize`，回報 Debug 渲染耗時與 Draw Calls。
+
 # 2026-06-25 同建築第二端口接入後終點延遲堵死補修計畫
 
 ## 核心目標

@@ -1819,7 +1819,16 @@ export class UIManager {
         this.potentialTransportLineBuildDrag = null;
 
         if (this.isLogisticsDragging) {
-            conveyorSystem.submitDrag();
+            const submitResult = conveyorSystem.submitDrag();
+            if (submitResult?.continuationPoint && submitResult?.continuationLine) {
+                const point = submitResult.continuationPoint;
+                if (LogisticsUI.beginLogisticsDragFromLine(submitResult.continuationLine, point.x, point.y)) {
+                    const world = this.getWorldPoint(e.clientX, e.clientY);
+                    conveyorSystem.updateDrag(world.x, world.y);
+                    this.updateValues();
+                    return;
+                }
+            }
             this.logisticsSourceEntity = null;
             this.logisticsSourceLine = null;
             this.isLogisticsDragging = false;

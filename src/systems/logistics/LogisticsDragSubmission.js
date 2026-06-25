@@ -68,12 +68,12 @@ function submitDrag() {
     }
     if (!this.activeDrag || !this.isValid || this.ghosts.length < 2) {
         this.cancelDrag();
-        return;
+        return null;
     }
     const buildGhosts = this.ghosts;
     if (buildGhosts.length < 2) {
         this.cancelDrag();
-        return;
+        return null;
     }
 
     const buildUndoSnapshot = this.captureLogisticsBuildUndoSnapshot(GameEngine.state);
@@ -83,7 +83,7 @@ function submitDrag() {
     if (!revalidateDragRouteContext.call(this, routeContext, drag)) {
         GameEngine.addLog(`[物流線] 路徑已被佔用，建造取消。`, 'LOGISTICS');
         this.cancelDrag();
-        return;
+        return null;
     }
     const TS = GameEngine.TILE_SIZE;
     const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
@@ -153,14 +153,14 @@ function submitDrag() {
         if (segmentCostCount < 2 && !allowsShortMergeConnector) {
             GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
             this.cancelDrag();
-            return;
+            return null;
         }
         const maxCosts = this.getTransportLineCost(segmentCostCount);
         const missing = Object.entries(maxCosts).find(([resource, amount]) => (GameEngine.state.resources[resource] || 0) < amount);
         if (missing) {
             GameEngine.triggerWarning("1", [missing[0].toUpperCase()]);
             this.cancelDrag();
-            return;
+            return null;
         }
         const transportCfg = this.getTransportLineConfig();
 
@@ -321,9 +321,10 @@ function submitDrag() {
         if (!BuildingSystem.spendResources(GameEngine.state, this.getTransportLineCost(builtSegments))) {
             this.restoreLogisticsBuildUndoSnapshot(buildUndoSnapshot, GameEngine.state);
             this.cancelDrag();
-            return;
+            return null;
         }
         this.recordLogisticsBuildUndoSnapshot(buildUndoSnapshot, GameEngine.state);
+        let selectedContinuationLine = null;
         if (drag.isLineExtension && finalGroupId && GameEngine.state) {
             const finalSegments = this.getLogisticsSegmentsByGroupId(finalGroupId);
             const activeSegment = finalSegments
@@ -343,11 +344,26 @@ function submitDrag() {
                 window.UIManager.activeLogisticsLine = activeSegment || null;
                 window.UIManager.activeLogisticsConnection = null;
             }
+            selectedContinuationLine = activeSegment || null;
         }
         GameEngine.addLog(`[物流] 傳送帶建造完成，共 ${builtSegments} 節。`, 'LOGISTICS');
+        const continuationPoint = points[points.length - 1] || lastPoint;
+        const continuationLine = this.findTouchedLogisticsLineAt(continuationPoint, null, (GameEngine.TILE_SIZE || 20) * 0.75)
+            || selectedContinuationLine
+            || createdLine
+            || null;
+        const result = {
+            built: builtSegments > 0,
+            finalGroupId,
+            continuationPoint,
+            continuationLine
+        };
+        this.cancelDrag();
+        return result;
     }
 
     this.cancelDrag();
+    return null;
 }
 
 export class LogisticsDragSubmission {
