@@ -66,14 +66,15 @@ function submitDrag() {
         this.pendingDragPoint = null;
         this.updateDragNow(point.x, point.y);
     }
-    if (!this.activeDrag || !this.isValid || this.ghosts.length < 2) {
-        this.cancelDrag();
+    if (!this.activeDrag) {
         return null;
+    }
+    if (!this.isValid || this.ghosts.length < 2) {
+        return { blocked: true };
     }
     const buildGhosts = this.ghosts;
     if (buildGhosts.length < 2) {
-        this.cancelDrag();
-        return null;
+        return { blocked: true };
     }
 
     const buildUndoSnapshot = this.captureLogisticsBuildUndoSnapshot(GameEngine.state);
@@ -82,8 +83,7 @@ function submitDrag() {
     const routeContext = drag.routeContext || null;
     if (!revalidateDragRouteContext.call(this, routeContext, drag)) {
         GameEngine.addLog(`[物流線] 路徑已被佔用，建造取消。`, 'LOGISTICS');
-        this.cancelDrag();
-        return null;
+        return { blocked: true };
     }
     const TS = GameEngine.TILE_SIZE;
     const offset = GameEngine.state.mapOffset || { x: 0, y: 0 };
@@ -97,8 +97,7 @@ function submitDrag() {
     }));
     if (this.isReverseLogisticsExtension(drag, points, false)) {
         GameEngine.addLog(`[物流線] 禁止從端點 180 度反向延伸物流線。`, 'LOGISTICS');
-        this.cancelDrag();
-        return null;
+        return { blocked: true };
     }
     this.applyExtensionTurnArrowOverride(drag, points);
 

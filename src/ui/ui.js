@@ -1820,6 +1820,10 @@ export class UIManager {
 
         if (this.isLogisticsDragging) {
             const submitResult = conveyorSystem.submitDrag();
+            if (submitResult?.blocked) {
+                this.updateValues();
+                return;
+            }
             if (submitResult?.continuationPoint && submitResult?.continuationLine) {
                 const point = submitResult.continuationPoint;
                 if (LogisticsUI.beginLogisticsDragFromLine(submitResult.continuationLine, point.x, point.y)) {

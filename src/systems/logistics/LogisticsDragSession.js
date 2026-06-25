@@ -72,6 +72,48 @@ function updateDrag(currentX, currentY) {
     });
 }
 
+function buildRawPreviewPath(start, end, bendMode = 'x-first') {
+    if (!start || !end) return null;
+    if (start.x === end.x && start.y === end.y) return [start];
+
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const path = [];
+    const push = (point) => {
+        const last = path[path.length - 1];
+        if (!last || last.x !== point.x || last.y !== point.y) path.push(point);
+    };
+    const walkX = (fromX, toX, y, includeStart = true) => {
+        if (fromX === toX) {
+            if (includeStart) push({ x: fromX, y });
+            return;
+        }
+        const step = Math.sign(toX - fromX);
+        for (let x = includeStart ? fromX : fromX + step; x !== toX + step; x += step) {
+            push({ x, y });
+        }
+    };
+    const walkY = (x, fromY, toY, includeStart = true) => {
+        if (fromY === toY) {
+            if (includeStart) push({ x, y: fromY });
+            return;
+        }
+        const step = Math.sign(toY - fromY);
+        for (let y = includeStart ? fromY : fromY + step; y !== toY + step; y += step) {
+            push({ x, y });
+        }
+    };
+
+    if (bendMode === 'y-first') {
+        walkY(start.x, start.y, end.y, true);
+        if (dx !== 0) walkX(start.x, end.x, end.y, false);
+    } else {
+        walkX(start.x, end.x, start.y, true);
+        if (dy !== 0) walkY(end.x, start.y, end.y, false);
+    }
+    return path.length > 0 ? path : null;
+}
+
 function updateDragNow(currentX, currentY) {
     if (!this.activeDrag) return;
     this.activeDrag.lastWorldPoint = { x: currentX, y: currentY };
@@ -153,15 +195,25 @@ function updateDragNow(currentX, currentY) {
 
     const routeStartDir = this.activeDrag.isLineExtension ? null : this.activeDrag.sourcePort?.dir;
     const routePath = this.router.findPath(sourceRouteGrid, targetRouteGrid, routeStartDir, this.activeDrag.bendMode, widthOffsets);
+    const rawPreviewPath = buildRawPreviewPath(sourceRouteGrid, targetRouteGrid, this.activeDrag.bendMode);
+    const rawPreviewGhosts = rawPreviewPath
+        ? this.router.processPath(
+            this.buildPortSafePath(rawPreviewPath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid) || rawPreviewPath,
+            dragTarget.building,
+            GameEngine.state.logisticsLines || []
+        )
+        : [];
+    const rawPreviewIsValid = rawPreviewGhosts.length >= 2 && this.validateGhosts(rawPreviewGhosts);
     let path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
     path = this.dedupeExtensionStart(path);
 
     const isReverseExtension = this.isReverseLogisticsExtension(this.activeDrag, path, true);
-    if (path && !isReverseExtension) {
+    const isRawReverseExtension = this.isReverseLogisticsExtension(this.activeDrag, rawPreviewPath, true);
+    if (path && !isReverseExtension && rawPreviewIsValid && !isRawReverseExtension) {
         this.ghosts = this.router.processPath(path, dragTarget.building, GameEngine.state.logisticsLines || []);
         this.isValid = this.validateGhosts(this.ghosts);
     } else {
-        this.ghosts = [];
+        this.ghosts = rawPreviewGhosts;
         this.isValid = false;
     }
 
