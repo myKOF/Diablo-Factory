@@ -99,6 +99,52 @@ export class ConveyorSystem {
         return this.dragSession.startDrag(...arguments);
     }
 
+    getDirectionBetweenPoints(start, end) {
+        if (!start || !end) return null;
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return null;
+        return Math.abs(dx) >= Math.abs(dy)
+            ? { x: Math.sign(dx) || 1, y: 0 }
+            : { x: 0, y: Math.sign(dy) || 1 };
+    }
+
+    isReverseLogisticsExtension(drag, pathPoints, pointsAreGrid = true) {
+        if (!drag?.isLineExtension || !drag.sourceLine || !Array.isArray(pathPoints) || pathPoints.length < 2) return false;
+        const sourceGroupId = drag.sourceLine.groupId || drag.sourceLine.id || null;
+        const segments = sourceGroupId
+            ? this.getLogisticsSegmentsByGroupId(sourceGroupId)
+            : [drag.sourceLine];
+        const ordered = Array.isArray(segments) && segments.length > 0
+            ? this.orderLogisticsSegmentsByDirection(segments)
+            : [drag.sourceLine];
+        const firstRoute = Array.isArray(ordered[0]?.routePoints) ? ordered[0].routePoints : [];
+        const lastSegment = ordered[ordered.length - 1];
+        const lastRoute = Array.isArray(lastSegment?.routePoints) ? lastSegment.routePoints : [];
+        if (firstRoute.length < 2 || lastRoute.length < 2) return false;
+
+        const toComparablePoint = (point) => pointsAreGrid ? point : this.toGrid(point.x, point.y);
+        const startGrid = drag.startGrid || this.toGrid(drag.startX, drag.startY);
+        const firstGrid = this.toGrid(firstRoute[0].x, firstRoute[0].y);
+        const secondGrid = this.toGrid(firstRoute[1].x, firstRoute[1].y);
+        const lastGrid = this.toGrid(lastRoute[lastRoute.length - 1].x, lastRoute[lastRoute.length - 1].y);
+        const beforeLastGrid = this.toGrid(lastRoute[lastRoute.length - 2].x, lastRoute[lastRoute.length - 2].y);
+        const extensionDir = this.getDirectionBetweenPoints(
+            toComparablePoint(pathPoints[0]),
+            toComparablePoint(pathPoints[1])
+        );
+        if (!extensionDir) return false;
+
+        const routeScale = this.getRouteScale();
+        const isNear = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= routeScale;
+        const blockedDir = isNear(startGrid, lastGrid)
+            ? this.getDirectionBetweenPoints(lastGrid, beforeLastGrid)
+            : (isNear(startGrid, firstGrid)
+                ? this.getDirectionBetweenPoints(firstGrid, secondGrid)
+                : null);
+        return !!blockedDir && extensionDir.x === blockedDir.x && extensionDir.y === blockedDir.y;
+    }
+
     getAlignmentUnit() {
         return this.configCostAdapter.getAlignmentUnit(...arguments);
     }

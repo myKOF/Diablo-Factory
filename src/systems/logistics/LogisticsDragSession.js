@@ -156,9 +156,8 @@ function updateDragNow(currentX, currentY) {
     let path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
     path = this.dedupeExtensionStart(path);
 
-
-
-    if (path) {
+    const isReverseExtension = this.isReverseLogisticsExtension(this.activeDrag, path, true);
+    if (path && !isReverseExtension) {
         this.ghosts = this.router.processPath(path, dragTarget.building, GameEngine.state.logisticsLines || []);
         this.isValid = this.validateGhosts(this.ghosts);
     } else {

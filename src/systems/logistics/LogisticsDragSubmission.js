@@ -95,6 +95,11 @@ function submitDrag() {
         x: (g.x + offset.x * scale) * gridUnit,
         y: (g.y + offset.y * scale) * gridUnit
     }));
+    if (this.isReverseLogisticsExtension(drag, points, false)) {
+        GameEngine.addLog(`[物流線] 禁止從端點 180 度反向延伸物流線。`, 'LOGISTICS');
+        this.cancelDrag();
+        return null;
+    }
     this.applyExtensionTurnArrowOverride(drag, points);
 
     const lastPoint = points[points.length - 1];
