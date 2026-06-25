@@ -1323,10 +1323,15 @@ export class LogisticsRenderer {
                 );
                 const useConnectedIdleStyle = isPhysicallyConnected && !isOperating;
                 const effectiveTurnCellKeys = new Set();
-                const roundedBaseSkipCellKeys = new Set(turnCellKeys ? [...turnCellKeys] : []);
+                // roundedTurnSkipCellKeys：本群組逐段繪製時要略過「圓角重繪」的格（圓角已由群組層 drawLogisticsGroupRoundedTurns 統一畫）。
+                // roundedBaseSkipCellKeys：要略過「方形底圖」的格。預設由 roundedTurnSkipCellKeys 複製而來（不可直接由 turnCellKeys 建構，
+                // 否則合流視覺轉彎格的底圖會被一併略過，導致接通後 180 度迴轉末端少一格底圖——見 protocol_alignment 對應回歸測試）。
                 const roundedTurnSkipCellKeys = new Set(turnCellKeys ? [...turnCellKeys] : []);
+                const roundedBaseSkipCellKeys = new Set(roundedTurnSkipCellKeys);
                 mergeVisualTurnCellKeys.forEach(key => {
-                    roundedBaseSkipCellKeys.add(key);
+                    // 合流視覺轉彎格由 drawLogisticsMergeVisualTurns 另行繪製其圓角，故略過圓角重繪；
+                    // 但對「本群組」而言此格是直線穿越格(isTurn=false)，必須保留其方形底圖，因此從 base-skip 移除。
+                    roundedBaseSkipCellKeys.delete(key);
                     roundedTurnSkipCellKeys.add(key);
                 });
                 const detachedSplitArrowCellKeys = LogisticsRenderer.getDetachedSplitArrowCellKeys(groupSegs);
