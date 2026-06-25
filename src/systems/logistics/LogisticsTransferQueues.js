@@ -5,6 +5,7 @@ import {
 } from './LogisticsPathMetrics.js';
 import { logisticsTransportArrayState } from './LogisticsTransportArrayState.js';
 import { routePointsSignature } from './LogisticsRouteCache.js';
+import { computeMergeInputMaxDistance } from './LogisticsMergeSpacing.js';
 
 export class LogisticsTransferQueues {
     constructor(system, getGameEngine) {
@@ -66,15 +67,14 @@ export class LogisticsTransferQueues {
             const mergePoint = node.point || { x: node.x, y: node.y };
 
             const winnerId = getMergeAdmissionWinner(node);
-            const isWinner = winnerId && transfer.id && transfer.id === winnerId;
-            // [非勝者等待線] 未取得路權前一律停在合流點前一格；
-            // 嚴禁「隨他線逼近而漸進」的灰色地帶——那會讓非勝者貼隊推進，
-            // 在勝者插入瞬間形成 <1 格間距並損失相位，產生週期性空隙。
+            const isWinner = !!(winnerId && transfer.id && transfer.id === winnerId);
+            // [非勝者等待線] 決策算術已抽至 LogisticsMergeSpacing（與 LogisticsTransferSystem 共用同一份），
+            // 杜絕兩 pass 各自一份而 drift。本 pass 刻意以「原始 progress」計算 other 距離（不含 stepDt 投影）。
             if (!isWinner) {
-                return Math.max(0, totalLength - mergeGateSpacing);
+                return computeMergeInputMaxDistance(totalLength, mergeGateSpacing, false, node, []);
             }
 
-            let requiredWait = 0;
+            const distancesFromMerge = [];
             state.activeTransfers.forEach(other => {
                 if (!other || other === transfer) return;
                 if (other.lineId !== node.outputGroupId) return;
@@ -83,24 +83,9 @@ export class LogisticsTransferQueues {
                 if (otherTotal <= 0) return;
                 const otherDistance = Math.max(0, Math.min(1, Number(other.progress) || 0)) * otherTotal;
                 const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint, pathMetricsCache);
-                const distFromMerge = otherDistance - mergeDistance;
-                const followingMainMayOverlapTurn = node.zipperTurn === 'branch' &&
-                    node.awaitingMainPass !== true &&
-                    distFromMerge < -0.01;
-                if (Math.abs(distFromMerge) < mergeGateSpacing - 0.1 && !followingMainMayOverlapTurn) {
-                    // [緊密放行] 勝者隨前車前進逐步跟進，保持剛好一格間距。
-                    const followGap = distFromMerge >= 0
-                        ? Math.max(0, mergeGateSpacing - distFromMerge)
-                        : mergeGateSpacing;
-                    requiredWait = Math.max(requiredWait, followGap);
-                } else if (node.awaitingMainPass === true && node.zipperTurn !== 'branch' &&
-                    distFromMerge <= -(mergeGateSpacing + 0.1) && distFromMerge > -mergeGateSpacing * 3) {
-                    // [防碎片視界] 輪到主線時，三格內有逼近中的來車：於等待線候命，禁止插它前面。
-                    requiredWait = Math.max(requiredWait, mergeGateSpacing);
-                }
+                distancesFromMerge.push(otherDistance - mergeDistance);
             });
-            if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
-            return totalLength;
+            return computeMergeInputMaxDistance(totalLength, mergeGateSpacing, true, node, distancesFromMerge);
         };
         const routeSignature = (transfer) => {
             const points = transfer.routePoints || [];

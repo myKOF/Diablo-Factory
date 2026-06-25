@@ -1,4 +1,5 @@
 import { routePointsSignature, routeAlongDistanceToPoint } from './LogisticsRouteCache.js';
+import { computeMergeInputMaxDistance } from './LogisticsMergeSpacing.js';
 
 // [Web Worker] 物流「運動學」核心:固定子步長的位移 + 合流閘門 + 堆積回壓。
 // 這段是整個遊戲時序最敏感的部分,主執行緒與 worker 共用同一份(避免分歧)。
@@ -116,8 +117,12 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
         const mergePoint = node.point || { x: node.x, y: node.y };
         const winnerId = getMergeAdmissionWinner(node, spacing);
         const isWinner = winnerId && transfer.id && transfer.id === winnerId;
-        if (!isWinner) return Math.max(0, totalLength - spacing);
-        let requiredWait = 0;
+        // [非勝者等待線] 決策算術已抽至 LogisticsMergeSpacing（與 LogisticsTransferQueues 共用同一份），
+        // 杜絕兩 pass 各自一份而 drift。本 pass 刻意以「含 stepDt 投影」計算 other 距離。
+        if (!isWinner) {
+            return computeMergeInputMaxDistance(totalLength, spacing, false, node, []);
+        }
+        const distancesFromMerge = [];
         state.activeTransfers.forEach(other => {
             if (!other || other === transfer) return;
             if (other.lineId !== node.outputGroupId) return;
@@ -132,18 +137,9 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
                 ? otherDistanceNow
                 : Math.min(otherMaxDistance, otherDistanceNow + stepDt * getTransferSpeed(other) * getCellSize());
             const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
-            const distFromMerge = projectedDistance - mergeDistance;
-            const followingMainMayOverlapTurn = node.zipperTurn === 'branch' && node.awaitingMainPass !== true && distFromMerge < -0.01;
-            if (Math.abs(distFromMerge) < spacing - 0.1 && !followingMainMayOverlapTurn) {
-                const followGap = distFromMerge >= 0 ? Math.max(0, spacing - distFromMerge) : spacing;
-                requiredWait = Math.max(requiredWait, followGap);
-            } else if (node.awaitingMainPass === true && node.zipperTurn !== 'branch' &&
-                distFromMerge <= -(spacing + 0.1) && distFromMerge > -spacing * 3) {
-                requiredWait = Math.max(requiredWait, spacing);
-            }
+            distancesFromMerge.push(projectedDistance - mergeDistance);
         });
-        if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
-        return totalLength;
+        return computeMergeInputMaxDistance(totalLength, spacing, true, node, distancesFromMerge);
     };
 
     const LOGISTICS_SUB_DT = 0.0167;
