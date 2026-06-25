@@ -583,6 +583,21 @@ export class LogisticsTransferSystem {
     }
 
     processAutomatedLogistics(state, deltaTime) {
+        // [效能] 開啟計算快取窗口：本方法同步執行期間不變更線段與合流拓樸，
+        // 讓內部大量的合流查詢（getSegmentsByGroupId、拓樸有效性檢查）由逐 transfer×逐子步 O(總線段數) 降為查表。
+        if (conveyorSystem && typeof conveyorSystem.beginLogisticsComputeCache === 'function') {
+            conveyorSystem.beginLogisticsComputeCache();
+        }
+        try {
+            return this._processAutomatedLogisticsImpl(state, deltaTime);
+        } finally {
+            if (conveyorSystem && typeof conveyorSystem.endLogisticsComputeCache === 'function') {
+                conveyorSystem.endLogisticsComputeCache();
+            }
+        }
+    }
+
+    _processAutomatedLogisticsImpl(state, deltaTime) {
         if (!state.activeTransfers) state.activeTransfers = [];
         // [固定子步長] 物品移動與合流放行對 tick 粗細極度敏感：每 tick 位移 = 速度×dt，
         // dt 過大時 winner 過衝合流閘門，留下永不閉合的碎片間隙（5Hz→56%、20Hz→83% 滿載）。
@@ -733,6 +748,29 @@ export class LogisticsTransferSystem {
             }
             return bestPathDist;
         };
+        // [效能] getLogisticsMergeNodeForInputTransfer 每次都要掃 nodes×lines（getSegmentsByGroupId
+        // 與 doesLogisticsGroupContainConnectionPoint 皆為 O(lines)），但合流拓樸與各 transfer 路徑在
+        // 單次 processAutomatedLogistics 內不變（applyLogisticsMergeNodes 只動排程狀態、不動拓樸）。
+        // 於本次呼叫記憶化，杜絕「排序比較器 / 逐 transfer / 逐子步長」造成的 O(n×nodes×lines) 重複掃描。
+        const _mergeNodeCache = new Map();
+        const getMergeNodeForTransfer = (transfer) => {
+            if (!transfer) return null;
+            if (_mergeNodeCache.has(transfer)) return _mergeNodeCache.get(transfer);
+            const node = (conveyorSystem && typeof conveyorSystem.getLogisticsMergeNodeForInputTransfer === 'function')
+                ? conveyorSystem.getLogisticsMergeNodeForInputTransfer(transfer, state)
+                : null;
+            _mergeNodeCache.set(transfer, node);
+            return node;
+        };
+        const _mergeOutputCache = new Map();
+        const isMergeOutputTransferCached = (transfer) => {
+            const lineId = transfer?.lineId || null;
+            if (!lineId || !Array.isArray(state.logisticsMergeNodes)) return false;
+            if (_mergeOutputCache.has(transfer)) return _mergeOutputCache.get(transfer);
+            const result = state.logisticsMergeNodes.some(node => node?.outputGroupId === lineId);
+            _mergeOutputCache.set(transfer, result);
+            return result;
+        };
         const getMergeAdmissionWinner = (node, spacing) => {
             if (!node || !Array.isArray(node.inputGroupIds)) return null;
             if (conveyorSystem && typeof conveyorSystem.getLogisticsMergeAdmissionWinner === 'function') {
@@ -747,7 +785,7 @@ export class LogisticsTransferSystem {
             if (!conveyorSystem || typeof conveyorSystem.getLogisticsMergeNodeForInputTransfer !== 'function') {
                 return totalLength;
             }
-            const node = conveyorSystem.getLogisticsMergeNodeForInputTransfer(transfer, state);
+            const node = getMergeNodeForTransfer(transfer);
             if (!node || !node.outputGroupId) return totalLength;
             const mergePoint = node.point || { x: node.x, y: node.y };
 
@@ -822,14 +860,9 @@ export class LogisticsTransferSystem {
 
             const cellSize = getCellSize();
 
-            const isMergeInputTransfer = (transfer) => conveyorSystem &&
-                typeof conveyorSystem.isLogisticsMergeInputTransfer === 'function' &&
-                conveyorSystem.isLogisticsMergeInputTransfer(transfer, state);
-            const isMergeOutputTransfer = (transfer) => {
-                const lineId = transfer?.lineId || null;
-                if (!lineId || !Array.isArray(state.logisticsMergeNodes)) return false;
-                return state.logisticsMergeNodes.some(node => node?.outputGroupId === lineId);
-            };
+            // [效能] 走本次呼叫的記憶化快取，避免每子步重複做 O(nodes×lines) 的合流節點掃描。
+            const isMergeInputTransfer = (transfer) => !!getMergeNodeForTransfer(transfer);
+            const isMergeOutputTransfer = (transfer) => isMergeOutputTransferCached(transfer);
 
             Array.from(transfersByPath.entries()).sort(([, a], [, b]) => {
                 const aIsMergeInput = a.some(isMergeInputTransfer);

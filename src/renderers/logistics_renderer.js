@@ -1762,13 +1762,12 @@ export class LogisticsRenderer {
         const useSpriteTransfers = LogisticsRenderer.canUseTransferSprites(scene);
         if (useSpriteTransfers) {
             LogisticsRenderer.beginTransferSprites(scene);
-            LogisticsRenderer.hideTransferSerialLabels(scene);
-        } else {
-            LogisticsRenderer.beginTransferSerialLabels(scene);
         }
+        // [效能] 序號一律走「池化文字」路徑：序號單調遞增且永不重複，若烤進 GPU 材質會造成材質無限增生
+        LogisticsRenderer.beginTransferSerialLabels(scene);
         if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) {
             if (useSpriteTransfers) LogisticsRenderer.endTransferSprites(scene);
-            else LogisticsRenderer.endTransferSerialLabels(scene);
+            LogisticsRenderer.endTransferSerialLabels(scene);
             return;
         }
 
@@ -1838,11 +1837,11 @@ export class LogisticsRenderer {
                     itemSize - strokeWidth,
                     itemSize - strokeWidth
                 );
-                LogisticsRenderer.renderTransferSerialLabel(scene, t, px, py, itemSize);
             }
+            LogisticsRenderer.renderTransferSerialLabel(scene, t, px, py, itemSize);
         });
         if (useSpriteTransfers) LogisticsRenderer.endTransferSprites(scene);
-        else LogisticsRenderer.endTransferSerialLabels(scene);
+        LogisticsRenderer.endTransferSerialLabels(scene);
     }
 
     static renderBuildPreview(graphics, state, scene, clear = true) {
@@ -2079,9 +2078,12 @@ export class LogisticsRenderer {
 
     static endTransferSprites(scene) {
         if (!scene || !scene.logisticsTransferSprites) return;
+        // [效能] 本幀未出現的 key == 已送達並從 activeTransfers 移除的 transfer：
+        // 直接銷毀並從池中刪除，避免池隨歷史累積無限成長（記憶體 + 每幀全量遍歷）。
         scene.logisticsTransferSprites.forEach((sprite, key) => {
             if (!scene.logisticsVisibleTransferSpriteIds || !scene.logisticsVisibleTransferSpriteIds.has(key)) {
-                sprite.setVisible(false);
+                if (sprite && sprite.destroy) sprite.destroy();
+                scene.logisticsTransferSprites.delete(key);
             }
         });
     }
@@ -2181,7 +2183,9 @@ export class LogisticsRenderer {
         if (!scene.logisticsVisibleTransferSpriteIds) scene.logisticsVisibleTransferSpriteIds = new Set();
 
         const key = transfer.id || `transfer_${transfer.serialNumber || scene.logisticsTransferSprites.size}`;
-        const label = transfer.serialNumber ? String(transfer.serialNumber) : "";
+        // [效能] box 材質僅依顏色/尺寸快取（有界）；序號改由 renderTransferSerialLabel 的池化文字繪製，
+        // 避免單調遞增的序號烤進材質造成 atlas 溢位後每序號新建一張 canvas 材質。
+        const label = "";
         const textureInfo = LogisticsRenderer.ensureTransferTexture(scene, color, label, itemSize, strokeWidth);
         const textureKey = textureInfo.key;
         const frame = textureInfo.frame;
@@ -2220,9 +2224,11 @@ export class LogisticsRenderer {
 
     static endTransferSerialLabels(scene) {
         if (!scene || !scene.logisticsTransferNumberTexts) return;
+        // [效能] 與 endTransferSprites 同理：銷毀並刪除已送達 transfer 的序號文字，避免文字池無限成長。
         scene.logisticsTransferNumberTexts.forEach((txt, key) => {
             if (!scene.logisticsVisibleTransferTextIds || !scene.logisticsVisibleTransferTextIds.has(key)) {
-                txt.setVisible(false);
+                if (txt && txt.destroy) txt.destroy();
+                scene.logisticsTransferNumberTexts.delete(key);
             }
         });
     }
@@ -2246,13 +2252,18 @@ export class LogisticsRenderer {
                 strokeThickness: 3,
                 align: 'center'
             }).setOrigin(0.5).setDepth(depth);
+            txt._lzFontSize = fontSize;
             scene.logisticsTransferNumberTexts.set(key, txt);
         } else {
             if (txt.text !== label) txt.setText(label);
             txt.setPosition(x, y);
-            txt.setDepth(depth);
-            txt.setVisible(true);
-            if (txt.setFontSize) txt.setFontSize(fontSize);
+            if (txt.depth !== depth) txt.setDepth(depth);
+            if (!txt.visible) txt.setVisible(true);
+            // [效能] fontSize 只依 itemSize 與位數變化；避免每幀 setFontSize 觸發文字材質重建。
+            if (txt.setFontSize && txt._lzFontSize !== fontSize) {
+                txt.setFontSize(fontSize);
+                txt._lzFontSize = fontSize;
+            }
         }
         scene.logisticsVisibleTransferTextIds.add(key);
     }

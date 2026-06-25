@@ -479,6 +479,18 @@ export class ConveyorSystem {
         return this.mergeNodeRuntime.apply(state);
     }
 
+    // [效能] 開啟/關閉一段「保證不變更線段與合流拓樸」的同步計算窗口。
+    // 窗口內 getSegmentsByGroupId 走群組索引快取、合流節點的拓樸有效性檢查走記憶化，
+    // 將原本逐 transfer × 逐子步 O(總線段數) 的重複掃描降為查表。呼叫端務必以 try/finally 成對使用。
+    beginLogisticsComputeCache() {
+        if (this.lineStore && typeof this.lineStore.beginGroupCache === 'function') this.lineStore.beginGroupCache();
+        if (this.mergeNodeStore && typeof this.mergeNodeStore.beginTopologyCache === 'function') this.mergeNodeStore.beginTopologyCache();
+    }
+    endLogisticsComputeCache() {
+        if (this.lineStore && typeof this.lineStore.endGroupCache === 'function') this.lineStore.endGroupCache();
+        if (this.mergeNodeStore && typeof this.mergeNodeStore.endTopologyCache === 'function') this.mergeNodeStore.endTopologyCache();
+    }
+
     snapPointToGridCenter(point) {
         return this.segmentBuilder.snapPointToGridCenter(point);
     }

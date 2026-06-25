@@ -3,6 +3,28 @@ import { GameEngine } from '../game_systems.js';
 export class LogisticsMergeNodeStore {
     constructor(system) {
         this.system = system;
+        // [效能] 合流節點「拓樸有效性」記憶化快取：僅在計算窗口(beginTopologyCache/endTopologyCache)內生效。
+        // 鍵為 (node, inputGroupId)，值與 transfer 狀態無關，純依線段/節點拓樸；窗口外一律即時計算。
+        this._topoValidCache = null;
+    }
+
+    beginTopologyCache() { this._topoValidCache = new Map(); }
+    endTopologyCache() { this._topoValidCache = null; }
+
+    // 與 transfer 無關的拓樸有效性檢查（輸入連線完整、輸入線確實進入、輸出線確實離開合流點）。
+    isNodeInputTopologyValid(node, inputGroupId, state) {
+        const cache = this._topoValidCache;
+        let key = null;
+        if (cache) {
+            key = `${node.id || node.nodeId || node.cellKey}|${inputGroupId}`;
+            if (cache.has(key)) return cache.get(key);
+        }
+        const p = node.point || { x: node.x, y: node.y };
+        const valid = this.system.isLogisticsMergeNodeInputConnectionIntact(node, inputGroupId, state) &&
+            this.getCandidateLines(inputGroupId).some(line => this.canLineEnterMergePoint(line, p)) &&
+            this.getCandidateLines(node.outputGroupId).some(line => this.canLineLeaveMergePoint(line, p));
+        if (cache) cache.set(key, valid);
+        return valid;
     }
 
     getMergeDirectionTolerance() {
@@ -453,13 +475,9 @@ export class LogisticsMergeNodeStore {
         return this.system.ensureLogisticsMergeNodeStore(state).find(node => {
             if (!node || !Array.isArray(node.inputGroupIds) || !node.inputGroupIds.includes(lineId)) return false;
             if (!node.outputGroupId) return false;
-            if (!this.system.isLogisticsMergeNodeInputConnectionIntact(node, lineId, state)) return false;
+            // [效能] 拓樸有效性與 transfer 無關，於計算窗口內記憶化；transfer 相關的終點距離檢查維持即時。
+            if (!this.isNodeInputTopologyValid(node, lineId, state)) return false;
             const p = node.point || { x: node.x, y: node.y };
-            const inputStillEnters = this.getCandidateLines(lineId)
-                .some(line => this.canLineEnterMergePoint(line, p));
-            const outputStillLeaves = this.getCandidateLines(node.outputGroupId)
-                .some(line => this.canLineLeaveMergePoint(line, p));
-            if (!inputStillEnters || !outputStillLeaves) return false;
             if (!endPoint) return true;
             return p && Math.hypot(endPoint.x - p.x, endPoint.y - p.y) <= TS * 1.5;
         }) || null;
