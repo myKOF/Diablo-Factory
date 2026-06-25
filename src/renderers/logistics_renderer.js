@@ -4,6 +4,10 @@ import { logisticsTransportArrayState } from "../systems/logistics/LogisticsTran
 import { logisticsRenderModel } from "../systems/logistics/LogisticsRenderModel.js";
 
 export class LogisticsRenderer {
+    // [效能] 路徑幾何記憶化(WeakMap 以 routePoints 參照為鍵,自動失效零洩漏)。段長/轉角是路徑的純函式,
+    // 對同路線跨幀跨 transfer 不變;normalized route 在 transfer 生命週期內參照穩定故能跨幀命中。
+    static _transferPathGeomCache = new WeakMap();
+
     static resolveTransferProgress(transfer, routePoints = transfer?.routePoints, cellSize = GameEngine.TILE_SIZE) {
         return logisticsTransportArrayState.resolveProgress(transfer, routePoints, cellSize);
     }
@@ -2433,11 +2437,12 @@ export class LogisticsRenderer {
         return metrics;
     }
 
-    static getPointOnTransferPath(points, progress, startOffset = 0, cacheOwner = null) {
-        if (!Array.isArray(points) || points.length < 2) return null;
-        const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
-
-        // 1. 計算折線的曼哈頓總長度與各段長度，使直線段視覺位移與邏輯位移 100% 等價對齊
+    // [效能] 折線的段長與轉角圓角資訊只依路徑幾何(與 progress 無關),對同一條路線在所有 transfer / 所有幀
+    // 都相同。以 routePoints 參照記憶化(WeakMap 自動失效),把 getPointOnTransferPath 每幀每 transfer 的
+    // O(P) 重建降為查表;之後只剩 O(P) 的落點插值(且通常落在單段內提早 return)。
+    static _getTransferPathGeometry(points) {
+        const memo = LogisticsRenderer._transferPathGeomCache.get(points);
+        if (memo !== undefined) return memo;
         const segments = [];
         let totalPixels = 0;
         for (let i = 0; i < points.length - 1; i++) {
@@ -2447,9 +2452,6 @@ export class LogisticsRenderer {
             segments.push({ a, b, len, start: totalPixels });
             totalPixels += len;
         }
-        if (totalPixels <= 0) return { x: points[0].x, y: points[0].y, angle: 0 };
-
-        // 2. 計算每個轉角 Corner 資訊
         const TS = GameEngine.TILE_SIZE || 20;
         const corners = [];
         let distanceAtPoint = 0;
@@ -2459,7 +2461,6 @@ export class LogisticsRenderer {
             const next = points[i + 1];
             const prevLen = Math.abs(curr.x - prev.x) + Math.abs(curr.y - prev.y);
             distanceAtPoint += prevLen;
-
             const inDir = LogisticsRenderer.getCardinalDir(prev, curr);
             const outDir = LogisticsRenderer.getCardinalDir(curr, next);
             const isTurn = inDir && outDir && (inDir.x !== outDir.x || inDir.y !== outDir.y);
@@ -2468,16 +2469,26 @@ export class LogisticsRenderer {
                 const radius = Math.min(TS, prevLen, nextLen);
                 if (radius >= 1) {
                     corners.push({
-                        currIndex: i,
-                        curr,
+                        currIndex: i, curr,
                         entry: { x: curr.x - inDir.x * radius, y: curr.y - inDir.y * radius },
                         exit: { x: curr.x + outDir.x * radius, y: curr.y + outDir.y * radius },
-                        distAtCorner: distanceAtPoint,
-                        radius
+                        distAtCorner: distanceAtPoint, radius
                     });
                 }
             }
         }
+        const geom = { segments, corners, totalPixels };
+        LogisticsRenderer._transferPathGeomCache.set(points, geom);
+        return geom;
+    }
+
+    static getPointOnTransferPath(points, progress, startOffset = 0, cacheOwner = null) {
+        if (!Array.isArray(points) || points.length < 2) return null;
+        const clampedProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+
+        // 段長與轉角資訊記憶化(只依路徑幾何)
+        const { segments, corners, totalPixels } = LogisticsRenderer._getTransferPathGeometry(points);
+        if (totalPixels <= 0) return { x: points[0].x, y: points[0].y, angle: 0 };
 
         const safeStartOffset = Math.max(0, Math.min(Number(startOffset) || 0, totalPixels * 0.45));
         const targetDistance = safeStartOffset + clampedProgress * (totalPixels - safeStartOffset);
