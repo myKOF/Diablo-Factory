@@ -1759,6 +1759,19 @@ export class LogisticsRenderer {
 
     static renderTransfers(graphics, state, scene) {
         graphics.clear();
+        // [效能] 每幀對每個合流 transfer 解析路由會呼叫 getLogisticsMergeNodeOutputRoute / getSegmentsByGroupId
+        // (內含 O(段×25) 的 orderByDirection)。一幀內拓樸穩定且僅讀,開啟同一個計算快取窗口把這些查詢
+        // 收斂為 per node/per group 一次。單執行緒下與 logic tick 不會交錯,各自成對開關。
+        const cs = logisticsRenderModel && logisticsRenderModel.system;
+        if (cs && typeof cs.beginLogisticsComputeCache === 'function') cs.beginLogisticsComputeCache();
+        try {
+            LogisticsRenderer._renderTransfersImpl(graphics, state, scene);
+        } finally {
+            if (cs && typeof cs.endLogisticsComputeCache === 'function') cs.endLogisticsComputeCache();
+        }
+    }
+
+    static _renderTransfersImpl(graphics, state, scene) {
         const useSpriteTransfers = LogisticsRenderer.canUseTransferSprites(scene);
         if (useSpriteTransfers) {
             LogisticsRenderer.beginTransferSprites(scene);
