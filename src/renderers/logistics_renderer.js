@@ -1899,6 +1899,21 @@ export class LogisticsRenderer {
             return conn;
         };
 
+        // [P2b 視口裁剪] 僅繪製落在相機可視世界範圍（含邊距）內的在途物品。
+        // 大地圖上可略過大量畫面外 sprite/序號文字的貼圖與定位成本；
+        // 被略過的物品其 id 不會加入本幀 visible 集合，endTransferSprites/Labels 會自動隱藏其池物件。
+        // 取不到相機資訊時回傳 true（不裁剪）以保底全繪，避免任何可視物品消失。
+        const cam = scene && scene.cameras && scene.cameras.main;
+        const cullView = cam && cam.worldView && cam.worldView.width > 0 && cam.worldView.height > 0
+            ? cam.worldView
+            : null;
+        const cullMargin = (GameEngine.TILE_SIZE || 20) * 2;
+        const isTransferPointVisible = (x, y) => {
+            if (!cullView) return true;
+            return x >= cullView.x - cullMargin && x <= cullView.right + cullMargin &&
+                   y >= cullView.y - cullMargin && y <= cullView.bottom + cullMargin;
+        };
+
         state.activeTransfers.forEach(t => {
             const source = entityById.get(t.sourceId);
             const target = entityById.get(t.targetId);
@@ -1929,6 +1944,7 @@ export class LogisticsRenderer {
             } else {
                 return;
             }
+            if (!isTransferPointVisible(px, py)) return;
             const color = (scene && typeof scene.getResourceIconColor === 'function')
                 ? scene.getResourceIconColor(t.itemType)
                 : 0xffffff;

@@ -182,6 +182,45 @@ test.describe('視覺渲染自動化驗證', () => {
         }
     });
 
+    test('物流貨物視口裁剪：畫面外貨物不繪製，畫面內貨物正常繪製', async ({ page }) => {
+        await waitForGameReady(page);
+
+        await page.evaluate(() => {
+            const GE = window.GameEngine, st = window.GAME_STATE, scene = window.PhaserScene;
+            const TS = GE.TILE_SIZE;
+            st.isPaused = true; // 凍結邏輯迴圈，避免 WorkerSystem 改寫 activeTransfers
+
+            const rect = scene.getMapWorldRect();
+            const gx = Math.floor(rect.centerX / TS);
+            const gy = Math.floor(rect.centerY / TS);
+            const ax = gx * TS + TS / 2, ay = gy * TS + TS / 2;
+            const bx = (gx + 8) * TS + TS / 2; // 水平線段
+
+            // 一筆位於畫面中央（progress 0.5 → 線段中點），一筆遠在畫面外 1000 格。
+            const farX = ax + 1000 * TS;
+            st.activeTransfers = [
+                { id: 'cull_visible', itemType: 'wood', progress: 0.5, serialNumber: 1,
+                  routePoints: [{ x: ax, y: ay }, { x: bx, y: ay }] },
+                { id: 'cull_offscreen', itemType: 'wood', progress: 0.5, serialNumber: 2,
+                  routePoints: [{ x: farX, y: ay }, { x: farX + 8 * TS, y: ay }] }
+            ];
+            scene.setCameraCenter((ax + bx) / 2, ay, 1); // 相機對準畫面內貨物
+            scene.pendingVisibleEntities = true;
+        });
+
+        await page.waitForFunction(() => {
+            const v = window.exportCurrentVisualState();
+            return v.elements.some(e => e.id === 'transfer_cull_visible');
+        }, { timeout: 10000 });
+        await advanceFrames(page, 4);
+
+        // exportCurrentVisualState 預設略過 visible===false 的池物件；
+        // 被視口裁剪的畫面外貨物其 sprite 會被 endTransferSprites 隱藏，故不應出現。
+        const ids = await page.evaluate(() => window.exportCurrentVisualState().elements.map(e => e.id));
+        expect(ids, '畫面內貨物應被繪製並序列化').toContain('transfer_cull_visible');
+        expect(ids, '畫面外貨物應被視口裁剪而不繪製').not.toContain('transfer_cull_offscreen');
+    });
+
     test('X 光模式：開關可切換、繪製不報錯且 exportCurrentVisualState 結構正確', async ({ page }) => {
         const pageErrors = [];
         page.on('pageerror', (err) => pageErrors.push(String(err)));
