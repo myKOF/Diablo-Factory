@@ -179,15 +179,18 @@ export class LogisticsTransferSystem {
         );
         if (segments.length < 2) return null;
 
-        const ordered = [...segments].sort((a, b) => {
-            const timeA = a?.createdAt || 0;
-            const timeB = b?.createdAt || 0;
-            if (timeA !== timeB) return timeA - timeB;
-            const orderA = Number.isFinite(a?.order) ? a.order : 0;
-            const orderB = Number.isFinite(b?.order) ? b.order : 0;
-            if (orderA !== orderB) return orderA - orderB;
-            return String(a?.id || "").localeCompare(String(b?.id || ""));
-        });
+        const ordered = conveyorSystem && typeof conveyorSystem.orderLogisticsSegmentsByDirection === 'function'
+            ? conveyorSystem.orderLogisticsSegmentsByDirection(segments)
+            : [...segments].sort((a, b) => {
+                const orderA = Number.isFinite(a?.splitSequenceOrder)
+                    ? a.splitSequenceOrder
+                    : (Number.isFinite(a?.order) ? a.order : 0);
+                const orderB = Number.isFinite(b?.splitSequenceOrder)
+                    ? b.splitSequenceOrder
+                    : (Number.isFinite(b?.order) ? b.order : 0);
+                if (orderA !== orderB) return orderA - orderB;
+                return String(a?.id || "").localeCompare(String(b?.id || ""));
+            });
 
         const points = [];
         const pushPoint = (point) => {
@@ -198,13 +201,10 @@ export class LogisticsTransferSystem {
             }
         };
 
-        // Keep active transfer positions aligned with the logistics position list.
-        // Segment endpoints may include construction handles past a merged corner.
-        ordered.forEach(seg => pushPoint(seg.routePoints[0]));
-
-        const lastSeg = ordered[ordered.length - 1];
-        const lastEndpoint = lastSeg?.routePoints?.[lastSeg.routePoints.length - 1];
-        if (lastEndpoint) pushPoint(lastEndpoint);
+        ordered.forEach(seg => {
+            if (!Array.isArray(seg.routePoints)) return;
+            seg.routePoints.forEach(pushPoint);
+        });
 
         // [修正] 連續性檢查改為驗證相鄰線段首尾相接，而非比較稀疏節點間距。
         // 舊檢查比較的是各線段起點(+最後終點)組成的稀疏骨架，只要任一線段長度
@@ -595,6 +595,9 @@ export class LogisticsTransferSystem {
             if (conveyorSystem && typeof conveyorSystem.endLogisticsComputeCache === 'function') {
                 conveyorSystem.endLogisticsComputeCache();
             }
+            // [效能] transfer 僅在此(20Hz)移動/增減,但渲染跑 60Hz。遞增版本號讓 render 端只在真正變動時
+            // 才重畫 transfer 層(sprite 為世界座標,相機移動由 Phaser 處理、不需重畫),省去重複的位置計算。
+            state.logisticsTransferVersion = (state.logisticsTransferVersion || 0) + 1;
         }
     }
 

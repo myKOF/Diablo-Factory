@@ -916,11 +916,18 @@ export class MainScene extends Phaser.Scene {
         }
 
         if (hasTransferContent) {
-            LogisticsRenderer.renderTransfers(this.logisticsTransferGraphics, state, this);
-            this._logisticsTransferLayerWasDrawn = true;
+            // [效能] transfer 只在物流邏輯(20Hz)移動/增減,渲染卻跑 60Hz。僅在版本變動時重畫,
+            // 省掉每幀對全部 transfer 的重複位置計算(sprite 為世界座標,相機移動由 Phaser 處理、不需重畫)。
+            const tv = state.logisticsTransferVersion || 0;
+            if (tv !== this._lastTransferVersion || !this._logisticsTransferLayerWasDrawn) {
+                LogisticsRenderer.renderTransfers(this.logisticsTransferGraphics, state, this);
+                this._lastTransferVersion = tv;
+                this._logisticsTransferLayerWasDrawn = true;
+            }
         } else if (this._logisticsTransferLayerWasDrawn) {
             LogisticsRenderer.renderTransfers(this.logisticsTransferGraphics, state, this);
             this._logisticsTransferLayerWasDrawn = false;
+            this._lastTransferVersion = state.logisticsTransferVersion || 0;
         }
     }
 
