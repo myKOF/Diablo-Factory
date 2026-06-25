@@ -835,8 +835,13 @@ export class LogisticsTransferSystem {
 
         // [固定子步長] 把「回壓佇列→堆積限制→移動→合流放行」整段以固定 stepDt 重複推進，
         // 使每子步位移 ≤ 一個合理格分數，合流閘門維持細粒度，不受外部 tick 粗細影響。
-        const LOGISTICS_SUB_DT = 0.0167; // ~60Hz 等效粒度，間距收斂到 1 格/93% 滿載（dt 上限 0.2 → ≤12 子步）
-        const subSteps = Math.max(1, Math.ceil(deltaTime / LOGISTICS_SUB_DT - 1e-6));
+        const LOGISTICS_SUB_DT = 0.0167; // ~60Hz 等效粒度，間距收斂到 1 格/93% 滿載
+        // [效能/防死亡螺旋] 子步數封頂。正常 dt≈0.05 本來就只需 3 步，封頂 4 步在正常遊玩完全不觸發；
+        // 僅當主執行緒忙碌使 logicTick 延遲、deltaTime 逼近上限(0.2)時生效，避免單 tick 做 12× 工作而
+        // 超過 tick 間隔(50ms)造成 tick 堆積→render 飢餓→deltaTime 更大的正反饋永久卡死。封頂後即使延遲
+        // 也只是子步略粗(極端時 stepDt≈0.05/20Hz)，物品稍慢但合流不重疊，且 logic 成本有界可自動恢復。
+        const MAX_LOGISTICS_SUBSTEPS = 4;
+        const subSteps = Math.min(MAX_LOGISTICS_SUBSTEPS, Math.max(1, Math.ceil(deltaTime / LOGISTICS_SUB_DT - 1e-6)));
         stepDt = deltaTime / subSteps;
         for (let _subStep = 0; _subStep < subSteps; _subStep++) {
             state.activeTransfers.forEach(syncTransferArrayPosition);
