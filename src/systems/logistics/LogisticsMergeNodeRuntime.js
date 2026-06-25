@@ -211,8 +211,27 @@ export class LogisticsMergeNodeRuntime {
         return node.currentActiveSlot === this.getMergeThroughSlotIndex(node);
     }
 
+    // [效能] winner 快取窗口：僅在「transfer 位置穩定」的堆積計算階段(begin/endWinnerCache)內生效。
+    // 同一節點的 admission winner 與「正在詢問的輸出 transfer」無關，原本被每個輸出 transfer 重算 O(n)；
+    // 於窗口內 per node 記憶化。副作用(zipperTurn/awaitingMainPass/_logisticsMergeAdmissionWinners)冪等:
+    // 首次呼叫設定後，後續以相同位置呼叫的最終狀態一致，故快取命中跳過重算與重設皆安全。
+    beginWinnerCache() { this._winnerCache = new Map(); }
+    endWinnerCache() { this._winnerCache = null; }
+
     getLogisticsMergeAdmissionWinner(node, state = this.gameEngine.state, options = {}) {
         if (!node || !Array.isArray(node.inputGroupIds) || node.inputGroupIds.length === 0) return null;
+        const cache = this._winnerCache;
+        if (cache) {
+            const ck = this.getMergeNodeKey(node);
+            if (cache.has(ck)) return cache.get(ck);
+            const computed = this._computeAdmissionWinner(node, state, options);
+            cache.set(ck, computed);
+            return computed;
+        }
+        return this._computeAdmissionWinner(node, state, options);
+    }
+
+    _computeAdmissionWinner(node, state = this.gameEngine.state, options = {}) {
         const spacing = Number.isFinite(options.spacing) ? options.spacing : (this.gameEngine.TILE_SIZE || 20);
         this.releaseClearedMergeOccupant(node, state, spacing);
         // [死鎖解除] 迴圈中兩個合流閘門可能互相等待對方「主線通過」而永遠卡死。

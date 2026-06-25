@@ -841,6 +841,12 @@ export class LogisticsTransferSystem {
         for (let _subStep = 0; _subStep < subSteps; _subStep++) {
             state.activeTransfers.forEach(syncTransferArrayPosition);
 
+            // [效能] 開啟 winner 快取窗口：本子步從此處(位置已同步)到移動迴圈前位置維持不變，
+            // 期間 getLogisticsMergeThroughYieldLimit / getMergeInputMaxDistance 會對同一節點重複求 winner。
+            if (conveyorSystem && typeof conveyorSystem.beginMergeWinnerCache === 'function') {
+                conveyorSystem.beginMergeWinnerCache();
+            }
+
             if (conveyorSystem && typeof conveyorSystem.applyBlockedTransferQueues === 'function') {
                 conveyorSystem.applyBlockedTransferQueues(state);
             }
@@ -1021,6 +1027,11 @@ export class LogisticsTransferSystem {
                     }
                 }
             });
+
+            // [效能] 關閉 winner 快取窗口：移動迴圈即將改變 transfer 位置，apply() 等後續階段需重算最新 winner。
+            if (conveyorSystem && typeof conveyorSystem.endMergeWinnerCache === 'function') {
+                conveyorSystem.endMergeWinnerCache();
+            }
 
             for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
                 let t = state.activeTransfers[i];

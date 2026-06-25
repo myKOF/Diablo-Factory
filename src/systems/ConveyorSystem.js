@@ -489,6 +489,17 @@ export class ConveyorSystem {
     endLogisticsComputeCache() {
         if (this.lineStore && typeof this.lineStore.endGroupCache === 'function') this.lineStore.endGroupCache();
         if (this.mergeNodeStore && typeof this.mergeNodeStore.endTopologyCache === 'function') this.mergeNodeStore.endTopologyCache();
+        // 安全網:即使子步區間因例外未成對關閉 winner 快取，整個計算窗口結束時一律清除，杜絕陳舊外溢。
+        this.endMergeWinnerCache();
+    }
+
+    // [效能] 合流 winner 快取窗口：僅在 transfer 位置穩定的堆積計算階段成對使用，
+    // 將「同一節點 winner 被每個輸出 transfer 重算 O(n)」收斂為 per node 一次。
+    beginMergeWinnerCache() {
+        if (this.mergeNodeRuntime && typeof this.mergeNodeRuntime.beginWinnerCache === 'function') this.mergeNodeRuntime.beginWinnerCache();
+    }
+    endMergeWinnerCache() {
+        if (this.mergeNodeRuntime && typeof this.mergeNodeRuntime.endWinnerCache === 'function') this.mergeNodeRuntime.endWinnerCache();
     }
 
     snapPointToGridCenter(point) {
