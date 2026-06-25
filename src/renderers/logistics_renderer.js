@@ -2043,6 +2043,7 @@ export class LogisticsRenderer {
 
         let sprite = scene.logisticsNumberSprites.get(id);
         if (!sprite) {
+            if (!scene.textures.exists(textureInfo.key)) return;
             sprite = scene.add.image(x, y, textureInfo.key, textureInfo.frame).setOrigin(0.5).setDepth(600000);
             scene.logisticsNumberSprites.set(id, sprite);
         } else {
@@ -2189,6 +2190,7 @@ export class LogisticsRenderer {
         const depth = scene.logisticsTransferGraphics?.depth || 900000;
         let sprite = scene.logisticsTransferSprites.get(key);
         if (!sprite) {
+            if (!scene.textures.exists(textureKey)) return;
             sprite = scene.add.image(x, y, textureKey, frame || undefined).setOrigin(0.5).setDepth(depth);
             scene.logisticsTransferSprites.set(key, sprite);
         } else {

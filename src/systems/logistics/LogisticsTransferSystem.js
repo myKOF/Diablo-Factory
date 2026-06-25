@@ -801,289 +801,289 @@ export class LogisticsTransferSystem {
         const subSteps = Math.max(1, Math.ceil(deltaTime / LOGISTICS_SUB_DT - 1e-6));
         stepDt = deltaTime / subSteps;
         for (let _subStep = 0; _subStep < subSteps; _subStep++) {
-        state.activeTransfers.forEach(syncTransferArrayPosition);
+            state.activeTransfers.forEach(syncTransferArrayPosition);
 
-        if (conveyorSystem && typeof conveyorSystem.applyBlockedTransferQueues === 'function') {
-            conveyorSystem.applyBlockedTransferQueues(state);
-        }
-
-        // ==========================================
-        // [新增] 計算每條物流線上物品的最大允許進度以實現堆積 (Backpressure & Stacking)
-        // ==========================================
-        const transfersByPath = new Map();
-        state.activeTransfers.forEach(t => {
-            if (!t) return;
-            const key = getTransferPathKey(t);
-            if (!transfersByPath.has(key)) {
-                transfersByPath.set(key, []);
+            if (conveyorSystem && typeof conveyorSystem.applyBlockedTransferQueues === 'function') {
+                conveyorSystem.applyBlockedTransferQueues(state);
             }
-            transfersByPath.get(key).push(t);
-        });
 
-        const cellSize = getCellSize();
+            // ==========================================
+            // [新增] 計算每條物流線上物品的最大允許進度以實現堆積 (Backpressure & Stacking)
+            // ==========================================
+            const transfersByPath = new Map();
+            state.activeTransfers.forEach(t => {
+                if (!t) return;
+                const key = getTransferPathKey(t);
+                if (!transfersByPath.has(key)) {
+                    transfersByPath.set(key, []);
+                }
+                transfersByPath.get(key).push(t);
+            });
 
-        const isMergeInputTransfer = (transfer) => conveyorSystem &&
-            typeof conveyorSystem.isLogisticsMergeInputTransfer === 'function' &&
-            conveyorSystem.isLogisticsMergeInputTransfer(transfer, state);
-        const isMergeOutputTransfer = (transfer) => {
-            const lineId = transfer?.lineId || null;
-            if (!lineId || !Array.isArray(state.logisticsMergeNodes)) return false;
-            return state.logisticsMergeNodes.some(node => node?.outputGroupId === lineId);
-        };
+            const cellSize = getCellSize();
 
-        Array.from(transfersByPath.entries()).sort(([, a], [, b]) => {
-            const aIsMergeInput = a.some(isMergeInputTransfer);
-            const bIsMergeInput = b.some(isMergeInputTransfer);
-            return Number(aIsMergeInput) - Number(bIsMergeInput);
-        }).forEach(([pathKey, groupTransfers]) => {
-            // [對齊最長主線] 與 LogisticsTransferQueues 一致：
-            // 尋找組內最長路徑作為基準路徑 (canonical)，並以此計算對齊後的距離進行排序與 Stacking 計算，
-            // 避免轉彎車剛合流到 output 路線時，因 progress 重置為 0 被誤判在直行後車的後方而產生煞車。
-            const canonical = groupTransfers.reduce((best, transfer) => {
-                const len = getTransferRouteMetrics(transfer).totalPixels;
-                return len > best.length ? { points: transfer.routePoints, length: len } : best;
-            }, { points: null, length: 0 });
+            const isMergeInputTransfer = (transfer) => conveyorSystem &&
+                typeof conveyorSystem.isLogisticsMergeInputTransfer === 'function' &&
+                conveyorSystem.isLogisticsMergeInputTransfer(transfer, state);
+            const isMergeOutputTransfer = (transfer) => {
+                const lineId = transfer?.lineId || null;
+                if (!lineId || !Array.isArray(state.logisticsMergeNodes)) return false;
+                return state.logisticsMergeNodes.some(node => node?.outputGroupId === lineId);
+            };
 
-            const useCanonical = groupTransfers.length > 1 && canonical.length > 0 && groupTransfers.some(transfer => {
-                const points = transfer.routePoints || [];
-                const canonicalPoints = canonical.points || [];
-                if (points.length !== canonicalPoints.length) return true;
-                return points.some((point, index) => {
-                    const other = canonicalPoints[index];
-                    return !other || Math.hypot(point.x - other.x, point.y - other.y) > 0.1;
+            Array.from(transfersByPath.entries()).sort(([, a], [, b]) => {
+                const aIsMergeInput = a.some(isMergeInputTransfer);
+                const bIsMergeInput = b.some(isMergeInputTransfer);
+                return Number(aIsMergeInput) - Number(bIsMergeInput);
+            }).forEach(([pathKey, groupTransfers]) => {
+                // [對齊最長主線] 與 LogisticsTransferQueues 一致：
+                // 尋找組內最長路徑作為基準路徑 (canonical)，並以此計算對齊後的距離進行排序與 Stacking 計算，
+                // 避免轉彎車剛合流到 output 路線時，因 progress 重置為 0 被誤判在直行後車的後方而產生煞車。
+                const canonical = groupTransfers.reduce((best, transfer) => {
+                    const len = getTransferRouteMetrics(transfer).totalPixels;
+                    return len > best.length ? { points: transfer.routePoints, length: len } : best;
+                }, { points: null, length: 0 });
+
+                const useCanonical = groupTransfers.length > 1 && canonical.length > 0 && groupTransfers.some(transfer => {
+                    const points = transfer.routePoints || [];
+                    const canonicalPoints = canonical.points || [];
+                    if (points.length !== canonicalPoints.length) return true;
+                    return points.some((point, index) => {
+                        const other = canonicalPoints[index];
+                        return !other || Math.hypot(point.x - other.x, point.y - other.y) > 0.1;
+                    });
                 });
-            });
 
-            const getPointOnPathByDistance = (pts, distance) => {
-                if (!Array.isArray(pts) || pts.length < 2) return null;
-                let remaining = Math.max(0, Number(distance) || 0);
-                for (let i = 0; i < pts.length - 1; i++) {
-                    const a = pts[i];
-                    const b = pts[i + 1];
-                    const dx = b.x - a.x;
-                    const dy = b.y - a.y;
-                    const len = Math.abs(dx) + Math.abs(dy); // 正交物流路徑長度
-                    if (len <= 0) continue;
-                    if (remaining <= len || i === pts.length - 2) {
-                        const t = Math.max(0, Math.min(1, remaining / len));
-                        return { x: a.x + dx * t, y: a.y + dy * t };
+                const getPointOnPathByDistance = (pts, distance) => {
+                    if (!Array.isArray(pts) || pts.length < 2) return null;
+                    let remaining = Math.max(0, Number(distance) || 0);
+                    for (let i = 0; i < pts.length - 1; i++) {
+                        const a = pts[i];
+                        const b = pts[i + 1];
+                        const dx = b.x - a.x;
+                        const dy = b.y - a.y;
+                        const len = Math.abs(dx) + Math.abs(dy); // 正交物流路徑長度
+                        if (len <= 0) continue;
+                        if (remaining <= len || i === pts.length - 2) {
+                            const t = Math.max(0, Math.min(1, remaining / len));
+                            return { x: a.x + dx * t, y: a.y + dy * t };
+                        }
+                        remaining -= len;
                     }
-                    remaining -= len;
-                }
-                const last = pts[pts.length - 1];
-                return last ? { x: last.x, y: last.y } : null;
-            };
+                    const last = pts[pts.length - 1];
+                    return last ? { x: last.x, y: last.y } : null;
+                };
 
-            const distanceCache = new Map();
-            const getDistance = (transfer) => {
-                if (distanceCache.has(transfer)) return distanceCache.get(transfer);
-                const total = getTransferRouteMetrics(transfer).totalPixels;
-                const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
-                const resolved = useCanonical
-                    ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance))
-                    : distance;
-                distanceCache.set(transfer, resolved);
-                return resolved;
-            };
+                const distanceCache = new Map();
+                const getDistance = (transfer) => {
+                    if (distanceCache.has(transfer)) return distanceCache.get(transfer);
+                    const total = getTransferRouteMetrics(transfer).totalPixels;
+                    const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
+                    const resolved = useCanonical
+                        ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance))
+                        : distance;
+                    distanceCache.set(transfer, resolved);
+                    return resolved;
+                };
 
-            // 排序：若是 useCanonical，以對齊後的 canonical 距離由大到小排序，否則依 progress 排序
-            groupTransfers.sort((a, b) => {
-                const da = getDistance(a);
-                const db = getDistance(b);
-                if (Math.abs(db - da) > 0.0001) return db - da;
-                return String(a.id).localeCompare(String(b.id));
-            });
+                // 排序：若是 useCanonical，以對齊後的 canonical 距離由大到小排序，否則依 progress 排序
+                groupTransfers.sort((a, b) => {
+                    const da = getDistance(a);
+                    const db = getDistance(b);
+                    if (Math.abs(db - da) > 0.0001) return db - da;
+                    return String(a.id).localeCompare(String(b.id));
+                });
 
-            let prevMaxCanonicalDist = Infinity;
-            for (let j = 0; j < groupTransfers.length; j++) {
-                const t = groupTransfers[j];
-                const metrics = getTransferRouteMetrics(t);
-                const totalLength = metrics.totalPixels;
-                if (totalLength <= 0) {
-                    t.maxAllowedProgress = 1.0;
-                    continue;
-                }
+                let prevMaxCanonicalDist = Infinity;
+                for (let j = 0; j < groupTransfers.length; j++) {
+                    const t = groupTransfers[j];
+                    const metrics = getTransferRouteMetrics(t);
+                    const totalLength = metrics.totalPixels;
+                    if (totalLength <= 0) {
+                        t.maxAllowedProgress = 1.0;
+                        continue;
+                    }
 
-                const isMergeInput = isMergeInputTransfer(t);
-                const isBreakpoint = !t.targetId && !isMergeInput;
-                if (isMergeInput) {
-                    delete t.queueBlocked;
-                    delete t.blockedOnBrokenLine;
-                }
+                    const isMergeInput = isMergeInputTransfer(t);
+                    const isBreakpoint = !t.targetId && !isMergeInput;
+                    if (isMergeInput) {
+                        delete t.queueBlocked;
+                        delete t.blockedOnBrokenLine;
+                    }
 
-                // 動態判定末端堆積限制：
-                // 若末端點鄰近另一群組的線段起始點（表示是刪除後形成的斷點間隙），
-                // 物品停在倒數第二格（totalLength - cellSize），否則停在自然終點（totalLength）。
-                let dist_pn = totalLength;
-                if (isBreakpoint) {
-                    const bpts = t.routePoints;
-                    if (Array.isArray(bpts) && bpts.length >= 2) {
-                        const lastPt = bpts[bpts.length - 1];
-                        const tLineId = t.lineId;
-                        const isGapEndpoint = (state.logisticsLines || []).some(seg => {
-                            if (!seg) return false;
-                            const segGroupId = seg.groupId || seg.id;
-                            if (segGroupId === tLineId) return false;
-                            const segPts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
-                            if (segPts.length < 1) return false;
-                            const segStart = segPts[0];
-                            return segStart && Math.hypot(segStart.x - lastPt.x, segStart.y - lastPt.y) <= cellSize * 1.5;
-                        });
-                        if (isGapEndpoint) {
-                            dist_pn = totalLength - cellSize;
+                    // 動態判定末端堆積限制：
+                    // 若末端點鄰近另一群組的線段起始點（表示是刪除後形成的斷點間隙），
+                    // 物品停在倒數第二格（totalLength - cellSize），否則停在自然終點（totalLength）。
+                    let dist_pn = totalLength;
+                    if (isBreakpoint) {
+                        const bpts = t.routePoints;
+                        if (Array.isArray(bpts) && bpts.length >= 2) {
+                            const lastPt = bpts[bpts.length - 1];
+                            const tLineId = t.lineId;
+                            const isGapEndpoint = (state.logisticsLines || []).some(seg => {
+                                if (!seg) return false;
+                                const segGroupId = seg.groupId || seg.id;
+                                if (segGroupId === tLineId) return false;
+                                const segPts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
+                                if (segPts.length < 1) return false;
+                                const segStart = segPts[0];
+                                return segStart && Math.hypot(segStart.x - lastPt.x, segStart.y - lastPt.y) <= cellSize * 1.5;
+                            });
+                            if (isGapEndpoint) {
+                                dist_pn = totalLength - cellSize;
+                            }
                         }
                     }
-                }
 
-                const startDistOnCanonical = useCanonical
-                    ? getPathDistanceToPoint(canonical.points, t.routePoints[0])
-                    : 0;
+                    const startDistOnCanonical = useCanonical
+                        ? getPathDistanceToPoint(canonical.points, t.routePoints[0])
+                        : 0;
 
-                // [緊密不重疊] 主線與一般線統一使用完整物品長度作為間距，嚴防重疊。
-                let spacing = cellSize;
-                const desired = (t.progress || 0) * totalLength;
+                    // [緊密不重疊] 主線與一般線統一使用完整物品長度作為間距，嚴防重疊。
+                    let spacing = cellSize;
+                    const desired = (t.progress || 0) * totalLength;
 
-                let maxDist = totalLength;
-                if (j === 0) {
-                    if (isBreakpoint) {
-                        maxDist = dist_pn;
-                    } else if (isMergeInput) {
-                        maxDist = Math.min(totalLength, getMergeInputMaxDistance(t, totalLength, cellSize));
+                    let maxDist = totalLength;
+                    if (j === 0) {
+                        if (isBreakpoint) {
+                            maxDist = dist_pn;
+                        } else if (isMergeInput) {
+                            maxDist = Math.min(totalLength, getMergeInputMaxDistance(t, totalLength, cellSize));
+                        } else {
+                            maxDist = totalLength;
+                        }
                     } else {
-                        maxDist = totalLength;
-                    }
-                } else {
-                    const frontItem = groupTransfers[j - 1];
-                    const frontCanonicalDist = getDistance(frontItem);
-                    const physicalLimitCanonical = Math.max(startDistOnCanonical, Math.min(frontCanonicalDist, prevMaxCanonicalDist) - spacing);
+                        const frontItem = groupTransfers[j - 1];
+                        const frontCanonicalDist = getDistance(frontItem);
+                        const physicalLimitCanonical = Math.max(startDistOnCanonical, Math.min(frontCanonicalDist, prevMaxCanonicalDist) - spacing);
 
-                    let limitCanonical = startDistOnCanonical + totalLength;
-                    if (desired <= dist_pn) {
-                        const targetLimitCanonical = startDistOnCanonical + dist_pn;
-                        if (frontCanonicalDist > targetLimitCanonical || prevMaxCanonicalDist > targetLimitCanonical) {
-                            limitCanonical = Math.min(targetLimitCanonical, physicalLimitCanonical);
+                        let limitCanonical = startDistOnCanonical + totalLength;
+                        if (desired <= dist_pn) {
+                            const targetLimitCanonical = startDistOnCanonical + dist_pn;
+                            if (frontCanonicalDist > targetLimitCanonical || prevMaxCanonicalDist > targetLimitCanonical) {
+                                limitCanonical = Math.min(targetLimitCanonical, physicalLimitCanonical);
+                            } else {
+                                limitCanonical = physicalLimitCanonical;
+                            }
                         } else {
                             limitCanonical = physicalLimitCanonical;
                         }
-                    } else {
-                        limitCanonical = physicalLimitCanonical;
+                        // 將 canonical 座標系的限制還原至物品局部座標系的 maxDist
+                        maxDist = Math.max(0, limitCanonical - startDistOnCanonical);
                     }
-                    // 將 canonical 座標系的限制還原至物品局部座標系的 maxDist
-                    maxDist = Math.max(0, limitCanonical - startDistOnCanonical);
-                }
 
-                // [拉鏈式合流] 主線穿越車在輪到支線時於合流點前一格讓行（對佇列中任何位置的穿越車皆適用）
-                if (isMergeOutputTransfer(t) && conveyorSystem &&
-                    typeof conveyorSystem.getLogisticsMergeThroughYieldLimit === 'function') {
-                    const yieldLimit = conveyorSystem.getLogisticsMergeThroughYieldLimit(t, state, cellSize);
-                    if (Number.isFinite(yieldLimit)) {
-                        maxDist = Math.min(maxDist, yieldLimit);
+                    // [拉鏈式合流] 主線穿越車在輪到支線時於合流點前一格讓行（對佇列中任何位置的穿越車皆適用）
+                    if (isMergeOutputTransfer(t) && conveyorSystem &&
+                        typeof conveyorSystem.getLogisticsMergeThroughYieldLimit === 'function') {
+                        const yieldLimit = conveyorSystem.getLogisticsMergeThroughYieldLimit(t, state, cellSize);
+                        if (Number.isFinite(yieldLimit)) {
+                            maxDist = Math.min(maxDist, yieldLimit);
+                        }
+                    }
+
+                    prevMaxCanonicalDist = startDistOnCanonical + maxDist;
+                    t.maxAllowedProgress = maxDist / totalLength;
+                    if (isMergeInput) {
+                        t.queueBlocked = maxDist < totalLength - 0.1 && desired >= maxDist - 0.1;
                     }
                 }
+            });
 
-                prevMaxCanonicalDist = startDistOnCanonical + maxDist;
-                t.maxAllowedProgress = maxDist / totalLength;
-                if (isMergeInput) {
-                    t.queueBlocked = maxDist < totalLength - 0.1 && desired >= maxDist - 0.1;
-                }
-            }
-        });
+            for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
+                let t = state.activeTransfers[i];
+                const maxAllowed = t.maxAllowedProgress !== undefined ? t.maxAllowedProgress : 1.0;
+                const queueHeld = t.queueBlocked === true && t.progress >= maxAllowed - 0.0001;
 
-        for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
-            let t = state.activeTransfers[i];
-            const maxAllowed = t.maxAllowedProgress !== undefined ? t.maxAllowedProgress : 1.0;
-            const queueHeld = t.queueBlocked === true && t.progress >= maxAllowed - 0.0001;
-
-            if (!queueHeld && t.progress < maxAllowed) {
-                const metrics = getTransferRouteMetrics(t);
-                const distanceDelta = stepDt * getTransferSpeed(t) * getCellSize();
-                this.transportArrayState.advanceTransfer(t, distanceDelta, metrics.totalPixels, maxAllowed, getCellSize());
-            } else if (t.progress > maxAllowed) {
-                // 移動階段只標記阻塞；最終佔位由 LogisticsTransferQueues 統一裁決。
-                t.queueBlocked = true;
-            }
-
-            if (t._mergeVisualTurn && Array.isArray(t.routePoints) && t.routePoints.length >= 2) {
-                const turnPoint = { x: Number(t._mergeVisualTurn.x), y: Number(t._mergeVisualTurn.y) };
-                if (Number.isFinite(turnPoint.x) && Number.isFinite(turnPoint.y)) {
+                if (!queueHeld && t.progress < maxAllowed) {
                     const metrics = getTransferRouteMetrics(t);
-                    const currentDistance = Math.max(0, Math.min(1, Number(t.progress) || 0)) * metrics.totalPixels;
-                    const mergeDistance = getPathDistanceToPoint(t.routePoints, turnPoint);
-                    if (currentDistance > mergeDistance + cellSize + 0.1) {
+                    const distanceDelta = stepDt * getTransferSpeed(t) * getCellSize();
+                    this.transportArrayState.advanceTransfer(t, distanceDelta, metrics.totalPixels, maxAllowed, getCellSize());
+                } else if (t.progress > maxAllowed) {
+                    // 移動階段只標記阻塞；最終佔位由 LogisticsTransferQueues 統一裁決。
+                    t.queueBlocked = true;
+                }
+
+                if (t._mergeVisualTurn && Array.isArray(t.routePoints) && t.routePoints.length >= 2) {
+                    const turnPoint = { x: Number(t._mergeVisualTurn.x), y: Number(t._mergeVisualTurn.y) };
+                    if (Number.isFinite(turnPoint.x) && Number.isFinite(turnPoint.y)) {
+                        const metrics = getTransferRouteMetrics(t);
+                        const currentDistance = Math.max(0, Math.min(1, Number(t.progress) || 0)) * metrics.totalPixels;
+                        const mergeDistance = getPathDistanceToPoint(t.routePoints, turnPoint);
+                        if (currentDistance > mergeDistance + cellSize + 0.1) {
+                            delete t._mergeVisualTurn;
+                        }
+                    } else {
                         delete t._mergeVisualTurn;
                     }
-                } else {
-                    delete t._mergeVisualTurn;
                 }
-            }
 
-            // [新增] 追蹤邏輯
-            if (state && state.trackedTransferId === t.id) {
-                const points = t.routePoints;
-                if (Array.isArray(points) && points.length >= 2) {
-                    let totalLength = 0;
-                    const segmentLengths = [];
-                    for (let j = 0; j < points.length - 1; j++) {
-                        const dx = points[j + 1].x - points[j].x;
-                        const dy = points[j + 1].y - points[j].y;
-                        const len = Math.hypot(dx, dy);
-                        segmentLengths.push(len);
-                        totalLength += len;
-                    }
-
-                    let remain = t.progress * totalLength;
-                    let currentSegment = 0;
-                    for (let j = 0; j < segmentLengths.length; j++) {
-                        if (remain <= segmentLengths[j]) {
-                            currentSegment = j;
-                            break;
+                // [新增] 追蹤邏輯
+                if (state && state.trackedTransferId === t.id) {
+                    const points = t.routePoints;
+                    if (Array.isArray(points) && points.length >= 2) {
+                        let totalLength = 0;
+                        const segmentLengths = [];
+                        for (let j = 0; j < points.length - 1; j++) {
+                            const dx = points[j + 1].x - points[j].x;
+                            const dy = points[j + 1].y - points[j].y;
+                            const len = Math.hypot(dx, dy);
+                            segmentLengths.push(len);
+                            totalLength += len;
                         }
-                        remain -= segmentLengths[j];
-                        currentSegment = j; // fallback
-                    }
 
-                    if (t.lastSegment !== currentSegment) {
-                        for (let seg = t.lastSegment + 1; seg <= currentSegment; seg++) {
-                            const p1 = points[seg];
-                            const p2 = points[seg + 1] || p1;
+                        let remain = t.progress * totalLength;
+                        let currentSegment = 0;
+                        for (let j = 0; j < segmentLengths.length; j++) {
+                            if (remain <= segmentLengths[j]) {
+                                currentSegment = j;
+                                break;
+                            }
+                            remain -= segmentLengths[j];
+                            currentSegment = j; // fallback
+                        }
+
+                        if (t.lastSegment !== currentSegment) {
+                            for (let seg = t.lastSegment + 1; seg <= currentSegment; seg++) {
+                                const p1 = points[seg];
+                                const p2 = points[seg + 1] || p1;
+                                if (this.engine && typeof this.engine.addLog === 'function') {
+                                    this.engine.addLog(`${t.itemType} 由位置${seg}(${Math.round(p1.x)},${Math.round(p1.y)})移動至位置${seg + 1}(${Math.round(p2.x)},${Math.round(p2.y)})`, 'LOGISTICS');
+                                }
+                            }
+                            t.lastSegment = currentSegment;
+                        }
+                    }
+                }
+
+                if (t.progress >= 1) {
+                    if (t.targetId) {
+                        let target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
+                        if (target) {
+                            const tType = target.type1 || target.type;
+                            const deposited = ResourceSystem.depositResourceToBuilding(state, this.engine, target, t.itemType, 1, null);
+                            if (!deposited && !['warehouse', 'storehouse', 'barn', 'town_center', 'village'].includes(tType)) {
+                                if (!target.inputBuffer) target.inputBuffer = {};
+                                target.inputBuffer[t.itemType] = (target.inputBuffer[t.itemType] || 0) + 1;
+                            }
+                            if (window.UIManager) window.UIManager.updateValues(true);
+                            // addTransportLog(`[物流] ${String(t.itemType).toUpperCase()} 已送達 ${getEntityLabel(target)}。`);
+                        }
+                        if (state && state.trackedTransferId === t.id) {
+                            state.trackedTransferId = null; // 釋放追蹤
                             if (this.engine && typeof this.engine.addLog === 'function') {
-                                this.engine.addLog(`${t.itemType} 由位置${seg}(${Math.round(p1.x)},${Math.round(p1.y)})移動至位置${seg + 1}(${Math.round(p2.x)},${Math.round(p2.y)})`, 'LOGISTICS');
+                                this.engine.addLog(`[追蹤] 物品 ${t.itemType} 已送達目的地。`, 'LOGISTICS');
                             }
                         }
-                        t.lastSegment = currentSegment;
+                        state.activeTransfers.splice(i, 1);
+                    } else {
+                        setTransferDistance(t, getTransferRouteMetrics(t).totalPixels);
                     }
                 }
             }
 
-            if (t.progress >= 1) {
-                if (t.targetId) {
-                    let target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
-                    if (target) {
-                        const tType = target.type1 || target.type;
-                        const deposited = ResourceSystem.depositResourceToBuilding(state, this.engine, target, t.itemType, 1, null);
-                        if (!deposited && !['warehouse', 'storehouse', 'barn', 'town_center', 'village'].includes(tType)) {
-                            if (!target.inputBuffer) target.inputBuffer = {};
-                            target.inputBuffer[t.itemType] = (target.inputBuffer[t.itemType] || 0) + 1;
-                        }
-                        if (window.UIManager) window.UIManager.updateValues(true);
-                        // addTransportLog(`[物流] ${String(t.itemType).toUpperCase()} 已送達 ${getEntityLabel(target)}。`);
-                    }
-                    if (state && state.trackedTransferId === t.id) {
-                        state.trackedTransferId = null; // 釋放追蹤
-                        if (this.engine && typeof this.engine.addLog === 'function') {
-                            this.engine.addLog(`[追蹤] 物品 ${t.itemType} 已送達目的地。`, 'LOGISTICS');
-                        }
-                    }
-                    state.activeTransfers.splice(i, 1);
-                } else {
-                    setTransferDistance(t, getTransferRouteMetrics(t).totalPixels);
-                }
+            if (conveyorSystem && typeof conveyorSystem.applyLogisticsMergeNodes === 'function') {
+                conveyorSystem.applyLogisticsMergeNodes(state);
             }
-        }
-
-        if (conveyorSystem && typeof conveyorSystem.applyLogisticsMergeNodes === 'function') {
-            conveyorSystem.applyLogisticsMergeNodes(state);
-        }
 
         } // ── 固定子步長迴圈結束 ──
 

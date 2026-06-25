@@ -49,6 +49,9 @@ export class MainScene extends Phaser.Scene {
     }
 
     preload() {
+        this.load.on('loaderror', (file) => {
+            console.error('[載入錯誤] 無法載入資源:', file?.key, '路徑:', file?.src);
+        });
         // 目前沒有外部資產，如果有的話可以在這裡加載
         // 例如: this.load.image('village', 'assets/village.png');
         if (UI_CONFIG.Grid && UI_CONFIG.Grid.useTexture && UI_CONFIG.Grid.texture) {
@@ -78,23 +81,27 @@ export class MainScene extends Phaser.Scene {
 
         // 創建地表情境 (使用 AI 生成的無縫貼圖)
         if (UI_CONFIG.Grid && UI_CONFIG.Grid.useTexture) {
-            const mapRect = this.getMapWorldRect();
-            const boundsW = mapRect.width;
-            const boundsH = mapRect.height;
-            const centerX = mapRect.centerX;
-            const centerY = mapRect.centerY;
+            if (this.textures.exists('ground_texture')) {
+                const mapRect = this.getMapWorldRect();
+                const boundsW = mapRect.width;
+                const boundsH = mapRect.height;
+                const centerX = mapRect.centerX;
+                const centerY = mapRect.centerY;
 
-            this.backgroundSprite = this.add.tileSprite(centerX, centerY, boundsW, boundsH, 'ground_texture');
-            this.backgroundSprite.setDepth(-10000); // 確保在最底層
+                this.backgroundSprite = this.add.tileSprite(centerX, centerY, boundsW, boundsH, 'ground_texture');
+                this.backgroundSprite.setDepth(-10000); // 確保在最底層
 
-            // 應用自訂參數
-            const gridCfg = UI_CONFIG.Grid;
-            if (gridCfg.textureAlpha !== undefined) this.backgroundSprite.setAlpha(gridCfg.textureAlpha);
-            if (gridCfg.textureScale !== undefined) this.backgroundSprite.setTileScale(gridCfg.textureScale);
-            if (gridCfg.textureTint) {
-                const tintInt = typeof gridCfg.textureTint === 'string' ?
-                    parseInt(gridCfg.textureTint.replace('#', ''), 16) : gridCfg.textureTint;
-                this.backgroundSprite.setTint(tintInt);
+                // 應用自訂參數
+                const gridCfg = UI_CONFIG.Grid;
+                if (gridCfg.textureAlpha !== undefined) this.backgroundSprite.setAlpha(gridCfg.textureAlpha);
+                if (gridCfg.textureScale !== undefined) this.backgroundSprite.setTileScale(gridCfg.textureScale);
+                if (gridCfg.textureTint) {
+                    const tintInt = typeof gridCfg.textureTint === 'string' ?
+                        parseInt(gridCfg.textureTint.replace('#', ''), 16) : gridCfg.textureTint;
+                    this.backgroundSprite.setTint(tintInt);
+                }
+            } else {
+                console.warn('[渲染警告] 缺少貼圖 ground_texture');
             }
         }
 
@@ -210,13 +217,11 @@ export class MainScene extends Phaser.Scene {
         const graphics = this.make.graphics({ x: 0, y: 0, add: false });
 
         const createTex = (key, width, height, drawFn) => {
+            const safeW = Math.max(1, Math.floor(width || 1));
+            const safeH = Math.max(1, Math.floor(height || 1));
             graphics.clear();
-            // 由於 generateTexture 會從 (0,0) 開始截取固定寬高，
-            // 我們的繪製邏輯（drawEntity）通常是以中心點為基準，
-            // 所以這裡需要傳入一個平移過的 graphics 物件或者在 drawFn 裡處理。
-            // 這裡簡單處理：直接在 x+width/2, y+height/2 繪製並對齊。
-            drawFn(graphics, width, height);
-            graphics.generateTexture(key, width, height);
+            drawFn(graphics, safeW, safeH);
+            graphics.generateTexture(key, safeW, safeH);
         };
 
         // 為了解決 drawEntity 使用相對座標 (0,0) 的問題，我們在繪製材質時先進行位移
@@ -2064,7 +2069,12 @@ export class MainScene extends Phaser.Scene {
             return pool.pop();
         }
         // 若池中無對象，新創一個 Image (資源貼圖皆以 tex_ 為前綴)
-        const img = this.add.image(0, 0, `tex_${type}`);
+        const texKey = `tex_${type}`;
+        if (!this.textures.exists(texKey)) {
+            console.warn(`[資源警告] 缺少紋理: ${texKey}`);
+            return null; // 防止 no canvas 錯誤
+        }
+        const img = this.add.image(0, 0, texKey);
         img.setDepth(500000);
         this.resourceGroup.add(img);
         return img;

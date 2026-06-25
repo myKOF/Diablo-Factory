@@ -121,7 +121,7 @@ export class ConfigManager {
     
     static async loadNPCConfig(state) {
         try {
-            const text = await ConfigManager.fetchCSVText('config/npc_data.csv');
+            const text = await ConfigManager.fetchCSVText('./config/npc_data.csv');
             const data = ConfigManager.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
@@ -205,7 +205,7 @@ export class ConfigManager {
 
     static async loadSystemConfig(state) {
         try {
-            const text = await ConfigManager.fetchCSVText('config/system_config.csv');
+            const text = await ConfigManager.fetchCSVText('./config/system_config.csv');
             console.log("--- [DEBUG] system_config.csv RAW TEXT ---");
             console.log(text.substring(0, 200) + "..."); 
             const data = ConfigManager.parseCSV(text);
@@ -262,7 +262,7 @@ export class ConfigManager {
 
     static async loadStringsConfig(state) {
         try {
-            const text = await ConfigManager.fetchCSVText('config/strings.csv');
+            const text = await ConfigManager.fetchCSVText('./config/strings.csv');
             const data = ConfigManager.parseCSV(text);
             if (data) {
                 const { rows, headerIdx, headers } = data;
@@ -278,7 +278,7 @@ export class ConfigManager {
 
     static async loadResourceConfig(state) {
         try {
-            const text = await ConfigManager.fetchCSVText('config/resources_data.csv');
+            const text = await ConfigManager.fetchCSVText('./config/resources_data.csv');
             const data = ConfigManager.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
@@ -348,7 +348,7 @@ export class ConfigManager {
 
     static async loadIngredientConfig(state) {
         try {
-            const text = await ConfigManager.fetchCSVText('config/Ingredients.csv');
+            const text = await ConfigManager.fetchCSVText('./config/Ingredients.csv');
             const data = ConfigManager.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
@@ -386,7 +386,7 @@ export class ConfigManager {
 
     static async loadBuildingConfig(state) {
         try {
-            const text = await ConfigManager.fetchCSVText('config/buildings.csv');
+            const text = await ConfigManager.fetchCSVText('./config/buildings.csv');
             const data = ConfigManager.parseCSV(text);
             if (!data) return;
             const { rows, headerIdx, headers } = data;
@@ -474,8 +474,11 @@ export class ConfigManager {
                     port: ports
                 };
 
+
                 // 按類型等級儲存
-                if (!state.buildingConfigsByType[type1]) state.buildingConfigsByType[type1] = {};
+                if (!state.buildingConfigsByType[type1]) {
+                    state.buildingConfigsByType[type1] = {};
+                }
                 state.buildingConfigsByType[type1][lv] = cfg;
 
                 // 為了相容舊邏輯，buildingConfigs 以 model 為 key，但只存 LV1 (用於新蓋建築)
@@ -495,6 +498,6 @@ export class ConfigManager {
             this.loadBuildingConfig(state),
             this.loadStringsConfig(state),
             this.loadIngredientConfig(state)
-        ]).catch(e => console.error(e));
+        ]).catch(err => console.error('Promise Error:', err));
     }
 }

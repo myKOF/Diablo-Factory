@@ -83,7 +83,7 @@ function initResizeHandler() {
 
 async function initGame() {
     console.log("暗黑煉金工廠：核心模組加載中...");
-    await GameEngine.start();
+    await GameEngine.start().catch(err => console.error('Promise Error:', err));
     PhaserRenderer.init();
     UIManager.init();
 
