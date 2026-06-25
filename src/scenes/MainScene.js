@@ -812,9 +812,42 @@ export class MainScene extends Phaser.Scene {
     }
 
     getLogisticsRenderSignature(state) {
+        // [P2b] 物流靜態層 dirty-check 簽章。
+        // 原實作每幀把整張圖（所有 line、所有 output target 的 routePoints）串成大字串，
+        // 60fps 下持續配置大量中間陣列/字串造成 GC 壓力。改以數值滾動雜湊：
+        // 仍逐項讀取同一組「渲染相關狀態」並以 Math.round 量化（觸發語義與原本完全一致），
+        // 但只做整數折疊、不配置中間字串。維持「由當前狀態推導、變更即觸發重繪」的健全性，
+        // 不依賴散落於 16 個檔案、50+ 處的變更點各自打 dirty 旗標（漏一處即畫面陳舊）。
+        // 採兩條獨立 FNV-1a 雜湊鏈並串接元素計數，將碰撞（→ 漏重繪）機率壓到可忽略。
         const lines = Array.isArray(state.logisticsLines) ? state.logisticsLines : [];
+        let h1 = 0x811c9dc5 | 0;
+        let h2 = 0x1505 | 0;
+        const mixNum = (n) => {
+            const v = (Number.isFinite(n) ? Math.round(n) : 0) | 0;
+            h1 = Math.imul(h1 ^ (v & 0xffff), 0x01000193);
+            h2 = Math.imul(h2 ^ ((v >>> 16) & 0xffff), 0x85ebca6b);
+        };
+        const mixStr = (s) => {
+            const str = s == null ? "" : String(s);
+            for (let i = 0; i < str.length; i++) {
+                const c = str.charCodeAt(i);
+                h1 = Math.imul(h1 ^ c, 0x01000193);
+                h2 = Math.imul(h2 ^ c, 0x85ebca6b);
+            }
+            mixNum(str.length); // 混入長度以消除欄位邊界歧義（原本由分隔字元承擔）
+        };
+
+        mixNum(lines.length);
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            mixStr(line?.id);
+            mixStr(line?.groupId);
+            mixStr(line?.filter);
+            mixNum(line?.routeWidth);
+            mixNum(line?.routePoints?.length || 0); // 與原本一致：line 只計點數，不計座標
+        }
+
         let outputTargetCount = 0;
-        let outputTargetState = "";
         if (Array.isArray(state.mapEntities)) {
             for (let i = 0; i < state.mapEntities.length; i++) {
                 const ent = state.mapEntities[i];
@@ -822,22 +855,25 @@ export class MainScene extends Phaser.Scene {
                 outputTargetCount += targets.length;
                 for (let j = 0; j < targets.length; j++) {
                     const conn = targets[j];
-                    const routeState = Array.isArray(conn.routePoints)
-                        ? conn.routePoints.map(p => `${Math.round(Number(p?.x) || 0)},${Math.round(Number(p?.y) || 0)}`).join(",")
-                        : "";
-                    outputTargetState += `${conn.id || ""}:${conn.lineId || ""}:${conn.filter || ""}:${routeState};`;
+                    mixStr(conn.id);
+                    mixStr(conn.lineId);
+                    mixStr(conn.filter);
+                    const rp = Array.isArray(conn.routePoints) ? conn.routePoints : null;
+                    if (rp) {
+                        for (let k = 0; k < rp.length; k++) {
+                            mixNum(rp[k]?.x);
+                            mixNum(rp[k]?.y);
+                        }
+                    }
+                    mixNum(rp ? rp.length : -1); // 區隔「無 routePoints」與「空陣列」
                 }
             }
         }
-        const lineState = lines.map(line => `${line.id || ""}:${line.groupId || ""}:${line.filter || ""}:${line.routeWidth || ""}:${line.routePoints?.length || 0}`).join(";");
-        return [
-            lines.length,
-            lineState,
-            outputTargetCount,
-            outputTargetState,
-            state.selectedLogisticsLineId || "",
-            state.selectedLogisticsGroupId || ""
-        ].join("|");
+        mixNum(outputTargetCount);
+        mixStr(state.selectedLogisticsLineId);
+        mixStr(state.selectedLogisticsGroupId);
+
+        return `${(h1 >>> 0).toString(36)}:${(h2 >>> 0).toString(36)}:${lines.length}:${outputTargetCount}`;
     }
 
     updateLogisticsLayer(state) {
