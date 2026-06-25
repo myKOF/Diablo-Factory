@@ -16,14 +16,14 @@
 | --- | --- | --- |
 | `startDrag` / `updateDrag` / `submitDrag` / `cancelDrag` / `toggleBendMode` | `src/ui/ui.js`、`src/ui/LogisticsUI.js` | 玩家拖曳建造與 bendMode 操作入口 |
 | `undoLastLogisticsBuild` | `src/ui/ui.js` | 建造復原快捷鍵 |
-| `deleteLogisticsLineById` / `deleteLogisticsLineGroupById` | `src/ui/LogisticsUI.js`、`src/systems/logistics/ConveyorManager.js` | 物流線刪除與群組刪除入口 |
+| `deleteLogisticsLineById` / `deleteLogisticsLineGroupById` | `src/ui/LogisticsUI.js` | 物流線刪除與群組刪除入口 |
 | `ensureLogisticsLineStore` | `src/ui/ui.js`、`src/ui/LogisticsUI.js` | UI 讀取物流線列表 |
 | `getLogisticsLineAt` / `getLogisticsLinesAt` / `getLogisticsSourcePortHitAt` | `src/ui/ui.js`、`src/scenes/MainScene.js` | 滑鼠命中偵測與選取 |
 | `getLogisticsLineById` / `getLogisticsLineSelectionKey` / `isSelectedLogisticsLine` | `src/ui/LogisticsUI.js`、`src/ui/ui.js`、`src/renderers/logistics_renderer.js` | 選取狀態、側欄顯示、renderer 高亮 |
 | `getConnectionRoute` / `getConnectionTransferRoute` / `getLogisticsLineRoute` | `src/renderers/logistics_renderer.js`、`src/systems/WorkerSystem.js` | 自動物流渲染與 transfer 路徑 |
 | `getLogisticsDisplayConnectedGroupIds` / `getLogisticsGroupsConnectedThroughMergeNodes` / `getLogisticsMergeConnectedGroupIds` | `src/renderers/logistics_renderer.js`、`src/ui/LogisticsUI.js`、`src/ui/ui.js` | 顯示群組、合流群組與刪除提示 |
 | `applyLogisticsMergeNodes` / `applyBlockedTransferQueues` / `isLogisticsMergeInputTransfer` | `src/systems/WorkerSystem.js` | 每幀 transfer runtime、合流節點與回壓 |
-| `buildGridRoutePoints` / `buildLogisticsSegments` / `upsertLogisticsLine` | `src/renderers/logistics_renderer.js`、`src/systems/logistics/ConveyorManager.js` | 既有 renderer/manager 建構物流線段 |
+| `buildGridRoutePoints` / `buildLogisticsSegments` / `upsertLogisticsLine` | `src/renderers/logistics_renderer.js` | 既有 renderer 建構物流線段 |
 
 ## 內部 facade API
 
