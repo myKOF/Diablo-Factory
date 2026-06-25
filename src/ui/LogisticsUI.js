@@ -68,7 +68,7 @@ export class LogisticsUI {
 
     static showLogisticsTooltip(event, text) {
         const tip = LogisticsUI.getLogisticsTooltipEl();
-        tip.innerHTML = `<div>${text}</div>`;
+        tip.innerHTML = `<div>${window.UIManager.escapeHtml(text)}</div>`;
         tip.style.display = "block";
         LogisticsUI.moveLogisticsTooltip(event);
     }

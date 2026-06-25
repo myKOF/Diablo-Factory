@@ -2661,7 +2661,7 @@ export class UIManager {
         const stack = target.dataset.tooltipStack || "0";
 
         const tip = this.getItemTooltipEl();
-        tip.innerHTML = `<div>${name} (ID:${id})</div><div>數量: ${amount} / ${stack}</div>`;
+        tip.innerHTML = `<div>${this.escapeHtml(name)} (ID:${this.escapeHtml(id)})</div><div>數量: ${amount} / ${stack}</div>`;
     }
 
     static moveItemTooltip(event) {
@@ -2804,7 +2804,7 @@ export class UIManager {
             debugInfo.style.display = "block";
             const target = (v.fullPath && v.fullPath[v.pathIndex]) ?
                 `➟ (${v.fullPath[v.pathIndex].x.toFixed(0)}, ${v.fullPath[v.pathIndex].y.toFixed(0)})` : " (待命)";
-            debugInfo.innerHTML = `[DEBUG] ${v.configName} (${v.state}): (${v.x.toFixed(0)}, ${v.y.toFixed(0)}) ${target}`;
+            debugInfo.innerHTML = `[DEBUG] ${this.escapeHtml(v.configName)} (${v.state}): (${v.x.toFixed(0)}, ${v.y.toFixed(0)}) ${target}`;
         } else if (debugInfo) {
             debugInfo.style.display = "none";
         }
