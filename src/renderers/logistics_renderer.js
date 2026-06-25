@@ -7,6 +7,7 @@ export class LogisticsRenderer {
     // [效能] 路徑幾何記憶化(WeakMap 以 routePoints 參照為鍵,自動失效零洩漏)。段長/轉角是路徑的純函式,
     // 對同路線跨幀跨 transfer 不變;normalized route 在 transfer 生命週期內參照穩定故能跨幀命中。
     static _transferPathGeomCache = new WeakMap();
+    static _annotatedRoutes = new WeakSet();
 
     static resolveTransferProgress(transfer, routePoints = transfer?.routePoints, cellSize = GameEngine.TILE_SIZE) {
         return logisticsTransportArrayState.resolveProgress(transfer, routePoints, cellSize);
@@ -2761,6 +2762,8 @@ export class LogisticsRenderer {
 
     static annotateRoutePoints(points) {
         if (!Array.isArray(points) || points.length < 3) return;
+        // [效能] isCorner 標記只依路徑幾何且冪等;每幀每 transfer 重算 O(P) 浪費。已註解過的路徑直接跳過。
+        if (LogisticsRenderer._annotatedRoutes.has(points)) return;
         for (let i = 1; i < points.length - 1; i++) {
             const prev = points[i - 1];
             const curr = points[i];
@@ -2771,6 +2774,7 @@ export class LogisticsRenderer {
                 curr.isCorner = true;
             }
         }
+        LogisticsRenderer._annotatedRoutes.add(points);
     }
 
     static isDetachedSplitCell(line, cellKey) {

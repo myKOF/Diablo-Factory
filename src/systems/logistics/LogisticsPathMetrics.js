@@ -17,12 +17,18 @@ export function buildPathMetrics(points) {
     return { total, segments };
 }
 
+// [效能] 預設記憶化快取:路徑度量是 routePoints 的純函式(段長/段資訊只依幾何),
+// 但呼叫端多半不傳 cache → 原本每次重建 O(P)。改用 WeakMap(以 points 參照為鍵,自動失效零洩漏),
+// 無顯式 cache 時仍跨呼叫/跨幀命中。render 與 logic 的 getPathDistanceToPoint/getPointOnPathByDistance 皆受惠。
+const _defaultMetricsCache = new WeakMap();
+
 export function getCachedPathMetrics(points, cache = null) {
-    if (!cache) return buildPathMetrics(points);
-    const cached = cache.get(points);
+    if (!Array.isArray(points)) return buildPathMetrics(points);
+    const store = cache || _defaultMetricsCache;
+    const cached = store.get(points);
     if (cached) return cached;
     const metrics = buildPathMetrics(points);
-    cache.set(points, metrics);
+    store.set(points, metrics);
     return metrics;
 }
 
