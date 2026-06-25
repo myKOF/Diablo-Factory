@@ -151,7 +151,15 @@ export class LogisticsMergeNodeStore {
                     routePoints: backPts,
                     createdAt: Date.now() + 1
                 };
+                delete newSeg.startGx;
+                delete newSeg.startGy;
+                delete newSeg.endGx;
+                delete newSeg.endGy;
                 seg.routePoints = frontPts;
+                delete seg.startGx;
+                delete seg.startGy;
+                delete seg.endGx;
+                delete seg.endGy;
                 state.logisticsLines.push(newSeg);
                 break;
             }
@@ -189,6 +197,40 @@ export class LogisticsMergeNodeStore {
                 this.system.recalculateLogisticsGroupEndpoints(outputGroupId);
                 this.system.recalculateLogisticsGroupEndpoints(newGroupId);
                 finalOutputGroupId = newGroupId;
+
+                const ts = (GameEngine.TILE_SIZE || 20) * 0.75;
+                const isPointOnSegments = (point, segs) => {
+                    if (!point) return false;
+                    return segs.some(seg => {
+                        const pts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
+                        for (let i = 0; i < pts.length - 1; i++) {
+                            if (this.system.isPointOnSegment(point, pts[i], pts[i+1], ts)) return true;
+                        }
+                        if (pts.length > 0) {
+                            if (Math.hypot(pts[0].x - point.x, pts[0].y - point.y) < ts) return true;
+                            if (Math.hypot(pts[pts.length-1].x - point.x, pts[pts.length-1].y - point.y) < ts) return true;
+                        }
+                        return false;
+                    });
+                };
+
+                nodes.forEach(existingNode => {
+                    if (!existingNode || existingNode.cellKey === cellKey) return;
+                    
+                    if (Array.isArray(existingNode.inputGroupIds)) {
+                        const idx = existingNode.inputGroupIds.indexOf(outputGroupId);
+                        if (idx !== -1) {
+                            existingNode.inputGroupIds[idx] = newGroupId;
+                        }
+                    }
+                    
+                    if (existingNode.outputGroupId === outputGroupId) {
+                        const p = existingNode.point || { x: existingNode.x, y: existingNode.y };
+                        if (isPointOnSegments(p, backSegments)) {
+                            existingNode.outputGroupId = newGroupId;
+                        }
+                    }
+                });
             }
         }
 
