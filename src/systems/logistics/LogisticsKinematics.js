@@ -1,0 +1,344 @@
+import { routePointsSignature, routeAlongDistanceToPoint } from './LogisticsRouteCache.js';
+
+// [Web Worker] 物流「運動學」核心:固定子步長的位移 + 合流閘門 + 堆積回壓。
+// 這段是整個遊戲時序最敏感的部分,主執行緒與 worker 共用同一份(避免分歧)。
+//
+// ctx = {
+//   simSystem,          // 合流/佇列查詢介面(主執行緒=conveyorSystem;worker=facade)
+//   engine,             // { TILE_SIZE, getEntityConfig, addLog? }
+//   transportArrayState // LogisticsTransportArrayState 實例
+// }
+//
+// 純運動學:只變更 transfer 的 index/offset/progress/maxAllowedProgress/queueBlocked,
+// 以及合流節點排程狀態。派送(存入建築/扣資源/UI)不在此處——抵達終點的 transfer 會被
+// 從 activeTransfers 移除並收進回傳的 arrivals,由呼叫端(主執行緒)實際入庫。
+export function runLogisticsKinematics(ctx, state, deltaTime) {
+    const { simSystem, engine, transportArrayState } = ctx;
+    if (!state.activeTransfers) state.activeTransfers = [];
+    const arrivals = [];
+    let stepDt = deltaTime;
+
+    const getTransferSpeed = (transfer) => {
+        const groupId = transfer?.lineId;
+        const line = groupId && Array.isArray(state.logisticsLines)
+            ? state.logisticsLines.find(item => item && (item.groupId === groupId || item.id === groupId) && Number(item.efficiency) > 0)
+            : null;
+        const cfg = engine && typeof engine.getEntityConfig === 'function' ? engine.getEntityConfig(line?.lineType || 'transport_line', 1) : null;
+        return Math.max(0.1, Number(line?.efficiency) || Number(transfer?.efficiency) || Number(cfg?.efficiency) || 4);
+    };
+    const getTransferRouteMetrics = (transfer) => {
+        const points = transfer?.routePoints;
+        if (!Array.isArray(points) || points.length < 2) {
+            return { totalPixels: 0, totalTiles: 1 };
+        }
+        if (transfer._logicRouteMetricsPoints === points && transfer._logicRouteMetrics) {
+            return transfer._logicRouteMetrics;
+        }
+        const key = routePointsSignature(points);
+        if (transfer._logicRouteMetricsKey === key && transfer._logicRouteMetrics) {
+            transfer._logicRouteMetricsPoints = points;
+            return transfer._logicRouteMetrics;
+        }
+        let total = 0;
+        for (let j = 0; j < points.length - 1; j++) {
+            total += Math.abs(points[j + 1].x - points[j].x) + Math.abs(points[j + 1].y - points[j].y);
+        }
+        const metrics = { totalPixels: total, totalTiles: Math.max(1, total / 20) };
+        transfer._logicRouteMetricsPoints = points;
+        transfer._logicRouteMetricsKey = key;
+        transfer._logicRouteMetrics = metrics;
+        return metrics;
+    };
+    const getCellSize = () => (engine && engine.TILE_SIZE) || 20;
+    const syncTransferArrayPosition = (transfer) => {
+        const metrics = getTransferRouteMetrics(transfer);
+        transportArrayState.syncTransferFromArrayState(transfer, metrics.totalPixels, getCellSize());
+    };
+    const setTransferDistance = (transfer, distance) => {
+        const metrics = getTransferRouteMetrics(transfer);
+        transportArrayState.setTransferDistance(transfer, distance, metrics.totalPixels, getCellSize());
+    };
+    const getTransferRouteSignature = (transfer) => {
+        const points = transfer?.routePoints || [];
+        if (!Array.isArray(points) || points.length < 2) return null;
+        return routePointsSignature(points);
+    };
+    const routeSignatureLineIds = new Map();
+    (state.activeTransfers || []).forEach(transfer => {
+        const signature = getTransferRouteSignature(transfer);
+        if (!signature) return;
+        if (!routeSignatureLineIds.has(signature)) routeSignatureLineIds.set(signature, new Set());
+        routeSignatureLineIds.get(signature).add(transfer.lineId || "");
+    });
+    const getTransferPathKey = (transfer) => {
+        const signature = getTransferRouteSignature(transfer);
+        if (signature && (routeSignatureLineIds.get(signature)?.size || 0) > 1) {
+            return `route:${signature}`;
+        }
+        if (transfer?.lineId) return `line:${transfer.lineId}`;
+        const points = transfer?.routePoints || [];
+        const first = points[0];
+        const last = points[points.length - 1];
+        return ["route", first ? `${Math.round(first.x)},${Math.round(first.y)}` : "start",
+            last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"].join("|");
+    };
+    const getPathDistanceToPoint = routeAlongDistanceToPoint;
+    const _mergeNodeCache = new Map();
+    const getMergeNodeForTransfer = (transfer) => {
+        if (!transfer) return null;
+        if (_mergeNodeCache.has(transfer)) return _mergeNodeCache.get(transfer);
+        const node = (simSystem && typeof simSystem.getLogisticsMergeNodeForInputTransfer === 'function')
+            ? simSystem.getLogisticsMergeNodeForInputTransfer(transfer, state)
+            : null;
+        _mergeNodeCache.set(transfer, node);
+        return node;
+    };
+    const _mergeOutputCache = new Map();
+    const isMergeOutputTransferCached = (transfer) => {
+        const lineId = transfer?.lineId || null;
+        if (!lineId || !Array.isArray(state.logisticsMergeNodes)) return false;
+        if (_mergeOutputCache.has(transfer)) return _mergeOutputCache.get(transfer);
+        const result = state.logisticsMergeNodes.some(node => node?.outputGroupId === lineId);
+        _mergeOutputCache.set(transfer, result);
+        return result;
+    };
+    const getMergeAdmissionWinner = (node, spacing) => {
+        if (!node || !Array.isArray(node.inputGroupIds)) return null;
+        if (simSystem && typeof simSystem.getLogisticsMergeAdmissionWinner === 'function') {
+            return simSystem.getLogisticsMergeAdmissionWinner(node, state, { spacing, readyDistanceFromEnd: spacing });
+        }
+        return null;
+    };
+    const getMergeInputMaxDistance = (transfer, totalLength, spacing) => {
+        if (!simSystem || typeof simSystem.getLogisticsMergeNodeForInputTransfer !== 'function') return totalLength;
+        const node = getMergeNodeForTransfer(transfer);
+        if (!node || !node.outputGroupId) return totalLength;
+        const mergePoint = node.point || { x: node.x, y: node.y };
+        const winnerId = getMergeAdmissionWinner(node, spacing);
+        const isWinner = winnerId && transfer.id && transfer.id === winnerId;
+        if (!isWinner) return Math.max(0, totalLength - spacing);
+        let requiredWait = 0;
+        state.activeTransfers.forEach(other => {
+            if (!other || other === transfer) return;
+            if (other.lineId !== node.outputGroupId) return;
+            if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
+            const otherTotal = getTransferRouteMetrics(other).totalPixels;
+            if (otherTotal <= 0) return;
+            const otherDistanceNow = transportArrayState.getTransferDistance(other, otherTotal, getCellSize());
+            const otherMaxAllowed = other.maxAllowedProgress !== undefined ? other.maxAllowedProgress : 1.0;
+            const otherMaxDistance = otherMaxAllowed * otherTotal;
+            const otherQueueHeld = other.queueBlocked === true && otherDistanceNow >= otherMaxDistance - 0.0001;
+            const projectedDistance = otherQueueHeld
+                ? otherDistanceNow
+                : Math.min(otherMaxDistance, otherDistanceNow + stepDt * getTransferSpeed(other) * getCellSize());
+            const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
+            const distFromMerge = projectedDistance - mergeDistance;
+            const followingMainMayOverlapTurn = node.zipperTurn === 'branch' && node.awaitingMainPass !== true && distFromMerge < -0.01;
+            if (Math.abs(distFromMerge) < spacing - 0.1 && !followingMainMayOverlapTurn) {
+                const followGap = distFromMerge >= 0 ? Math.max(0, spacing - distFromMerge) : spacing;
+                requiredWait = Math.max(requiredWait, followGap);
+            } else if (node.awaitingMainPass === true && node.zipperTurn !== 'branch' &&
+                distFromMerge <= -(spacing + 0.1) && distFromMerge > -spacing * 3) {
+                requiredWait = Math.max(requiredWait, spacing);
+            }
+        });
+        if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
+        return totalLength;
+    };
+
+    const LOGISTICS_SUB_DT = 0.0167;
+    const MAX_LOGISTICS_SUBSTEPS = 4;
+    const subSteps = Math.min(MAX_LOGISTICS_SUBSTEPS, Math.max(1, Math.ceil(deltaTime / LOGISTICS_SUB_DT - 1e-6)));
+    stepDt = deltaTime / subSteps;
+    for (let _subStep = 0; _subStep < subSteps; _subStep++) {
+        state.activeTransfers.forEach(syncTransferArrayPosition);
+
+        if (simSystem && typeof simSystem.beginMergeWinnerCache === 'function') simSystem.beginMergeWinnerCache();
+        if (simSystem && typeof simSystem.applyBlockedTransferQueues === 'function') simSystem.applyBlockedTransferQueues(state);
+
+        const transfersByPath = new Map();
+        state.activeTransfers.forEach(t => {
+            if (!t) return;
+            const key = getTransferPathKey(t);
+            if (!transfersByPath.has(key)) transfersByPath.set(key, []);
+            transfersByPath.get(key).push(t);
+        });
+
+        const cellSize = getCellSize();
+        const isMergeInputTransfer = (transfer) => !!getMergeNodeForTransfer(transfer);
+        const isMergeOutputTransfer = (transfer) => isMergeOutputTransferCached(transfer);
+
+        Array.from(transfersByPath.entries()).sort(([, a], [, b]) => {
+            const aIsMergeInput = a.some(isMergeInputTransfer);
+            const bIsMergeInput = b.some(isMergeInputTransfer);
+            return Number(aIsMergeInput) - Number(bIsMergeInput);
+        }).forEach(([pathKey, groupTransfers]) => {
+            const canonical = groupTransfers.reduce((best, transfer) => {
+                const len = getTransferRouteMetrics(transfer).totalPixels;
+                return len > best.length ? { points: transfer.routePoints, length: len } : best;
+            }, { points: null, length: 0 });
+
+            const useCanonical = groupTransfers.length > 1 && canonical.length > 0 && groupTransfers.some(transfer => {
+                const points = transfer.routePoints || [];
+                const canonicalPoints = canonical.points || [];
+                if (points.length !== canonicalPoints.length) return true;
+                return points.some((point, index) => {
+                    const other = canonicalPoints[index];
+                    return !other || Math.hypot(point.x - other.x, point.y - other.y) > 0.1;
+                });
+            });
+
+            const getPointOnPathByDistance = (pts, distance) => {
+                if (!Array.isArray(pts) || pts.length < 2) return null;
+                let remaining = Math.max(0, Number(distance) || 0);
+                for (let i = 0; i < pts.length - 1; i++) {
+                    const a = pts[i];
+                    const b = pts[i + 1];
+                    const dx = b.x - a.x;
+                    const dy = b.y - a.y;
+                    const len = Math.abs(dx) + Math.abs(dy);
+                    if (len <= 0) continue;
+                    if (remaining <= len || i === pts.length - 2) {
+                        const t = Math.max(0, Math.min(1, remaining / len));
+                        return { x: a.x + dx * t, y: a.y + dy * t };
+                    }
+                    remaining -= len;
+                }
+                const last = pts[pts.length - 1];
+                return last ? { x: last.x, y: last.y } : null;
+            };
+
+            const distanceCache = new Map();
+            const getDistance = (transfer) => {
+                if (distanceCache.has(transfer)) return distanceCache.get(transfer);
+                const total = getTransferRouteMetrics(transfer).totalPixels;
+                const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
+                const resolved = useCanonical
+                    ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance))
+                    : distance;
+                distanceCache.set(transfer, resolved);
+                return resolved;
+            };
+
+            groupTransfers.sort((a, b) => {
+                const da = getDistance(a);
+                const db = getDistance(b);
+                if (Math.abs(db - da) > 0.0001) return db - da;
+                return String(a.id).localeCompare(String(b.id));
+            });
+
+            let prevMaxCanonicalDist = Infinity;
+            for (let j = 0; j < groupTransfers.length; j++) {
+                const t = groupTransfers[j];
+                const metrics = getTransferRouteMetrics(t);
+                const totalLength = metrics.totalPixels;
+                if (totalLength <= 0) { t.maxAllowedProgress = 1.0; continue; }
+
+                const isMergeInput = isMergeInputTransfer(t);
+                const isBreakpoint = !t.targetId && !isMergeInput;
+                if (isMergeInput) { delete t.queueBlocked; delete t.blockedOnBrokenLine; }
+
+                let dist_pn = totalLength;
+                if (isBreakpoint) {
+                    const bpts = t.routePoints;
+                    if (Array.isArray(bpts) && bpts.length >= 2) {
+                        const lastPt = bpts[bpts.length - 1];
+                        const tLineId = t.lineId;
+                        const isGapEndpoint = (state.logisticsLines || []).some(seg => {
+                            if (!seg) return false;
+                            const segGroupId = seg.groupId || seg.id;
+                            if (segGroupId === tLineId) return false;
+                            const segPts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
+                            if (segPts.length < 1) return false;
+                            const segStart = segPts[0];
+                            return segStart && Math.hypot(segStart.x - lastPt.x, segStart.y - lastPt.y) <= cellSize * 1.5;
+                        });
+                        if (isGapEndpoint) dist_pn = totalLength - cellSize;
+                    }
+                }
+
+                const startDistOnCanonical = useCanonical
+                    ? getPathDistanceToPoint(canonical.points, t.routePoints[0])
+                    : 0;
+
+                let spacing = cellSize;
+                const desired = (t.progress || 0) * totalLength;
+
+                let maxDist = totalLength;
+                if (j === 0) {
+                    if (isBreakpoint) maxDist = dist_pn;
+                    else if (isMergeInput) maxDist = Math.min(totalLength, getMergeInputMaxDistance(t, totalLength, cellSize));
+                    else maxDist = totalLength;
+                } else {
+                    const frontItem = groupTransfers[j - 1];
+                    const frontCanonicalDist = getDistance(frontItem);
+                    const physicalLimitCanonical = Math.max(startDistOnCanonical, Math.min(frontCanonicalDist, prevMaxCanonicalDist) - spacing);
+                    let limitCanonical = startDistOnCanonical + totalLength;
+                    if (desired <= dist_pn) {
+                        const targetLimitCanonical = startDistOnCanonical + dist_pn;
+                        if (frontCanonicalDist > targetLimitCanonical || prevMaxCanonicalDist > targetLimitCanonical) {
+                            limitCanonical = Math.min(targetLimitCanonical, physicalLimitCanonical);
+                        } else {
+                            limitCanonical = physicalLimitCanonical;
+                        }
+                    } else {
+                        limitCanonical = physicalLimitCanonical;
+                    }
+                    maxDist = Math.max(0, limitCanonical - startDistOnCanonical);
+                }
+
+                if (isMergeOutputTransfer(t) && simSystem &&
+                    typeof simSystem.getLogisticsMergeThroughYieldLimit === 'function') {
+                    const yieldLimit = simSystem.getLogisticsMergeThroughYieldLimit(t, state, cellSize);
+                    if (Number.isFinite(yieldLimit)) maxDist = Math.min(maxDist, yieldLimit);
+                }
+
+                prevMaxCanonicalDist = startDistOnCanonical + maxDist;
+                t.maxAllowedProgress = maxDist / totalLength;
+                if (isMergeInput) t.queueBlocked = maxDist < totalLength - 0.1 && desired >= maxDist - 0.1;
+            }
+        });
+
+        if (simSystem && typeof simSystem.endMergeWinnerCache === 'function') simSystem.endMergeWinnerCache();
+
+        for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
+            const t = state.activeTransfers[i];
+            const maxAllowed = t.maxAllowedProgress !== undefined ? t.maxAllowedProgress : 1.0;
+            const queueHeld = t.queueBlocked === true && t.progress >= maxAllowed - 0.0001;
+
+            if (!queueHeld && t.progress < maxAllowed) {
+                const metrics = getTransferRouteMetrics(t);
+                const distanceDelta = stepDt * getTransferSpeed(t) * getCellSize();
+                transportArrayState.advanceTransfer(t, distanceDelta, metrics.totalPixels, maxAllowed, getCellSize());
+            } else if (t.progress > maxAllowed) {
+                t.queueBlocked = true;
+            }
+
+            if (t._mergeVisualTurn && Array.isArray(t.routePoints) && t.routePoints.length >= 2) {
+                const turnPoint = { x: Number(t._mergeVisualTurn.x), y: Number(t._mergeVisualTurn.y) };
+                if (Number.isFinite(turnPoint.x) && Number.isFinite(turnPoint.y)) {
+                    const metrics = getTransferRouteMetrics(t);
+                    const currentDistance = Math.max(0, Math.min(1, Number(t.progress) || 0)) * metrics.totalPixels;
+                    const mergeDistance = getPathDistanceToPoint(t.routePoints, turnPoint);
+                    if (currentDistance > mergeDistance + cellSize + 0.1) delete t._mergeVisualTurn;
+                } else {
+                    delete t._mergeVisualTurn;
+                }
+            }
+
+            if (t.progress >= 1) {
+                if (t.targetId) {
+                    // [Worker 邊界] 不在此入庫/扣資源/更新 UI;收集抵達事件交由主執行緒處理。移除以免後續子步繼續參與合流。
+                    arrivals.push({ id: t.id, targetId: t.targetId, itemType: t.itemType, transfer: t });
+                    state.activeTransfers.splice(i, 1);
+                } else {
+                    setTransferDistance(t, getTransferRouteMetrics(t).totalPixels);
+                }
+            }
+        }
+
+        if (simSystem && typeof simSystem.applyLogisticsMergeNodes === 'function') simSystem.applyLogisticsMergeNodes(state);
+    }
+
+    return { arrivals };
+}

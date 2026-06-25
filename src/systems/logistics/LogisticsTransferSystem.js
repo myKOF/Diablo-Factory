@@ -1,8 +1,9 @@
 import { UI_CONFIG } from "../../ui/ui_config.js";
 import { ResourceSystem } from "../ResourceSystem.js";
 import { conveyorSystem } from "../ConveyorSystem.js";
-import { routePointsSignature, routeAlongDistanceToPoint } from "./LogisticsRouteCache.js";
+import { routePointsSignature } from "./LogisticsRouteCache.js";
 import { LogisticsTransportArrayState } from "./LogisticsTransportArrayState.js";
+import { runLogisticsKinematics } from "./LogisticsKinematics.js";
 
 function annotateRoutePoints(points) {
     if (!Array.isArray(points) || points.length < 3) return;
@@ -603,69 +604,46 @@ export class LogisticsTransferSystem {
 
     _processAutomatedLogisticsImpl(state, deltaTime) {
         if (!state.activeTransfers) state.activeTransfers = [];
-        // [固定子步長] 物品移動與合流放行對 tick 粗細極度敏感：每 tick 位移 = 速度×dt，
-        // dt 過大時 winner 過衝合流閘門，留下永不閉合的碎片間隙（5Hz→56%、20Hz→83% 滿載）。
-        // 把「移動+合流」這段切成固定 stepDt 子步長，與外部 tick 率脫鉤；建築發料仍用完整 deltaTime。
-        let stepDt = deltaTime;
-        const addTransportLog = (message) => {
-            if (this.engine && typeof this.engine.addLog === 'function') {
-                this.engine.addLog(message, 'LOGISTICS');
+
+        // [Web Worker] 昂貴的「運動學」(固定子步長位移 + 合流閘門 + 堆積)抽至共用模組 LogisticsKinematics,
+        // 主執行緒與 worker 共用同一份;此處在主執行緒就地同步執行。抵達終點者由下方就地入庫。
+        const { arrivals } = runLogisticsKinematics(
+            { simSystem: conveyorSystem, engine: this.engine, transportArrayState: this.transportArrayState },
+            state,
+            deltaTime
+        );
+
+        // 入庫(主執行緒專屬:存入建築 / 扣資源 / 更新 UI)。kinematics 已將抵達者移出 activeTransfers。
+        for (let a = 0; a < arrivals.length; a++) {
+            const arrival = arrivals[a];
+            const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === arrival.targetId);
+            if (target) {
+                const tType = target.type1 || target.type;
+                const deposited = ResourceSystem.depositResourceToBuilding(state, this.engine, target, arrival.itemType, 1, null);
+                if (!deposited && !['warehouse', 'storehouse', 'barn', 'town_center', 'village'].includes(tType)) {
+                    if (!target.inputBuffer) target.inputBuffer = {};
+                    target.inputBuffer[arrival.itemType] = (target.inputBuffer[arrival.itemType] || 0) + 1;
+                }
+                if (window.UIManager) window.UIManager.updateValues(true);
             }
-        };
+            if (state && state.trackedTransferId === arrival.id) {
+                state.trackedTransferId = null;
+                if (this.engine && typeof this.engine.addLog === 'function') {
+                    this.engine.addLog(`[追蹤] 物品 ${arrival.itemType} 已送達目的地。`, 'LOGISTICS');
+                }
+            }
+        }
+
+        // ── 以下為「建築自動發料(dispatch)」所需的輔助;與 kinematics 內部同名輔助為純函式,共享 transfer 上的快取 ──
         const getEntityLabel = (ent) => ent ? (ent.name || ent.type1 || ent.type || '未知建築') : '未知目標';
         const getTransferRouteText = (transfer) => {
             const count = Array.isArray(transfer?.routePoints) ? transfer.routePoints.length : 0;
             return count >= 2 ? `路徑 ${count} 點` : '未取得繪製路徑點';
         };
-
-        // 1. 推進正在運輸中的物品
-        const getTransferSpeed = (transfer) => {
-            const groupId = transfer?.lineId;
-            const line = groupId && Array.isArray(state.logisticsLines)
-                ? state.logisticsLines.find(item => item && (item.groupId === groupId || item.id === groupId) && Number(item.efficiency) > 0)
-                : null;
-            const cfg = this.engine ? this.engine.getEntityConfig(line?.lineType || 'transport_line', 1) : null;
-            return Math.max(0.1, Number(line?.efficiency) || Number(transfer?.efficiency) || Number(cfg?.efficiency) || 4);
-        };
-        const getTransferRouteMetrics = (transfer) => {
-            const points = transfer?.routePoints;
-            if (!Array.isArray(points) || points.length < 2) {
-                return { totalPixels: 0, totalTiles: 1 };
-            }
-            if (transfer._logicRouteMetricsPoints === points && transfer._logicRouteMetrics) {
-                return transfer._logicRouteMetrics;
-            }
-            const key = points.map(point => `${Math.round(point.x)},${Math.round(point.y)}`).join("|");
-            if (transfer._logicRouteMetricsKey === key && transfer._logicRouteMetrics) {
-                transfer._logicRouteMetricsPoints = points;
-                return transfer._logicRouteMetrics;
-            }
-
-            let total = 0;
-            for (let j = 0; j < points.length - 1; j++) {
-                const segLen = Math.abs(points[j + 1].x - points[j].x) + Math.abs(points[j + 1].y - points[j].y);
-                total += segLen;
-            }
-
-            const metrics = { totalPixels: total, totalTiles: Math.max(1, total / 20) };
-            transfer._logicRouteMetricsPoints = points;
-            transfer._logicRouteMetricsKey = key;
-            transfer._logicRouteMetrics = metrics;
-            return metrics;
+        const addTransportLog = (message) => {
+            if (this.engine && typeof this.engine.addLog === 'function') this.engine.addLog(message, 'LOGISTICS');
         };
         const getCellSize = () => this.engine?.TILE_SIZE || 20;
-        const getTransferDistance = (transfer) => {
-            const metrics = getTransferRouteMetrics(transfer);
-            return this.transportArrayState.getTransferDistance(transfer, metrics.totalPixels, getCellSize());
-        };
-        const syncTransferArrayPosition = (transfer) => {
-            const metrics = getTransferRouteMetrics(transfer);
-            this.transportArrayState.syncTransferFromArrayState(transfer, metrics.totalPixels, getCellSize());
-        };
-        const setTransferDistance = (transfer, distance) => {
-            const metrics = getTransferRouteMetrics(transfer);
-            this.transportArrayState.setTransferDistance(transfer, distance, metrics.totalPixels, getCellSize());
-        };
         const getStorageAmount = (ent, itemType) => {
             const key = String(itemType || '').toLowerCase();
             return (ent?.storage && Number(ent.storage[key])) || 0;
@@ -677,30 +655,30 @@ export class LogisticsTransferSystem {
             if ((ent.storage[key] || 0) < amount) return false;
             ent.storage[key] -= amount;
             if (ent.storage[key] <= 0) delete ent.storage[key];
-            if (state.resources) {
-                state.resources[key] = Math.max(0, (state.resources[key] || 0) - amount);
-            }
+            if (state.resources) state.resources[key] = Math.max(0, (state.resources[key] || 0) - amount);
             return true;
         };
-        const getTransferPathKey = (transfer) => {
-            const signature = getTransferRouteSignature(transfer);
-            if (signature && (routeSignatureLineIds.get(signature)?.size || 0) > 1) {
-                return `route:${signature}`;
+        const getTransferRouteMetrics = (transfer) => {
+            const points = transfer?.routePoints;
+            if (!Array.isArray(points) || points.length < 2) return { totalPixels: 0, totalTiles: 1 };
+            if (transfer._logicRouteMetricsPoints === points && transfer._logicRouteMetrics) return transfer._logicRouteMetrics;
+            const key = routePointsSignature(points);
+            if (transfer._logicRouteMetricsKey === key && transfer._logicRouteMetrics) {
+                transfer._logicRouteMetricsPoints = points;
+                return transfer._logicRouteMetrics;
             }
-            if (transfer?.lineId) return `line:${transfer.lineId}`;
-            const points = transfer?.routePoints || [];
-            const first = points[0];
-            const last = points[points.length - 1];
-            return [
-                "route",
-                first ? `${Math.round(first.x)},${Math.round(first.y)}` : "start",
-                last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"
-            ].join("|");
+            let total = 0;
+            for (let j = 0; j < points.length - 1; j++) total += Math.abs(points[j + 1].x - points[j].x) + Math.abs(points[j + 1].y - points[j].y);
+            const metrics = { totalPixels: total, totalTiles: Math.max(1, total / 20) };
+            transfer._logicRouteMetricsPoints = points;
+            transfer._logicRouteMetricsKey = key;
+            transfer._logicRouteMetrics = metrics;
+            return metrics;
         };
         const getTransferRouteSignature = (transfer) => {
             const points = transfer?.routePoints || [];
             if (!Array.isArray(points) || points.length < 2) return null;
-            return routePointsSignature(points); // [效能] 以路徑參照記憶化
+            return routePointsSignature(points);
         };
         const routeSignatureLineIds = new Map();
         (state.activeTransfers || []).forEach(transfer => {
@@ -709,6 +687,16 @@ export class LogisticsTransferSystem {
             if (!routeSignatureLineIds.has(signature)) routeSignatureLineIds.set(signature, new Set());
             routeSignatureLineIds.get(signature).add(transfer.lineId || "");
         });
+        const getTransferPathKey = (transfer) => {
+            const signature = getTransferRouteSignature(transfer);
+            if (signature && (routeSignatureLineIds.get(signature)?.size || 0) > 1) return `route:${signature}`;
+            if (transfer?.lineId) return `line:${transfer.lineId}`;
+            const points = transfer?.routePoints || [];
+            const first = points[0];
+            const last = points[points.length - 1];
+            return ["route", first ? `${Math.round(first.x)},${Math.round(first.y)}` : "start",
+                last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"].join("|");
+        };
         const canStartTransfer = (transfer) => {
             if (!transfer || !Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) return true;
             const key = getTransferPathKey(transfer);
@@ -727,395 +715,6 @@ export class LogisticsTransferSystem {
                 return activeDistance < cellSize;
             });
         };
-        // [效能] 記憶化(見 LogisticsRouteCache);物流路徑為正交,逐段 |dx|+|dy| 與 hypot 相同。
-        const getPathDistanceToPoint = routeAlongDistanceToPoint;
-        // [效能] getLogisticsMergeNodeForInputTransfer 每次都要掃 nodes×lines（getSegmentsByGroupId
-        // 與 doesLogisticsGroupContainConnectionPoint 皆為 O(lines)），但合流拓樸與各 transfer 路徑在
-        // 單次 processAutomatedLogistics 內不變（applyLogisticsMergeNodes 只動排程狀態、不動拓樸）。
-        // 於本次呼叫記憶化，杜絕「排序比較器 / 逐 transfer / 逐子步長」造成的 O(n×nodes×lines) 重複掃描。
-        const _mergeNodeCache = new Map();
-        const getMergeNodeForTransfer = (transfer) => {
-            if (!transfer) return null;
-            if (_mergeNodeCache.has(transfer)) return _mergeNodeCache.get(transfer);
-            const node = (conveyorSystem && typeof conveyorSystem.getLogisticsMergeNodeForInputTransfer === 'function')
-                ? conveyorSystem.getLogisticsMergeNodeForInputTransfer(transfer, state)
-                : null;
-            _mergeNodeCache.set(transfer, node);
-            return node;
-        };
-        const _mergeOutputCache = new Map();
-        const isMergeOutputTransferCached = (transfer) => {
-            const lineId = transfer?.lineId || null;
-            if (!lineId || !Array.isArray(state.logisticsMergeNodes)) return false;
-            if (_mergeOutputCache.has(transfer)) return _mergeOutputCache.get(transfer);
-            const result = state.logisticsMergeNodes.some(node => node?.outputGroupId === lineId);
-            _mergeOutputCache.set(transfer, result);
-            return result;
-        };
-        const getMergeAdmissionWinner = (node, spacing) => {
-            if (!node || !Array.isArray(node.inputGroupIds)) return null;
-            if (conveyorSystem && typeof conveyorSystem.getLogisticsMergeAdmissionWinner === 'function') {
-                return conveyorSystem.getLogisticsMergeAdmissionWinner(node, state, {
-                    spacing,
-                    readyDistanceFromEnd: spacing
-                });
-            }
-            return null;
-        };
-        const getMergeInputMaxDistance = (transfer, totalLength, spacing) => {
-            if (!conveyorSystem || typeof conveyorSystem.getLogisticsMergeNodeForInputTransfer !== 'function') {
-                return totalLength;
-            }
-            const node = getMergeNodeForTransfer(transfer);
-            if (!node || !node.outputGroupId) return totalLength;
-            const mergePoint = node.point || { x: node.x, y: node.y };
-
-            const winnerId = getMergeAdmissionWinner(node, spacing);
-            const isWinner = winnerId && transfer.id && transfer.id === winnerId;
-            // [非勝者等待線] 與 LogisticsTransferQueues 一致：未取得路權前一律停在合流點前一格，
-            // 杜絕貼隊推進造成的相位損失與重疊。
-            if (!isWinner) {
-                return Math.max(0, totalLength - spacing);
-            }
-
-            let requiredWait = 0;
-            state.activeTransfers.forEach(other => {
-                if (!other || other === transfer) return;
-                if (other.lineId !== node.outputGroupId) return;
-                if (!Array.isArray(other.routePoints) || other.routePoints.length < 2) return;
-                const otherMetrics = getTransferRouteMetrics(other);
-                const otherTotal = otherMetrics.totalPixels;
-                if (otherTotal <= 0) return;
-                const otherDistanceNow = this.transportArrayState.getTransferDistance(other, otherTotal, getCellSize());
-                const otherMaxAllowed = other.maxAllowedProgress !== undefined ? other.maxAllowedProgress : 1.0;
-                const otherMaxDistance = otherMaxAllowed * otherTotal;
-                const otherQueueHeld = other.queueBlocked === true && otherDistanceNow >= otherMaxDistance - 0.0001;
-                const projectedDistance = otherQueueHeld
-                    ? otherDistanceNow
-                    : Math.min(otherMaxDistance, otherDistanceNow + stepDt * getTransferSpeed(other) * getCellSize());
-                const mergeDistance = getPathDistanceToPoint(other.routePoints, mergePoint);
-                const distFromMerge = projectedDistance - mergeDistance;
-                const followingMainMayOverlapTurn = node.zipperTurn === 'branch' &&
-                    node.awaitingMainPass !== true &&
-                    distFromMerge < -0.01;
-                if (Math.abs(distFromMerge) < spacing - 0.1 && !followingMainMayOverlapTurn) {
-                    // [緊密放行] 勝者隨前車逐步跟進保持一格間距。
-                    const followGap = distFromMerge >= 0
-                        ? Math.max(0, spacing - distFromMerge)
-                        : spacing;
-                    requiredWait = Math.max(requiredWait, followGap);
-                } else if (node.awaitingMainPass === true && node.zipperTurn !== 'branch' &&
-                    distFromMerge <= -(spacing + 0.1) && distFromMerge > -spacing * 3) {
-                    // [防碎片視界] 輪到主線時，三格內有逼近中的來車：於等待線候命，禁止插它前面。
-                    requiredWait = Math.max(requiredWait, spacing);
-                }
-            });
-            if (requiredWait > 0) return Math.max(0, totalLength - requiredWait);
-            return totalLength;
-        };
-
-        // [固定子步長] 把「回壓佇列→堆積限制→移動→合流放行」整段以固定 stepDt 重複推進，
-        // 使每子步位移 ≤ 一個合理格分數，合流閘門維持細粒度，不受外部 tick 粗細影響。
-        const LOGISTICS_SUB_DT = 0.0167; // ~60Hz 等效粒度，間距收斂到 1 格/93% 滿載
-        // [效能/防死亡螺旋] 子步數封頂。正常 dt≈0.05 本來就只需 3 步，封頂 4 步在正常遊玩完全不觸發；
-        // 僅當主執行緒忙碌使 logicTick 延遲、deltaTime 逼近上限(0.2)時生效，避免單 tick 做 12× 工作而
-        // 超過 tick 間隔(50ms)造成 tick 堆積→render 飢餓→deltaTime 更大的正反饋永久卡死。封頂後即使延遲
-        // 也只是子步略粗(極端時 stepDt≈0.05/20Hz)，物品稍慢但合流不重疊，且 logic 成本有界可自動恢復。
-        const MAX_LOGISTICS_SUBSTEPS = 4;
-        const subSteps = Math.min(MAX_LOGISTICS_SUBSTEPS, Math.max(1, Math.ceil(deltaTime / LOGISTICS_SUB_DT - 1e-6)));
-        stepDt = deltaTime / subSteps;
-        for (let _subStep = 0; _subStep < subSteps; _subStep++) {
-            state.activeTransfers.forEach(syncTransferArrayPosition);
-
-            // [效能] 開啟 winner 快取窗口：本子步從此處(位置已同步)到移動迴圈前位置維持不變，
-            // 期間 getLogisticsMergeThroughYieldLimit / getMergeInputMaxDistance 會對同一節點重複求 winner。
-            if (conveyorSystem && typeof conveyorSystem.beginMergeWinnerCache === 'function') {
-                conveyorSystem.beginMergeWinnerCache();
-            }
-
-            if (conveyorSystem && typeof conveyorSystem.applyBlockedTransferQueues === 'function') {
-                conveyorSystem.applyBlockedTransferQueues(state);
-            }
-
-            // ==========================================
-            // [新增] 計算每條物流線上物品的最大允許進度以實現堆積 (Backpressure & Stacking)
-            // ==========================================
-            const transfersByPath = new Map();
-            state.activeTransfers.forEach(t => {
-                if (!t) return;
-                const key = getTransferPathKey(t);
-                if (!transfersByPath.has(key)) {
-                    transfersByPath.set(key, []);
-                }
-                transfersByPath.get(key).push(t);
-            });
-
-            const cellSize = getCellSize();
-
-            // [效能] 走本次呼叫的記憶化快取，避免每子步重複做 O(nodes×lines) 的合流節點掃描。
-            const isMergeInputTransfer = (transfer) => !!getMergeNodeForTransfer(transfer);
-            const isMergeOutputTransfer = (transfer) => isMergeOutputTransferCached(transfer);
-
-            Array.from(transfersByPath.entries()).sort(([, a], [, b]) => {
-                const aIsMergeInput = a.some(isMergeInputTransfer);
-                const bIsMergeInput = b.some(isMergeInputTransfer);
-                return Number(aIsMergeInput) - Number(bIsMergeInput);
-            }).forEach(([pathKey, groupTransfers]) => {
-                // [對齊最長主線] 與 LogisticsTransferQueues 一致：
-                // 尋找組內最長路徑作為基準路徑 (canonical)，並以此計算對齊後的距離進行排序與 Stacking 計算，
-                // 避免轉彎車剛合流到 output 路線時，因 progress 重置為 0 被誤判在直行後車的後方而產生煞車。
-                const canonical = groupTransfers.reduce((best, transfer) => {
-                    const len = getTransferRouteMetrics(transfer).totalPixels;
-                    return len > best.length ? { points: transfer.routePoints, length: len } : best;
-                }, { points: null, length: 0 });
-
-                const useCanonical = groupTransfers.length > 1 && canonical.length > 0 && groupTransfers.some(transfer => {
-                    const points = transfer.routePoints || [];
-                    const canonicalPoints = canonical.points || [];
-                    if (points.length !== canonicalPoints.length) return true;
-                    return points.some((point, index) => {
-                        const other = canonicalPoints[index];
-                        return !other || Math.hypot(point.x - other.x, point.y - other.y) > 0.1;
-                    });
-                });
-
-                const getPointOnPathByDistance = (pts, distance) => {
-                    if (!Array.isArray(pts) || pts.length < 2) return null;
-                    let remaining = Math.max(0, Number(distance) || 0);
-                    for (let i = 0; i < pts.length - 1; i++) {
-                        const a = pts[i];
-                        const b = pts[i + 1];
-                        const dx = b.x - a.x;
-                        const dy = b.y - a.y;
-                        const len = Math.abs(dx) + Math.abs(dy); // 正交物流路徑長度
-                        if (len <= 0) continue;
-                        if (remaining <= len || i === pts.length - 2) {
-                            const t = Math.max(0, Math.min(1, remaining / len));
-                            return { x: a.x + dx * t, y: a.y + dy * t };
-                        }
-                        remaining -= len;
-                    }
-                    const last = pts[pts.length - 1];
-                    return last ? { x: last.x, y: last.y } : null;
-                };
-
-                const distanceCache = new Map();
-                const getDistance = (transfer) => {
-                    if (distanceCache.has(transfer)) return distanceCache.get(transfer);
-                    const total = getTransferRouteMetrics(transfer).totalPixels;
-                    const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
-                    const resolved = useCanonical
-                        ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance))
-                        : distance;
-                    distanceCache.set(transfer, resolved);
-                    return resolved;
-                };
-
-                // 排序：若是 useCanonical，以對齊後的 canonical 距離由大到小排序，否則依 progress 排序
-                groupTransfers.sort((a, b) => {
-                    const da = getDistance(a);
-                    const db = getDistance(b);
-                    if (Math.abs(db - da) > 0.0001) return db - da;
-                    return String(a.id).localeCompare(String(b.id));
-                });
-
-                let prevMaxCanonicalDist = Infinity;
-                for (let j = 0; j < groupTransfers.length; j++) {
-                    const t = groupTransfers[j];
-                    const metrics = getTransferRouteMetrics(t);
-                    const totalLength = metrics.totalPixels;
-                    if (totalLength <= 0) {
-                        t.maxAllowedProgress = 1.0;
-                        continue;
-                    }
-
-                    const isMergeInput = isMergeInputTransfer(t);
-                    const isBreakpoint = !t.targetId && !isMergeInput;
-                    if (isMergeInput) {
-                        delete t.queueBlocked;
-                        delete t.blockedOnBrokenLine;
-                    }
-
-                    // 動態判定末端堆積限制：
-                    // 若末端點鄰近另一群組的線段起始點（表示是刪除後形成的斷點間隙），
-                    // 物品停在倒數第二格（totalLength - cellSize），否則停在自然終點（totalLength）。
-                    let dist_pn = totalLength;
-                    if (isBreakpoint) {
-                        const bpts = t.routePoints;
-                        if (Array.isArray(bpts) && bpts.length >= 2) {
-                            const lastPt = bpts[bpts.length - 1];
-                            const tLineId = t.lineId;
-                            const isGapEndpoint = (state.logisticsLines || []).some(seg => {
-                                if (!seg) return false;
-                                const segGroupId = seg.groupId || seg.id;
-                                if (segGroupId === tLineId) return false;
-                                const segPts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
-                                if (segPts.length < 1) return false;
-                                const segStart = segPts[0];
-                                return segStart && Math.hypot(segStart.x - lastPt.x, segStart.y - lastPt.y) <= cellSize * 1.5;
-                            });
-                            if (isGapEndpoint) {
-                                dist_pn = totalLength - cellSize;
-                            }
-                        }
-                    }
-
-                    const startDistOnCanonical = useCanonical
-                        ? getPathDistanceToPoint(canonical.points, t.routePoints[0])
-                        : 0;
-
-                    // [緊密不重疊] 主線與一般線統一使用完整物品長度作為間距，嚴防重疊。
-                    let spacing = cellSize;
-                    const desired = (t.progress || 0) * totalLength;
-
-                    let maxDist = totalLength;
-                    if (j === 0) {
-                        if (isBreakpoint) {
-                            maxDist = dist_pn;
-                        } else if (isMergeInput) {
-                            maxDist = Math.min(totalLength, getMergeInputMaxDistance(t, totalLength, cellSize));
-                        } else {
-                            maxDist = totalLength;
-                        }
-                    } else {
-                        const frontItem = groupTransfers[j - 1];
-                        const frontCanonicalDist = getDistance(frontItem);
-                        const physicalLimitCanonical = Math.max(startDistOnCanonical, Math.min(frontCanonicalDist, prevMaxCanonicalDist) - spacing);
-
-                        let limitCanonical = startDistOnCanonical + totalLength;
-                        if (desired <= dist_pn) {
-                            const targetLimitCanonical = startDistOnCanonical + dist_pn;
-                            if (frontCanonicalDist > targetLimitCanonical || prevMaxCanonicalDist > targetLimitCanonical) {
-                                limitCanonical = Math.min(targetLimitCanonical, physicalLimitCanonical);
-                            } else {
-                                limitCanonical = physicalLimitCanonical;
-                            }
-                        } else {
-                            limitCanonical = physicalLimitCanonical;
-                        }
-                        // 將 canonical 座標系的限制還原至物品局部座標系的 maxDist
-                        maxDist = Math.max(0, limitCanonical - startDistOnCanonical);
-                    }
-
-                    // [拉鏈式合流] 主線穿越車在輪到支線時於合流點前一格讓行（對佇列中任何位置的穿越車皆適用）
-                    if (isMergeOutputTransfer(t) && conveyorSystem &&
-                        typeof conveyorSystem.getLogisticsMergeThroughYieldLimit === 'function') {
-                        const yieldLimit = conveyorSystem.getLogisticsMergeThroughYieldLimit(t, state, cellSize);
-                        if (Number.isFinite(yieldLimit)) {
-                            maxDist = Math.min(maxDist, yieldLimit);
-                        }
-                    }
-
-                    prevMaxCanonicalDist = startDistOnCanonical + maxDist;
-                    t.maxAllowedProgress = maxDist / totalLength;
-                    if (isMergeInput) {
-                        t.queueBlocked = maxDist < totalLength - 0.1 && desired >= maxDist - 0.1;
-                    }
-                }
-            });
-
-            // [效能] 關閉 winner 快取窗口：移動迴圈即將改變 transfer 位置，apply() 等後續階段需重算最新 winner。
-            if (conveyorSystem && typeof conveyorSystem.endMergeWinnerCache === 'function') {
-                conveyorSystem.endMergeWinnerCache();
-            }
-
-            for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
-                let t = state.activeTransfers[i];
-                const maxAllowed = t.maxAllowedProgress !== undefined ? t.maxAllowedProgress : 1.0;
-                const queueHeld = t.queueBlocked === true && t.progress >= maxAllowed - 0.0001;
-
-                if (!queueHeld && t.progress < maxAllowed) {
-                    const metrics = getTransferRouteMetrics(t);
-                    const distanceDelta = stepDt * getTransferSpeed(t) * getCellSize();
-                    this.transportArrayState.advanceTransfer(t, distanceDelta, metrics.totalPixels, maxAllowed, getCellSize());
-                } else if (t.progress > maxAllowed) {
-                    // 移動階段只標記阻塞；最終佔位由 LogisticsTransferQueues 統一裁決。
-                    t.queueBlocked = true;
-                }
-
-                if (t._mergeVisualTurn && Array.isArray(t.routePoints) && t.routePoints.length >= 2) {
-                    const turnPoint = { x: Number(t._mergeVisualTurn.x), y: Number(t._mergeVisualTurn.y) };
-                    if (Number.isFinite(turnPoint.x) && Number.isFinite(turnPoint.y)) {
-                        const metrics = getTransferRouteMetrics(t);
-                        const currentDistance = Math.max(0, Math.min(1, Number(t.progress) || 0)) * metrics.totalPixels;
-                        const mergeDistance = getPathDistanceToPoint(t.routePoints, turnPoint);
-                        if (currentDistance > mergeDistance + cellSize + 0.1) {
-                            delete t._mergeVisualTurn;
-                        }
-                    } else {
-                        delete t._mergeVisualTurn;
-                    }
-                }
-
-                // [新增] 追蹤邏輯
-                if (state && state.trackedTransferId === t.id) {
-                    const points = t.routePoints;
-                    if (Array.isArray(points) && points.length >= 2) {
-                        let totalLength = 0;
-                        const segmentLengths = [];
-                        for (let j = 0; j < points.length - 1; j++) {
-                            const dx = points[j + 1].x - points[j].x;
-                            const dy = points[j + 1].y - points[j].y;
-                            const len = Math.hypot(dx, dy);
-                            segmentLengths.push(len);
-                            totalLength += len;
-                        }
-
-                        let remain = t.progress * totalLength;
-                        let currentSegment = 0;
-                        for (let j = 0; j < segmentLengths.length; j++) {
-                            if (remain <= segmentLengths[j]) {
-                                currentSegment = j;
-                                break;
-                            }
-                            remain -= segmentLengths[j];
-                            currentSegment = j; // fallback
-                        }
-
-                        if (t.lastSegment !== currentSegment) {
-                            for (let seg = t.lastSegment + 1; seg <= currentSegment; seg++) {
-                                const p1 = points[seg];
-                                const p2 = points[seg + 1] || p1;
-                                if (this.engine && typeof this.engine.addLog === 'function') {
-                                    this.engine.addLog(`${t.itemType} 由位置${seg}(${Math.round(p1.x)},${Math.round(p1.y)})移動至位置${seg + 1}(${Math.round(p2.x)},${Math.round(p2.y)})`, 'LOGISTICS');
-                                }
-                            }
-                            t.lastSegment = currentSegment;
-                        }
-                    }
-                }
-
-                if (t.progress >= 1) {
-                    if (t.targetId) {
-                        let target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === t.targetId);
-                        if (target) {
-                            const tType = target.type1 || target.type;
-                            const deposited = ResourceSystem.depositResourceToBuilding(state, this.engine, target, t.itemType, 1, null);
-                            if (!deposited && !['warehouse', 'storehouse', 'barn', 'town_center', 'village'].includes(tType)) {
-                                if (!target.inputBuffer) target.inputBuffer = {};
-                                target.inputBuffer[t.itemType] = (target.inputBuffer[t.itemType] || 0) + 1;
-                            }
-                            if (window.UIManager) window.UIManager.updateValues(true);
-                            // addTransportLog(`[物流] ${String(t.itemType).toUpperCase()} 已送達 ${getEntityLabel(target)}。`);
-                        }
-                        if (state && state.trackedTransferId === t.id) {
-                            state.trackedTransferId = null; // 釋放追蹤
-                            if (this.engine && typeof this.engine.addLog === 'function') {
-                                this.engine.addLog(`[追蹤] 物品 ${t.itemType} 已送達目的地。`, 'LOGISTICS');
-                            }
-                        }
-                        state.activeTransfers.splice(i, 1);
-                    } else {
-                        setTransferDistance(t, getTransferRouteMetrics(t).totalPixels);
-                    }
-                }
-            }
-
-            if (conveyorSystem && typeof conveyorSystem.applyLogisticsMergeNodes === 'function') {
-                conveyorSystem.applyLogisticsMergeNodes(state);
-            }
-
-        } // ── 固定子步長迴圈結束 ──
 
         // 2. 讓滿足工人條件的建築自動發送物品
         state.mapEntities.forEach(ent => {

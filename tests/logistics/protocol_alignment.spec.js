@@ -1310,7 +1310,7 @@ test('匯合拓樸變更時不得沿用舊排程等待狀態', async ({ page }) 
                 clearSuppressedLogisticsConnectionCell: () => {},
                 reassignDeletedGapContinuationToMergeInput: () => false
             };
-            const store = new LogisticsMergeNodeStore(system);
+            const store = new LogisticsMergeNodeStore(system, () => GameEngine);
 
             const node = store.registerLogisticsMergeNode({
                 inputGroupId: 'new_input',
