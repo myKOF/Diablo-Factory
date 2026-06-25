@@ -145,6 +145,31 @@ export class ConveyorSystem {
         return !!blockedDir && extensionDir.x === blockedDir.x && extensionDir.y === blockedDir.y;
     }
 
+    getCrossedLogisticsLineKeys(drag, ghosts, routeWidth = 1) {
+        if (!Array.isArray(ghosts) || ghosts.length < 2) return new Set();
+        const router = this.router || this.routingGridBuilder.getFootprintRouter();
+        const footprintCells = router.getGhostOccupiedCells(
+            ghosts.filter(ghost => !ghost.isPortConnector && !ghost.isVirtualEnd),
+            Math.max(1, Number(routeWidth) || 1)
+        );
+        const footprintKeys = new Set(footprintCells.map(cell => `${cell.x},${cell.y}`));
+        const sourceGroupId = drag?.sourceLine?.groupId || drag?.sourceLine?.id || null;
+        const crossedLineKeys = new Set();
+        (GameEngine.state.logisticsLines || []).forEach(line => {
+            const groupId = line?.groupId || line?.id || null;
+            if (!groupId || groupId === sourceGroupId) return;
+            const lineKeys = this.getLogisticsSegmentOccupiedKeys(line);
+            if (lineKeys.some(key => footprintKeys.has(key))) {
+                crossedLineKeys.add(this.getLogisticsLineSelectionKey(line) || line.id || groupId);
+            }
+        });
+        return crossedLineKeys;
+    }
+
+    isCrossingMultipleLogisticsGroups(drag, ghosts, routeWidth = 1) {
+        return this.getCrossedLogisticsLineKeys(drag, ghosts, routeWidth).size >= 2;
+    }
+
     getAlignmentUnit() {
         return this.configCostAdapter.getAlignmentUnit(...arguments);
     }
@@ -458,11 +483,6 @@ export class ConveyorSystem {
             const groupId = groupOf(line);
             return !!groupId && groupId !== excludedGroupId;
         };
-
-        const directHits = typeof this.getLogisticsLinesAt === 'function'
-            ? this.getLogisticsLinesAt(point.x, point.y).filter(isCandidate)
-            : [];
-        if (directHits.length > 0) return directHits[0];
 
         const snapped = this.snapPointToGridCenter(point);
         const probes = [{ x: point.x, y: point.y }];

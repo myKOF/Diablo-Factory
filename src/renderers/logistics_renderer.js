@@ -1205,8 +1205,7 @@ export class LogisticsRenderer {
         };
         const mergeVisualTurnsByGroup = getMergeVisualTurnsByGroup();
 
-        const primarySelectedGroupId = state.selectedLogisticsGroupId ||
-            (state.selectedLogisticsLineId ? logisticsRenderModel.getLineById(state.selectedLogisticsLineId)?.groupId : null);
+        const primarySelectedGroupId = state.selectedLogisticsGroupId || null;
 
         const drawnCanonicalGroups = new Set();
         if (Array.isArray(state.logisticsLines)) {
@@ -1350,7 +1349,10 @@ export class LogisticsRenderer {
                     ? logisticsRenderModel.getMergeConnectedGroupIds(state.selectedLogisticsGroupId, state).has(groupKey)
                     : groupSegs.some(line => logisticsRenderModel.isSelectedLine(line, state));
 
-                const isPrimarySelected = (groupKey === primarySelectedGroupId);
+                const selectedLine = state.selectedLogisticsLineId
+                    ? groupSegs.find(line => logisticsRenderModel.isSelectedLine(line, state))
+                    : null;
+                const isPrimarySelected = (groupKey === primarySelectedGroupId) || !!selectedLine;
 
                 if (isPrimarySelected) {
                     // [核心修正] 移除原先的 segmentRoutes.forEach 繪製紅色方框，因為這會導致單擊也顯示整條方框。
@@ -1504,17 +1506,22 @@ export class LogisticsRenderer {
                         seg.__numberNextPoint = { x: gc.endGx * _align, y: gc.endGy * _align };
                     });
 
-                    const debugRoutes = LogisticsRenderer.getSelectedGroupDebugRoutePoints(state, groupKey, groupSegs);
-                    LogisticsRenderer.renderDebugRouteNumberSprites(scene, groupKey, debugRoutes, groupSegs);
+                    const numberRoutes = selectedLine && !state.selectedLogisticsGroupId
+                        ? [logisticsRenderModel.getLineRoute(selectedLine)?.points || []]
+                        : LogisticsRenderer.getSelectedGroupDebugRoutePoints(state, groupKey, groupSegs);
+                    const numberSourceSegs = selectedLine && !state.selectedLogisticsGroupId
+                        ? [selectedLine]
+                        : groupSegs;
+                    LogisticsRenderer.renderDebugRouteNumberSprites(scene, groupKey, numberRoutes, numberSourceSegs);
                     const extendedAllowedCellKeys = new Set();
-                    debugRoutes.forEach(points => {
+                    numberRoutes.forEach(points => {
                         if (Array.isArray(points)) {
                             points.forEach(pt => {
                                 extendedAllowedCellKeys.add(`${Math.round(pt.x)},${Math.round(pt.y)}`);
                             });
                         }
                     });
-                    debugRoutes.forEach(points => {
+                    numberRoutes.forEach(points => {
                         LogisticsRenderer.drawRoutePointsDebug(graphics, points, extendedAllowedCellKeys);
                     });
                 }
@@ -3519,31 +3526,6 @@ export class LogisticsRenderer {
             }
         });
 
-        allKeys.forEach((key) => {
-            if (hasTurnAtKey(key)) return;
-            if ((incoming.get(key) || []).length > 0) return;
-            const outList = outgoing.get(key) || [];
-            if (outList.length === 0) return;
-            const point = pointOfKey(key);
-            for (const outDir of outList) {
-                const candidates = [
-                    { x: point.x - TS, y: point.y },
-                    { x: point.x + TS, y: point.y },
-                    { x: point.x, y: point.y - TS },
-                    { x: point.x, y: point.y + TS }
-                ];
-                for (const candidate of candidates) {
-                    const neighborKey = keyOf(candidate);
-                    if ((outgoing.get(neighborKey) || []).length > 0) continue;
-                    const neighborIncoming = incoming.get(neighborKey) || [];
-                    for (const inDir of neighborIncoming) {
-                        if (!LogisticsRenderer.getTurnArrowDirection(inDir, outDir)) continue;
-                        turns.push({ key, x: point.x, y: point.y, inDir, outDir });
-                        return;
-                    }
-                }
-            }
-        });
         return turns;
     }
 

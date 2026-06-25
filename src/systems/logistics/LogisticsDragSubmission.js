@@ -95,6 +95,10 @@ function submitDrag() {
         x: (g.x + offset.x * scale) * gridUnit,
         y: (g.y + offset.y * scale) * gridUnit
     }));
+    if (this.isCrossingMultipleLogisticsGroups(drag, buildGhosts, drag.routeWidth || 1)) {
+        GameEngine.addLog(`[物流線] 不可連續跨越 2 條以上物流線。`, 'LOGISTICS');
+        return { blocked: true };
+    }
     if (this.isReverseLogisticsExtension(drag, points, false)) {
         GameEngine.addLog(`[物流線] 禁止從端點 180 度反向延伸物流線。`, 'LOGISTICS');
         return { blocked: true };
@@ -109,28 +113,7 @@ function submitDrag() {
         : null;
     const sourceGroupId = drag.sourceLine?.groupId || drag.sourceLine?.id || null;
     let touchedTargetLine = this.findTouchedLogisticsLineAt(lastPoint, sourceGroupId);
-    // [核心修復] 若預設容差找不到（ghost 末端鄰接但未重疊現有線段），
-    // 以鄰接容差（一格距離）再搜尋一次，覆蓋繞路後末端差一格的情況。
     let mergePointOverride = null;
-    if (!touchedTargetLine && !targetBuilding) {
-        const TS = GameEngine.TILE_SIZE || 20;
-        touchedTargetLine = this.findTouchedLogisticsLineAt(lastPoint, sourceGroupId, TS * 1.1);
-        if (touchedTargetLine) {
-            // 合流點應對齊到目標線段上最近的端點，而非 ghost 的 lastPoint
-            const pts = Array.isArray(touchedTargetLine.routePoints) ? touchedTargetLine.routePoints : [];
-            let bestDist = Infinity;
-            let bestPt = null;
-            pts.forEach(p => {
-                const d = Math.hypot(p.x - lastPoint.x, p.y - lastPoint.y);
-                if (d < bestDist) { bestDist = d; bestPt = p; }
-            });
-            if (bestPt) {
-                mergePointOverride = { x: bestPt.x, y: bestPt.y };
-                // 追加合流點到路徑末端，使新建線段延伸至目標線段
-                points.push({ ...points[points.length - 1], x: bestPt.x, y: bestPt.y });
-            }
-        }
-    }
     const touchedTargetGroupId = touchedTargetLine ? (touchedTargetLine.groupId || touchedTargetLine.id) : null;
 
     if (window.UIManager) {

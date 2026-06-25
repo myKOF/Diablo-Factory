@@ -211,7 +211,8 @@ function updateDragNow(currentX, currentY) {
     const isRawReverseExtension = this.isReverseLogisticsExtension(this.activeDrag, rawPreviewPath, true);
     if (path && !isReverseExtension && rawPreviewIsValid && !isRawReverseExtension) {
         this.ghosts = this.router.processPath(path, dragTarget.building, GameEngine.state.logisticsLines || []);
-        this.isValid = this.validateGhosts(this.ghosts);
+        this.isValid = this.validateGhosts(this.ghosts) &&
+            !this.isCrossingMultipleLogisticsGroups(this.activeDrag, this.ghosts, this.activeDrag.routeWidth || 1);
     } else {
         this.ghosts = rawPreviewGhosts;
         this.isValid = false;
