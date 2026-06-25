@@ -1,6 +1,6 @@
 import { UI_CONFIG } from "../ui/ui_config.js";
 import { EffectSystem } from "./EffectSystem.js";
-import { PathfindingSystem } from "./PathfindingSystem.js?v=3";
+import { PathfindingSystem } from "./PathfindingSystem.js";
 import { BattleSystem } from "./BattleSystem.js";
 import { MapDataSystem } from "./MapDataSystem.js";
 import { ResourceSystem } from "./ResourceSystem.js";
