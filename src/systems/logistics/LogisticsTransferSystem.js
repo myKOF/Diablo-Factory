@@ -605,13 +605,21 @@ export class LogisticsTransferSystem {
     _processAutomatedLogisticsImpl(state, deltaTime) {
         if (!state.activeTransfers) state.activeTransfers = [];
 
-        // [Web Worker] 昂貴的「運動學」(固定子步長位移 + 合流閘門 + 堆積)抽至共用模組 LogisticsKinematics,
-        // 主執行緒與 worker 共用同一份;此處在主執行緒就地同步執行。抵達終點者由下方就地入庫。
-        const { arrivals } = runLogisticsKinematics(
-            { simSystem: conveyorSystem, engine: this.engine, transportArrayState: this.transportArrayState },
-            state,
-            deltaTime
-        );
+        // [Web Worker] 運動學來源:
+        //   預設(旗標關閉)→ 主執行緒就地同步跑 runLogisticsKinematics(已驗證、零延遲)。
+        //   啟用 worker(window.LOGISTICS_WORKER=true)→ 套用 worker 上一批結果(1-tick 延遲),
+        //   昂貴計算移出主執行緒並行。抵達終點者皆由下方統一就地入庫。
+        this._maybeInitWorker();
+        let arrivals;
+        if (this._workerBridge) {
+            arrivals = this._workerBridge.pullResult(state);
+        } else {
+            arrivals = runLogisticsKinematics(
+                { simSystem: conveyorSystem, engine: this.engine, transportArrayState: this.transportArrayState },
+                state,
+                deltaTime
+            ).arrivals;
+        }
 
         // 入庫(主執行緒專屬:存入建築 / 扣資源 / 更新 UI)。kinematics 已將抵達者移出 activeTransfers。
         for (let a = 0; a < arrivals.length; a++) {

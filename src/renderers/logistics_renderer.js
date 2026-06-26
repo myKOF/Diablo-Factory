@@ -121,6 +121,15 @@ export class LogisticsRenderer {
         };
 
         const selectedLogisticsOutlineJobs = [];
+        const deleteHoverLineIds = new Set(state.logisticsDeleteBrushHoverLineIds || []);
+        const deleteHoverGroupIds = new Set(state.logisticsDeleteBrushHoverGroupIds || []);
+        const isDeleteHoverGroupMode = !!state.logisticsDeleteToolActive && !!state.logisticsDeleteBrushCtrlMode;
+        const getLineSelectionKey = (line) => {
+            if (!line) return null;
+            const gx = line.gridX !== undefined ? line.gridX : Math.round((line.x || 0) / ((GameEngine.TILE_SIZE || 64) / 2));
+            const gy = line.gridY !== undefined ? line.gridY : Math.round((line.y || 0) / ((GameEngine.TILE_SIZE || 64) / 2));
+            return `${line.id || line.groupId || "logistics"}@${gx},${gy}`;
+        };
         const flushSelectedLogisticsOutlines = () => {
             selectedLogisticsOutlineJobs.forEach(({ points, widthTiles, line, outlineAll }) => {
                 if (outlineAll) drawSelectedLogisticsRouteOutlines(points, widthTiles, line);
@@ -246,6 +255,35 @@ export class LogisticsRenderer {
                         graphics.fillRect(selectedRect.x, selectedRect.y, selectedRect.w, selectedRect.h);
                     }
                 }
+            }
+
+            const lineSelectionKey = getLineSelectionKey(line);
+            const lineGroupKey = line?.groupId || line?.id || null;
+            const isDeleteHovered = !!state.logisticsDeleteToolActive && (
+                (isDeleteHoverGroupMode && lineGroupKey && deleteHoverGroupIds.has(lineGroupKey)) ||
+                (!isDeleteHoverGroupMode && lineSelectionKey && deleteHoverLineIds.has(lineSelectionKey))
+            );
+            if (isDeleteHovered) {
+                const hoverColor = 0xff3030;
+                const hoverAlpha = 0.72;
+                const rects = getRenderableLogisticsCellRects(points, widthTiles, true, line);
+                if (shouldDrawOpenEndpointCell(line, points)) {
+                    const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
+                    if (endpointRect) rects.push(endpointRect);
+                }
+                LogisticsRenderer.drawLogisticsRoundedTurnSegments(
+                    graphics,
+                    points,
+                    thickPx,
+                    hoverColor,
+                    hoverAlpha,
+                    roundedSkipCellKeys
+                );
+                graphics.fillStyle(hoverColor, hoverAlpha);
+                rects.forEach(rect => {
+                    if (skipBaseCellKeys?.has(rect.cellKey)) return;
+                    graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
+                });
             }
 
             const arrowRects = getRenderableLogisticsCellRects(points, widthTiles, true, line);
@@ -1354,7 +1392,8 @@ export class LogisticsRenderer {
                     : null;
                 const isPrimarySelected = (groupKey === primarySelectedGroupId) || !!selectedLine;
 
-                if (isPrimarySelected) {
+                const showLogisticsLineNumbers = !!state.settings?.showLogisticsLineNumbers;
+                if (isPrimarySelected && showLogisticsLineNumbers) {
                     // [核心修正] 移除原先的 segmentRoutes.forEach 繪製紅色方框，因為這會導致單擊也顯示整條方框。
                     // 紅色方框繪製已經被移至 drawLogisticsRoute 內部 (只針對被選中的單獨 line 繪製)。
 
@@ -1512,7 +1551,10 @@ export class LogisticsRenderer {
                     const numberSourceSegs = selectedLine && !state.selectedLogisticsGroupId
                         ? [selectedLine]
                         : groupSegs;
-                    LogisticsRenderer.renderDebugRouteNumberSprites(scene, groupKey, numberRoutes, numberSourceSegs);
+                    const numberStartIndex = selectedLine && !state.selectedLogisticsGroupId
+                        ? LogisticsRenderer.getSingleLineDebugNumberStartIndex(state, groupKey, groupSegs, selectedLine)
+                        : 0;
+                    LogisticsRenderer.renderDebugRouteNumberSprites(scene, groupKey, numberRoutes, numberSourceSegs, numberStartIndex);
                     const extendedAllowedCellKeys = new Set();
                     numberRoutes.forEach(points => {
                         if (Array.isArray(points)) {
@@ -2990,11 +3032,31 @@ export class LogisticsRenderer {
         return keys;
     }
 
-    static renderDebugRouteNumberSprites(scene, groupKey, routes, groupSegs = null) {
+    static getSingleLineDebugNumberStartIndex(state, groupKey, groupSegs, selectedLine) {
+        const selectedRoute = logisticsRenderModel.getLineRoute(selectedLine)?.points || selectedLine?.routePoints || [];
+        const selectedStart = Array.isArray(selectedRoute) ? selectedRoute[0] : null;
+        if (!selectedStart || !Number.isFinite(selectedStart.x) || !Number.isFinite(selectedStart.y)) return 0;
+        const targetKey = `${Math.round(selectedStart.x)},${Math.round(selectedStart.y)}`;
+        const fullRoutes = LogisticsRenderer.getSelectedGroupDebugRoutePoints(state, groupKey, groupSegs);
+        const seen = new Set();
+        for (const points of fullRoutes) {
+            if (!Array.isArray(points)) continue;
+            for (const point of points) {
+                if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+                const key = `${Math.round(point.x)},${Math.round(point.y)}`;
+                if (seen.has(key)) continue;
+                if (key === targetKey) return seen.size;
+                seen.add(key);
+            }
+        }
+        return 0;
+    }
+
+    static renderDebugRouteNumberSprites(scene, groupKey, routes, groupSegs = null, startIndex = 0) {
         if (!Array.isArray(routes) || routes.length === 0) return;
         const seen = new Set();
         const suppressedKeys = LogisticsRenderer.getDetachedSplitArrowCellKeys(groupSegs);
-        let labelIndex = 0;
+        let labelIndex = Math.max(0, Math.floor(Number(startIndex) || 0));
         routes.forEach((points, routeIndex) => {
             if (!Array.isArray(points)) return;
             points.forEach(point => {

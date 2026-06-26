@@ -341,6 +341,16 @@ export class UIManager {
                     return;
                 }
             }
+            if (GameEngine.state.logisticsDeleteToolActive && !this.isTextInputEvent(e)) {
+                const isPlus = e.key === "+" || e.key === "=" || e.code === "NumpadAdd" || e.code === "Equal";
+                const isMinus = e.key === "-" || e.key === "_" || e.code === "NumpadSubtract" || e.code === "Minus";
+                if (isPlus || isMinus) {
+                    this.adjustLogisticsDeleteBrushSize(isPlus ? 1 : -1);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return;
+                }
+            }
             if (e.key === "Escape") {
                 if (this.cancelActiveConstructionPreview()) {
                     e.preventDefault();
@@ -1089,6 +1099,57 @@ export class UIManager {
                 countResource: cfg.model
             }, { compact: true });
         });
+        this.createLogisticsDeleteToolButtons(container, bp);
+    }
+
+    static createLogisticsDeleteToolButtons(container, bp) {
+        const makeBtn = (id, label, title, clickHandler) => {
+            const btn = document.createElement("button");
+            btn.id = id;
+            btn.type = "button";
+            btn.title = title;
+            btn.textContent = label;
+            btn.style.cssText = `
+                width: ${Math.min(52, bp.itemWidth || 52)}px;
+                height: ${bp.itemHeight || 52}px;
+                border: 1.5px solid rgba(255,255,255,0.10);
+                background: rgba(45,45,45,0.62);
+                color: ${bp.titleColor || "#fbc02d"};
+                cursor: pointer;
+                border-radius: 4px;
+                font-size: 18px;
+                font-weight: 900;
+                box-sizing: border-box;
+            `;
+            btn.onclick = (event) => {
+                event.stopPropagation();
+                clickHandler(event);
+            };
+            container.appendChild(btn);
+            return btn;
+        };
+
+        const deleteBtn = makeBtn(
+            "logistics_delete_tool_btn",
+            "",
+            `物流線刪除刷子（目前 ${GameEngine.state.logisticsDeleteBrushSize || 1}x${GameEngine.state.logisticsDeleteBrushSize || 1}，鍵盤 +/- 調整）`,
+            () => this.toggleLogisticsDeleteTool()
+        );
+        deleteBtn.innerHTML = `
+            <svg viewBox="0 0 48 48" width="34" height="34" aria-hidden="true">
+                <rect x="7" y="19" width="34" height="10" rx="2" fill="#6f7375"/>
+                <path d="M12 24h24" stroke="#d7d7d7" stroke-width="3" stroke-linecap="round" stroke-dasharray="4 5"/>
+                <path d="M15 13L33 35M33 13L15 35" stroke="#ff3434" stroke-width="5" stroke-linecap="round"/>
+            </svg>
+        `;
+        deleteBtn.className = "shortcut-tool-btn";
+        if (GameEngine.state.logisticsDeleteToolActive) {
+            deleteBtn.classList.add("active");
+            deleteBtn.style.border = "3px solid #ff3434";
+            deleteBtn.style.boxShadow = "0 0 18px rgba(255,52,52,0.55)";
+            deleteBtn.style.background = "rgba(255,52,52,0.22)";
+        }
+
     }
 
     static createBuildingBtn(container, bp, item, options = {}) {
@@ -1274,6 +1335,11 @@ export class UIManager {
 
     static startStampMode(type) {
         this.cancelBuildingMode();
+        GameEngine.state.logisticsDeleteToolActive = false;
+        GameEngine.state.logisticsDeleteBrushDragging = false;
+        GameEngine.state.logisticsDeleteBrushHoverLineIds = [];
+        GameEngine.state.logisticsDeleteBrushHoverGroupIds = [];
+        GameEngine.state.logisticsDeleteBrushCtrlMode = false;
         const cfg = GameEngine.state.buildingConfigs[type];
         if (cfg && cfg.type2 === 'transport_line') {
             GameEngine.state.activeTransportLineType = type;
@@ -1330,6 +1396,159 @@ export class UIManager {
             x: gx * TS,
             y: gy * TS
         };
+    }
+
+    static ensureLogisticsToolCursor() {
+        let cursor = document.getElementById("logistics_tool_cursor");
+        if (cursor) return cursor;
+        cursor = document.createElement("div");
+        cursor.id = "logistics_tool_cursor";
+        cursor.style.cssText = `
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 64px;
+            height: 64px;
+            border: 3px solid #2cff5a;
+            background: rgba(44,255,90,0.16);
+            pointer-events: none;
+            z-index: 9998;
+            box-sizing: border-box;
+            display: none;
+        `;
+        document.body.appendChild(cursor);
+        return cursor;
+    }
+
+    static updateLogisticsToolCursor(clientX = null, clientY = null, worldX = null, worldY = null, ctrlMode = false) {
+        const cursor = this.ensureLogisticsToolCursor();
+        const state = GameEngine.state;
+        const TS = GameEngine.TILE_SIZE || 64;
+        const deleteActive = !!state.logisticsDeleteToolActive;
+        const buildActive = LogisticsUI.isTransportLinePlacementActive() && !this.isLogisticsDragging && !deleteActive;
+        if (!deleteActive && !buildActive) {
+            cursor.style.display = "none";
+            return;
+        }
+        const size = deleteActive ? Math.max(1, Math.min(5, Number(state.logisticsDeleteBrushSize) || 1)) : 1;
+        const pxSize = TS * size;
+        const left = Number.isFinite(clientX) ? clientX - pxSize / 2 : parseFloat(cursor.style.left) || 0;
+        const top = Number.isFinite(clientY) ? clientY - pxSize / 2 : parseFloat(cursor.style.top) || 0;
+        cursor.style.display = "block";
+        cursor.style.left = `${left}px`;
+        cursor.style.top = `${top}px`;
+        cursor.style.width = `${pxSize}px`;
+        cursor.style.height = `${pxSize}px`;
+        cursor.style.borderColor = deleteActive ? "#ff3434" : "#2cff5a";
+        cursor.style.background = deleteActive ? "rgba(255,52,52,0.16)" : "rgba(44,255,90,0.16)";
+        if (deleteActive && Number.isFinite(worldX) && Number.isFinite(worldY)) {
+            this.updateLogisticsDeleteBrushHover(worldX, worldY, ctrlMode);
+        }
+    }
+
+    static toggleLogisticsDeleteTool() {
+        const state = GameEngine.state;
+        state.logisticsDeleteToolActive = !state.logisticsDeleteToolActive;
+        state.logisticsDeleteBrushDragging = false;
+        state.logisticsDeleteBrushHoverLineIds = [];
+        state.logisticsDeleteBrushHoverGroupIds = [];
+        state.logisticsDeleteBrushCtrlMode = false;
+        if (state.logisticsDeleteToolActive) {
+            this.cancelBuildingMode();
+            LogisticsUI.cancelLogisticsDrag();
+        }
+        this.updateLogisticsToolCursor();
+        state.renderVersion++;
+        this.updateValues(true);
+    }
+
+    static adjustLogisticsDeleteBrushSize(delta) {
+        const state = GameEngine.state;
+        const current = Math.max(1, Math.min(5, Number(state.logisticsDeleteBrushSize) || 1));
+        state.logisticsDeleteBrushSize = Math.max(1, Math.min(5, current + delta));
+        this.updateLogisticsToolCursor();
+        state.renderVersion++;
+        this.updateValues(true);
+    }
+
+    static pointInsideRect(point, rect) {
+        return !!point &&
+            point.x >= rect.left && point.x <= rect.right &&
+            point.y >= rect.top && point.y <= rect.bottom;
+    }
+
+    static getLogisticsDeleteBrushRect(worldX, worldY) {
+        const TS = GameEngine.TILE_SIZE || 64;
+        const size = Math.max(1, Math.min(5, Number(GameEngine.state.logisticsDeleteBrushSize) || 1));
+        const cx = Math.floor(worldX / TS) * TS + TS / 2;
+        const cy = Math.floor(worldY / TS) * TS + TS / 2;
+        const half = (TS * size) / 2;
+        return { left: cx - half, right: cx + half, top: cy - half, bottom: cy + half, cx, cy };
+    }
+
+    static isLogisticsLineInsideBrush(line, rect) {
+        const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+        if (points.length === 0) return this.pointInsideRect(line, rect);
+        const TS = GameEngine.TILE_SIZE || 64;
+        for (let i = 0; i < points.length; i++) {
+            if (this.pointInsideRect(points[i], rect)) return true;
+        }
+        for (let i = 0; i < points.length - 1; i++) {
+            const a = points[i];
+            const b = points[i + 1];
+            if (!a || !b) continue;
+            const dist = Math.hypot(b.x - a.x, b.y - a.y);
+            const steps = Math.max(1, Math.ceil(dist / (TS / 2)));
+            for (let step = 0; step <= steps; step++) {
+                const t = step / steps;
+                const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+                if (this.pointInsideRect(p, rect)) return true;
+            }
+        }
+        return false;
+    }
+
+    static getLogisticsLinesInBrush(worldX, worldY) {
+        if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) return [];
+        const rect = this.getLogisticsDeleteBrushRect(worldX, worldY);
+        return conveyorSystem.ensureLogisticsLineStore()
+            .filter(line => this.isLogisticsLineInsideBrush(line, rect));
+    }
+
+    static updateLogisticsDeleteBrushHover(worldX, worldY, ctrlMode = false) {
+        const state = GameEngine.state;
+        const touchedLines = this.getLogisticsLinesInBrush(worldX, worldY);
+        const touchedLineIds = touchedLines
+            .map(line => conveyorSystem.getLogisticsLineSelectionKey(line))
+            .filter(Boolean);
+        const touchedGroupIds = touchedLines
+            .map(line => line?.groupId || line?.id || null)
+            .filter(Boolean);
+        state.logisticsDeleteBrushWorld = { x: worldX, y: worldY };
+        state.logisticsDeleteBrushCtrlMode = !!ctrlMode;
+        state.logisticsDeleteBrushHoverLineIds = [...new Set(touchedLineIds)];
+        state.logisticsDeleteBrushHoverGroupIds = [...new Set(touchedGroupIds)];
+        state.renderVersion++;
+    }
+
+    static deleteLogisticsLinesInBrush(worldX, worldY, ctrlMode = false) {
+        const state = GameEngine.state;
+        if (!state.logisticsDeleteToolActive || !Number.isFinite(worldX) || !Number.isFinite(worldY)) return;
+        const touchedLines = this.getLogisticsLinesInBrush(worldX, worldY);
+        if (ctrlMode) {
+            const groupIds = [...new Set(touchedLines.map(line => line?.groupId || line?.id || null).filter(Boolean))];
+            groupIds.forEach(groupId => conveyorSystem.deleteLogisticsLineGroupById(groupId));
+        } else {
+            touchedLines.forEach(line => {
+                const lineId = conveyorSystem.getLogisticsLineSelectionKey(line);
+                if (!lineId) return;
+                state.selectedLogisticsClickX = Number.isFinite(line?.x) ? line.x : worldX;
+                state.selectedLogisticsClickY = Number.isFinite(line?.y) ? line.y : worldY;
+                conveyorSystem.deleteLogisticsLineById(lineId);
+            });
+        }
+        this.updateLogisticsDeleteBrushHover(worldX, worldY, ctrlMode);
+        this.updateValues(true);
     }
 
     static getWorldPoint(clientX, clientY) {
@@ -1661,22 +1880,24 @@ export class UIManager {
         this.leftMouseDownPos = { x: e.clientX, y: e.clientY };
         const world = this.getWorldPoint(e.clientX, e.clientY);
         const worldX = world.x; const worldY = world.y;
+        this.updateLogisticsToolCursor(e.clientX, e.clientY, worldX, worldY, e.ctrlKey);
+        if (GameEngine.state.logisticsDeleteToolActive) {
+            GameEngine.state.logisticsDeleteBrushDragging = true;
+            this.deleteLogisticsLinesInBrush(worldX, worldY, e.ctrlKey);
+            return;
+        }
         const clickedBuilding = GameEngine.state.mapEntities.find(ent => {
             if (ent.isUnderConstruction) return false;
             const cfg = GameEngine.getEntityConfig(ent.type1);
             if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false;
-            if (!this.isSelectedBuilding(ent)) return false;
             return !!this.getPortSlotAt(ent, worldX, worldY);
         });
-        if (clickedBuilding && GameEngine.state.buildingMode === 'NONE') {
+        if (clickedBuilding && (!GameEngine.state.placingType || LogisticsUI.isTransportLinePlacementActive())) {
             const sourcePort = this.getPortSlotAt(clickedBuilding, worldX, worldY);
-            if (sourcePort) {
-                this.potentialLogisticsDrag = {
-                    entity: clickedBuilding,
-                    sourcePort,
-                    startClientX: e.clientX,
-                    startClientY: e.clientY
-                };
+            if (sourcePort && LogisticsUI.beginLogisticsDragFromBuilding(clickedBuilding, sourcePort)) {
+                conveyorSystem.updateDrag(worldX, worldY);
+                this.updateValues();
+                return;
             }
         }
 
@@ -1686,10 +1907,12 @@ export class UIManager {
         const clickedSelectedLine = clickedLines.find(line => conveyorSystem.isSelectedLogisticsLine(line)) || null;
         const clickedLine = clickedSelectedLine || clickedLines[0] || conveyorSystem.getLogisticsLineAt(worldX, worldY);
         const isDoubleClick = (e.detail || 0) >= 2;
-        if (clickedSelectedLine) {
+        if (e.ctrlKey && clickedLine) {
             GameEngine.state.selectedLogisticsClickX = worldX;
             GameEngine.state.selectedLogisticsClickY = worldY;
-            LogisticsUI.beginLogisticsDragFromLine(clickedSelectedLine, worldX, worldY);
+            LogisticsUI.beginLogisticsDragFromLine(clickedLine, worldX, worldY);
+            conveyorSystem.updateDrag(worldX, worldY);
+            this.updateValues();
             return;
         }
         if (LogisticsUI.isTransportLinePlacementActive() && GameEngine.state.buildingMode === 'STAMP') {
@@ -1701,21 +1924,12 @@ export class UIManager {
             });
             if (portBuilding) {
                 const sourcePort = this.getPortSlotAt(portBuilding, worldX, worldY);
-                this.potentialLogisticsDrag = {
-                    entity: portBuilding,
-                    sourcePort,
-                    startClientX: e.clientX,
-                    startClientY: e.clientY
-                };
+                if (sourcePort && LogisticsUI.beginLogisticsDragFromBuilding(portBuilding, sourcePort)) {
+                    conveyorSystem.updateDrag(worldX, worldY);
+                    this.updateValues();
+                }
                 return;
             }
-            this.potentialTransportLineBuildDrag = {
-                startX: e.clientX,
-                startY: e.clientY,
-                worldX,
-                worldY,
-                clickedLine: clickedLine || null
-            };
             return;
         }
 
@@ -1728,6 +1942,13 @@ export class UIManager {
     }
 
     static handleWorldMouseMove(e) {
+        const toolWorld = this.getWorldPoint(e.clientX, e.clientY);
+        this.updateLogisticsToolCursor(e.clientX, e.clientY, toolWorld.x, toolWorld.y, e.ctrlKey);
+        if (GameEngine.state.logisticsDeleteToolActive && GameEngine.state.logisticsDeleteBrushDragging) {
+            this.deleteLogisticsLinesInBrush(toolWorld.x, toolWorld.y, e.ctrlKey);
+            return;
+        }
+
         if (this.potentialTransportLineBuildDrag && !this.isLogisticsDragging) {
             const threshold = UI_CONFIG.Interaction?.minDragDistance || 10;
             const dist = Math.hypot(
@@ -1815,6 +2036,10 @@ export class UIManager {
 
         // [左鍵邏輯專區]
         if (e.button !== 0) return;
+        if (GameEngine.state.logisticsDeleteBrushDragging) {
+            GameEngine.state.logisticsDeleteBrushDragging = false;
+            return;
+        }
         this.potentialLogisticsDrag = null;
         this.potentialTransportLineBuildDrag = null;
 
@@ -2171,6 +2396,13 @@ export class UIManager {
                 <span style="font-size: 16px; color: #e0e0e0; font-weight: 600;">右鍵拖動畫面的開關</span>
                 <div class="setting-toggle ${settings.rightClickDrag ? 'active' : ''}" style="width: 54px; height: 26px; background: ${settings.rightClickDrag ? 'var(--aoe-gold)' : '#444'}; border-radius: 13px; position: relative; transition: all 0.3s; box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);">
                     <div style="width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 3px; ${settings.rightClickDrag ? 'right: 3px' : 'left: 3px'}; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
+                </div>
+            </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="window.UIManager.updateSetting(event, 'showLogisticsLineNumbers', !window.GAME_STATE.settings.showLogisticsLineNumbers)">
+                <span style="font-size: 16px; color: #e0e0e0; font-weight: 600;">物流線編號顯示</span>
+                <div class="setting-toggle ${settings.showLogisticsLineNumbers ? 'active' : ''}" style="width: 54px; height: 26px; background: ${settings.showLogisticsLineNumbers ? 'var(--aoe-gold)' : '#444'}; border-radius: 13px; position: relative; transition: all 0.3s; box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);">
+                    <div style="width: 20px; height: 20px; background: white; border-radius: 50%; position: absolute; top: 3px; ${settings.showLogisticsLineNumbers ? 'right: 3px' : 'left: 3px'}; transition: all 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.4);"></div>
                 </div>
             </div>
         `;
@@ -2728,7 +2960,12 @@ export class UIManager {
         // 5. 更新建築按鈕高亮
         const placingType = GameEngine.state.placingType;
         document.querySelectorAll(".building-item").forEach(btn => {
-            if (btn.getAttribute("data-type") === placingType) {
+            const buttonType = btn.getAttribute("data-type");
+            const buttonCfg = GameEngine.state.buildingConfigs?.[buttonType];
+            const isLogisticsGhostButton = !!GameEngine.state.logisticsDragLine &&
+                !!buttonCfg &&
+                buttonCfg.type2 === "transport_line";
+            if (buttonType === placingType || isLogisticsGhostButton) {
                 btn.classList.add("active");
             } else {
                 btn.classList.remove("active");
