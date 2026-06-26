@@ -2143,7 +2143,16 @@ export class UIManager {
     static handleWorldMouseUp(e) {
         // [右鍵邏輯專區]
         if (e.button === 2) {
-            if (this.cancelActiveConstructionPreview()) {
+            let isDrag = false;
+            if (this.rightMouseDownPos) {
+                const dist = Math.hypot(e.clientX - this.rightMouseDownPos.x, e.clientY - this.rightMouseDownPos.y);
+                const timeDiff = Date.now() - (this.rightMouseDownTime || 0);
+                if (dist > 10 || timeDiff > 250) {
+                    isDrag = true;
+                }
+            }
+
+            if (!isDrag && this.cancelActiveConstructionPreview()) {
                 GameEngine.state.rightClickStartedInPlacementMode = false;
                 GameEngine.state.suppressRightClickMoveUntil = Date.now() + 250;
                 if (typeof e.preventDefault === "function") e.preventDefault();
