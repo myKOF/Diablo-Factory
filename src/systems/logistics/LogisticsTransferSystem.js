@@ -603,8 +603,23 @@ export class LogisticsTransferSystem {
         }
     }
 
-    // [Web Worker] 依旗標延遲建立/拆除運動學 worker。預設關閉:設 window.LOGISTICS_WORKER=true 即於下一 tick 啟用。
+    // [Web Worker] 依旗標延遲建立/拆除運動學 worker。預設關閉。
+    // 啟用方式(會持久化,重整後保留):console 執行 setLogisticsWorker(true) / setLogisticsWorker(false)。
+    // 或一次性:window.LOGISTICS_WORKER = true(不持久化)。
     _maybeInitWorker() {
+        if (typeof window !== 'undefined') {
+            // 首次:提供持久化開關 + 由 localStorage 還原偏好
+            if (typeof window.setLogisticsWorker !== 'function') {
+                window.setLogisticsWorker = (on) => {
+                    window.LOGISTICS_WORKER = !!on;
+                    try { localStorage.setItem('LOGISTICS_WORKER', on ? '1' : '0'); } catch (e) {}
+                    return `物流 Web Worker: ${on ? '啟用' : '停用'}(已記住)`;
+                };
+            }
+            if (window.LOGISTICS_WORKER === undefined) {
+                try { if (localStorage.getItem('LOGISTICS_WORKER') === '1') window.LOGISTICS_WORKER = true; } catch (e) {}
+            }
+        }
         const want = typeof window !== 'undefined' && window.LOGISTICS_WORKER === true && typeof Worker !== 'undefined';
         if (want && !this._workerBridge) {
             try {
