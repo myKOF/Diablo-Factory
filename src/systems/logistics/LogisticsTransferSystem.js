@@ -650,6 +650,25 @@ export class LogisticsTransferSystem {
         }
     }
 
+    // [C: 密度上限] 在途物品上限(0=不限)。可持久化調整:console 執行 setMaxActiveTransfers(n)。
+    // 預設 700(維持 worker 接近即時、源頭不塞車);想要更多物品可調高(較卡),想更順可調低。
+    _getMaxActiveTransfers() {
+        if (typeof window === 'undefined') return 0;
+        if (typeof window.setMaxActiveTransfers !== 'function') {
+            window.setMaxActiveTransfers = (n) => {
+                window.MAX_ACTIVE_TRANSFERS = Math.max(0, Math.floor(Number(n) || 0));
+                try { localStorage.setItem('MAX_ACTIVE_TRANSFERS', String(window.MAX_ACTIVE_TRANSFERS)); } catch (e) {}
+                return `物品上限: ${window.MAX_ACTIVE_TRANSFERS || '不限'}(已記住)`;
+            };
+        }
+        if (window.MAX_ACTIVE_TRANSFERS === undefined) {
+            let v = 700;
+            try { const s = localStorage.getItem('MAX_ACTIVE_TRANSFERS'); if (s !== null) v = Math.max(0, parseInt(s, 10) || 0); } catch (e) {}
+            window.MAX_ACTIVE_TRANSFERS = v;
+        }
+        return Number(window.MAX_ACTIVE_TRANSFERS) || 0;
+    }
+
     _processAutomatedLogisticsImpl(state, deltaTime) {
         if (!state.activeTransfers) state.activeTransfers = [];
 
@@ -773,6 +792,13 @@ export class LogisticsTransferSystem {
         };
 
         // 2. 讓滿足工人條件的建築自動發送物品
+        // [C: 密度上限/發料回壓] 在途物品達上限時暫停發料(源頭物資/outputBuffer 留存等待,不遺失),
+        // 避免發料速率快過 worker 移動速率造成源頭塞車(內圈密外圈疏)與體感卡頓。上限維持 worker 接近即時。
+        // 可調且持久化:console 執行 setMaxActiveTransfers(n)(0=不限);預設見下。
+        const _maxActive = this._getMaxActiveTransfers();
+        if (_maxActive > 0 && state.activeTransfers.length >= _maxActive) {
+            // 達上限:本 tick 不發料(已在途者照常推進/抵達,count 降回上限下時自動恢復發料)。
+        } else
         state.mapEntities.forEach(ent => {
             if (!ent.outputTargets || ent.outputTargets.length === 0) return;
 
