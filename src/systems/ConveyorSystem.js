@@ -44,7 +44,7 @@ export class ConveyorSystem {
         // [合併鎖定] 防止拆分後立刻被自動合併覆蓋，由 deleteLogisticsLineById 啟用
         this.isProcessingMerge = false;
         this.logisticsBuildUndoStack = [];
-        this.maxLogisticsBuildUndoSteps = 5;
+        this.maxLogisticsBuildUndoSteps = 99;
         this.runtimeContext = new LogisticsRuntimeContext(() => GameEngine);
         this.lineStore = new LogisticsLineStore(this, () => GameEngine);
         this.undoStore = new LogisticsUndoStore(this, () => GameEngine);

@@ -623,52 +623,58 @@ export class LogisticsRenderer {
             allConnectedGroupSegs.forEach((seg) => {
                 const pts = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
                 if (pts.length < 2) return;
-                const fromKey = makeNodeKey(pts[0]);
-                const toKey = makeNodeKey(pts[1]);
-                nodeKeySet.add(fromKey);
-                nodeKeySet.add(toKey);
-                if (!adj.has(fromKey)) adj.set(fromKey, new Set());
-                adj.get(fromKey).add(toKey);
-                if (!undirected.has(fromKey)) undirected.set(fromKey, new Set());
-                if (!undirected.has(toKey)) undirected.set(toKey, new Set());
-                undirected.get(fromKey).add(toKey);
-                undirected.get(toKey).add(fromKey);
-                incoming.add(toKey);
-                outDegree.set(fromKey, (outDegree.get(fromKey) || 0) + 1);
-                inDegree.set(toKey, (inDegree.get(toKey) || 0) + 1);
+                for (let i = 0; i < pts.length - 1; i++) {
+                    const fromPoint = pts[i];
+                    const toPoint = pts[i + 1];
+                    if (!fromPoint || !toPoint) continue;
+                    const fromKey = makeNodeKey(fromPoint);
+                    const toKey = makeNodeKey(toPoint);
+                    nodeKeySet.add(fromKey);
+                    nodeKeySet.add(toKey);
+                    if (!adj.has(fromKey)) adj.set(fromKey, new Set());
+                    adj.get(fromKey).add(toKey);
+                    if (!undirected.has(fromKey)) undirected.set(fromKey, new Set());
+                    if (!undirected.has(toKey)) undirected.set(toKey, new Set());
+                    undirected.get(fromKey).add(toKey);
+                    undirected.get(toKey).add(fromKey);
+                    incoming.add(toKey);
+                    outDegree.set(fromKey, (outDegree.get(fromKey) || 0) + 1);
+                    inDegree.set(toKey, (inDegree.get(toKey) || 0) + 1);
 
-                const dx = pts[1].x - pts[0].x;
-                const dy = pts[1].y - pts[0].y;
-                const dist = Math.hypot(dx, dy);
-                if (dist > 0.001) {
-                    const dirX = dx / dist;
-                    const dirY = dy / dist;
-                    const steps = Math.max(1, Math.round(dist / GameEngine.TILE_SIZE));
-                    const stepSize = dist / steps;
-                    let prevCellKey = null;
-                    for (let step = 0; step < steps; step++) {
-                        const point = {
-                            x: pts[0].x + dirX * stepSize * step,
-                            y: pts[0].y + dirY * stepSize * step
-                        };
-                        const cellKey = makeNodeKey(point);
-                        cellKeySet.add(cellKey);
-                        cellPointByKey.set(cellKey, getNodePoint(cellKey));
-                        if (!cellAdj.has(cellKey)) cellAdj.set(cellKey, new Set());
-                        addCellEdge(prevCellKey, cellKey);
-                        prevCellKey = cellKey;
+                    const dx = toPoint.x - fromPoint.x;
+                    const dy = toPoint.y - fromPoint.y;
+                    const dist = Math.hypot(dx, dy);
+                    if (dist > 0.001) {
+                        const dirX = dx / dist;
+                        const dirY = dy / dist;
+                        const steps = Math.max(1, Math.round(dist / GameEngine.TILE_SIZE));
+                        const stepSize = dist / steps;
+                        let prevCellKey = null;
+                        for (let step = 0; step < steps; step++) {
+                            const point = {
+                                x: fromPoint.x + dirX * stepSize * step,
+                                y: fromPoint.y + dirY * stepSize * step
+                            };
+                            const cellKey = makeNodeKey(point);
+                            cellKeySet.add(cellKey);
+                            cellPointByKey.set(cellKey, getNodePoint(cellKey));
+                            if (!cellAdj.has(cellKey)) cellAdj.set(cellKey, new Set());
+                            addCellEdge(prevCellKey, cellKey);
+                            prevCellKey = cellKey;
+                        }
+                        const endCellKey = makeNodeKey(toPoint);
+                        cellKeySet.add(endCellKey);
+                        cellPointByKey.set(endCellKey, getNodePoint(endCellKey));
+                        if (!cellAdj.has(endCellKey)) cellAdj.set(endCellKey, new Set());
+                        addCellEdge(prevCellKey, endCellKey);
                     }
-                    const endCellKey = makeNodeKey(pts[1]);
-                    cellKeySet.add(endCellKey);
-                    cellPointByKey.set(endCellKey, getNodePoint(endCellKey));
-                    if (!cellAdj.has(endCellKey)) cellAdj.set(endCellKey, new Set());
-                    addCellEdge(prevCellKey, endCellKey);
                 }
             });
 
             const nodeKeys = Array.from(nodeKeySet);
             if (nodeKeys.length === 0) return;
             const cellKeys = Array.from(cellKeySet);
+            const terminalCellKeySet = new Set(cellKeys.filter((key) => (cellAdj.get(key)?.size || 0) <= 1));
             cellKeys.forEach((key) => {
                 const p = cellPointByKey.get(key);
                 if (!p) return;
@@ -713,6 +719,8 @@ export class LogisticsRenderer {
             const fallbackEnd = nodeKeys.filter((k) => incoming.has(k));
             const startKeys = terminalStarts.length > 0 ? terminalStarts : fallbackStart;
             const endKeys = terminalEnds.length > 0 ? terminalEnds : fallbackEnd;
+            const terminalStartKeySet = new Set(terminalStarts);
+            const terminalEndKeySet = new Set(terminalEnds);
 
             const getPortOwnersNearNode = (nodeKey, wantOutput) => {
                 if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return [];
@@ -829,6 +837,10 @@ export class LogisticsRenderer {
                 scored.sort((a, b) => a.d - b.d);
                 return scored.slice(0, 8).map((s) => s.key);
             };
+            const getNearbyTerminalCellKeys = (point, maxSnap) => {
+                if (!point || terminalCellKeySet.size === 0) return [];
+                return getNearbyCellKeys(point, maxSnap).filter((key) => terminalCellKeySet.has(key));
+            };
             const getPortOwnersNearCell = (cellKey, wantOutput) => {
                 if (!window.UIManager || typeof window.UIManager.getBuildingPortSlots !== 'function') return [];
                 const cellPoint = cellPointByKey.get(cellKey) || getNodePoint(cellKey);
@@ -888,8 +900,8 @@ export class LogisticsRenderer {
                 const endKeysRaw = targetPort
                     ? getNearbyNodeKeys(targetPort, nodeKeys, targetSnap)
                     : getNearbyNodeKeys({ x: targetEnt.x, y: targetEnt.y }, nodeKeys, targetSnap);
-                const explicitStarts = startKeysRaw.filter((k) => (adj.get(k)?.size || 0) > 0);
-                const explicitEnds = endKeysRaw.filter((k) => incoming.has(k));
+                const explicitStarts = startKeysRaw.filter((k) => terminalStartKeySet.has(k) && (adj.get(k)?.size || 0) > 0);
+                const explicitEnds = endKeysRaw.filter((k) => terminalEndKeySet.has(k) && incoming.has(k));
                 for (const sk of explicitStarts) {
                     if (connected) break;
                     for (const ek of explicitEnds) {
@@ -907,8 +919,8 @@ export class LogisticsRenderer {
                 const targetPort = representative.targetPort || null;
                 const sourceSnap = sourcePort ? GameEngine.TILE_SIZE * 1.5 : GameEngine.TILE_SIZE * 2.5;
                 const targetSnap = targetPort ? GameEngine.TILE_SIZE * 1.5 : GameEngine.TILE_SIZE * 2.5;
-                const sourceCells = getNearbyCellKeys(sourcePort || { x: sourceEnt.x, y: sourceEnt.y }, sourceSnap);
-                const targetCells = getNearbyCellKeys(targetPort || { x: targetEnt.x, y: targetEnt.y }, targetSnap);
+                const sourceCells = getNearbyTerminalCellKeys(sourcePort || { x: sourceEnt.x, y: sourceEnt.y }, sourceSnap);
+                const targetCells = getNearbyTerminalCellKeys(targetPort || { x: targetEnt.x, y: targetEnt.y }, targetSnap);
                 for (const sk of sourceCells) {
                     if (connected) break;
                     for (const ek of targetCells) {
@@ -953,9 +965,11 @@ export class LogisticsRenderer {
                 const endKeysRaw = targetPort
                     ? getNearbyNodeKeys(targetPort, nodeKeys, targetSnap)
                     : getNearbyNodeKeys({ x: targetEnt.x, y: targetEnt.y }, nodeKeys, targetSnap);
-                for (const sk of startKeysRaw) {
+                const terminalStartKeysRaw = startKeysRaw.filter((key) => terminalStartKeySet.has(key));
+                const terminalEndKeysRaw = endKeysRaw.filter((key) => terminalEndKeySet.has(key));
+                for (const sk of terminalStartKeysRaw) {
                     if (connected) break;
-                    for (const ek of endKeysRaw) {
+                    for (const ek of terminalEndKeysRaw) {
                         if (hasUndirectedPath(sk, ek)) {
                             connected = true;
                             break;
@@ -1023,7 +1037,7 @@ export class LogisticsRenderer {
                     const collectOwnerCells = (candidates, wantOutput, ownerId, bucket) => {
                         const seen = new Set();
                         candidates.forEach((candidate) => {
-                            getNearbyCellKeys(candidate, GameEngine.TILE_SIZE * 2.25).forEach((k) => {
+                            getNearbyTerminalCellKeys(candidate, GameEngine.TILE_SIZE * 2.25).forEach((k) => {
                                 if (seen.has(k)) return;
                                 const owners = getPortOwnersNearCell(k, wantOutput).filter((owner) => owner.id === ownerId);
                                 if (owners.length === 0) return;
@@ -1035,13 +1049,13 @@ export class LogisticsRenderer {
                     collectOwnerCells(sourceCandidates, true, sourceId, outputCells);
                     collectOwnerCells(targetCandidates, false, targetId, inputCells);
                     if (outputCells.length === 0) {
-                        getNearbyCellKeys(sourcePort || { x: sourceEnt.x, y: sourceEnt.y }, GameEngine.TILE_SIZE * 3).forEach((k) => {
+                        getNearbyTerminalCellKeys(sourcePort || { x: sourceEnt.x, y: sourceEnt.y }, GameEngine.TILE_SIZE * 3).forEach((k) => {
                             const owners = getPortOwnersNearCell(k, true).filter((owner) => owner.id === sourceId);
                             if (owners.length > 0) outputCells.push({ key: k, owners });
                         });
                     }
                     if (inputCells.length === 0) {
-                        getNearbyCellKeys(targetPort || { x: targetEnt.x, y: targetEnt.y }, GameEngine.TILE_SIZE * 3).forEach((k) => {
+                        getNearbyTerminalCellKeys(targetPort || { x: targetEnt.x, y: targetEnt.y }, GameEngine.TILE_SIZE * 3).forEach((k) => {
                             const owners = getPortOwnersNearCell(k, false).filter((owner) => owner.id === targetId);
                             if (owners.length > 0) inputCells.push({ key: k, owners });
                         });
@@ -1884,6 +1898,12 @@ export class LogisticsRenderer {
             return;
         }
 
+        // [效能 LOD] 序號文字每個都是獨立 GPU 材質 / 一個 draw call(無法批次)。物品多或縮放小時數字
+        // 本就讀不到,卻成為主執行緒卸載(worker)後的繪製瓶頸。縮放夠大且數量不多時才畫;否則全部隱藏。
+        const camZoom = scene?.cameras?.main?.zoom || 1;
+        const transferCount = state.activeTransfers.length;
+        const showSerial = camZoom >= 0.85 && transferCount <= 150;
+
         const entityById = new Map();
         (state.mapEntities || []).forEach(ent => {
             if (!ent) return;
@@ -1967,9 +1987,10 @@ export class LogisticsRenderer {
                     itemSize - strokeWidth
                 );
             }
-            LogisticsRenderer.renderTransferSerialLabel(scene, t, px, py, itemSize);
+            if (showSerial) LogisticsRenderer.renderTransferSerialLabel(scene, t, px, py, itemSize);
         });
         if (useSpriteTransfers) LogisticsRenderer.endTransferSprites(scene);
+        // showSerial=false 時本幀無任何 label 被標記為可見,endTransferSerialLabels 會銷毀全部殘留文字,移除其 draw call。
         LogisticsRenderer.endTransferSerialLabels(scene);
     }
 
