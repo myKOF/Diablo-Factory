@@ -1,4 +1,28 @@
+# 2026-06-26 物流線刪除模式 Hover 半透明紅色高亮計畫
+
+## 核心目標
+1. 修正開啟物流線刪除模式時，滑鼠的紅框碰觸到物流線，該物流線未顯示為半透明紅色的問題。
+2. 確保物流靜態層的 dirty-check 特徵簽章（`getLogisticsRenderSignature`）包含刪除模式與滑鼠 hover 狀態，以便滑鼠移動時即時重繪物流線。
+
+## 實施步驟
+- [ ] 步驟 1：在 `src/scenes/MainScene.js` 的 `getLogisticsRenderSignature` 中，混入刪除模式狀態 `logisticsDeleteToolActive`、筆刷位置 `logisticsDeleteBrushWorld` 的 `x` 與 `y`、筆刷大小 `logisticsDeleteBrushSize` 與 Ctrl 模式 `logisticsDeleteBrushCtrlMode`。
+- [ ] 步驟 2：使用 Playwright 執行既有的 `render_signature.spec.js` 回歸測試，確保特徵簽章的修改未破壞既有的決定性與非追蹤欄位測試。
+- [ ] 步驟 3：執行 `npm run finalize` 進行任務完成收尾。
+
 # 2026-06-25 物流線連續延伸建造流程改造計畫
+
+# 2026-06-26 物品運輸移動一致性補修計畫
+
+## 核心目標
+1. 找出性能優化後物品長時間運輸出現重疊、速度不一致的根因。
+2. 保留陣列偏移運輸法，不恢復每物品獨立 Update，目標同屏 1000 個物品 FPS 40 以上。
+3. 補上可重現的物流運輸一致性驗證，避免後續優化再次破壞 spacing / offset。
+
+## 實施步驟
+- [x] 步驟 1：使用 `tools/safe_search.cjs` 定位物品 offset、運輸陣列、sprite 同步與近期性能優化改動。
+- [x] 步驟 2：建立最小重現或回歸檢查，確認長時間移動後物品間距與速度漂移。
+- [x] 步驟 3：局部修正根因，維持批次更新與低 draw call，不新增每物品獨立 update。
+- [x] 步驟 4：執行相關驗證與 `npm run finalize`，回報 Debug 渲染耗時與 Draw Calls。
 
 ## 核心目標
 1. 物流線完成一次建造後，不退出延伸流程，而是自動以剛建好物流線末端作為新起點建立虛影。

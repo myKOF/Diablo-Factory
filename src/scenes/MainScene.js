@@ -743,6 +743,14 @@ export class MainScene extends Phaser.Scene {
         mixStr(state.selectedLogisticsLineId);
         mixStr(state.selectedLogisticsGroupId);
 
+        mixNum(state.logisticsDeleteToolActive ? 1 : 0);
+        if (state.logisticsDeleteToolActive) {
+            mixNum(state.logisticsDeleteBrushWorld?.x);
+            mixNum(state.logisticsDeleteBrushWorld?.y);
+            mixNum(state.logisticsDeleteBrushSize);
+            mixNum(state.logisticsDeleteBrushCtrlMode ? 1 : 0);
+        }
+
         return `${(h1 >>> 0).toString(36)}:${(h2 >>> 0).toString(36)}:${lines.length}:${outputTargetCount}`;
     }
 

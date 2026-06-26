@@ -1,41 +1,56 @@
 const fs = require('fs');
 const path = require('path');
 
-function searchFiles(dir, query, results = []) {
-    const list = fs.readdirSync(dir);
-    for (const file of list) {
-        if (file === 'node_modules' || file === '.git' || file === 'tmp' || file === 'dist') continue;
-        const filePath = path.join(dir, file);
-        const stat = fs.statSync(filePath);
-        if (stat && stat.isDirectory()) {
-            searchFiles(filePath, query, results);
-        } else if (file.endsWith('.js') || file.endsWith('.md')) {
-            try {
-                const content = fs.readFileSync(filePath, 'utf8');
-                const lines = content.split('\n');
-                for (let i = 0; i < lines.length; i++) {
-                    if (lines[i].includes(query)) {
-                        results.push({ file: filePath, line: i + 1, content: lines[i].trim() });
-                    }
-                }
-            } catch (err) {}
-        }
-    }
-    return results;
-}
-
-const args = process.argv.slice(2);
-if (args.length === 0) {
+const query = process.argv[2];
+if (!query) {
     console.error('Please provide a search query.');
     process.exit(1);
 }
 
-const query = args[0];
-const results = searchFiles(__dirname + '/../', query);
-console.log(`Found ${results.length} matches for "${query}":`);
-for (let i = 0; i < Math.min(results.length, 50); i++) {
-    console.log(`${results[i].file}:${results[i].line}: ${results[i].content}`);
+const ignoreDirs = ['node_modules', '.git', 'tmp', 'dist'];
+const results = [];
+
+function searchDir(dir) {
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+        const fullPath = path.join(dir, file);
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+            if (ignoreDirs.includes(file)) continue;
+            searchDir(fullPath);
+        } else {
+            const ext = path.extname(file);
+            if (['.js', '.json', '.html', '.css', '.md'].includes(ext)) {
+                try {
+                    const content = fs.readFileSync(fullPath, 'utf8');
+                    const lines = content.split('\n');
+                    lines.forEach((line, idx) => {
+                        if (line.includes(query)) {
+                            results.push({
+                                file: path.relative(process.cwd(), fullPath),
+                                line: idx + 1,
+                                text: line.trim()
+                            });
+                        }
+                    });
+                } catch (e) {
+                    // Ignore read errors
+                }
+            }
+        }
+    }
 }
-if (results.length > 50) {
-    console.log(`... and ${results.length - 50} more matches.`);
+
+searchDir(process.cwd());
+
+if (results.length === 0) {
+    console.log('No matches found.');
+} else {
+    console.log(`Found ${results.length} matches for "${query}":`);
+    results.slice(0, 100).forEach(r => {
+        console.log(`${r.file}:${r.line}: ${r.text}`);
+    });
+    if (results.length > 100) {
+        console.log(`... and ${results.length - 100} more matches.`);
+    }
 }
