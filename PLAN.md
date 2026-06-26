@@ -3,11 +3,13 @@
 ## 核心目標
 1. 修正開啟物流線刪除模式時，滑鼠的紅框碰觸到物流線，該物流線未顯示為半透明紅色的問題。
 2. 確保物流靜態層的 dirty-check 特徵簽章（`getLogisticsRenderSignature`）包含刪除模式與滑鼠 hover 狀態，以便滑鼠移動時即時重繪物流線。
+3. **[新增] 精確選取機制**：在非 Ctrl 刪除模式下，若同時碰觸到多個相連線段，只高亮並刪除滑鼠最靠近的那「一格」物流線段。
 
 ## 實施步驟
-- [ ] 步驟 1：在 `src/scenes/MainScene.js` 的 `getLogisticsRenderSignature` 中，混入刪除模式狀態 `logisticsDeleteToolActive`、筆刷位置 `logisticsDeleteBrushWorld` 的 `x` 與 `y`、筆刷大小 `logisticsDeleteBrushSize` 與 Ctrl 模式 `logisticsDeleteBrushCtrlMode`。
-- [ ] 步驟 2：使用 Playwright 執行既有的 `render_signature.spec.js` 回歸測試，確保特徵簽章的修改未破壞既有的決定性與非追蹤欄位測試。
-- [ ] 步驟 3：執行 `npm run finalize` 進行任務完成收尾。
+- [x] 步驟 1：在 `src/scenes/MainScene.js` 的 `getLogisticsRenderSignature` 中，混入刪除模式狀態 `logisticsDeleteToolActive`、筆刷位置 `logisticsDeleteBrushWorld` 的 `x` 與 `y`、筆刷大小 `logisticsDeleteBrushSize` 與 Ctrl 模式 `logisticsDeleteBrushCtrlMode`。
+- [ ] 步驟 2：修改 `src/ui/ui.js` 的 `getLogisticsLinesInBrush`，在非 Ctrl 模式下對多個被碰觸的線段依距離滑鼠點的最小距離進行排序，僅回傳距離最近的唯一段落。
+- [ ] 步驟 3：使用 Playwright 執行既有的 `render_signature.spec.js` 回歸測試，確保特徵簽章的修改未破壞既有的決定性與非追蹤欄位測試。
+- [ ] 步驟 4：執行 `npm run finalize` 進行任務完成收尾。
 
 # 2026-06-25 物流線連續延伸建造流程改造計畫
 

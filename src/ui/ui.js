@@ -1600,7 +1600,7 @@ export class UIManager {
         return false;
     }
 
-    static getLogisticsLinesInBrush(worldX, worldY) {
+    static getLogisticsLinesInBrush(worldX, worldY, ctrlMode = false) {
         if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) return [];
         const rect = this.getLogisticsDeleteBrushRect(worldX, worldY);
         const linesByKey = new Map();
@@ -1621,12 +1621,22 @@ export class UIManager {
         conveyorSystem.ensureLogisticsLineStore()
             .filter(line => this.isLogisticsLineInsideBrush(line, rect))
             .forEach(addLine);
-        return [...linesByKey.values()];
+        const linesArray = [...linesByKey.values()];
+        if (!ctrlMode && linesArray.length > 1) {
+            let nearest = linesArray[0];
+            let minDist = Math.hypot(nearest.x - worldX, nearest.y - worldY);
+            for (const line of linesArray) {
+                const d = Math.hypot(line.x - worldX, line.y - worldY);
+                if (d < minDist) { minDist = d; nearest = line; }
+            }
+            return [nearest];
+        }
+        return linesArray;
     }
 
     static updateLogisticsDeleteBrushHover(worldX, worldY, ctrlMode = false) {
         const state = GameEngine.state;
-        const touchedLines = this.getLogisticsLinesInBrush(worldX, worldY);
+        const touchedLines = this.getLogisticsLinesInBrush(worldX, worldY, ctrlMode);
         const touchedLineIds = touchedLines
             .map(line => conveyorSystem.getLogisticsLineSelectionKey(line))
             .filter(Boolean);
@@ -1643,7 +1653,7 @@ export class UIManager {
     static deleteLogisticsLinesInBrush(worldX, worldY, ctrlMode = false) {
         const state = GameEngine.state;
         if (!state.logisticsDeleteToolActive || !Number.isFinite(worldX) || !Number.isFinite(worldY)) return;
-        const touchedLines = this.getLogisticsLinesInBrush(worldX, worldY);
+        const touchedLines = this.getLogisticsLinesInBrush(worldX, worldY, ctrlMode);
         if (ctrlMode) {
             const groupIds = [...new Set(touchedLines.map(line => line?.groupId || line?.id || null).filter(Boolean))];
             groupIds.forEach(groupId => conveyorSystem.deleteLogisticsLineGroupById(groupId));
