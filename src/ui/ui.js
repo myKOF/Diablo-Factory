@@ -5,6 +5,7 @@ import { conveyorSystem } from "../systems/ConveyorSystem.js";
 import { WarehouseUI } from "./WarehouseUI.js";
 import { LogisticsUI } from "./LogisticsUI.js";
 import { BuildingMenuUI } from "./BuildingMenuUI.js";
+import { LogisticsRenderer } from "../renderers/logistics_renderer.js";
 
 
 /**
@@ -1143,13 +1144,20 @@ export class UIManager {
             </svg>
         `;
         deleteBtn.className = "shortcut-tool-btn";
-        if (GameEngine.state.logisticsDeleteToolActive) {
-            deleteBtn.classList.add("active");
-            deleteBtn.style.border = "3px solid #ff3434";
-            deleteBtn.style.boxShadow = "0 0 18px rgba(255,52,52,0.55)";
-            deleteBtn.style.background = "rgba(255,52,52,0.22)";
-        }
+        this.refreshLogisticsDeleteToolButtonState(deleteBtn);
 
+    }
+
+    static refreshLogisticsDeleteToolButtonState(button = null) {
+        const btn = button || document.getElementById("logistics_delete_tool_btn");
+        if (!btn) return;
+        const active = !!GameEngine.state.logisticsDeleteToolActive;
+        btn.classList.toggle("active", active);
+        btn.style.border = active ? "3px solid var(--aoe-gold)" : "1.5px solid rgba(255,255,255,0.10)";
+        btn.style.boxShadow = active ? "0 0 20px rgba(251,192,45,0.62), inset 0 0 10px rgba(255,52,52,0.18)" : "none";
+        btn.style.background = active ? "rgba(139,110,75,0.30)" : "rgba(45,45,45,0.62)";
+        const size = GameEngine.state.logisticsDeleteBrushSize || 1;
+        btn.title = `物流線刪除刷子（目前 ${size}x${size}，鍵盤 +/- 調整，右鍵取消）`;
     }
 
     static createBuildingBtn(container, bp, item, options = {}) {
@@ -1335,11 +1343,7 @@ export class UIManager {
 
     static startStampMode(type) {
         this.cancelBuildingMode();
-        GameEngine.state.logisticsDeleteToolActive = false;
-        GameEngine.state.logisticsDeleteBrushDragging = false;
-        GameEngine.state.logisticsDeleteBrushHoverLineIds = [];
-        GameEngine.state.logisticsDeleteBrushHoverGroupIds = [];
-        GameEngine.state.logisticsDeleteBrushCtrlMode = false;
+        this.cancelLogisticsDeleteTool();
         const cfg = GameEngine.state.buildingConfigs[type];
         if (cfg && cfg.type2 === 'transport_line') {
             GameEngine.state.activeTransportLineType = type;
@@ -1365,6 +1369,8 @@ export class UIManager {
             document.body.removeChild(this.dragGhost);
             this.dragGhost = null;
         }
+        this.potentialTransportLineBuildDrag = null;
+        this.updateLogisticsToolCursor();
         this.updateValues();
     }
 
@@ -1458,8 +1464,30 @@ export class UIManager {
             LogisticsUI.cancelLogisticsDrag();
         }
         this.updateLogisticsToolCursor();
+        this.refreshLogisticsDeleteToolButtonState();
         state.renderVersion++;
         this.updateValues(true);
+    }
+
+    static cancelLogisticsDeleteTool() {
+        const state = GameEngine.state;
+        if (!state.logisticsDeleteToolActive &&
+            !state.logisticsDeleteBrushDragging &&
+            !(state.logisticsDeleteBrushHoverLineIds || []).length &&
+            !(state.logisticsDeleteBrushHoverGroupIds || []).length) {
+            return false;
+        }
+        state.logisticsDeleteToolActive = false;
+        state.logisticsDeleteBrushDragging = false;
+        state.logisticsDeleteBrushWorld = null;
+        state.logisticsDeleteBrushHoverLineIds = [];
+        state.logisticsDeleteBrushHoverGroupIds = [];
+        state.logisticsDeleteBrushCtrlMode = false;
+        this.updateLogisticsToolCursor();
+        this.refreshLogisticsDeleteToolButtonState();
+        state.renderVersion++;
+        this.updateValues(true);
+        return true;
     }
 
     static adjustLogisticsDeleteBrushSize(delta) {
@@ -1467,6 +1495,7 @@ export class UIManager {
         const current = Math.max(1, Math.min(5, Number(state.logisticsDeleteBrushSize) || 1));
         state.logisticsDeleteBrushSize = Math.max(1, Math.min(5, current + delta));
         this.updateLogisticsToolCursor();
+        this.refreshLogisticsDeleteToolButtonState();
         state.renderVersion++;
         this.updateValues(true);
     }
@@ -1475,6 +1504,19 @@ export class UIManager {
         return !!point &&
             point.x >= rect.left && point.x <= rect.right &&
             point.y >= rect.top && point.y <= rect.bottom;
+    }
+
+    static rectsIntersect(a, b) {
+        if (!a || !b) return false;
+        const aLeft = Number.isFinite(a.left) ? a.left : a.x;
+        const aTop = Number.isFinite(a.top) ? a.top : a.y;
+        const aRight = Number.isFinite(a.right) ? a.right : a.x + a.w;
+        const aBottom = Number.isFinite(a.bottom) ? a.bottom : a.y + a.h;
+        const bLeft = Number.isFinite(b.left) ? b.left : b.x;
+        const bTop = Number.isFinite(b.top) ? b.top : b.y;
+        const bRight = Number.isFinite(b.right) ? b.right : b.x + b.w;
+        const bBottom = Number.isFinite(b.bottom) ? b.bottom : b.y + b.h;
+        return aLeft <= bRight && aRight >= bLeft && aTop <= bBottom && aBottom >= bTop;
     }
 
     static getLogisticsDeleteBrushRect(worldX, worldY) {
@@ -1486,8 +1528,33 @@ export class UIManager {
         return { left: cx - half, right: cx + half, top: cy - half, bottom: cy + half, cx, cy };
     }
 
+    static getLogisticsDeleteBrushCellKeys(rect) {
+        const TS = GameEngine.TILE_SIZE || 64;
+        const keys = new Set();
+        const minX = Math.floor(rect.left / TS) * TS + TS / 2;
+        const maxX = Math.floor(rect.right / TS) * TS + TS / 2;
+        const minY = Math.floor(rect.top / TS) * TS + TS / 2;
+        const maxY = Math.floor(rect.bottom / TS) * TS + TS / 2;
+        for (let y = minY; y <= maxY; y += TS) {
+            for (let x = minX; x <= maxX; x += TS) {
+                keys.add(`${Math.round(x)},${Math.round(y)}`);
+            }
+        }
+        return keys;
+    }
+
     static isLogisticsLineInsideBrush(line, rect) {
         const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+        if (points.length >= 2 && typeof LogisticsRenderer.getLogisticsCellRects === "function") {
+            const widthTiles = Math.max(1, Number(line?.routeWidth) || 1);
+            const visibleRects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
+            if (visibleRects.some(lineRect => this.rectsIntersect(rect, lineRect))) return true;
+        }
+        const brushCellKeys = this.getLogisticsDeleteBrushCellKeys(rect);
+        if (typeof conveyorSystem.getLogisticsSegmentOccupiedKeys === "function") {
+            const lineCellKeys = conveyorSystem.getLogisticsSegmentOccupiedKeys(line);
+            if (Array.isArray(lineCellKeys) && lineCellKeys.some(key => brushCellKeys.has(key))) return true;
+        }
         if (points.length === 0) return this.pointInsideRect(line, rect);
         const TS = GameEngine.TILE_SIZE || 64;
         for (let i = 0; i < points.length; i++) {
@@ -1846,6 +1913,12 @@ export class UIManager {
 
 
     static cancelActiveConstructionPreview() {
+        if (this.cancelLogisticsDeleteTool()) {
+            GameEngine.state.rightClickStartedInPlacementMode = false;
+            GameEngine.state.suppressRightClickMoveUntil = Date.now() + 250;
+            GameEngine.addLog(`[物流] 已取消物流線刪除工具。`, 'LOGISTICS');
+            return true;
+        }
         if (LogisticsUI.cancelLogisticsDrag()) return true;
         if (!GameEngine.state.placingType && GameEngine.state.buildingMode === 'NONE') return false;
         this.cancelBuildingMode();
@@ -1867,7 +1940,7 @@ export class UIManager {
         if (e.button === 2) {
             // [核心修復] 在操作起始階段，標記本次右鍵是否是「取消建造」
             // 因為後續 contextmenu 事件可能會提前清空 GameEngine.state.placingType
-            GameEngine.state.rightClickStartedInPlacementMode = !!GameEngine.state.placingType;
+            GameEngine.state.rightClickStartedInPlacementMode = !!GameEngine.state.placingType || !!GameEngine.state.logisticsDeleteToolActive;
             this.rightMouseDownPos = { x: e.clientX, y: e.clientY };
             this.rightMouseDownTime = Date.now();
             return;
@@ -1930,6 +2003,13 @@ export class UIManager {
                 }
                 return;
             }
+            this.potentialTransportLineBuildDrag = {
+                startX: e.clientX,
+                startY: e.clientY,
+                worldX,
+                worldY,
+                clickedLine: null
+            };
             return;
         }
 
@@ -2021,7 +2101,7 @@ export class UIManager {
     static handleWorldMouseUp(e) {
         // [右鍵邏輯專區]
         if (e.button === 2) {
-            if (LogisticsUI.cancelLogisticsDrag()) {
+            if (this.cancelActiveConstructionPreview()) {
                 GameEngine.state.rightClickStartedInPlacementMode = false;
                 GameEngine.state.suppressRightClickMoveUntil = Date.now() + 250;
                 if (typeof e.preventDefault === "function") e.preventDefault();

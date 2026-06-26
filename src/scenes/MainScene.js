@@ -444,7 +444,7 @@ export class MainScene extends Phaser.Scene {
 
         this.input.on('pointerdown', (pointer) => {
             const isPlacement = !!GameEngine.state.placingType;
-            if (window.GAME_STATE && window.GAME_STATE.logisticsDragLine) return;
+            if (this.isLogisticsToolInputActive()) return;
             if (window.UIManager && window.UIManager.dragGhost) return;
 
             const isMiddleDrag = pointer.middleButtonDown();
@@ -464,7 +464,7 @@ export class MainScene extends Phaser.Scene {
                     if (pointer.event?.stopPropagation) pointer.event.stopPropagation();
                     return;
                 }
-                if (!isPlacement) {
+                if (!isPlacement && !this.isLogisticsToolInputActive()) {
                     this.selectionStartPos = worldPoint;
                     this.mouseDownScreenPos = { x: pointer.x, y: pointer.y };
                 }
@@ -2673,11 +2673,20 @@ export class MainScene extends Phaser.Scene {
     /**
      * [核心修補] 全域框選移動處理：支援 UI 穿透並實施邊界限制 (Clamping)
      */
+    isLogisticsToolInputActive() {
+        return !!(window.GAME_STATE && (
+            window.GAME_STATE.logisticsDragLine ||
+            window.GAME_STATE.logisticsDeleteToolActive ||
+            window.GAME_STATE.logisticsDeleteBrushDragging
+        ));
+    }
+
     handleSelectionMove(e) {
-        if (window.GAME_STATE && window.GAME_STATE.logisticsDragLine) {
+        if (this.isLogisticsToolInputActive()) {
             this.selectionStartPos = null;
             this.mouseDownScreenPos = null;
             if (this.marqueeGraphics) this.marqueeGraphics.visible = false;
+            if (this.marqueeGraphics) this.marqueeGraphics.clear();
             return;
         }
         if (!this.selectionStartPos) return;
@@ -2719,7 +2728,7 @@ export class MainScene extends Phaser.Scene {
      * [核心修補] 全域框選結束處理：解決鼠標移出視窗後鎖死的問題
      */
     handleSelectionEnd(e) {
-        if (window.GAME_STATE && window.GAME_STATE.logisticsDragLine) {
+        if (this.isLogisticsToolInputActive()) {
             this.selectionStartPos = null;
             this.mouseDownScreenPos = null;
             if (this.marqueeGraphics) this.marqueeGraphics.clear();

@@ -311,10 +311,16 @@ function submitDrag() {
             return null;
         }
         this.recordLogisticsBuildUndoSnapshot(buildUndoSnapshot, GameEngine.state);
+        const continuationPoint = points[points.length - 1] || lastPoint;
         let selectedContinuationLine = null;
-        if (drag.isLineExtension && finalGroupId && GameEngine.state) {
+        if (finalGroupId && GameEngine.state) {
             const finalSegments = this.getLogisticsSegmentsByGroupId(finalGroupId);
-            const activeSegment = finalSegments
+            const endpointMatchDistance = Math.max(1, (GameEngine.TILE_SIZE || 20) * 0.2);
+            const activeSegment = finalSegments.find(seg => {
+                const segPoints = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
+                const end = segPoints[segPoints.length - 1] || null;
+                return end && continuationPoint && Math.hypot(end.x - continuationPoint.x, end.y - continuationPoint.y) <= endpointMatchDistance;
+            }) || finalSegments
                 .slice()
                 .sort((a, b) =>
                     (Number(a?.createdAt) || 0) - (Number(b?.createdAt) || 0) ||
@@ -334,10 +340,9 @@ function submitDrag() {
             selectedContinuationLine = activeSegment || null;
         }
         GameEngine.addLog(`[物流] 傳送帶建造完成，共 ${builtSegments} 節。`, 'LOGISTICS');
-        const continuationPoint = points[points.length - 1] || lastPoint;
-        const continuationLine = this.findTouchedLogisticsLineAt(continuationPoint, null, (GameEngine.TILE_SIZE || 20) * 0.75)
-            || selectedContinuationLine
+        const continuationLine = selectedContinuationLine
             || createdLine
+            || this.findTouchedLogisticsLineAt(continuationPoint, null, (GameEngine.TILE_SIZE || 20) * 0.75)
             || null;
         const result = {
             built: builtSegments > 0,

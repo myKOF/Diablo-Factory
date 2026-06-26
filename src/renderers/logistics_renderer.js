@@ -124,6 +124,30 @@ export class LogisticsRenderer {
         const deleteHoverLineIds = new Set(state.logisticsDeleteBrushHoverLineIds || []);
         const deleteHoverGroupIds = new Set(state.logisticsDeleteBrushHoverGroupIds || []);
         const isDeleteHoverGroupMode = !!state.logisticsDeleteToolActive && !!state.logisticsDeleteBrushCtrlMode;
+        const getDeleteBrushRect = () => {
+            const point = state.logisticsDeleteBrushWorld;
+            if (!state.logisticsDeleteToolActive || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+            const TS = GameEngine.TILE_SIZE || 64;
+            const size = Math.max(1, Math.min(5, Number(state.logisticsDeleteBrushSize) || 1));
+            const cx = Math.floor(point.x / TS) * TS + TS / 2;
+            const cy = Math.floor(point.y / TS) * TS + TS / 2;
+            const half = (TS * size) / 2;
+            return { left: cx - half, right: cx + half, top: cy - half, bottom: cy + half };
+        };
+        const rectsIntersect = (a, b) => {
+            if (!a || !b) return false;
+            const bLeft = Number.isFinite(b.left) ? b.left : b.x;
+            const bTop = Number.isFinite(b.top) ? b.top : b.y;
+            const bRight = Number.isFinite(b.right) ? b.right : b.x + b.w;
+            const bBottom = Number.isFinite(b.bottom) ? b.bottom : b.y + b.h;
+            return a.left <= bRight && a.right >= bLeft && a.top <= bBottom && a.bottom >= bTop;
+        };
+        const deleteBrushRect = getDeleteBrushRect();
+        const routeIntersectsDeleteBrush = (points, widthTiles) => {
+            if (!deleteBrushRect || !Array.isArray(points) || points.length < 2) return false;
+            return LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true)
+                .some(rect => rectsIntersect(deleteBrushRect, rect));
+        };
         const getLineSelectionKey = (line) => {
             if (!line) return null;
             const gx = line.gridX !== undefined ? line.gridX : Math.round((line.x || 0) / ((GameEngine.TILE_SIZE || 64) / 2));
@@ -152,7 +176,7 @@ export class LogisticsRenderer {
             const endpointKey = end ? `${Math.round(end.x)},${Math.round(end.y)}` : null;
             return !!endpointKey && !isDetachedSplitCell(line, endpointKey);
         };
-        const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null, skipBaseCellKeys = null, skipRoundedTurnCellKeys = null, skippedTurnBaseCellKeys = null) => {
+        const drawLogisticsRoute = (points, widthTiles, isSelected, isConnected, line = null, isPortToPort = false, skipArrowCellKeys = null, skipBaseCellKeys = null, skipRoundedTurnCellKeys = null, skippedTurnBaseCellKeys = null, forceDeleteHover = false) => {
             const baseThickness = logCfg.lineThickness || 3;
             const thickPx = Math.max(baseThickness, widthTiles * GameEngine.TILE_SIZE);
             const usePortToPortStyle = !!isPortToPort && !!isConnected;
@@ -259,7 +283,8 @@ export class LogisticsRenderer {
 
             const lineSelectionKey = getLineSelectionKey(line);
             const lineGroupKey = line?.groupId || line?.id || null;
-            const isDeleteHovered = !!state.logisticsDeleteToolActive && (
+            const isDeleteHovered = !!state.logisticsDeleteToolActive && (forceDeleteHover ||
+                routeIntersectsDeleteBrush(points, widthTiles) ||
                 (isDeleteHoverGroupMode && lineGroupKey && deleteHoverGroupIds.has(lineGroupKey)) ||
                 (!isDeleteHoverGroupMode && lineSelectionKey && deleteHoverLineIds.has(lineSelectionKey))
             );
@@ -1337,10 +1362,13 @@ export class LogisticsRenderer {
                         detachedSplitArrowCellKeys
                     );
                 }
+                const groupDeleteHovered = !!state.logisticsDeleteToolActive &&
+                    !!isDeleteHoverGroupMode &&
+                    segmentRoutes.some(({ route }) => routeIntersectsDeleteBrush(route.points, route.width || widthTiles));
                 segmentRoutes.forEach(({ line, route }) => {
                     // [核心修正] 單擊時僅高亮被點擊的那一段，而不是用 some 讓整個群組都高亮
                     const isLineSelected = logisticsRenderModel.isSelectedLine(line, state);
-                    drawLogisticsRoute(route.points, route.width || widthTiles, isLineSelected, isConnected, line, useConnectedIdleStyle, ordinaryArrowSkipCellKeys, roundedBaseSkipCellKeys, roundedTurnSkipCellKeys, null);
+                    drawLogisticsRoute(route.points, route.width || widthTiles, isLineSelected, isConnected, line, useConnectedIdleStyle, ordinaryArrowSkipCellKeys, roundedBaseSkipCellKeys, roundedTurnSkipCellKeys, null, groupDeleteHovered);
                 });
                 if (isPortToPortCandidate && useConnectedIdleStyle) {
                     segmentRoutes.forEach(({ route }) => {

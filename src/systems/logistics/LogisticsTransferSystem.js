@@ -4,6 +4,7 @@ import { conveyorSystem } from "../ConveyorSystem.js";
 import { routePointsSignature } from "./LogisticsRouteCache.js";
 import { LogisticsTransportArrayState } from "./LogisticsTransportArrayState.js";
 import { runLogisticsKinematics } from "./LogisticsKinematics.js";
+import { LogisticsWorkerBridge } from "./LogisticsWorkerBridge.js";
 
 function annotateRoutePoints(points) {
     if (!Array.isArray(points) || points.length < 3) return;
@@ -602,6 +603,25 @@ export class LogisticsTransferSystem {
         }
     }
 
+    // [Web Worker] 依旗標延遲建立/拆除運動學 worker。預設關閉:設 window.LOGISTICS_WORKER=true 即於下一 tick 啟用。
+    _maybeInitWorker() {
+        const want = typeof window !== 'undefined' && window.LOGISTICS_WORKER === true && typeof Worker !== 'undefined';
+        if (want && !this._workerBridge) {
+            try {
+                const url = new URL('./logistics.worker.js', import.meta.url);
+                this._workerBridge = new LogisticsWorkerBridge(url);
+                if (this.engine && typeof this.engine.addLog === 'function') this.engine.addLog('[物流] Web Worker 運動學已啟用', 'SYSTEM');
+            } catch (err) {
+                console.error('[物流] Web Worker 啟用失敗,回退主執行緒同步:', err);
+                this._workerBridge = null;
+                if (typeof window !== 'undefined') window.LOGISTICS_WORKER = false;
+            }
+        } else if (!want && this._workerBridge) {
+            this._workerBridge.dispose();
+            this._workerBridge = null;
+        }
+    }
+
     _processAutomatedLogisticsImpl(state, deltaTime) {
         if (!state.activeTransfers) state.activeTransfers = [];
 
@@ -800,5 +820,9 @@ export class LogisticsTransferSystem {
             }
         });
 
+        // [Web Worker] dispatch 完成後,把本 tick 的新增/移除送交 worker 計算下一批運動學(結果於後續 tick 套用)。
+        if (this._workerBridge) {
+            this._workerBridge.pushStep(state, deltaTime, this.engine?.TILE_SIZE || 20);
+        }
     }
 }
