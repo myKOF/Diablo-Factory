@@ -103,7 +103,8 @@ function deleteLogisticsLineById(lineId) {
             
             // [修正]: 僅選取完全同位或被直接點擊的線段，不使用 routePoints.some，避免把首尾相連的前一格/後一格一起誤殺
             const segmentsAtClick = groupSegments.filter(seg => {
-                return seg.id === line.id || (Math.abs(seg.x - cx) < 1 && Math.abs(seg.y - cy) < 1);
+                return this.getLogisticsLineSelectionKey(seg) === lineKey ||
+                    (Math.abs(seg.x - cx) < 1 && Math.abs(seg.y - cy) < 1);
             });
             if (segmentsAtClick.length > 0) {
                 targetSegments = segmentsAtClick;

@@ -1519,6 +1519,17 @@ export class UIManager {
         return aLeft <= bRight && aRight >= bLeft && aTop <= bBottom && aBottom >= bTop;
     }
 
+    static isPointInsideLogisticsRect(point, rect) {
+        if (!point || !rect) return false;
+        const left = rect.x;
+        const top = rect.y;
+        const right = rect.x + rect.w;
+        const bottom = rect.y + rect.h;
+        const eps = 0.5;
+        return point.x >= left + eps && point.x < right - eps &&
+            point.y >= top + eps && point.y < bottom - eps;
+    }
+
     static getLogisticsDeleteBrushRect(worldX, worldY) {
         const TS = GameEngine.TILE_SIZE || 64;
         const size = Math.max(1, Math.min(5, Number(GameEngine.state.logisticsDeleteBrushSize) || 1));
@@ -1531,45 +1542,58 @@ export class UIManager {
     static getLogisticsDeleteBrushCellKeys(rect) {
         const TS = GameEngine.TILE_SIZE || 64;
         const keys = new Set();
-        const minX = Math.floor(rect.left / TS) * TS + TS / 2;
-        const maxX = Math.floor(rect.right / TS) * TS + TS / 2;
-        const minY = Math.floor(rect.top / TS) * TS + TS / 2;
-        const maxY = Math.floor(rect.bottom / TS) * TS + TS / 2;
-        for (let y = minY; y <= maxY; y += TS) {
-            for (let x = minX; x <= maxX; x += TS) {
-                keys.add(`${Math.round(x)},${Math.round(y)}`);
+        this.getLogisticsDeleteBrushSamplePoints(rect).forEach(point => {
+            keys.add(`${Math.round(point.x)},${Math.round(point.y)}`);
+        });
+        return keys;
+    }
+
+    static getLogisticsDeleteBrushSamplePoints(rect) {
+        const TS = GameEngine.TILE_SIZE || 64;
+        const size = Math.max(1, Math.min(5, Number(GameEngine.state.logisticsDeleteBrushSize) || 1));
+        const points = [];
+        const startX = rect.cx - ((size - 1) * TS) / 2;
+        const startY = rect.cy - ((size - 1) * TS) / 2;
+        for (let row = 0; row < size; row++) {
+            for (let col = 0; col < size; col++) {
+                const x = startX + col * TS;
+                const y = startY + row * TS;
+                points.push({ x, y });
             }
         }
-        return keys;
+        return points;
     }
 
     static isLogisticsLineInsideBrush(line, rect) {
         const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+        const brushPoints = this.getLogisticsDeleteBrushSamplePoints(rect);
         if (points.length >= 2 && typeof LogisticsRenderer.getLogisticsCellRects === "function") {
             const widthTiles = Math.max(1, Number(line?.routeWidth) || 1);
             const visibleRects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
-            if (visibleRects.some(lineRect => this.rectsIntersect(rect, lineRect))) return true;
+            if (visibleRects.some(lineRect => brushPoints.some(point => this.isPointInsideLogisticsRect(point, lineRect)))) return true;
         }
         const brushCellKeys = this.getLogisticsDeleteBrushCellKeys(rect);
         if (typeof conveyorSystem.getLogisticsSegmentOccupiedKeys === "function") {
             const lineCellKeys = conveyorSystem.getLogisticsSegmentOccupiedKeys(line);
             if (Array.isArray(lineCellKeys) && lineCellKeys.some(key => brushCellKeys.has(key))) return true;
         }
-        if (points.length === 0) return this.pointInsideRect(line, rect);
+        if (points.length === 0) return brushPoints.some(point => this.pointInsideRect(point, {
+            left: line?.x || 0,
+            right: line?.x || 0,
+            top: line?.y || 0,
+            bottom: line?.y || 0
+        }));
         const TS = GameEngine.TILE_SIZE || 64;
-        for (let i = 0; i < points.length; i++) {
-            if (this.pointInsideRect(points[i], rect)) return true;
-        }
         for (let i = 0; i < points.length - 1; i++) {
             const a = points[i];
             const b = points[i + 1];
             if (!a || !b) continue;
             const dist = Math.hypot(b.x - a.x, b.y - a.y);
-            const steps = Math.max(1, Math.ceil(dist / (TS / 2)));
+            const steps = Math.max(1, Math.ceil(dist / TS));
             for (let step = 0; step <= steps; step++) {
                 const t = step / steps;
                 const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-                if (this.pointInsideRect(p, rect)) return true;
+                if (brushPoints.some(point => Math.hypot(point.x - p.x, point.y - p.y) < TS * 0.25)) return true;
             }
         }
         return false;
@@ -1578,8 +1602,25 @@ export class UIManager {
     static getLogisticsLinesInBrush(worldX, worldY) {
         if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) return [];
         const rect = this.getLogisticsDeleteBrushRect(worldX, worldY);
-        return conveyorSystem.ensureLogisticsLineStore()
-            .filter(line => this.isLogisticsLineInsideBrush(line, rect));
+        const linesByKey = new Map();
+        const addLine = (line) => {
+            if (!line) return;
+            const key = conveyorSystem.getLogisticsLineSelectionKey(line) || line.id || `${line.x},${line.y}`;
+            if (key && !linesByKey.has(key)) linesByKey.set(key, line);
+        };
+        const brushPoints = this.getLogisticsDeleteBrushSamplePoints(rect);
+        if (typeof conveyorSystem.getLogisticsLinesAt === "function") {
+            brushPoints.forEach(point => {
+                conveyorSystem.getLogisticsLinesAt(point.x, point.y).forEach(addLine);
+            });
+        }
+        if (linesByKey.size === 0 && typeof conveyorSystem.getLogisticsLineAt === "function") {
+            brushPoints.forEach(point => addLine(conveyorSystem.getLogisticsLineAt(point.x, point.y)));
+        }
+        conveyorSystem.ensureLogisticsLineStore()
+            .filter(line => this.isLogisticsLineInsideBrush(line, rect))
+            .forEach(addLine);
+        return [...linesByKey.values()];
     }
 
     static updateLogisticsDeleteBrushHover(worldX, worldY, ctrlMode = false) {
@@ -1965,7 +2006,7 @@ export class UIManager {
             if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false;
             return !!this.getPortSlotAt(ent, worldX, worldY);
         });
-        if (clickedBuilding && (!GameEngine.state.placingType || LogisticsUI.isTransportLinePlacementActive())) {
+        if (e.ctrlKey && clickedBuilding && (!GameEngine.state.placingType || LogisticsUI.isTransportLinePlacementActive())) {
             const sourcePort = this.getPortSlotAt(clickedBuilding, worldX, worldY);
             if (sourcePort && LogisticsUI.beginLogisticsDragFromBuilding(clickedBuilding, sourcePort)) {
                 conveyorSystem.updateDrag(worldX, worldY);
@@ -1995,7 +2036,7 @@ export class UIManager {
                 if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false;
                 return !!this.getPortSlotAt(ent, worldX, worldY);
             });
-            if (portBuilding) {
+            if (e.ctrlKey && portBuilding) {
                 const sourcePort = this.getPortSlotAt(portBuilding, worldX, worldY);
                 if (sourcePort && LogisticsUI.beginLogisticsDragFromBuilding(portBuilding, sourcePort)) {
                     conveyorSystem.updateDrag(worldX, worldY);
@@ -2003,6 +2044,7 @@ export class UIManager {
                 }
                 return;
             }
+            if (portBuilding) return;
             this.potentialTransportLineBuildDrag = {
                 startX: e.clientX,
                 startY: e.clientY,

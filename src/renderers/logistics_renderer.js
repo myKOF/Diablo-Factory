@@ -132,21 +132,34 @@ export class LogisticsRenderer {
             const cx = Math.floor(point.x / TS) * TS + TS / 2;
             const cy = Math.floor(point.y / TS) * TS + TS / 2;
             const half = (TS * size) / 2;
-            return { left: cx - half, right: cx + half, top: cy - half, bottom: cy + half };
+            return { left: cx - half, right: cx + half, top: cy - half, bottom: cy + half, cx, cy, size };
         };
-        const rectsIntersect = (a, b) => {
-            if (!a || !b) return false;
-            const bLeft = Number.isFinite(b.left) ? b.left : b.x;
-            const bTop = Number.isFinite(b.top) ? b.top : b.y;
-            const bRight = Number.isFinite(b.right) ? b.right : b.x + b.w;
-            const bBottom = Number.isFinite(b.bottom) ? b.bottom : b.y + b.h;
-            return a.left <= bRight && a.right >= bLeft && a.top <= bBottom && a.bottom >= bTop;
+        const getDeleteBrushSamplePoints = () => {
+            if (!deleteBrushRect) return [];
+            const TS = GameEngine.TILE_SIZE || 64;
+            const size = Math.max(1, Math.min(5, Number(deleteBrushRect.size) || 1));
+            const startX = deleteBrushRect.cx - ((size - 1) * TS) / 2;
+            const startY = deleteBrushRect.cy - ((size - 1) * TS) / 2;
+            const points = [];
+            for (let row = 0; row < size; row++) {
+                for (let col = 0; col < size; col++) {
+                    points.push({ x: startX + col * TS, y: startY + row * TS });
+                }
+            }
+            return points;
+        };
+        const pointInsideLogisticsRect = (point, rect) => {
+            if (!point || !rect) return false;
+            const eps = 0.5;
+            return point.x >= rect.x + eps && point.x < rect.x + rect.w - eps &&
+                point.y >= rect.y + eps && point.y < rect.y + rect.h - eps;
         };
         const deleteBrushRect = getDeleteBrushRect();
+        const deleteBrushSamplePoints = getDeleteBrushSamplePoints();
         const routeIntersectsDeleteBrush = (points, widthTiles) => {
             if (!deleteBrushRect || !Array.isArray(points) || points.length < 2) return false;
             return LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true)
-                .some(rect => rectsIntersect(deleteBrushRect, rect));
+                .some(rect => deleteBrushSamplePoints.some(point => pointInsideLogisticsRect(point, rect)));
         };
         const getLineSelectionKey = (line) => {
             if (!line) return null;
