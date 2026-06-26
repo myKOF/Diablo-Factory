@@ -530,7 +530,12 @@ export class LogisticsTransferSystem {
             transportCellSize: this.engine?.TILE_SIZE || 20,
             lineId: conn.lineId || null,
             efficiency: Number(conn.efficiency) || 0,
-            routePoints
+            routePoints,
+            // [斷線防護] 記下「目標端口」座標(路線終點)。抵達判定時據此確認路線終點仍在目標端口,
+            // 避免線被切斷後路線止於斷點卻被誤判已送達而讓物品憑空消失。
+            targetPoint: (Array.isArray(routePoints) && routePoints.length >= 2)
+                ? { x: routePoints[routePoints.length - 1].x, y: routePoints[routePoints.length - 1].y }
+                : null
         };
     }
 

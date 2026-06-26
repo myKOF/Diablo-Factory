@@ -369,7 +369,14 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
             }
 
             if (t.progress >= 1) {
-                if (t.targetId) {
+                // [斷線防護] 僅在「路線終點確實到達目標端口(targetPoint)」時才入庫。線被切斷後 rerouter 會把路線
+                // 縮短到斷點,終點偏離原目標;此時不可誤判抵達(否則物品在斷點憑空消失/被當成已送達),改為停在
+                // 斷點等待重連/重路由。無 targetPoint(舊資料)則維持原行為。
+                const rp = t.routePoints;
+                const endPt = Array.isArray(rp) && rp.length >= 2 ? rp[rp.length - 1] : null;
+                const tp = t.targetPoint;
+                const reachedTarget = !tp || (endPt && (Math.abs(endPt.x - tp.x) + Math.abs(endPt.y - tp.y)) <= getCellSize() * 1.5);
+                if (t.targetId && reachedTarget) {
                     arrivals.push({ id: t.id, targetId: t.targetId, itemType: t.itemType, transfer: t });
                     state.activeTransfers.splice(i, 1);
                 } else {
