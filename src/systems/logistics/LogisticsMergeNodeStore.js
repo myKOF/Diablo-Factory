@@ -13,8 +13,8 @@ export class LogisticsMergeNodeStore {
         return this.getGameEngine ? this.getGameEngine() : null;
     }
 
-    beginTopologyCache() { this._topoValidCache = new Map(); this._outputRouteCache = new Map(); }
-    endTopologyCache() { this._topoValidCache = null; this._outputRouteCache = null; }
+    beginTopologyCache() { this._topoValidCache = new Map(); this._outputRouteCache = new Map(); this._inputNodeCache = new Map(); }
+    endTopologyCache() { this._topoValidCache = null; this._outputRouteCache = null; this._inputNodeCache = null; }
 
     // 與 transfer 無關的拓樸有效性檢查（輸入連線完整、輸入線確實進入、輸出線確實離開合流點）。
     isNodeInputTopologyValid(node, inputGroupId, state) {
@@ -489,10 +489,15 @@ export class LogisticsMergeNodeStore {
     getLogisticsMergeNodeForInputTransfer(transfer, state = this.gameEngine.state) {
         const lineId = transfer?.lineId || null;
         if (!lineId) return null;
+
+        if (this._inputNodeCache && this._inputNodeCache.has(lineId)) {
+            return this._inputNodeCache.get(lineId);
+        }
+
         const route = Array.isArray(transfer.routePoints) ? transfer.routePoints : [];
         const endPoint = route[route.length - 1] || null;
         const TS = this.gameEngine.TILE_SIZE || 20;
-        return this.system.ensureLogisticsMergeNodeStore(state).find(node => {
+        const node = this.system.ensureLogisticsMergeNodeStore(state).find(node => {
             if (!node || !Array.isArray(node.inputGroupIds) || !node.inputGroupIds.includes(lineId)) return false;
             if (!node.outputGroupId) return false;
             // [效能] 拓樸有效性與 transfer 無關，於計算窗口內記憶化；transfer 相關的終點距離檢查維持即時。
@@ -501,6 +506,11 @@ export class LogisticsMergeNodeStore {
             if (!endPoint) return true;
             return p && Math.hypot(endPoint.x - p.x, endPoint.y - p.y) <= TS * 1.5;
         }) || null;
+
+        if (this._inputNodeCache) {
+            this._inputNodeCache.set(lineId, node);
+        }
+        return node;
     }
 
     isLogisticsMergeInputTransfer(transfer, state = this.gameEngine.state) {

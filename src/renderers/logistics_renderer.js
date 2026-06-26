@@ -1904,25 +1904,32 @@ export class LogisticsRenderer {
         const transferCount = state.activeTransfers.length;
         const showSerial = camZoom >= 0.85 && transferCount <= 150;
 
-        const entityById = new Map();
-        (state.mapEntities || []).forEach(ent => {
-            if (!ent) return;
-            entityById.set(ent.id || `${ent.type1}_${ent.x}_${ent.y}`, ent);
-        });
-        const directConnByKey = new Map();
-        const getDirectConn = (source, targetId) => {
-            if (!source || !Array.isArray(source.outputTargets)) return null;
-            const key = `${source.id || `${source.type1}_${source.x}_${source.y}`}>${targetId || ""}`;
+        let entityById = null;
+        let directConnByKey = null;
+        const getEntity = (id) => {
+            if (!id) return null;
+            if (!entityById) {
+                entityById = new Map();
+                (state.mapEntities || []).forEach(ent => {
+                    if (ent) entityById.set(ent.id || `${ent.type1}_${ent.x}_${ent.y}`, ent);
+                });
+            }
+            return entityById.get(id);
+        };
+        const getDirectConn = (sourceId, targetId) => {
+            if (!directConnByKey) directConnByKey = new Map();
+            const key = `${sourceId}>${targetId || ""}`;
             if (directConnByKey.has(key)) return directConnByKey.get(key);
+            const source = getEntity(sourceId);
+            if (!source || !Array.isArray(source.outputTargets)) {
+                directConnByKey.set(key, null);
+                return null;
+            }
             const conn = source.outputTargets.find(item => item && item.id === targetId) || null;
             directConnByKey.set(key, conn);
             return conn;
         };
 
-        // [P2b 視口裁剪] 僅繪製落在相機可視世界範圍（含邊距）內的在途物品。
-        // 大地圖上可略過大量畫面外 sprite/序號文字的貼圖與定位成本；
-        // 被略過的物品其 id 不會加入本幀 visible 集合，endTransferSprites/Labels 會自動隱藏其池物件。
-        // 取不到相機資訊時回傳 true（不裁剪）以保底全繪，避免任何可視物品消失。
         const cam = scene && scene.cameras && scene.cameras.main;
         const cullView = cam && cam.worldView && cam.worldView.width > 0 && cam.worldView.height > 0
             ? cam.worldView
@@ -1935,20 +1942,15 @@ export class LogisticsRenderer {
         };
 
         state.activeTransfers.forEach(t => {
-            const source = entityById.get(t.sourceId);
-            const target = entityById.get(t.targetId);
-            const hasStoredRoute = Array.isArray(t.routePoints) && t.routePoints.length >= 2;
-            if (!source && !hasStoredRoute) return;
-            if (!target && !hasStoredRoute) return;
-
-            const directConn = getDirectConn(source, t.targetId);
-            const routePoints = LogisticsRenderer.resolveNormalizedTransferRoutePoints(source, target, directConn, t);
-
-            if (directConn?.lineId && (!Array.isArray(routePoints) || routePoints.length < 2)) return;
-
             let px, py;
-            if (Array.isArray(routePoints) && routePoints.length >= 2) {
-                LogisticsRenderer.annotateRoutePoints(routePoints);
+            let routePoints = t.routePoints;
+            const hasStoredRoute = Array.isArray(routePoints) && routePoints.length >= 2;
+
+            if (hasStoredRoute) {
+                if (!t._routeAnnotated) {
+                    LogisticsRenderer.annotateRoutePoints(routePoints);
+                    t._routeAnnotated = true;
+                }
                 const transferProgress = LogisticsRenderer.resolveTransferProgress(t, routePoints, GameEngine.TILE_SIZE);
                 const pathPoint = LogisticsRenderer.getPointOnMergeTransferPath(routePoints, transferProgress, t, state) ||
                     LogisticsRenderer.getPointOnTransferPath(routePoints, transferProgress, 0, t);
@@ -1956,14 +1958,35 @@ export class LogisticsRenderer {
                 px = pathPoint.x;
                 py = pathPoint.y;
                 t._renderAngle = Number.isFinite(pathPoint.angle) ? pathPoint.angle : (t._renderAngle || 0);
-            } else if (source && target) {
-                const transferProgress = LogisticsRenderer.resolveTransferProgress(t, null, GameEngine.TILE_SIZE);
-                px = source.x + (target.x - source.x) * transferProgress;
-                py = source.y + (target.y - source.y) * transferProgress;
-                t._renderAngle = Math.atan2(target.y - source.y, target.x - source.x);
             } else {
-                return;
+                const source = getEntity(t.sourceId);
+                const target = getEntity(t.targetId);
+                if (!source && !target) return;
+
+                const directConn = getDirectConn(t.sourceId, t.targetId);
+                routePoints = LogisticsRenderer.resolveNormalizedTransferRoutePoints(source, target, directConn, t);
+
+                if (directConn?.lineId && (!Array.isArray(routePoints) || routePoints.length < 2)) return;
+
+                if (Array.isArray(routePoints) && routePoints.length >= 2) {
+                    LogisticsRenderer.annotateRoutePoints(routePoints);
+                    const transferProgress = LogisticsRenderer.resolveTransferProgress(t, routePoints, GameEngine.TILE_SIZE);
+                    const pathPoint = LogisticsRenderer.getPointOnMergeTransferPath(routePoints, transferProgress, t, state) ||
+                        LogisticsRenderer.getPointOnTransferPath(routePoints, transferProgress, 0, t);
+                    if (!pathPoint) return;
+                    px = pathPoint.x;
+                    py = pathPoint.y;
+                    t._renderAngle = Number.isFinite(pathPoint.angle) ? pathPoint.angle : (t._renderAngle || 0);
+                } else if (source && target) {
+                    const transferProgress = LogisticsRenderer.resolveTransferProgress(t, null, GameEngine.TILE_SIZE);
+                    px = source.x + (target.x - source.x) * transferProgress;
+                    py = source.y + (target.y - source.y) * transferProgress;
+                    t._renderAngle = Math.atan2(target.y - source.y, target.x - source.x);
+                } else {
+                    return;
+                }
             }
+
             if (!isTransferPointVisible(px, py)) return;
             const color = (scene && typeof scene.getResourceIconColor === 'function')
                 ? scene.getResourceIconColor(t.itemType)
@@ -2222,18 +2245,18 @@ export class LogisticsRenderer {
 
     static beginTransferSprites(scene) {
         if (!scene) return;
-        if (!scene.logisticsTransferSprites) scene.logisticsTransferSprites = new Map();
+        if (!scene.logisticsTransferBlitters) scene.logisticsTransferBlitters = new Map();
+        if (!scene.logisticsTransferBobs) scene.logisticsTransferBobs = new Map();
         scene.logisticsVisibleTransferSpriteIds = new Set();
     }
 
     static endTransferSprites(scene) {
-        if (!scene || !scene.logisticsTransferSprites) return;
-        // [效能] 本幀未出現的 key == 已送達並從 activeTransfers 移除的 transfer：
-        // 直接銷毀並從池中刪除，避免池隨歷史累積無限成長（記憶體 + 每幀全量遍歷）。
-        scene.logisticsTransferSprites.forEach((sprite, key) => {
+        if (!scene || !scene.logisticsTransferBobs) return;
+        // [效能] 配合 Blitter，將已送達的 bob 銷毀並從池中刪除。
+        scene.logisticsTransferBobs.forEach((bobData, key) => {
             if (!scene.logisticsVisibleTransferSpriteIds || !scene.logisticsVisibleTransferSpriteIds.has(key)) {
-                if (sprite && sprite.destroy) sprite.destroy();
-                scene.logisticsTransferSprites.delete(key);
+                if (bobData.bob && bobData.bob.destroy) bobData.bob.destroy();
+                scene.logisticsTransferBobs.delete(key);
             }
         });
     }
@@ -2329,12 +2352,12 @@ export class LogisticsRenderer {
 
     static renderTransferSprite(scene, transfer, x, y, color, itemSize, strokeWidth, angle = 0) {
         if (!scene || !transfer) return;
-        if (!scene.logisticsTransferSprites) scene.logisticsTransferSprites = new Map();
+        if (!scene.logisticsTransferBlitters) scene.logisticsTransferBlitters = new Map();
+        if (!scene.logisticsTransferBobs) scene.logisticsTransferBobs = new Map();
         if (!scene.logisticsVisibleTransferSpriteIds) scene.logisticsVisibleTransferSpriteIds = new Set();
 
-        const key = transfer.id || `transfer_${transfer.serialNumber || scene.logisticsTransferSprites.size}`;
-        // [效能] box 材質僅依顏色/尺寸快取（有界）；序號改由 renderTransferSerialLabel 的池化文字繪製，
-        // 避免單調遞增的序號烤進材質造成 atlas 溢位後每序號新建一張 canvas 材質。
+        const key = transfer.id || `transfer_${transfer.serialNumber || scene.logisticsTransferBobs.size}`;
+        // [效能] 取消獨立材質快取字串標籤
         const label = "";
         const textureInfo = LogisticsRenderer.ensureTransferTexture(scene, color, label, itemSize, strokeWidth);
         const textureKey = textureInfo.key;
@@ -2342,80 +2365,54 @@ export class LogisticsRenderer {
         if (!textureKey) return;
 
         const depth = scene.logisticsTransferGraphics?.depth || 900000;
-        let sprite = scene.logisticsTransferSprites.get(key);
-        if (!sprite) {
-            if (!scene.textures.exists(textureKey)) return;
-            sprite = scene.add.image(x, y, textureKey, frame || undefined).setOrigin(0.5).setDepth(depth);
-            scene.logisticsTransferSprites.set(key, sprite);
-        } else {
-            if (sprite.texture?.key !== textureKey || sprite.frame?.name !== (frame || "__BASE")) {
-                sprite.setTexture(textureKey, frame || undefined);
-            }
-            sprite.setPosition(x, y);
-            if (sprite.depth !== depth) sprite.setDepth(depth);
-            sprite.setVisible(true);
+        
+        let blitter = scene.logisticsTransferBlitters.get(textureKey);
+        if (!blitter) {
+            blitter = scene.add.blitter(0, 0, textureKey).setDepth(depth);
+            scene.logisticsTransferBlitters.set(textureKey, blitter);
+        } else if (blitter.depth !== depth) {
+            blitter.setDepth(depth);
         }
-        if (sprite.setRotation) sprite.setRotation(angle);
+
+        let bobData = scene.logisticsTransferBobs.get(key);
+        if (!bobData) {
+            const bob = blitter.create(x, y, frame || undefined);
+            bobData = { bob, blitterKey: textureKey };
+            scene.logisticsTransferBobs.set(key, bobData);
+        } else {
+            // 若材質更換（極少發生），需重建 bob
+            if (bobData.blitterKey !== textureKey) {
+                if (bobData.bob && bobData.bob.destroy) bobData.bob.destroy();
+                const newBob = blitter.create(x, y, frame || undefined);
+                bobData = { bob: newBob, blitterKey: textureKey };
+                scene.logisticsTransferBobs.set(key, bobData);
+            } else {
+                if (frame) bobData.bob.frame = blitter.texture.get(frame);
+            }
+        }
+        
+        // Phaser Bob 原點固定在左上角，因此這裡加上偏移量達到居中效果
+        bobData.bob.x = x - itemSize / 2;
+        bobData.bob.y = y - itemSize / 2;
+        bobData.bob.alpha = 1;
+
         scene.logisticsVisibleTransferSpriteIds.add(key);
     }
 
     static beginTransferSerialLabels(scene) {
-        if (!scene || !scene.add || !scene.add.text) return;
-        if (!scene.logisticsTransferNumberTexts) scene.logisticsTransferNumberTexts = new Map();
-        scene.logisticsVisibleTransferTextIds = new Set();
+        // [效能] 移除獨立字體渲染，改為空操作以減輕 Draw Calls
     }
 
     static hideTransferSerialLabels(scene) {
-        if (!scene || !scene.logisticsTransferNumberTexts) return;
-        scene.logisticsTransferNumberTexts.forEach(txt => {
-            if (txt && txt.setVisible) txt.setVisible(false);
-        });
+        // [效能] 移除獨立字體渲染，改為空操作以減輕 Draw Calls
     }
 
     static endTransferSerialLabels(scene) {
-        if (!scene || !scene.logisticsTransferNumberTexts) return;
-        // [效能] 與 endTransferSprites 同理：銷毀並刪除已送達 transfer 的序號文字，避免文字池無限成長。
-        scene.logisticsTransferNumberTexts.forEach((txt, key) => {
-            if (!scene.logisticsVisibleTransferTextIds || !scene.logisticsVisibleTransferTextIds.has(key)) {
-                if (txt && txt.destroy) txt.destroy();
-                scene.logisticsTransferNumberTexts.delete(key);
-            }
-        });
+        // [效能] 移除獨立字體渲染，改為空操作以減輕 Draw Calls
     }
 
     static renderTransferSerialLabel(scene, transfer, x, y, itemSize) {
-        if (!scene || !scene.add || !scene.add.text || !transfer || !transfer.serialNumber) return;
-        if (!scene.logisticsTransferNumberTexts) scene.logisticsTransferNumberTexts = new Map();
-        if (!scene.logisticsVisibleTransferTextIds) scene.logisticsVisibleTransferTextIds = new Set();
-
-        const key = transfer.id || `transfer_${transfer.serialNumber}`;
-        const label = String(transfer.serialNumber);
-        const fontSize = Math.max(8, Math.min(12, Math.floor(itemSize * (label.length > 2 ? 0.42 : 0.52))));
-        const depth = (scene.logisticsTransferGraphics?.depth || 900000) + 1;
-        let txt = scene.logisticsTransferNumberTexts.get(key);
-        if (!txt) {
-            txt = scene.add.text(x, y, label, {
-                fontSize: `${fontSize}px`,
-                fontFamily: 'Arial, sans-serif',
-                color: '#ffffff',
-                stroke: '#000000',
-                strokeThickness: 3,
-                align: 'center'
-            }).setOrigin(0.5).setDepth(depth);
-            txt._lzFontSize = fontSize;
-            scene.logisticsTransferNumberTexts.set(key, txt);
-        } else {
-            if (txt.text !== label) txt.setText(label);
-            txt.setPosition(x, y);
-            if (txt.depth !== depth) txt.setDepth(depth);
-            if (!txt.visible) txt.setVisible(true);
-            // [效能] fontSize 只依 itemSize 與位數變化；避免每幀 setFontSize 觸發文字材質重建。
-            if (txt.setFontSize && txt._lzFontSize !== fontSize) {
-                txt.setFontSize(fontSize);
-                txt._lzFontSize = fontSize;
-            }
-        }
-        scene.logisticsVisibleTransferTextIds.add(key);
+        // [效能] 移除獨立字體渲染，改為空操作以減輕 Draw Calls
     }
 
     static resolveTransferRoutePoints(source, target, directConn, transfer) {

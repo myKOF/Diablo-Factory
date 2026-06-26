@@ -235,6 +235,7 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
             });
 
             let prevMaxCanonicalDist = Infinity;
+            let pathDistPn = undefined;
             for (let j = 0; j < groupTransfers.length; j++) {
                 const t = groupTransfers[j];
                 const metrics = getTransferRouteMetrics(t);
@@ -247,20 +248,27 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
 
                 let dist_pn = totalLength;
                 if (isBreakpoint) {
-                    const bpts = t.routePoints;
-                    if (Array.isArray(bpts) && bpts.length >= 2) {
-                        const lastPt = bpts[bpts.length - 1];
-                        const tLineId = t.lineId;
-                        const isGapEndpoint = (state.logisticsLines || []).some(seg => {
-                            if (!seg) return false;
-                            const segGroupId = seg.groupId || seg.id;
-                            if (segGroupId === tLineId) return false;
-                            const segPts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
-                            if (segPts.length < 1) return false;
-                            const segStart = segPts[0];
-                            return segStart && Math.hypot(segStart.x - lastPt.x, segStart.y - lastPt.y) <= cellSize * 1.5;
-                        });
-                        if (isGapEndpoint) dist_pn = totalLength - cellSize;
+                    if (pathDistPn !== undefined) {
+                        dist_pn = pathDistPn;
+                    } else {
+                        const bpts = t.routePoints;
+                        if (Array.isArray(bpts) && bpts.length >= 2) {
+                            const lastPt = bpts[bpts.length - 1];
+                            const tLineId = t.lineId;
+                            const isGapEndpoint = (state.logisticsLines || []).some(seg => {
+                                if (!seg) return false;
+                                const segGroupId = seg.groupId || seg.id;
+                                if (segGroupId === tLineId) return false;
+                                const segPts = Array.isArray(seg.routePoints) ? seg.routePoints : [];
+                                if (segPts.length < 1) return false;
+                                const segStart = segPts[0];
+                                return segStart && Math.hypot(segStart.x - lastPt.x, segStart.y - lastPt.y) <= cellSize * 1.5;
+                            });
+                            pathDistPn = isGapEndpoint ? totalLength - cellSize : totalLength;
+                        } else {
+                            pathDistPn = totalLength;
+                        }
+                        dist_pn = pathDistPn;
                     }
                 }
 

@@ -1,64 +1,41 @@
 const fs = require('fs');
 const path = require('path');
 
-const root = process.cwd();
-const pattern = process.argv[2];
-const limit = Number(process.argv[3] || 80);
-const ignoreDirs = new Set(['node_modules', '.git', 'tmp', 'dist']);
-const textExts = new Set(['.js', '.cjs', '.mjs', '.json', '.html', '.css', '.md', '.ts']);
-
-if (!pattern) {
-  console.error('Usage: node tools/safe_search.cjs <pattern> [limit]');
-  process.exit(1);
+function searchFiles(dir, query, results = []) {
+    const list = fs.readdirSync(dir);
+    for (const file of list) {
+        if (file === 'node_modules' || file === '.git' || file === 'tmp' || file === 'dist') continue;
+        const filePath = path.join(dir, file);
+        const stat = fs.statSync(filePath);
+        if (stat && stat.isDirectory()) {
+            searchFiles(filePath, query, results);
+        } else if (file.endsWith('.js') || file.endsWith('.md')) {
+            try {
+                const content = fs.readFileSync(filePath, 'utf8');
+                const lines = content.split('\n');
+                for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].includes(query)) {
+                        results.push({ file: filePath, line: i + 1, content: lines[i].trim() });
+                    }
+                }
+            } catch (err) {}
+        }
+    }
+    return results;
 }
 
-const results = [];
-const needle = pattern.toLowerCase();
-
-function walk(dir) {
-  let entries;
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-
-  for (const entry of entries) {
-    if (results.length >= limit) return;
-    if (entry.isDirectory() && ignoreDirs.has(entry.name)) continue;
-
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      walk(full);
-      continue;
-    }
-
-    if (!entry.isFile()) continue;
-    if (!textExts.has(path.extname(entry.name).toLowerCase())) continue;
-
-    let text;
-    try {
-      text = fs.readFileSync(full, 'utf8');
-    } catch {
-      continue;
-    }
-
-    const lines = text.split(/\r?\n/);
-    for (let i = 0; i < lines.length; i += 1) {
-      if (lines[i].toLowerCase().includes(needle)) {
-        results.push({
-          file: path.relative(root, full),
-          line: i + 1,
-          text: lines[i].trim().slice(0, 160),
-        });
-        if (results.length >= limit) return;
-      }
-    }
-  }
+const args = process.argv.slice(2);
+if (args.length === 0) {
+    console.error('Please provide a search query.');
+    process.exit(1);
 }
 
-walk(root);
-
-for (const result of results) {
-  console.log(`${result.file}:${result.line}: ${result.text}`);
+const query = args[0];
+const results = searchFiles(__dirname + '/../', query);
+console.log(`Found ${results.length} matches for "${query}":`);
+for (let i = 0; i < Math.min(results.length, 50); i++) {
+    console.log(`${results[i].file}:${results[i].line}: ${results[i].content}`);
+}
+if (results.length > 50) {
+    console.log(`... and ${results.length - 50} more matches.`);
 }
