@@ -79,6 +79,7 @@ export class RenderDebugger {
         }
 
         const screen = this.worldToScreen(cam, ax, ay);
+        const objDepth = obj.depth !== undefined ? obj.depth : (obj.blitter ? obj.blitter.depth : (obj.parent && obj.parent.depth !== undefined ? obj.parent.depth : undefined));
 
         const element = {
             id,
@@ -88,9 +89,9 @@ export class RenderDebugger {
             logicalGrid: {
                 x: Math.floor(ax / TS),
                 y: Math.floor(ay / TS),
-                layer: this.depthToLayer(obj.depth)
+                layer: this.depthToLayer(objDepth)
             },
-            zIndex: Math.round(Number(obj.depth) || 0),
+            zIndex: Math.round(Number(objDepth) || 0),
             boundingBox: {
                 w: bounds ? Math.round(bounds.width * zoom) : 0,
                 h: bounds ? Math.round(bounds.height * zoom) : 0
@@ -162,12 +163,22 @@ export class RenderDebugger {
             });
         }
 
-        // 4. 移動中的輸送帶貨物 (scene.logisticsTransferSprites: key -> Image)
-        if (scene.logisticsTransferSprites && typeof scene.logisticsTransferSprites.forEach === "function") {
+        // 4. 移動中的輸送帶貨物 (scene.logisticsTransferSprites: key -> Image / scene.logisticsTransferBobs: key -> bobData)
+        if (scene.logisticsTransferSprites && typeof scene.logisticsTransferSprites.forEach === "function" && scene.logisticsTransferSprites.size > 0) {
             scene.logisticsTransferSprites.forEach((sprite, key) => {
                 if (!sprite) return;
                 if (!includeHidden && sprite.visible === false) return;
                 push(`transfer_${key}`, "transfer_item", sprite, {});
+            });
+        } else if (scene.logisticsTransferBobs && typeof scene.logisticsTransferBobs.forEach === "function") {
+            scene.logisticsTransferBobs.forEach((bobData, key) => {
+                const bob = bobData && bobData.bob;
+                if (!bob) return;
+                if (!includeHidden && bob.visible === false) return;
+                push(`transfer_${key}`, "transfer_item", bob, {
+                    anchorX: bob.x + GameEngine.TILE_SIZE / 2,
+                    anchorY: bob.y + GameEngine.TILE_SIZE / 2
+                });
             });
         }
 

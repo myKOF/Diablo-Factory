@@ -1952,12 +1952,32 @@ export class LogisticsRenderer {
                     t._routeAnnotated = true;
                 }
                 const transferProgress = LogisticsRenderer.resolveTransferProgress(t, routePoints, GameEngine.TILE_SIZE);
-                const pathPoint = LogisticsRenderer.getPointOnMergeTransferPath(routePoints, transferProgress, t, state) ||
-                    LogisticsRenderer.getPointOnTransferPath(routePoints, transferProgress, 0, t);
-                if (!pathPoint) return;
-                px = pathPoint.x;
-                py = pathPoint.y;
-                t._renderAngle = Number.isFinite(pathPoint.angle) ? pathPoint.angle : (t._renderAngle || 0);
+                
+                // DOD: Try fetching dense path first
+                let usedDense = false;
+                const pathPoint = LogisticsRenderer.getPointOnMergeTransferPath(routePoints, transferProgress, t, state);
+                if (pathPoint) {
+                    px = pathPoint.x;
+                    py = pathPoint.y;
+                    t._renderAngle = Number.isFinite(pathPoint.angle) ? pathPoint.angle : (t._renderAngle || 0);
+                } else {
+                    const dense = LogisticsRenderer.getDenseTransferPath(routePoints);
+                    if (dense) {
+                        const targetDist = Math.max(0, Math.min(dense.totalPixels, transferProgress * dense.totalPixels));
+                        const idx = Math.floor(targetDist);
+                        const offset = idx * 3;
+                        px = dense.buffer[offset];
+                        py = dense.buffer[offset + 1];
+                        t._renderAngle = dense.buffer[offset + 2];
+                        usedDense = true;
+                    } else {
+                        const pt = LogisticsRenderer.getPointOnTransferPath(routePoints, transferProgress, 0, t);
+                        if (!pt) return;
+                        px = pt.x;
+                        py = pt.y;
+                        t._renderAngle = Number.isFinite(pt.angle) ? pt.angle : (t._renderAngle || 0);
+                    }
+                }
             } else {
                 const source = getEntity(t.sourceId);
                 const target = getEntity(t.targetId);
@@ -2610,6 +2630,37 @@ export class LogisticsRenderer {
         const geom = { segments, corners, totalPixels };
         LogisticsRenderer._transferPathGeomCache.set(points, geom);
         return geom;
+    }
+    static _densePathCache = new WeakMap();
+
+    static getDenseTransferPath(points) {
+        if (!Array.isArray(points) || points.length < 2) return null;
+        let dense = LogisticsRenderer._densePathCache.get(points);
+        if (dense) return dense;
+
+        const geom = LogisticsRenderer._getTransferPathGeometry(points);
+        const totalPixels = Math.ceil(geom.totalPixels);
+        if (totalPixels <= 0) {
+            dense = { buffer: new Float32Array([points[0].x, points[0].y, 0]), totalPixels: 0 };
+            LogisticsRenderer._densePathCache.set(points, dense);
+            return dense;
+        }
+
+        const buffer = new Float32Array((totalPixels + 1) * 3);
+        
+        for (let dist = 0; dist <= totalPixels; dist++) {
+            const progress = dist / totalPixels;
+            const pt = LogisticsRenderer.getPointOnTransferPath(points, progress, 0);
+            if (pt) {
+                buffer[dist * 3] = pt.x;
+                buffer[dist * 3 + 1] = pt.y;
+                buffer[dist * 3 + 2] = Number.isFinite(pt.angle) ? pt.angle : 0;
+            }
+        }
+        
+        dense = { buffer, totalPixels };
+        LogisticsRenderer._densePathCache.set(points, dense);
+        return dense;
     }
 
     static getPointOnTransferPath(points, progress, startOffset = 0, cacheOwner = null) {

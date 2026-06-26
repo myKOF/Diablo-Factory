@@ -1,6 +1,26 @@
 import { routePointsSignature, routeAlongDistanceToPoint } from './LogisticsRouteCache.js';
 import { computeMergeInputMaxDistance } from './LogisticsMergeSpacing.js';
 
+const _manhattanSegmentsCache = new WeakMap();
+function getManhattanSegments(pts) {
+    if (!Array.isArray(pts)) return [];
+    let cached = _manhattanSegmentsCache.get(pts);
+    if (cached) return cached;
+    const segments = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i];
+        const b = pts[i + 1];
+        if (!a || !b) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.abs(dx) + Math.abs(dy);
+        segments.push({ dx, dy, len });
+    }
+    cached = segments;
+    _manhattanSegmentsCache.set(pts, cached);
+    return cached;
+}
+
 // [Web Worker] 物流「運動學」核心:固定子步長的位移 + 合流閘門 + 堆積回壓。
 // 這段是整個遊戲時序最敏感的部分,主執行緒與 worker 共用同一份(避免分歧)。
 //
@@ -148,9 +168,11 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
     const MAX_LOGISTICS_SUBSTEPS = 4;
     const subSteps = Math.min(MAX_LOGISTICS_SUBSTEPS, Math.max(1, Math.ceil(deltaTime / LOGISTICS_SUB_DT - 1e-6)));
     stepDt = deltaTime / subSteps;
-    for (let _subStep = 0; _subStep < subSteps; _subStep++) {
-        state.activeTransfers.forEach(syncTransferArrayPosition);
 
+    // [效能] 陣列位置同步在 tick 開始前執行一次即可，子步間無外部變動不需重複同步。
+    state.activeTransfers.forEach(syncTransferArrayPosition);
+
+    for (let _subStep = 0; _subStep < subSteps; _subStep++) {
         if (simSystem && typeof simSystem.beginMergeWinnerCache === 'function') simSystem.beginMergeWinnerCache();
         if (simSystem && typeof simSystem.applyBlockedTransferQueues === 'function') simSystem.applyBlockedTransferQueues(state);
 
@@ -175,17 +197,22 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
         const isMergeInputTransfer = (transfer) => !!getMergeNodeForTransfer(transfer);
         const isMergeOutputTransfer = (transfer) => isMergeOutputTransferCached(transfer);
 
-        Array.from(transfersByPath.entries()).sort(([, a], [, b]) => {
-            const aIsMergeInput = a.some(isMergeInputTransfer);
-            const bIsMergeInput = b.some(isMergeInputTransfer);
-            return Number(aIsMergeInput) - Number(bIsMergeInput);
-        }).forEach(([pathKey, groupTransfers]) => {
+        // [效能] 預先計算 sorted 權重，避免在 sort 比較子中重複走訪 runs 尋找 merge input
+        const pathEntries = Array.from(transfersByPath.entries()).map(([pathKey, groupTransfers]) => {
+            const hasMergeInput = groupTransfers.some(isMergeInputTransfer);
+            return { pathKey, groupTransfers, hasMergeInput };
+        });
+        pathEntries.sort((a, b) => Number(a.hasMergeInput) - Number(b.hasMergeInput));
+
+        pathEntries.forEach(({ pathKey, groupTransfers }) => {
             const canonical = groupTransfers.reduce((best, transfer) => {
                 const len = getTransferRouteMetrics(transfer).totalPixels;
                 return len > best.length ? { points: transfer.routePoints, length: len } : best;
             }, { points: null, length: 0 });
 
+            // [效能] 引用相等的路徑直接視為一致，無須走訪座標
             const useCanonical = groupTransfers.length > 1 && canonical.length > 0 && groupTransfers.some(transfer => {
+                if (transfer.routePoints === canonical.points) return false;
                 const points = transfer.routePoints || [];
                 const canonicalPoints = canonical.points || [];
                 if (points.length !== canonicalPoints.length) return true;
@@ -195,21 +222,20 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
                 });
             });
 
+            // [效能] 優化走訪查找：使用快取段結構
             const getPointOnPathByDistance = (pts, distance) => {
                 if (!Array.isArray(pts) || pts.length < 2) return null;
+                const segments = getManhattanSegments(pts);
                 let remaining = Math.max(0, Number(distance) || 0);
-                for (let i = 0; i < pts.length - 1; i++) {
+                for (let i = 0; i < segments.length; i++) {
+                    const seg = segments[i];
                     const a = pts[i];
-                    const b = pts[i + 1];
-                    const dx = b.x - a.x;
-                    const dy = b.y - a.y;
-                    const len = Math.abs(dx) + Math.abs(dy);
-                    if (len <= 0) continue;
-                    if (remaining <= len || i === pts.length - 2) {
-                        const t = Math.max(0, Math.min(1, remaining / len));
-                        return { x: a.x + dx * t, y: a.y + dy * t };
+                    if (!a) continue;
+                    if (remaining <= seg.len || i === segments.length - 1) {
+                        const t = seg.len > 0 ? Math.max(0, Math.min(1, remaining / seg.len)) : 0;
+                        return { x: a.x + seg.dx * t, y: a.y + seg.dy * t };
                     }
-                    remaining -= len;
+                    remaining -= seg.len;
                 }
                 const last = pts[pts.length - 1];
                 return last ? { x: last.x, y: last.y } : null;
@@ -220,7 +246,8 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
                 if (distanceCache.has(transfer)) return distanceCache.get(transfer);
                 const total = getTransferRouteMetrics(transfer).totalPixels;
                 const distance = Math.max(0, Math.min(1, Number(transfer.progress) || 0)) * total;
-                const resolved = useCanonical
+                // [效能] 若路徑與 canonical 完全相同，投影距離即為當前 local 距離，不須重算幾何
+                const resolved = (useCanonical && transfer.routePoints !== canonical.points)
                     ? getPathDistanceToPoint(canonical.points, getPointOnPathByDistance(transfer.routePoints, distance))
                     : distance;
                 distanceCache.set(transfer, resolved);
@@ -343,7 +370,6 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
 
             if (t.progress >= 1) {
                 if (t.targetId) {
-                    // [Worker 邊界] 不在此入庫/扣資源/更新 UI;收集抵達事件交由主執行緒處理。移除以免後續子步繼續參與合流。
                     arrivals.push({ id: t.id, targetId: t.targetId, itemType: t.itemType, transfer: t });
                     state.activeTransfers.splice(i, 1);
                 } else {

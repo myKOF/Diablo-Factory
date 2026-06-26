@@ -31,6 +31,7 @@ export class UIManager {
 
     static activeWarehouseEntity = null;
     static activeBuilding = null;
+    static logisticsDoubleClickActivation = null;
     static uiPositions = {};
 
     static loadUIPositions() {
@@ -1994,6 +1995,7 @@ export class UIManager {
         this.leftMouseDownPos = { x: e.clientX, y: e.clientY };
         const world = this.getWorldPoint(e.clientX, e.clientY);
         const worldX = world.x; const worldY = world.y;
+        const isDoubleClick = (e.detail || 0) >= 2;
         this.updateLogisticsToolCursor(e.clientX, e.clientY, worldX, worldY, e.ctrlKey);
         if (GameEngine.state.logisticsDeleteToolActive) {
             GameEngine.state.logisticsDeleteBrushDragging = true;
@@ -2006,11 +2008,22 @@ export class UIManager {
             if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false;
             return !!this.getPortSlotAt(ent, worldX, worldY);
         });
-        if (e.ctrlKey && clickedBuilding && (!GameEngine.state.placingType || LogisticsUI.isTransportLinePlacementActive())) {
+        if (clickedBuilding && (!GameEngine.state.placingType || LogisticsUI.isTransportLinePlacementActive())) {
             const sourcePort = this.getPortSlotAt(clickedBuilding, worldX, worldY);
-            if (sourcePort && LogisticsUI.beginLogisticsDragFromBuilding(clickedBuilding, sourcePort)) {
+            if (sourcePort && (e.ctrlKey || isDoubleClick) && LogisticsUI.beginLogisticsDragFromBuilding(clickedBuilding, sourcePort)) {
+                this.logisticsDoubleClickActivation = isDoubleClick ? { x: e.clientX, y: e.clientY } : null;
                 conveyorSystem.updateDrag(worldX, worldY);
                 this.updateValues();
+                return;
+            }
+            if (sourcePort) {
+                this.logisticsDoubleClickActivation = null;
+                this.potentialLogisticsDrag = {
+                    entity: clickedBuilding,
+                    sourcePort,
+                    startClientX: e.clientX,
+                    startClientY: e.clientY
+                };
                 return;
             }
         }
@@ -2020,7 +2033,6 @@ export class UIManager {
             : [];
         const clickedSelectedLine = clickedLines.find(line => conveyorSystem.isSelectedLogisticsLine(line)) || null;
         const clickedLine = clickedSelectedLine || clickedLines[0] || conveyorSystem.getLogisticsLineAt(worldX, worldY);
-        const isDoubleClick = (e.detail || 0) >= 2;
         if (e.ctrlKey && clickedLine) {
             GameEngine.state.selectedLogisticsClickX = worldX;
             GameEngine.state.selectedLogisticsClickY = worldY;
@@ -2036,11 +2048,22 @@ export class UIManager {
                 if (!cfg || !cfg.logistics || !cfg.logistics.canOutput) return false;
                 return !!this.getPortSlotAt(ent, worldX, worldY);
             });
-            if (e.ctrlKey && portBuilding) {
+            if (portBuilding) {
                 const sourcePort = this.getPortSlotAt(portBuilding, worldX, worldY);
-                if (sourcePort && LogisticsUI.beginLogisticsDragFromBuilding(portBuilding, sourcePort)) {
+                if (sourcePort && (e.ctrlKey || isDoubleClick) && LogisticsUI.beginLogisticsDragFromBuilding(portBuilding, sourcePort)) {
+                    this.logisticsDoubleClickActivation = isDoubleClick ? { x: e.clientX, y: e.clientY } : null;
                     conveyorSystem.updateDrag(worldX, worldY);
                     this.updateValues();
+                    return;
+                }
+                if (sourcePort) {
+                    this.logisticsDoubleClickActivation = null;
+                    this.potentialLogisticsDrag = {
+                        entity: portBuilding,
+                        sourcePort,
+                        startClientX: e.clientX,
+                        startClientY: e.clientY
+                    };
                 }
                 return;
             }
@@ -2175,6 +2198,18 @@ export class UIManager {
         this.potentialTransportLineBuildDrag = null;
 
         if (this.isLogisticsDragging) {
+            if (this.logisticsDoubleClickActivation) {
+                const threshold = UI_CONFIG.Interaction?.minDragDistance || 10;
+                const dist = Math.hypot(
+                    e.clientX - this.logisticsDoubleClickActivation.x,
+                    e.clientY - this.logisticsDoubleClickActivation.y
+                );
+                this.logisticsDoubleClickActivation = null;
+                if (dist <= threshold) {
+                    this.updateValues();
+                    return;
+                }
+            }
             const submitResult = conveyorSystem.submitDrag();
             if (submitResult?.blocked) {
                 this.updateValues();

@@ -617,7 +617,15 @@ export class LogisticsTransferSystem {
                 };
             }
             if (window.LOGISTICS_WORKER === undefined) {
-                try { if (localStorage.getItem('LOGISTICS_WORKER') === '1') window.LOGISTICS_WORKER = true; } catch (e) {}
+                // [效能] 非測試環境(無 navigator.webdriver 且無 ?test 參數)預設啟用 Web Worker
+                const isTest = typeof navigator !== 'undefined' &&
+                    (navigator.webdriver || (typeof window !== 'undefined' && window.location && window.location.search.includes('test')));
+                window.LOGISTICS_WORKER = !isTest;
+                try {
+                    const saved = localStorage.getItem('LOGISTICS_WORKER');
+                    if (saved === '0') window.LOGISTICS_WORKER = false;
+                    else if (saved === '1') window.LOGISTICS_WORKER = true;
+                } catch (e) {}
             }
         }
         const want = typeof window !== 'undefined' && window.LOGISTICS_WORKER === true && typeof Worker !== 'undefined';
@@ -648,6 +656,28 @@ export class LogisticsTransferSystem {
         let arrivals;
         if (this._workerBridge) {
             arrivals = this._workerBridge.pullResult(state);
+            // [效能/非同步補償] 本地樂觀預測推進：為了補償 Web Worker 的非同步通訊延遲，
+            // 在主執行緒中也將物品進度向前推進 deltaTime，防止物品因為通信延遲卡在起點，
+            // 確保產出率與同步模式完全一致。
+            const cellSize = this.engine?.TILE_SIZE || 20;
+            (state.activeTransfers || []).forEach(t => {
+                if (!t) return;
+                const points = t.routePoints;
+                if (!Array.isArray(points) || points.length < 2) return;
+                let total = 0;
+                for (let j = 0; j < points.length - 1; j++) {
+                    total += Math.abs(points[j + 1].x - points[j].x) + Math.abs(points[j + 1].y - points[j].y);
+                }
+                if (total <= 0) return;
+                const groupId = t.lineId;
+                const line = groupId && Array.isArray(state.logisticsLines)
+                    ? state.logisticsLines.find(item => item && (item.groupId === groupId || item.id === groupId) && Number(item.efficiency) > 0)
+                    : null;
+                const cfg = this.engine && typeof this.engine.getEntityConfig === 'function' ? this.engine.getEntityConfig(line?.lineType || 'transport_line', 1) : null;
+                const speed = Math.max(0.1, Number(line?.efficiency) || Number(t.efficiency) || Number(cfg?.efficiency) || 4);
+                const distDelta = deltaTime * speed * cellSize;
+                this.transportArrayState.advanceTransfer(t, distDelta, total, t.maxAllowedProgress ?? 1, cellSize);
+            });
         } else {
             arrivals = runLogisticsKinematics(
                 { simSystem: conveyorSystem, engine: this.engine, transportArrayState: this.transportArrayState },

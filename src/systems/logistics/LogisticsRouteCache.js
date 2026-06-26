@@ -46,6 +46,30 @@ const _alongCache = new WeakMap();
 const _perpCache = new WeakMap();
 function _ptKey(point) { return `${point.x},${point.y}`; }
 
+const _euclidSegmentsCache = new WeakMap();
+
+export function getEuclideanSegments(points) {
+    if (!Array.isArray(points)) return { segments: [], total: 0 };
+    let cached = _euclidSegmentsCache.get(points);
+    if (cached) return cached;
+    const segments = [];
+    let total = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i];
+        const b = points[i + 1];
+        if (!a || !b) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy);
+        const lenSq = dx * dx + dy * dy;
+        segments.push({ dx, dy, len, lenSq, cumulative: total });
+        total += len;
+    }
+    cached = { segments, total };
+    _euclidSegmentsCache.set(points, cached);
+    return cached;
+}
+
 // 沿路徑到 point 投影處的「路徑距離」(等同原 getPathDistanceToPoint)。
 export function routeAlongDistanceToPoint(points, point) {
     if (!Array.isArray(points) || points.length < 2 || !point) return 0;
@@ -53,18 +77,24 @@ export function routeAlongDistanceToPoint(points, point) {
     const k = _ptKey(point);
     if (inner === undefined) { inner = new Map(); _alongCache.set(points, inner); }
     else { const hit = inner.get(k); if (hit !== undefined) return hit; }
-    let bestDist = Infinity, bestPathDist = 0, total = 0;
-    for (let i = 0; i < points.length - 1; i++) {
-        const a = points[i], b = points[i + 1];
-        const dx = b.x - a.x, dy = b.y - a.y;
-        const len = Math.hypot(dx, dy);
-        const lenSq = dx * dx + dy * dy;
+
+    const { segments } = getEuclideanSegments(points);
+    let bestDist = Infinity, bestPathDist = 0;
+    for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const a = points[i];
+        if (!a) continue;
+        const dx = seg.dx, dy = seg.dy, len = seg.len, lenSq = seg.lenSq;
         if (lenSq > 0) {
             const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
-            const dist = Math.hypot(point.x - (a.x + dx * t), point.y - (a.y + dy * t));
-            if (dist < bestDist) { bestDist = dist; bestPathDist = total + len * t; }
+            const px = point.x - (a.x + dx * t);
+            const py = point.y - (a.y + dy * t);
+            const distSq = px * px + py * py;
+            if (distSq < bestDist * bestDist) {
+                bestDist = Math.sqrt(distSq);
+                bestPathDist = seg.cumulative + len * t;
+            }
         }
-        total += len;
     }
     inner.set(k, bestPathDist);
     return bestPathDist;
