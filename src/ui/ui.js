@@ -335,6 +335,9 @@ export class UIManager {
         });
         window.addEventListener("keydown", (e) => {
             const key = String(e.key || "").toLowerCase();
+            if ((e.key === "Control" || e.key === "Meta") && GameEngine.state.logisticsDeleteToolActive && !this.isTextInputEvent(e)) {
+                this.syncLogisticsDeleteBrushCtrlMode(true);
+            }
             if ((e.ctrlKey || e.metaKey) && !e.shiftKey && key === "z") {
                 if (this.isTextInputEvent(e)) return;
                 if (conveyorSystem.undoLastLogisticsBuild()) {
@@ -403,6 +406,11 @@ export class UIManager {
 
                     GameEngine.addLog(`建築間距已切換為：${state.buildingSpacing} 格`, "SYSTEM");
                 }
+            }
+        });
+        window.addEventListener("keyup", (e) => {
+            if ((e.key === "Control" || e.key === "Meta") && GameEngine.state.logisticsDeleteToolActive && !this.isTextInputEvent(e)) {
+                this.syncLogisticsDeleteBrushCtrlMode(false);
             }
         });
         window.addEventListener("contextmenu", (e) => {
@@ -1427,6 +1435,45 @@ export class UIManager {
         return cursor;
     }
 
+    static getLogisticsToolGridRect(worldX, worldY, size = 1) {
+        const TS = GameEngine.TILE_SIZE || 64;
+        const safeSize = Math.max(1, Math.min(5, Number(size) || 1));
+        const cx = Math.floor(worldX / TS) * TS + TS / 2;
+        const cy = Math.floor(worldY / TS) * TS + TS / 2;
+        const half = (TS * safeSize) / 2;
+        return {
+            left: cx - half,
+            top: cy - half,
+            right: cx + half,
+            bottom: cy + half,
+            cx,
+            cy,
+            size: safeSize
+        };
+    }
+
+    static worldToClientPoint(worldX, worldY) {
+        const container = document.getElementById("game_container");
+        const scene = window.PhaserScene;
+        if (!container || !scene || !scene.cameras || !scene.cameras.main) {
+            return { x: worldX, y: worldY, scaleX: 1, scaleY: 1, zoom: 1 };
+        }
+        const rect = container.getBoundingClientRect();
+        const scaleX = rect.width / 1920;
+        const scaleY = rect.height / 1080;
+        const cam = scene.cameras.main;
+        const zoom = cam.zoom || 1;
+        const originX = cam.scrollX + (cam.width * (1 - 1 / zoom)) / 2;
+        const originY = cam.scrollY + (cam.height * (1 - 1 / zoom)) / 2;
+        return {
+            x: rect.left + (worldX - originX) * zoom * scaleX,
+            y: rect.top + (worldY - originY) * zoom * scaleY,
+            scaleX,
+            scaleY,
+            zoom
+        };
+    }
+
     static updateLogisticsToolCursor(clientX = null, clientY = null, worldX = null, worldY = null, ctrlMode = false) {
         const cursor = this.ensureLogisticsToolCursor();
         const state = GameEngine.state;
@@ -1438,14 +1485,24 @@ export class UIManager {
             return;
         }
         const size = deleteActive ? Math.max(1, Math.min(5, Number(state.logisticsDeleteBrushSize) || 1)) : 1;
-        const pxSize = TS * size;
-        const left = Number.isFinite(clientX) ? clientX - pxSize / 2 : parseFloat(cursor.style.left) || 0;
-        const top = Number.isFinite(clientY) ? clientY - pxSize / 2 : parseFloat(cursor.style.top) || 0;
+        let pxSizeX = TS * size;
+        let pxSizeY = TS * size;
+        let left = Number.isFinite(clientX) ? clientX - pxSizeX / 2 : parseFloat(cursor.style.left) || 0;
+        let top = Number.isFinite(clientY) ? clientY - pxSizeY / 2 : parseFloat(cursor.style.top) || 0;
+        if (Number.isFinite(worldX) && Number.isFinite(worldY)) {
+            const gridRect = this.getLogisticsToolGridRect(worldX, worldY, size);
+            const topLeft = this.worldToClientPoint(gridRect.left, gridRect.top);
+            const bottomRight = this.worldToClientPoint(gridRect.right, gridRect.bottom);
+            left = topLeft.x;
+            top = topLeft.y;
+            pxSizeX = Math.max(1, bottomRight.x - topLeft.x);
+            pxSizeY = Math.max(1, bottomRight.y - topLeft.y);
+        }
         cursor.style.display = "block";
         cursor.style.left = `${left}px`;
         cursor.style.top = `${top}px`;
-        cursor.style.width = `${pxSize}px`;
-        cursor.style.height = `${pxSize}px`;
+        cursor.style.width = `${pxSizeX}px`;
+        cursor.style.height = `${pxSizeY}px`;
         cursor.style.borderColor = deleteActive ? "#ff3434" : "#2cff5a";
         cursor.style.background = deleteActive ? "rgba(255,52,52,0.16)" : "rgba(44,255,90,0.16)";
         if (deleteActive && Number.isFinite(worldX) && Number.isFinite(worldY)) {
@@ -1495,7 +1552,12 @@ export class UIManager {
         const state = GameEngine.state;
         const current = Math.max(1, Math.min(5, Number(state.logisticsDeleteBrushSize) || 1));
         state.logisticsDeleteBrushSize = Math.max(1, Math.min(5, current + delta));
-        this.updateLogisticsToolCursor();
+        const point = state.logisticsDeleteBrushWorld;
+        if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) {
+            this.updateLogisticsToolCursor(null, null, point.x, point.y, !!state.logisticsDeleteBrushCtrlMode);
+        } else {
+            this.updateLogisticsToolCursor();
+        }
         this.refreshLogisticsDeleteToolButtonState();
         state.renderVersion++;
         this.updateValues(true);
@@ -1532,12 +1594,8 @@ export class UIManager {
     }
 
     static getLogisticsDeleteBrushRect(worldX, worldY) {
-        const TS = GameEngine.TILE_SIZE || 64;
         const size = Math.max(1, Math.min(5, Number(GameEngine.state.logisticsDeleteBrushSize) || 1));
-        const cx = Math.floor(worldX / TS) * TS + TS / 2;
-        const cy = Math.floor(worldY / TS) * TS + TS / 2;
-        const half = (TS * size) / 2;
-        return { left: cx - half, right: cx + half, top: cy - half, bottom: cy + half, cx, cy };
+        return this.getLogisticsToolGridRect(worldX, worldY, size);
     }
 
     static getLogisticsDeleteBrushCellKeys(rect) {
@@ -1650,9 +1708,18 @@ export class UIManager {
         state.renderVersion++;
     }
 
+    static syncLogisticsDeleteBrushCtrlMode(ctrlMode) {
+        const state = GameEngine.state;
+        const point = state.logisticsDeleteBrushWorld;
+        if (!state.logisticsDeleteToolActive || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+        this.updateLogisticsDeleteBrushHover(point.x, point.y, ctrlMode);
+        this.updateValues(true);
+    }
+
     static deleteLogisticsLinesInBrush(worldX, worldY, ctrlMode = false) {
         const state = GameEngine.state;
         if (!state.logisticsDeleteToolActive || !Number.isFinite(worldX) || !Number.isFinite(worldY)) return;
+        const brushRect = this.getLogisticsDeleteBrushRect(worldX, worldY);
         const touchedLines = this.getLogisticsLinesInBrush(worldX, worldY, ctrlMode);
         if (ctrlMode) {
             const groupIds = [...new Set(touchedLines.map(line => line?.groupId || line?.id || null).filter(Boolean))];
@@ -1661,8 +1728,8 @@ export class UIManager {
             touchedLines.forEach(line => {
                 const lineId = conveyorSystem.getLogisticsLineSelectionKey(line);
                 if (!lineId) return;
-                state.selectedLogisticsClickX = Number.isFinite(line?.x) ? line.x : worldX;
-                state.selectedLogisticsClickY = Number.isFinite(line?.y) ? line.y : worldY;
+                state.selectedLogisticsClickX = brushRect.cx;
+                state.selectedLogisticsClickY = brushRect.cy;
                 conveyorSystem.deleteLogisticsLineById(lineId);
             });
         }

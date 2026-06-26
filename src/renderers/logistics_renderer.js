@@ -156,10 +156,9 @@ export class LogisticsRenderer {
         };
         const deleteBrushRect = getDeleteBrushRect();
         const deleteBrushSamplePoints = getDeleteBrushSamplePoints();
-        const routeIntersectsDeleteBrush = (points, widthTiles) => {
-            if (!deleteBrushRect || !Array.isArray(points) || points.length < 2) return false;
-            return LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true)
-                .some(rect => deleteBrushSamplePoints.some(point => pointInsideLogisticsRect(point, rect)));
+        const getDeleteBrushHitRects = (rects) => {
+            if (!deleteBrushRect || !Array.isArray(rects) || rects.length === 0) return [];
+            return rects.filter(rect => deleteBrushSamplePoints.some(point => pointInsideLogisticsRect(point, rect)));
         };
         const getLineSelectionKey = (line) => {
             if (!line) return null;
@@ -297,7 +296,6 @@ export class LogisticsRenderer {
             const lineSelectionKey = getLineSelectionKey(line);
             const lineGroupKey = line?.groupId || line?.id || null;
             const isDeleteHovered = !!state.logisticsDeleteToolActive && (forceDeleteHover ||
-                routeIntersectsDeleteBrush(points, widthTiles) ||
                 (isDeleteHoverGroupMode && lineGroupKey && deleteHoverGroupIds.has(lineGroupKey)) ||
                 (!isDeleteHoverGroupMode && lineSelectionKey && deleteHoverLineIds.has(lineSelectionKey))
             );
@@ -309,16 +307,20 @@ export class LogisticsRenderer {
                     const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, widthTiles);
                     if (endpointRect) rects.push(endpointRect);
                 }
-                LogisticsRenderer.drawLogisticsRoundedTurnSegments(
-                    graphics,
-                    points,
-                    thickPx,
-                    hoverColor,
-                    hoverAlpha,
-                    roundedSkipCellKeys
-                );
+                const shouldPaintFullRoute = forceDeleteHover || (isDeleteHoverGroupMode && lineGroupKey && deleteHoverGroupIds.has(lineGroupKey));
+                const hoverRects = shouldPaintFullRoute ? rects : getDeleteBrushHitRects(rects);
+                if (shouldPaintFullRoute) {
+                    LogisticsRenderer.drawLogisticsRoundedTurnSegments(
+                        graphics,
+                        points,
+                        thickPx,
+                        hoverColor,
+                        hoverAlpha,
+                        roundedSkipCellKeys
+                    );
+                }
                 graphics.fillStyle(hoverColor, hoverAlpha);
-                rects.forEach(rect => {
+                hoverRects.forEach(rect => {
                     if (skipBaseCellKeys?.has(rect.cellKey)) return;
                     graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
                 });
@@ -1396,7 +1398,8 @@ export class LogisticsRenderer {
                 }
                 const groupDeleteHovered = !!state.logisticsDeleteToolActive &&
                     !!isDeleteHoverGroupMode &&
-                    segmentRoutes.some(({ route }) => routeIntersectsDeleteBrush(route.points, route.width || widthTiles));
+                    !!groupKey &&
+                    deleteHoverGroupIds.has(groupKey);
                 segmentRoutes.forEach(({ line, route }) => {
                     // [核心修正] 單擊時僅高亮被點擊的那一段，而不是用 some 讓整個群組都高亮
                     const isLineSelected = logisticsRenderModel.isSelectedLine(line, state);
