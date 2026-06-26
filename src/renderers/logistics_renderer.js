@@ -129,36 +129,24 @@ export class LogisticsRenderer {
             if (!state.logisticsDeleteToolActive || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
             const TS = GameEngine.TILE_SIZE || 64;
             const size = Math.max(1, Math.min(5, Number(state.logisticsDeleteBrushSize) || 1));
-            const cx = Math.floor(point.x / TS) * TS + TS / 2;
-            const cy = Math.floor(point.y / TS) * TS + TS / 2;
-            const half = (TS * size) / 2;
-            return { left: cx - half, right: cx + half, top: cy - half, bottom: cy + half, cx, cy, size };
+            const left = Math.round(point.x / TS - size / 2) * TS;
+            const top = Math.round(point.y / TS - size / 2) * TS;
+            const right = left + TS * size;
+            const bottom = top + TS * size;
+            return { left, right, top, bottom, cx: (left + right) / 2, cy: (top + bottom) / 2, size };
         };
-        const getDeleteBrushSamplePoints = () => {
-            if (!deleteBrushRect) return [];
-            const TS = GameEngine.TILE_SIZE || 64;
-            const size = Math.max(1, Math.min(5, Number(deleteBrushRect.size) || 1));
-            const startX = deleteBrushRect.cx - ((size - 1) * TS) / 2;
-            const startY = deleteBrushRect.cy - ((size - 1) * TS) / 2;
-            const points = [];
-            for (let row = 0; row < size; row++) {
-                for (let col = 0; col < size; col++) {
-                    points.push({ x: startX + col * TS, y: startY + row * TS });
-                }
-            }
-            return points;
-        };
-        const pointInsideLogisticsRect = (point, rect) => {
-            if (!point || !rect) return false;
-            const eps = 0.5;
-            return point.x >= rect.x + eps && point.x < rect.x + rect.w - eps &&
-                point.y >= rect.y + eps && point.y < rect.y + rect.h - eps;
+        const rectIntersectsDeleteBrush = (rect) => {
+            if (!deleteBrushRect || !rect) return false;
+            const left = Math.max(deleteBrushRect.left, rect.x);
+            const right = Math.min(deleteBrushRect.right, rect.x + rect.w);
+            const top = Math.max(deleteBrushRect.top, rect.y);
+            const bottom = Math.min(deleteBrushRect.bottom, rect.y + rect.h);
+            return right - left > 0.5 && bottom - top > 0.5;
         };
         const deleteBrushRect = getDeleteBrushRect();
-        const deleteBrushSamplePoints = getDeleteBrushSamplePoints();
         const getDeleteBrushHitRects = (rects) => {
             if (!deleteBrushRect || !Array.isArray(rects) || rects.length === 0) return [];
-            return rects.filter(rect => deleteBrushSamplePoints.some(point => pointInsideLogisticsRect(point, rect)));
+            return rects.filter(rect => rectIntersectsDeleteBrush(rect));
         };
         const getLineSelectionKey = (line) => {
             if (!line) return null;

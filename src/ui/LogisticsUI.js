@@ -527,7 +527,6 @@ export class LogisticsUI {
         LogisticsUI.logisticsSourceLine = null;
         LogisticsUI.potentialLogisticsDrag = null;
         LogisticsUI.isLogisticsDragging = false;
-        if (window.UIManager) window.UIManager.logisticsDoubleClickActivation = null;
         GameEngine.state.logisticsDragLine = null;
         GameEngine.addLog(`[物流] 已取消物流線建造。`, 'LOGISTICS');
         if (window.UIManager) window.UIManager.updateValues();

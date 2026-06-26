@@ -31,7 +31,7 @@ export class UIManager {
 
     static activeWarehouseEntity = null;
     static activeBuilding = null;
-    static logisticsDoubleClickActivation = null;
+
     static uiPositions = {};
 
     static loadUIPositions() {
@@ -367,6 +367,10 @@ export class UIManager {
             if (e.key === "Delete") {
                 if (this.isTextInputEvent(e)) return;
                 if (LogisticsUI.deleteSelectedLogisticsLine()) {
+                    // 同時清除物流線建造虛影狀態（如果有的話）
+                    if (LogisticsUI.isLogisticsDragging || GameEngine.state.logisticsDragLine) {
+                        LogisticsUI.cancelLogisticsDrag();
+                    }
                     e.preventDefault();
                     e.stopPropagation();
                 }
@@ -1438,16 +1442,17 @@ export class UIManager {
     static getLogisticsToolGridRect(worldX, worldY, size = 1) {
         const TS = GameEngine.TILE_SIZE || 64;
         const safeSize = Math.max(1, Math.min(5, Number(size) || 1));
-        const cx = Math.floor(worldX / TS) * TS + TS / 2;
-        const cy = Math.floor(worldY / TS) * TS + TS / 2;
-        const half = (TS * safeSize) / 2;
+        const left = Math.round(worldX / TS - safeSize / 2) * TS;
+        const top = Math.round(worldY / TS - safeSize / 2) * TS;
+        const right = left + TS * safeSize;
+        const bottom = top + TS * safeSize;
         return {
-            left: cx - half,
-            top: cy - half,
-            right: cx + half,
-            bottom: cy + half,
-            cx,
-            cy,
+            left,
+            top,
+            right,
+            bottom,
+            cx: (left + right) / 2,
+            cy: (top + bottom) / 2,
             size: safeSize
         };
     }
@@ -1582,15 +1587,19 @@ export class UIManager {
         return aLeft <= bRight && aRight >= bLeft && aTop <= bBottom && aBottom >= bTop;
     }
 
-    static isPointInsideLogisticsRect(point, rect) {
-        if (!point || !rect) return false;
-        const left = rect.x;
-        const top = rect.y;
-        const right = rect.x + rect.w;
-        const bottom = rect.y + rect.h;
-        const eps = 0.5;
-        return point.x >= left + eps && point.x < right - eps &&
-            point.y >= top + eps && point.y < bottom - eps;
+    static getLogisticsRectBrushOverlapArea(lineRect, brushRect) {
+        if (!lineRect || !brushRect) return 0;
+        const left = Math.max(brushRect.left, lineRect.x);
+        const right = Math.min(brushRect.right, lineRect.x + lineRect.w);
+        const top = Math.max(brushRect.top, lineRect.y);
+        const bottom = Math.min(brushRect.bottom, lineRect.y + lineRect.h);
+        const width = Math.max(0, right - left);
+        const height = Math.max(0, bottom - top);
+        return width * height;
+    }
+
+    static isLogisticsRectInsideBrush(lineRect, brushRect) {
+        return this.getLogisticsRectBrushOverlapArea(lineRect, brushRect) > 0.5;
     }
 
     static getLogisticsDeleteBrushRect(worldX, worldY) {
@@ -1611,8 +1620,8 @@ export class UIManager {
         const TS = GameEngine.TILE_SIZE || 64;
         const size = Math.max(1, Math.min(5, Number(GameEngine.state.logisticsDeleteBrushSize) || 1));
         const points = [];
-        const startX = rect.cx - ((size - 1) * TS) / 2;
-        const startY = rect.cy - ((size - 1) * TS) / 2;
+        const startX = rect.left + TS / 2;
+        const startY = rect.top + TS / 2;
         for (let row = 0; row < size; row++) {
             for (let col = 0; col < size; col++) {
                 const x = startX + col * TS;
@@ -1625,24 +1634,24 @@ export class UIManager {
 
     static isLogisticsLineInsideBrush(line, rect) {
         const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
-        const brushPoints = this.getLogisticsDeleteBrushSamplePoints(rect);
         if (points.length >= 2 && typeof LogisticsRenderer.getLogisticsCellRects === "function") {
             const widthTiles = Math.max(1, Number(line?.routeWidth) || 1);
             const visibleRects = LogisticsRenderer.getLogisticsCellRects(points, widthTiles, true);
-            if (visibleRects.some(lineRect => brushPoints.some(point => this.isPointInsideLogisticsRect(point, lineRect)))) return true;
+            return visibleRects.some(lineRect => this.isLogisticsRectInsideBrush(lineRect, rect));
         }
         const brushCellKeys = this.getLogisticsDeleteBrushCellKeys(rect);
         if (typeof conveyorSystem.getLogisticsSegmentOccupiedKeys === "function") {
             const lineCellKeys = conveyorSystem.getLogisticsSegmentOccupiedKeys(line);
             if (Array.isArray(lineCellKeys) && lineCellKeys.some(key => brushCellKeys.has(key))) return true;
         }
-        if (points.length === 0) return brushPoints.some(point => this.pointInsideRect(point, {
+        if (points.length === 0) return this.pointInsideRect({ x: rect.cx, y: rect.cy }, {
             left: line?.x || 0,
             right: line?.x || 0,
             top: line?.y || 0,
             bottom: line?.y || 0
-        }));
+        });
         const TS = GameEngine.TILE_SIZE || 64;
+        const brushPoints = this.getLogisticsDeleteBrushSamplePoints(rect);
         for (let i = 0; i < points.length - 1; i++) {
             const a = points[i];
             const b = points[i + 1];
@@ -1667,28 +1676,10 @@ export class UIManager {
             const key = conveyorSystem.getLogisticsLineSelectionKey(line) || line.id || `${line.x},${line.y}`;
             if (key && !linesByKey.has(key)) linesByKey.set(key, line);
         };
-        const brushPoints = this.getLogisticsDeleteBrushSamplePoints(rect);
-        if (typeof conveyorSystem.getLogisticsLinesAt === "function") {
-            brushPoints.forEach(point => {
-                conveyorSystem.getLogisticsLinesAt(point.x, point.y).forEach(addLine);
-            });
-        }
-        if (linesByKey.size === 0 && typeof conveyorSystem.getLogisticsLineAt === "function") {
-            brushPoints.forEach(point => addLine(conveyorSystem.getLogisticsLineAt(point.x, point.y)));
-        }
         conveyorSystem.ensureLogisticsLineStore()
             .filter(line => this.isLogisticsLineInsideBrush(line, rect))
             .forEach(addLine);
         const linesArray = [...linesByKey.values()];
-        if (!ctrlMode && linesArray.length > 1) {
-            let nearest = linesArray[0];
-            let minDist = Math.hypot(nearest.x - worldX, nearest.y - worldY);
-            for (const line of linesArray) {
-                const d = Math.hypot(line.x - worldX, line.y - worldY);
-                if (d < minDist) { minDist = d; nearest = line; }
-            }
-            return [nearest];
-        }
         return linesArray;
     }
 
@@ -2072,7 +2063,7 @@ export class UIManager {
         this.leftMouseDownPos = { x: e.clientX, y: e.clientY };
         const world = this.getWorldPoint(e.clientX, e.clientY);
         const worldX = world.x; const worldY = world.y;
-        const isDoubleClick = (e.detail || 0) >= 2;
+
         this.updateLogisticsToolCursor(e.clientX, e.clientY, worldX, worldY, e.ctrlKey);
         if (GameEngine.state.logisticsDeleteToolActive) {
             GameEngine.state.logisticsDeleteBrushDragging = true;
@@ -2087,14 +2078,12 @@ export class UIManager {
         });
         if (clickedBuilding && (!GameEngine.state.placingType || LogisticsUI.isTransportLinePlacementActive())) {
             const sourcePort = this.getPortSlotAt(clickedBuilding, worldX, worldY);
-            if (sourcePort && (e.ctrlKey || isDoubleClick) && LogisticsUI.beginLogisticsDragFromBuilding(clickedBuilding, sourcePort)) {
-                this.logisticsDoubleClickActivation = isDoubleClick ? { x: e.clientX, y: e.clientY } : null;
+            if (sourcePort && e.ctrlKey && LogisticsUI.beginLogisticsDragFromBuilding(clickedBuilding, sourcePort)) {
                 conveyorSystem.updateDrag(worldX, worldY);
                 this.updateValues();
                 return;
             }
             if (sourcePort) {
-                this.logisticsDoubleClickActivation = null;
                 this.potentialLogisticsDrag = {
                     entity: clickedBuilding,
                     sourcePort,
@@ -2127,14 +2116,12 @@ export class UIManager {
             });
             if (portBuilding) {
                 const sourcePort = this.getPortSlotAt(portBuilding, worldX, worldY);
-                if (sourcePort && (e.ctrlKey || isDoubleClick) && LogisticsUI.beginLogisticsDragFromBuilding(portBuilding, sourcePort)) {
-                    this.logisticsDoubleClickActivation = isDoubleClick ? { x: e.clientX, y: e.clientY } : null;
+                if (sourcePort && e.ctrlKey && LogisticsUI.beginLogisticsDragFromBuilding(portBuilding, sourcePort)) {
                     conveyorSystem.updateDrag(worldX, worldY);
                     this.updateValues();
                     return;
                 }
                 if (sourcePort) {
-                    this.logisticsDoubleClickActivation = null;
                     this.potentialLogisticsDrag = {
                         entity: portBuilding,
                         sourcePort,
@@ -2275,18 +2262,6 @@ export class UIManager {
         this.potentialTransportLineBuildDrag = null;
 
         if (this.isLogisticsDragging) {
-            if (this.logisticsDoubleClickActivation) {
-                const threshold = UI_CONFIG.Interaction?.minDragDistance || 10;
-                const dist = Math.hypot(
-                    e.clientX - this.logisticsDoubleClickActivation.x,
-                    e.clientY - this.logisticsDoubleClickActivation.y
-                );
-                this.logisticsDoubleClickActivation = null;
-                if (dist <= threshold) {
-                    this.updateValues();
-                    return;
-                }
-            }
             const submitResult = conveyorSystem.submitDrag();
             if (submitResult?.blocked) {
                 this.updateValues();
@@ -2428,28 +2403,15 @@ export class UIManager {
             return;
         }
 
-        // 如果處於建造物流線模式，且點擊到了物流線，優先進行物流線的選取/雙擊全選，不被 Stamp 建造模式阻斷
+        // 如果處於建造物流線模式，且點擊到了物流線，優先進行物流線的選取，不被 Stamp 建造模式阻斷
         if (LogisticsUI.isTransportLinePlacementActive() && clickedLine) {
             GameEngine.state.selectedLogisticsClickX = worldX;
             GameEngine.state.selectedLogisticsClickY = worldY;
-            const now = Date.now();
-            const groupId = clickedLine.groupId || clickedLine.id;
-            const isDoubleClick = (e.detail || 0) >= 2
-                || (GameEngine.state.lastSelectedLogisticsGroupId === groupId && (now - GameEngine.state.lastSelectionTime < 500));
             GameEngine.state.selectedUnitIds = [];
             GameEngine.state.selectedBuildingIds = [];
             GameEngine.state.selectedBuildingId = null;
             GameEngine.state.selectedResourceId = null;
-            LogisticsUI.selectLogisticsLine(clickedLine, isDoubleClick);
-            GameEngine.state.lastSelectionTime = now;
-            GameEngine.state.lastSelectedLogisticsGroupId = groupId;
-            if (isDoubleClick) {
-                const selectedGroupIds = conveyorSystem.getLogisticsMergeConnectedGroupIds?.(groupId) || new Set([groupId]);
-                const groupCount = conveyorSystem.ensureLogisticsLineStore()
-                    .filter(line => selectedGroupIds.has(line.groupId || line.id))
-                    .length;
-                GameEngine.addLog(`[物流] 已選取同群組物流線 ${groupCount} 段。`, 'LOGISTICS');
-            }
+            LogisticsUI.selectLogisticsLine(clickedLine, false);
             LogisticsUI.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
             this.updateValues(true);
             return;
@@ -2536,24 +2498,11 @@ export class UIManager {
         if (clickedLine) {
             GameEngine.state.selectedLogisticsClickX = worldX;
             GameEngine.state.selectedLogisticsClickY = worldY;
-            const now = Date.now();
-            const groupId = clickedLine.groupId || clickedLine.id;
-            const isDoubleClick = (e.detail || 0) >= 2
-                || (GameEngine.state.lastSelectedLogisticsGroupId === groupId && (now - GameEngine.state.lastSelectionTime < 500));
             GameEngine.state.selectedUnitIds = [];
             GameEngine.state.selectedBuildingIds = [];
             GameEngine.state.selectedBuildingId = null;
             GameEngine.state.selectedResourceId = null;
-            LogisticsUI.selectLogisticsLine(clickedLine, isDoubleClick);
-            GameEngine.state.lastSelectionTime = now;
-            GameEngine.state.lastSelectedLogisticsGroupId = groupId;
-            if (isDoubleClick) {
-                const selectedGroupIds = conveyorSystem.getLogisticsMergeConnectedGroupIds?.(groupId) || new Set([groupId]);
-                const groupCount = conveyorSystem.ensureLogisticsLineStore()
-                    .filter(line => selectedGroupIds.has(line.groupId || line.id))
-                    .length;
-                GameEngine.addLog(`[物流] 已選取同群組物流線 ${groupCount} 段。`, 'LOGISTICS');
-            }
+            LogisticsUI.selectLogisticsLine(clickedLine, false);
             LogisticsUI.showLogisticsLineMenu(clickedLine, e.clientX, e.clientY);
             this.updateValues(true);
             return;
