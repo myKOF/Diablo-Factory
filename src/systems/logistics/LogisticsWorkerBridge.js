@@ -14,10 +14,23 @@ export class LogisticsWorkerBridge {
         this.sentIds = new Set();     // 已送交 worker 的 transfer id
         this.topoSig = null;
         this.ready = true;
+        // [流量控制] worker 在高物品數時單步運算可能 > tick 間隔(實測 1000 物品 ~61ms > 50ms)。
+        // 若每 tick 無條件送 step,worker queue 會無上限堆積、越落越後,新發物品在 worker ack 前
+        // progress 停在 0(卡起點)→ 該線稀疏 + canStartTransfer 擋下後續發料,且隨數量惡化。
+        // 解法:最多 1 個 in-flight step;期間累積 deltaTime,下一步一次涵蓋(落後時步長變粗但不失真)。
+        this.inFlight = false;
+        this._pendingDt = 0;
+        this._pendingState = null;
+        this._pendingTileSize = 20;
     }
 
     _onMessage(msg) {
-        if (msg && msg.type === 'result') this.latest = msg;
+        if (msg && msg.type === 'result') {
+            this.latest = msg;
+            this.inFlight = false;
+            // worker 完成上一步;期間若有累積的時間/新增物品,立即送出下一步,避免空轉。
+            if (this._pendingDt > 0 && this._pendingState) this._flush();
+        }
     }
 
     _topologySignature(state) {
@@ -81,9 +94,23 @@ export class LogisticsWorkerBridge {
         return arrivals;
     }
 
-    // 把本 tick 的新增/移除送給 worker,並請求推進。
+    // [流量控制] 累積本 tick 的 deltaTime;worker 閒置時才真正送出 step(否則等它回覆再送)。
+    // 累積上限 0.2(與 logicTick 的 deltaTime 上限一致):極端落後時退化為慢動作而非物品瞬移。
     pushStep(state, deltaTime, tileSize) {
-        this._maybeSyncTopology(state, tileSize);
+        this._pendingDt = Math.min(this._pendingDt + deltaTime, 0.2);
+        this._pendingState = state;
+        this._pendingTileSize = tileSize;
+        // 看門狗:若上一步逾 500ms 仍無回覆(訊息遺失/worker 卡住),解除 in-flight 以免永久凍結。
+        if (this.inFlight && this._lastFlushTime && (performance.now() - this._lastFlushTime > 500)) {
+            this.inFlight = false;
+        }
+        if (!this.inFlight) this._flush();
+    }
+
+    _flush() {
+        const state = this._pendingState;
+        if (!state) return;
+        this._maybeSyncTopology(state, this._pendingTileSize);
         const adds = [];
         const liveIds = new Set();
         for (const t of state.activeTransfers) {
@@ -98,7 +125,11 @@ export class LogisticsWorkerBridge {
         for (const id of this.sentIds) {
             if (!liveIds.has(id)) { removes.push(id); this.sentIds.delete(id); }
         }
-        this.worker.postMessage({ type: 'step', seq: ++this.seq, deltaTime, adds, removes });
+        const dt = this._pendingDt;
+        this._pendingDt = 0;
+        this.inFlight = true;
+        this._lastFlushTime = performance.now();
+        this.worker.postMessage({ type: 'step', seq: ++this.seq, deltaTime: dt, adds, removes });
     }
 
     dispose() {
