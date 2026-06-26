@@ -2151,6 +2151,12 @@ export class UIManager {
                 return;
             }
             if (portBuilding) return;
+            if (clickedLine) {
+                LogisticsUI.beginTransportLineBuildDrag(worldX, worldY, clickedLine);
+                conveyorSystem.updateDrag(worldX, worldY);
+                this.updateValues();
+                return;
+            }
             this.potentialTransportLineBuildDrag = {
                 startX: e.clientX,
                 startY: e.clientY,
