@@ -743,14 +743,6 @@ export class MainScene extends Phaser.Scene {
         mixStr(state.selectedLogisticsLineId);
         mixStr(state.selectedLogisticsGroupId);
 
-        mixNum(state.logisticsDeleteToolActive ? 1 : 0);
-        if (state.logisticsDeleteToolActive) {
-            mixNum(state.logisticsDeleteBrushWorld?.x);
-            mixNum(state.logisticsDeleteBrushWorld?.y);
-            mixNum(state.logisticsDeleteBrushSize);
-            mixNum(state.logisticsDeleteBrushCtrlMode ? 1 : 0);
-        }
-
         return `${(h1 >>> 0).toString(36)}:${(h2 >>> 0).toString(36)}:${lines.length}:${outputTargetCount}`;
     }
 
@@ -763,6 +755,18 @@ export class MainScene extends Phaser.Scene {
         const hasPreviewContent =
             !!state.logisticsDragLine ||
             (Array.isArray(state.conveyorGhosts) && state.conveyorGhosts.length > 0);
+        const hasDeleteOverlayContent =
+            !!state.logisticsDeleteToolActive &&
+            !!state.logisticsDeleteBrushWorld &&
+            (((state.logisticsDeleteBrushHoverLineIds || []).length > 0) ||
+                ((state.logisticsDeleteBrushHoverGroupIds || []).length > 0));
+        const deleteOverlaySignature = hasDeleteOverlayContent
+            ? [
+                state.logisticsDeleteBrushHoverSignature || "",
+                (state.logisticsDeleteBrushHoverLineIds || []).join("|"),
+                (state.logisticsDeleteBrushHoverGroupIds || []).join("|")
+            ].join("::")
+            : "";
         const hasTransferContent =
             Array.isArray(state.activeTransfers) && state.activeTransfers.length > 0;
 
@@ -806,7 +810,7 @@ export class MainScene extends Phaser.Scene {
         const signature = this.getLogisticsRenderSignature(state);
         if (hasStaticContent) {
             if (this._lastLogisticsRenderSignature !== signature) {
-                LogisticsRenderer.render(this.logisticsGraphics, state, this, { drawTransfers: false, drawBuildPreview: false });
+                LogisticsRenderer.render(this.logisticsGraphics, state, this, { drawTransfers: false, drawBuildPreview: false, drawDeleteHover: false });
                 if (this.logisticsPortGraphics) this.logisticsPortGraphics.clear();
                 this._lastLogisticsRenderSignature = signature;
                 this._logisticsLayerWasDrawn = true;
@@ -822,10 +826,23 @@ export class MainScene extends Phaser.Scene {
         if (this.logisticsPreviewGraphics) {
             if (hasPreviewContent) {
                 LogisticsRenderer.renderBuildPreview(this.logisticsPreviewGraphics, state, this);
+                if (hasDeleteOverlayContent) {
+                    LogisticsRenderer.renderDeleteHoverOverlay(this.logisticsPreviewGraphics, state, this, false);
+                    this._lastLogisticsDeleteOverlaySignature = deleteOverlaySignature;
+                } else {
+                    this._lastLogisticsDeleteOverlaySignature = "";
+                }
                 this._logisticsPreviewLayerWasDrawn = true;
+            } else if (hasDeleteOverlayContent) {
+                if (this._lastLogisticsDeleteOverlaySignature !== deleteOverlaySignature || !this._logisticsPreviewLayerWasDrawn) {
+                    LogisticsRenderer.renderDeleteHoverOverlay(this.logisticsPreviewGraphics, state, this);
+                    this._lastLogisticsDeleteOverlaySignature = deleteOverlaySignature;
+                    this._logisticsPreviewLayerWasDrawn = true;
+                }
             } else if (this._logisticsPreviewLayerWasDrawn) {
                 this.logisticsPreviewGraphics.clear();
                 this._logisticsPreviewLayerWasDrawn = false;
+                this._lastLogisticsDeleteOverlaySignature = "";
             }
         }
 

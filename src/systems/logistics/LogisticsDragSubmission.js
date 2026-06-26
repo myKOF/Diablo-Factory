@@ -3,12 +3,11 @@ import { BuildingSystem } from '../BuildingSystem.js';
 import { LogisticsStateActions } from './LogisticsStateActions.js';
 
 function buildSingleSegmentAt(worldX, worldY) {
-    GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
     return false;
 }
 
 function revalidateDragRouteContext(routeContext, drag) {
-    if (!routeContext?.isValid || !Array.isArray(routeContext.ghosts) || routeContext.ghosts.length < 2) {
+    if (!routeContext?.isValid || !Array.isArray(routeContext.ghosts) || routeContext.ghosts.length < 1) {
         return false;
     }
     if (!this.router) return false;
@@ -137,11 +136,6 @@ function submitDrag() {
         const beforeCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : 0;
         const segmentCostCount = Math.max(1, buildGhosts.length - 1);
         const allowsShortMergeConnector = !!touchedTargetLine;
-        if (segmentCostCount < 2 && !allowsShortMergeConnector) {
-            GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
-            this.cancelDrag();
-            return null;
-        }
         const maxCosts = this.getTransportLineCost(segmentCostCount);
         const missing = Object.entries(maxCosts).find(([resource, amount]) => (GameEngine.state.resources[resource] || 0) < amount);
         if (missing) {

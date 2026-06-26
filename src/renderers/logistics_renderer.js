@@ -9,6 +9,118 @@ export class LogisticsRenderer {
     static _transferPathGeomCache = new WeakMap();
     static _annotatedRoutes = new WeakSet();
 
+    static getLogisticsLineSelectionKey(line) {
+        if (!line) return null;
+        const unit = (GameEngine.TILE_SIZE || 64) / 2;
+        const gx = line.gridX !== undefined ? line.gridX : Math.round((line.x || 0) / unit);
+        const gy = line.gridY !== undefined ? line.gridY : Math.round((line.y || 0) / unit);
+        return `${line.id || line.groupId || "logistics"}@${gx},${gy}`;
+    }
+
+    static getDeleteBrushWorldRect(state) {
+        const point = state?.logisticsDeleteBrushWorld;
+        if (!state?.logisticsDeleteToolActive || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+        const TS = GameEngine.TILE_SIZE || 64;
+        const size = Math.max(1, Math.min(5, Number(state.logisticsDeleteBrushSize) || 1));
+        const left = Math.round(point.x / TS - size / 2) * TS;
+        const top = Math.round(point.y / TS - size / 2) * TS;
+        const right = left + TS * size;
+        const bottom = top + TS * size;
+        return { left, top, right, bottom, cx: (left + right) / 2, cy: (top + bottom) / 2, size };
+    }
+
+    static rectIntersectsDeleteBrush(rect, brushRect) {
+        if (!rect || !brushRect) return false;
+        const left = Math.max(brushRect.left, rect.x);
+        const right = Math.min(brushRect.right, rect.x + rect.w);
+        const top = Math.max(brushRect.top, rect.y);
+        const bottom = Math.min(brushRect.bottom, rect.y + rect.h);
+        return right - left > 0.5 && bottom - top > 0.5;
+    }
+
+    static renderDeleteHoverOverlay(graphics, state, scene, clear = true) {
+        if (!graphics || !state || !scene) return;
+        if (clear) graphics.clear();
+        const brushRect = LogisticsRenderer.getDeleteBrushWorldRect(state);
+        if (!brushRect) return;
+        const hoverLineIds = new Set(state.logisticsDeleteBrushHoverLineIds || []);
+        const hoverGroupIds = new Set(state.logisticsDeleteBrushHoverGroupIds || []);
+        if (hoverLineIds.size === 0 && hoverGroupIds.size === 0) return;
+
+        const logCfg = UI_CONFIG.LogisticsSystem || {};
+        const hoverColor = 0xff3030;
+        const hoverAlpha = 0.72;
+        const isGroupMode = !!state.logisticsDeleteBrushCtrlMode;
+        const lines = Array.isArray(state.logisticsLines) ? state.logisticsLines : [];
+        const targetLines = lines.filter(line => {
+            const groupKey = line?.groupId || line?.id || null;
+            if (isGroupMode) return groupKey && hoverGroupIds.has(groupKey);
+            const lineKey = LogisticsRenderer.getLogisticsLineSelectionKey(line);
+            return lineKey && hoverLineIds.has(lineKey);
+        });
+        if (targetLines.length === 0) return;
+
+        const groups = new Map();
+        targetLines.forEach(line => {
+            const groupKey = line?.groupId || line?.id || "logistics";
+            if (!groups.has(groupKey)) groups.set(groupKey, []);
+            groups.get(groupKey).push(line);
+        });
+
+        graphics.fillStyle(hoverColor, hoverAlpha);
+        groups.forEach(groupLines => {
+            const widthTiles = Math.max(1, ...groupLines.map(line => Math.round(Number(line?.routeWidth) || 1)));
+            const thickness = Math.max(logCfg.lineThickness || 3, widthTiles * (GameEngine.TILE_SIZE || 20));
+            const groupTurnKeys = new Set();
+            groupLines.forEach(line => {
+                const points = Array.isArray(line?.routePoints) ? line.routePoints : [];
+                if (points.length < 2) return;
+                const lineWidth = Math.max(1, Math.round(Number(line?.routeWidth) || 1));
+                const rects = LogisticsRenderer.getLogisticsCellRects(points, lineWidth, true);
+                if (!line.targetId && !line.suppressOpenEndpointCell) {
+                    const endpointRect = LogisticsRenderer.getLogisticsEndpointCellRect(points, lineWidth);
+                    if (endpointRect) rects.push(endpointRect);
+                }
+                const hitRects = isGroupMode
+                    ? rects
+                    : rects.filter(rect => LogisticsRenderer.rectIntersectsDeleteBrush(rect, brushRect));
+                const hitCellKeys = isGroupMode ? null : new Set(hitRects.map(rect => rect.cellKey).filter(Boolean));
+                LogisticsRenderer.drawLogisticsRoundedTurnSegments(
+                    graphics,
+                    points,
+                    thickness,
+                    hoverColor,
+                    hoverAlpha,
+                    null,
+                    hitCellKeys
+                );
+                hitRects.forEach(rect => graphics.fillRect(rect.x, rect.y, rect.w, rect.h));
+            });
+
+            LogisticsRenderer.getLogisticsGroupTurnCells(groupLines).forEach(turn => {
+                if (isGroupMode) {
+                    groupTurnKeys.add(turn.key);
+                    return;
+                }
+                const TS = GameEngine.TILE_SIZE || 20;
+                if (LogisticsRenderer.rectIntersectsDeleteBrush({ x: turn.x - TS / 2, y: turn.y - TS / 2, w: TS, h: TS }, brushRect)) {
+                    groupTurnKeys.add(turn.key);
+                }
+            });
+            if (groupTurnKeys.size > 0) {
+                LogisticsRenderer.drawLogisticsGroupRoundedTurns(
+                    graphics,
+                    groupLines,
+                    thickness,
+                    hoverColor,
+                    hoverAlpha,
+                    null,
+                    groupTurnKeys
+                );
+            }
+        });
+    }
+
     static resolveTransferProgress(transfer, routePoints = transfer?.routePoints, cellSize = GameEngine.TILE_SIZE) {
         return logisticsTransportArrayState.resolveProgress(transfer, routePoints, cellSize);
     }
@@ -22,6 +134,7 @@ export class LogisticsRenderer {
         };
         const parseColor = (c) => scene.hexOrRgba(c).color;
         const currentTime = scene.time.now / 1000;
+        const drawDeleteHover = options.drawDeleteHover !== false;
 
         const getCoordId = (e) => `${e.type1}_${e.x}_${e.y}`;
         const drawSelectedLogisticsSegmentOutline = (line) => {
@@ -123,10 +236,10 @@ export class LogisticsRenderer {
         const selectedLogisticsOutlineJobs = [];
         const deleteHoverLineIds = new Set(state.logisticsDeleteBrushHoverLineIds || []);
         const deleteHoverGroupIds = new Set(state.logisticsDeleteBrushHoverGroupIds || []);
-        const isDeleteHoverGroupMode = !!state.logisticsDeleteToolActive && !!state.logisticsDeleteBrushCtrlMode;
+        const isDeleteHoverGroupMode = drawDeleteHover && !!state.logisticsDeleteToolActive && !!state.logisticsDeleteBrushCtrlMode;
         const getDeleteBrushRect = () => {
             const point = state.logisticsDeleteBrushWorld;
-            if (!state.logisticsDeleteToolActive || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+            if (!drawDeleteHover || !state.logisticsDeleteToolActive || !point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
             const TS = GameEngine.TILE_SIZE || 64;
             const size = Math.max(1, Math.min(5, Number(state.logisticsDeleteBrushSize) || 1));
             const left = Math.round(point.x / TS - size / 2) * TS;
@@ -283,7 +396,7 @@ export class LogisticsRenderer {
 
             const lineSelectionKey = getLineSelectionKey(line);
             const lineGroupKey = line?.groupId || line?.id || null;
-            const isDeleteHovered = !!state.logisticsDeleteToolActive && (forceDeleteHover ||
+            const isDeleteHovered = drawDeleteHover && !!state.logisticsDeleteToolActive && (forceDeleteHover ||
                 (isDeleteHoverGroupMode && lineGroupKey && deleteHoverGroupIds.has(lineGroupKey)) ||
                 (!isDeleteHoverGroupMode && lineSelectionKey && deleteHoverLineIds.has(lineSelectionKey))
             );
@@ -1384,7 +1497,7 @@ export class LogisticsRenderer {
                         detachedSplitArrowCellKeys
                     );
                 }
-                const groupDeleteHovered = !!state.logisticsDeleteToolActive &&
+                const groupDeleteHovered = drawDeleteHover && !!state.logisticsDeleteToolActive &&
                     !!isDeleteHoverGroupMode &&
                     !!groupKey &&
                     deleteHoverGroupIds.has(groupKey);
@@ -1393,7 +1506,7 @@ export class LogisticsRenderer {
                     const isLineSelected = logisticsRenderModel.isSelectedLine(line, state);
                     drawLogisticsRoute(route.points, route.width || widthTiles, isLineSelected, isConnected, line, useConnectedIdleStyle, ordinaryArrowSkipCellKeys, roundedBaseSkipCellKeys, roundedTurnSkipCellKeys, null, groupDeleteHovered);
                 });
-                if (!!state.logisticsDeleteToolActive) {
+                if (drawDeleteHover && !!state.logisticsDeleteToolActive) {
                     const hoverTurnColor = 0xff3030;
                     const hoverTurnAlpha = 0.72;
                     const hoverTurnThickness = Math.max(logCfg.lineThickness || 3, widthTiles * GameEngine.TILE_SIZE);
@@ -1960,7 +2073,7 @@ export class LogisticsRenderer {
         const isTransferPointVisible = (x, y) => {
             if (!cullView) return true;
             return x >= cullView.x - cullMargin && x <= cullView.right + cullMargin &&
-                   y >= cullView.y - cullMargin && y <= cullView.bottom + cullMargin;
+                y >= cullView.y - cullMargin && y <= cullView.bottom + cullMargin;
         };
 
         state.activeTransfers.forEach(t => {
@@ -1974,7 +2087,7 @@ export class LogisticsRenderer {
                     t._routeAnnotated = true;
                 }
                 const transferProgress = LogisticsRenderer.resolveTransferProgress(t, routePoints, GameEngine.TILE_SIZE);
-                
+
                 // DOD: Try fetching dense path first
                 let usedDense = false;
                 const pathPoint = LogisticsRenderer.getPointOnMergeTransferPath(routePoints, transferProgress, t, state);
@@ -2407,7 +2520,7 @@ export class LogisticsRenderer {
         if (!textureKey) return;
 
         const depth = scene.logisticsTransferGraphics?.depth || 900000;
-        
+
         let blitter = scene.logisticsTransferBlitters.get(textureKey);
         if (!blitter) {
             blitter = scene.add.blitter(0, 0, textureKey).setDepth(depth);
@@ -2432,7 +2545,7 @@ export class LogisticsRenderer {
                 if (frame) bobData.bob.frame = blitter.texture.get(frame);
             }
         }
-        
+
         // Phaser Bob 原點固定在左上角，因此這裡加上偏移量達到居中效果
         bobData.bob.x = x - itemSize / 2;
         bobData.bob.y = y - itemSize / 2;
@@ -2669,7 +2782,7 @@ export class LogisticsRenderer {
         }
 
         const buffer = new Float32Array((totalPixels + 1) * 3);
-        
+
         for (let dist = 0; dist <= totalPixels; dist++) {
             const progress = dist / totalPixels;
             const pt = LogisticsRenderer.getPointOnTransferPath(points, progress, 0);
@@ -2679,7 +2792,7 @@ export class LogisticsRenderer {
                 buffer[dist * 3 + 2] = Number.isFinite(pt.angle) ? pt.angle : 0;
             }
         }
-        
+
         dense = { buffer, totalPixels };
         LogisticsRenderer._densePathCache.set(points, dense);
         return dense;
@@ -3631,9 +3744,21 @@ export class LogisticsRenderer {
     }
 
     static getLogisticsCellRects(points, widthTiles = 1, perStep = false) {
-        if (!Array.isArray(points) || points.length < 2) return [];
+        if (!Array.isArray(points) || points.length === 0) return [];
         const TS = GameEngine.TILE_SIZE;
         const width = Math.max(1, Math.round(Number(widthTiles) || 1));
+        if (points.length === 1) {
+            const p = points[0];
+            return [{
+                x: p.x + TS / 2 - (width * TS) / 2,
+                y: p.y + TS / 2 - (width * TS) / 2,
+                w: width * TS,
+                h: width * TS,
+                cellKey: `${Math.round(p.x)},${Math.round(p.y)}`,
+                dirX: 1,
+                dirY: 0
+            }];
+        }
         const eps = 0.001;
         const cells = new Set();
         const stepRects = [];

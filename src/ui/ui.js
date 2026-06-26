@@ -1521,6 +1521,7 @@ export class UIManager {
         state.logisticsDeleteBrushDragging = false;
         state.logisticsDeleteBrushHoverLineIds = [];
         state.logisticsDeleteBrushHoverGroupIds = [];
+        state.logisticsDeleteBrushHoverSignature = null;
         state.logisticsDeleteBrushCtrlMode = false;
         if (state.logisticsDeleteToolActive) {
             this.cancelBuildingMode();
@@ -1545,6 +1546,7 @@ export class UIManager {
         state.logisticsDeleteBrushWorld = null;
         state.logisticsDeleteBrushHoverLineIds = [];
         state.logisticsDeleteBrushHoverGroupIds = [];
+        state.logisticsDeleteBrushHoverSignature = null;
         state.logisticsDeleteBrushCtrlMode = false;
         this.updateLogisticsToolCursor();
         this.refreshLogisticsDeleteToolButtonState();
@@ -1676,7 +1678,13 @@ export class UIManager {
             const key = conveyorSystem.getLogisticsLineSelectionKey(line) || line.id || `${line.x},${line.y}`;
             if (key && !linesByKey.has(key)) linesByKey.set(key, line);
         };
-        conveyorSystem.ensureLogisticsLineStore()
+        const candidateLines = new Set();
+        this.getLogisticsDeleteBrushSamplePoints(rect).forEach(point => {
+            const nearby = conveyorSystem.spatialGrid?.getNearby?.(point.x, point.y) || [];
+            nearby.forEach(line => candidateLines.add(line));
+        });
+        const candidates = candidateLines.size > 0 ? [...candidateLines] : conveyorSystem.ensureLogisticsLineStore();
+        candidates
             .filter(line => this.isLogisticsLineInsideBrush(line, rect))
             .forEach(addLine);
         const linesArray = [...linesByKey.values()];
@@ -1685,6 +1693,16 @@ export class UIManager {
 
     static updateLogisticsDeleteBrushHover(worldX, worldY, ctrlMode = false) {
         const state = GameEngine.state;
+        const rect = this.getLogisticsDeleteBrushRect(worldX, worldY);
+        const hoverSignature = [
+            Math.round(rect.left),
+            Math.round(rect.top),
+            Math.round(rect.right),
+            Math.round(rect.bottom),
+            ctrlMode ? 1 : 0,
+            (state.logisticsLines || []).length
+        ].join(":");
+        if (state.logisticsDeleteBrushHoverSignature === hoverSignature) return;
         const touchedLines = this.getLogisticsLinesInBrush(worldX, worldY, ctrlMode);
         const touchedLineIds = touchedLines
             .map(line => conveyorSystem.getLogisticsLineSelectionKey(line))
@@ -1696,7 +1714,7 @@ export class UIManager {
         state.logisticsDeleteBrushCtrlMode = !!ctrlMode;
         state.logisticsDeleteBrushHoverLineIds = [...new Set(touchedLineIds)];
         state.logisticsDeleteBrushHoverGroupIds = [...new Set(touchedGroupIds)];
-        state.renderVersion++;
+        state.logisticsDeleteBrushHoverSignature = hoverSignature;
     }
 
     static syncLogisticsDeleteBrushCtrlMode(ctrlMode) {
@@ -1724,6 +1742,7 @@ export class UIManager {
                 conveyorSystem.deleteLogisticsLineById(lineId);
             });
         }
+        state.logisticsDeleteBrushHoverSignature = null;
         this.updateLogisticsDeleteBrushHover(worldX, worldY, ctrlMode);
         this.updateValues(true);
     }
@@ -2424,7 +2443,6 @@ export class UIManager {
 
             const pos = this.getWorldMousePos(e.clientX, e.clientY);
             if (LogisticsUI.isTransportLinePlacementActive()) {
-                GameEngine.addLog(`[物流線] 至少需要向任一方向拖曳 2 格才能建造。`, 'LOGISTICS');
                 return;
             }
             GameEngine.placeBuilding(state.placingType, pos.x, pos.y);

@@ -203,7 +203,7 @@ function updateDragNow(currentX, currentY) {
             GameEngine.state.logisticsLines || []
         )
         : [];
-    const rawPreviewIsValid = rawPreviewGhosts.length >= 2 && this.validateGhosts(rawPreviewGhosts);
+    const rawPreviewIsValid = rawPreviewGhosts.length >= 1 && this.validateGhosts(rawPreviewGhosts);
     let path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
     path = this.dedupeExtensionStart(path);
 
