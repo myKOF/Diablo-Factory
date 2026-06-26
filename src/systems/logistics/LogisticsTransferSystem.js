@@ -617,7 +617,7 @@ export class LogisticsTransferSystem {
             if (typeof window.setLogisticsWorker !== 'function') {
                 window.setLogisticsWorker = (on) => {
                     window.LOGISTICS_WORKER = !!on;
-                    try { localStorage.setItem('LOGISTICS_WORKER', on ? '1' : '0'); } catch (e) {}
+                    try { localStorage.setItem('LOGISTICS_WORKER', on ? '1' : '0'); } catch (e) { }
                     return `物流 Web Worker: ${on ? '啟用' : '停用'}(已記住)`;
                 };
             }
@@ -630,7 +630,7 @@ export class LogisticsTransferSystem {
                     const saved = localStorage.getItem('LOGISTICS_WORKER');
                     if (saved === '0') window.LOGISTICS_WORKER = false;
                     else if (saved === '1') window.LOGISTICS_WORKER = true;
-                } catch (e) {}
+                } catch (e) { }
             }
         }
         const want = typeof window !== 'undefined' && window.LOGISTICS_WORKER === true && typeof Worker !== 'undefined';
@@ -657,13 +657,13 @@ export class LogisticsTransferSystem {
         if (typeof window.setMaxActiveTransfers !== 'function') {
             window.setMaxActiveTransfers = (n) => {
                 window.MAX_ACTIVE_TRANSFERS = Math.max(0, Math.floor(Number(n) || 0));
-                try { localStorage.setItem('MAX_ACTIVE_TRANSFERS', String(window.MAX_ACTIVE_TRANSFERS)); } catch (e) {}
+                try { localStorage.setItem('MAX_ACTIVE_TRANSFERS', String(window.MAX_ACTIVE_TRANSFERS)); } catch (e) { }
                 return `物品上限: ${window.MAX_ACTIVE_TRANSFERS || '不限'}(已記住)`;
             };
         }
         if (window.MAX_ACTIVE_TRANSFERS === undefined) {
-            let v = 700;
-            try { const s = localStorage.getItem('MAX_ACTIVE_TRANSFERS'); if (s !== null) v = Math.max(0, parseInt(s, 10) || 0); } catch (e) {}
+            let v = 0; // 預設不限(滿載產線應保持滿載;真正解法是讓 sim 夠快,而非限流)。需要時自行 setMaxActiveTransfers(n)。
+            try { const s = localStorage.getItem('MAX_ACTIVE_TRANSFERS'); if (s !== null) v = Math.max(0, parseInt(s, 10) || 0); } catch (e) { }
             window.MAX_ACTIVE_TRANSFERS = v;
         }
         return Number(window.MAX_ACTIVE_TRANSFERS) || 0;
@@ -799,80 +799,80 @@ export class LogisticsTransferSystem {
         if (_maxActive > 0 && state.activeTransfers.length >= _maxActive) {
             // 達上限:本 tick 不發料(已在途者照常推進/抵達,count 降回上限下時自動恢復發料)。
         } else
-        state.mapEntities.forEach(ent => {
-            if (!ent.outputTargets || ent.outputTargets.length === 0) return;
+            state.mapEntities.forEach(ent => {
+                if (!ent.outputTargets || ent.outputTargets.length === 0) return;
 
-            const cfg = this.engine ? this.engine.getEntityConfig(ent.type1, ent.lv) : null;
-            const needWorkers = cfg ? (cfg.need_villagers || 0) : 0;
-            const currentWorkers = ent.assignedWorkers ? ent.assignedWorkers.length : 0;
-            const isWarehouse = ['warehouse', 'storehouse', 'barn', 'town_center', 'village'].includes(ent.type1);
+                const cfg = this.engine ? this.engine.getEntityConfig(ent.type1, ent.lv) : null;
+                const needWorkers = cfg ? (cfg.need_villagers || 0) : 0;
+                const currentWorkers = ent.assignedWorkers ? ent.assignedWorkers.length : 0;
+                const isWarehouse = ['warehouse', 'storehouse', 'barn', 'town_center', 'village'].includes(ent.type1);
 
 
 
-            // 修正規則：不再因為工人不足而停擺。
-            // 1 名工人是 1 倍效率，N 名工人是 N 倍效率。
-            const efficiency = Math.max(0, currentWorkers);
+                // 修正規則：不再因為工人不足而停擺。
+                // 1 名工人是 1 倍效率，N 名工人是 N 倍效率。
+                const efficiency = Math.max(0, currentWorkers);
 
-            const itemDispatchInterval = 2; // 基準：1 名工人每 2 秒發送一個物品。
-            ent.logisticsTimer = (ent.logisticsTimer || 0) + deltaTime * efficiency;
-            if (ent.logisticsTimer >= itemDispatchInterval) {
-                let itemSpawned = false;
+                const itemDispatchInterval = 2; // 基準：1 名工人每 2 秒發送一個物品。
+                ent.logisticsTimer = (ent.logisticsTimer || 0) + deltaTime * efficiency;
+                if (ent.logisticsTimer >= itemDispatchInterval) {
+                    let itemSpawned = false;
 
-                const outputTargets = Array.isArray(ent.outputTargets) ? ent.outputTargets : [];
-                const startIndex = outputTargets.length > 0
-                    ? Math.max(0, Math.floor(Number(ent.nextLogisticsOutputTargetIndex) || 0)) % outputTargets.length
-                    : 0;
+                    const outputTargets = Array.isArray(ent.outputTargets) ? ent.outputTargets : [];
+                    const startIndex = outputTargets.length > 0
+                        ? Math.max(0, Math.floor(Number(ent.nextLogisticsOutputTargetIndex) || 0)) % outputTargets.length
+                        : 0;
 
-                for (let offset = 0; offset < outputTargets.length; offset++) {
-                    if (itemSpawned) break; // 一次 tick 只發送一個物品，依序分配
-                    const connIndex = (startIndex + offset) % outputTargets.length;
-                    const conn = outputTargets[connIndex];
+                    for (let offset = 0; offset < outputTargets.length; offset++) {
+                        if (itemSpawned) break; // 一次 tick 只發送一個物品，依序分配
+                        const connIndex = (startIndex + offset) % outputTargets.length;
+                        const conn = outputTargets[connIndex];
 
-                    if (isWarehouse) {
-                        if (conn.filter) {
-                            if (this.engine && typeof this.engine.addLog === 'function' && !ent._debugLogged) {
-                                this.engine.addLog(`[DEBUG] Warehouse checking: ${conn.filter}, value: ${getStorageAmount(ent, conn.filter)}`, 'LOGISTICS');
-                                ent._debugLogged = true;
+                        if (isWarehouse) {
+                            if (conn.filter) {
+                                if (this.engine && typeof this.engine.addLog === 'function' && !ent._debugLogged) {
+                                    this.engine.addLog(`[DEBUG] Warehouse checking: ${conn.filter}, value: ${getStorageAmount(ent, conn.filter)}`, 'LOGISTICS');
+                                    ent._debugLogged = true;
+                                }
+                                if (getStorageAmount(ent, conn.filter) >= 1) {
+                                    const transfer = this.createActiveTransfer(state, ent, conn, conn.filter);
+                                    if (!transfer) continue;
+                                    if (!canStartTransfer(transfer)) continue;
+                                    if (!removeFromWarehouseStorage(ent, conn.filter, 1)) continue;
+                                    if (window.UIManager) window.UIManager.updateValues(true);
+                                    this.assignTransferSerial(state, transfer);
+                                    state.activeTransfers.push(transfer);
+                                    itemSpawned = true;
+                                    ent.nextLogisticsOutputTargetIndex = (connIndex + 1) % outputTargets.length;
+                                    const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
+                                    // addTransportLog(`[物流] ${getEntityLabel(ent)} -> ${getEntityLabel(target)} 開始輸送 ${String(conn.filter).toUpperCase()}（${getTransferRouteText(transfer)}）。`);
+                                }
                             }
-                            if (getStorageAmount(ent, conn.filter) >= 1) {
-                                const transfer = this.createActiveTransfer(state, ent, conn, conn.filter);
-                                if (!transfer) continue;
-                                if (!canStartTransfer(transfer)) continue;
-                                if (!removeFromWarehouseStorage(ent, conn.filter, 1)) continue;
-                                if (window.UIManager) window.UIManager.updateValues(true);
-                                this.assignTransferSerial(state, transfer);
-                                state.activeTransfers.push(transfer);
-                                itemSpawned = true;
-                                ent.nextLogisticsOutputTargetIndex = (connIndex + 1) % outputTargets.length;
-                                const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
-                                // addTransportLog(`[物流] ${getEntityLabel(ent)} -> ${getEntityLabel(target)} 開始輸送 ${String(conn.filter).toUpperCase()}（${getTransferRouteText(transfer)}）。`);
-                            }
-                        }
-                    } else if (ent.outputBuffer) {
-                        for (let resType in ent.outputBuffer) {
-                            if (ent.outputBuffer[resType] >= 1 && conn.filter === resType) {
-                                const transfer = this.createActiveTransfer(state, ent, conn, resType);
-                                if (!transfer) continue;
-                                if (!canStartTransfer(transfer)) continue;
-                                ent.outputBuffer[resType] -= 1;
-                                if (window.UIManager) window.UIManager.updateValues(true);
-                                this.assignTransferSerial(state, transfer);
-                                state.activeTransfers.push(transfer);
-                                itemSpawned = true;
-                                ent.nextLogisticsOutputTargetIndex = (connIndex + 1) % outputTargets.length;
-                                const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
-                                // addTransportLog(`[物流] ${getEntityLabel(ent)} -> ${getEntityLabel(target)} 開始輸送 ${String(resType).toUpperCase()}（${getTransferRouteText(transfer)}）。`);
-                                break;
+                        } else if (ent.outputBuffer) {
+                            for (let resType in ent.outputBuffer) {
+                                if (ent.outputBuffer[resType] >= 1 && conn.filter === resType) {
+                                    const transfer = this.createActiveTransfer(state, ent, conn, resType);
+                                    if (!transfer) continue;
+                                    if (!canStartTransfer(transfer)) continue;
+                                    ent.outputBuffer[resType] -= 1;
+                                    if (window.UIManager) window.UIManager.updateValues(true);
+                                    this.assignTransferSerial(state, transfer);
+                                    state.activeTransfers.push(transfer);
+                                    itemSpawned = true;
+                                    ent.nextLogisticsOutputTargetIndex = (connIndex + 1) % outputTargets.length;
+                                    const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
+                                    // addTransportLog(`[物流] ${getEntityLabel(ent)} -> ${getEntityLabel(target)} 開始輸送 ${String(resType).toUpperCase()}（${getTransferRouteText(transfer)}）。`);
+                                    break;
+                                }
                             }
                         }
                     }
-                }
 
-                if (itemSpawned) {
-                    ent.logisticsTimer = Math.max(0, ent.logisticsTimer - itemDispatchInterval);
+                    if (itemSpawned) {
+                        ent.logisticsTimer = Math.max(0, ent.logisticsTimer - itemDispatchInterval);
+                    }
                 }
-            }
-        });
+            });
 
         // [Web Worker] dispatch 完成後,把本 tick 的新增/移除送交 worker 計算下一批運動學(結果於後續 tick 套用)。
         if (this._workerBridge) {

@@ -297,16 +297,16 @@ export class LogisticsRenderer {
                 }
                 const shouldPaintFullRoute = forceDeleteHover || (isDeleteHoverGroupMode && lineGroupKey && deleteHoverGroupIds.has(lineGroupKey));
                 const hoverRects = shouldPaintFullRoute ? rects : getDeleteBrushHitRects(rects);
-                if (shouldPaintFullRoute) {
-                    LogisticsRenderer.drawLogisticsRoundedTurnSegments(
-                        graphics,
-                        points,
-                        thickPx,
-                        hoverColor,
-                        hoverAlpha,
-                        roundedSkipCellKeys
-                    );
-                }
+                const hoverCellKeys = shouldPaintFullRoute ? null : new Set(hoverRects.map(rect => rect.cellKey).filter(Boolean));
+                LogisticsRenderer.drawLogisticsRoundedTurnSegments(
+                    graphics,
+                    points,
+                    thickPx,
+                    hoverColor,
+                    hoverAlpha,
+                    roundedSkipCellKeys,
+                    hoverCellKeys
+                );
                 graphics.fillStyle(hoverColor, hoverAlpha);
                 hoverRects.forEach(rect => {
                     if (skipBaseCellKeys?.has(rect.cellKey)) return;
@@ -1393,6 +1393,37 @@ export class LogisticsRenderer {
                     const isLineSelected = logisticsRenderModel.isSelectedLine(line, state);
                     drawLogisticsRoute(route.points, route.width || widthTiles, isLineSelected, isConnected, line, useConnectedIdleStyle, ordinaryArrowSkipCellKeys, roundedBaseSkipCellKeys, roundedTurnSkipCellKeys, null, groupDeleteHovered);
                 });
+                if (!!state.logisticsDeleteToolActive) {
+                    const hoverTurnColor = 0xff3030;
+                    const hoverTurnAlpha = 0.72;
+                    const hoverTurnThickness = Math.max(logCfg.lineThickness || 3, widthTiles * GameEngine.TILE_SIZE);
+                    let hoverGroupTurnCellKeys = null;
+                    if (!groupDeleteHovered) {
+                        const TS = GameEngine.TILE_SIZE || 20;
+                        hoverGroupTurnCellKeys = new Set(
+                            LogisticsRenderer.getLogisticsGroupTurnCells(groupSegs)
+                                .filter(turn => rectIntersectsDeleteBrush({
+                                    x: turn.x - TS / 2,
+                                    y: turn.y - TS / 2,
+                                    w: TS,
+                                    h: TS
+                                }))
+                                .map(turn => turn.key)
+                                .filter(Boolean)
+                        );
+                    }
+                    if (groupDeleteHovered || hoverGroupTurnCellKeys?.size > 0) {
+                        LogisticsRenderer.drawLogisticsGroupRoundedTurns(
+                            graphics,
+                            groupSegs,
+                            hoverTurnThickness,
+                            hoverTurnColor,
+                            hoverTurnAlpha,
+                            ordinaryTurnSkipCellKeys,
+                            hoverGroupTurnCellKeys
+                        );
+                    }
+                }
                 if (isPortToPortCandidate && useConnectedIdleStyle) {
                     segmentRoutes.forEach(({ route }) => {
                         drawConnectedCellOverlay(route.points, route.width || widthTiles, connectedCellKeys, useConnectedIdleStyle, ordinaryArrowSkipCellKeys, useConnectedIdleStyle, roundedBaseSkipCellKeys);
@@ -3348,13 +3379,16 @@ export class LogisticsRenderer {
         return keys;
     }
 
-    static drawLogisticsRoundedTurnSegments(g, points, thickness, color, alpha, skipCellKeys = null) {
+    static drawLogisticsRoundedTurnSegments(g, points, thickness, color, alpha, skipCellKeys = null, onlyCellKeys = null) {
         const segments = LogisticsRenderer.getLogisticsRoundedTurnSegments(points, skipCellKeys);
         if (segments.length === 0) return;
-        segments.forEach(segment => LogisticsRenderer.fillLogisticsRibbon(g, segment.points, thickness, color, alpha, segment));
+        segments.forEach(segment => {
+            if (onlyCellKeys && !onlyCellKeys.has(segment.cellKey)) return;
+            LogisticsRenderer.fillLogisticsRibbon(g, segment.points, thickness, color, alpha, segment);
+        });
     }
 
-    static drawLogisticsGroupRoundedTurns(g, groupSegs, thickness, color, alpha, skipCellKeys = null) {
+    static drawLogisticsGroupRoundedTurns(g, groupSegs, thickness, color, alpha, skipCellKeys = null, onlyCellKeys = null) {
         const turns = LogisticsRenderer.getLogisticsGroupTurnCells(groupSegs);
         if (!Array.isArray(turns) || turns.length === 0) return;
         const TS = GameEngine.TILE_SIZE || 20;
@@ -3362,6 +3396,7 @@ export class LogisticsRenderer {
         const drawn = new Set();
         turns.forEach(({ x, y, inDir, outDir, key }) => {
             if (skipCellKeys?.has(key)) return;
+            if (onlyCellKeys && !onlyCellKeys.has(key)) return;
             if (!inDir || !outDir) return;
             if (drawn.has(key)) return;
             drawn.add(key);
@@ -3493,6 +3528,7 @@ export class LogisticsRenderer {
             };
             segments.push({
                 points: LogisticsRenderer.sampleQuadraticCorner(entry, curr, exit, 12),
+                cellKey: currKey,
                 startDir: inDir,
                 endDir: outDir
             });
