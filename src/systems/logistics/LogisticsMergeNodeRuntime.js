@@ -633,6 +633,12 @@ export class LogisticsMergeNodeRuntime {
             this.commitLogisticsMergeAdmission(node, transfer.id, state);
             transfer.lineId = node.outputGroupId;
             transfer.routePoints = route.map(point => ({ x: point.x, y: point.y }));
+            // [斷線防護一致性] 路線已換成輸出線(止於目標端口),targetPoint 必須同步更新為新終點。
+            // 否則抵達判定仍拿舊輸入線終點(=合流點)比對,合流過來的物品永遠判定「未抵達」→
+            // 在終點端口前堆死,且支線新物品因 occupied 無法合流,看似在合流點憑空消失。
+            transfer.targetPoint = transfer.routePoints.length >= 2
+                ? { x: transfer.routePoints[transfer.routePoints.length - 1].x, y: transfer.routePoints[transfer.routePoints.length - 1].y }
+                : null;
             logisticsTransportArrayState.setTransferDistance(transfer, 0, this.getRouteLength(transfer.routePoints), minTransferSpacing);
             // 路線已切換，舊路線上的排隊距離殘值必須清除，避免排隊邏輯誤判位置。
             delete transfer._queuedDistance;

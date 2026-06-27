@@ -74,6 +74,21 @@ export class LogisticsWorkerBridge {
         for (const k of msg.kin) {
             const t = byId.get(k.id);
             if (!t) continue;
+            // [合流重映射] 先套用換線(若有):worker 內部合流交接已把物品移到輸出線,主執行緒必須同步
+            // routePoints/lineId/targetPoint 等,否則渲染仍沿舊輸入線路徑 → 物品在合流點後消失/卡住,
+            // 且 targetId 未更新會讓入庫判定失準。換陣列參照同時自動失效以參照為鍵的渲染/邏輯幾何快取。
+            if (k.remap) {
+                t.lineId = k.remap.lineId;
+                t.routePoints = k.remap.routePoints;
+                t.targetPoint = k.remap.targetPoint;
+                t.targetId = k.remap.targetId;
+                t.targetPort = k.remap.targetPort;
+                t.sourceId = k.remap.sourceId;
+                t.efficiency = k.remap.efficiency;
+                t._logicRouteMetrics = undefined;
+                t._logicRouteMetricsPoints = undefined;
+                t._logicRouteMetricsKey = undefined;
+            }
             t.progress = k.progress;
             t.transportIndex = k.transportIndex;
             t.transportOffset = k.transportOffset;
