@@ -314,7 +314,13 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
                 } else {
                     const frontItem = groupTransfers[j - 1];
                     const frontCanonicalDist = getDistance(frontItem);
-                    const physicalLimitCanonical = Math.max(startDistOnCanonical, Math.min(frontCanonicalDist, prevMaxCanonicalDist) - spacing);
+                    // [滿載防稀疏] 間距限制須以「前車本子步推進後的位置」為準,而非推進前。否則後車永遠落後前車
+                    // 一個子步位移(≈1.3px),滿載線會鬆弛成 cell+一子步 的間距(實測 20→21.3,約 6.7% 變疏),
+                    // 沿線累積成「內圈密外圈疏」。投影量=前車本子步實際位移,並以前車自身上限 prevMax 收斂
+                    // (前車被堵→prevMax=其當前位置→不投影,後車照常停在 cell 間距,不會重疊)。
+                    const frontStep = stepDt * getTransferSpeed(frontItem) * cellSize;
+                    const frontProjectedCanonical = Math.min(frontCanonicalDist + frontStep, prevMaxCanonicalDist);
+                    const physicalLimitCanonical = Math.max(startDistOnCanonical, frontProjectedCanonical - spacing);
                     let limitCanonical = startDistOnCanonical + totalLength;
                     if (desired <= dist_pn) {
                         const targetLimitCanonical = startDistOnCanonical + dist_pn;
