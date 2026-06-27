@@ -847,10 +847,14 @@ export class MainScene extends Phaser.Scene {
         }
 
         if (hasTransferContent) {
-            // [效能] transfer 只在物流邏輯(20Hz)移動/增減,渲染卻跑 60Hz。僅在版本變動時重畫,
-            // 省掉每幀對全部 transfer 的重複位置計算(sprite 為世界座標,相機移動由 Phaser 處理、不需重畫)。
+            // [體感 FPS] transfer 的權威 progress 只在物流邏輯(20Hz)更新(worker 模式還有 1-tick 延遲),
+            // 但畫面跑 ~60Hz。啟用渲染端等速插值(預設開)時必須「每幀」重畫 transfer 層,插值才會動 →
+            // 物品平滑移動;否則只在版本變動(20Hz)重畫 → 顯示 FPS 高但移動體感僅 ~15(本問題根因)。
+            // 靜態線網層仍以 signature 閘控(只在拓樸變動時重畫),不受此每幀重畫影響。
+            // 關閉插值(window.LOGISTICS_INTERP === false)則退回版本閘控,省去每幀重畫。
+            const interp = !(typeof window !== 'undefined' && window.LOGISTICS_INTERP === false);
             const tv = state.logisticsTransferVersion || 0;
-            if (tv !== this._lastTransferVersion || !this._logisticsTransferLayerWasDrawn) {
+            if (interp || tv !== this._lastTransferVersion || !this._logisticsTransferLayerWasDrawn) {
                 LogisticsRenderer.renderTransfers(this.logisticsTransferGraphics, state, this);
                 this._lastTransferVersion = tv;
                 this._logisticsTransferLayerWasDrawn = true;

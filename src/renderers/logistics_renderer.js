@@ -125,6 +125,38 @@ export class LogisticsRenderer {
         return logisticsTransportArrayState.resolveProgress(transfer, routePoints, cellSize);
     }
 
+    // [體感 FPS] 物流邏輯只在 20Hz tick 推進 progress(且 worker 模式下還有 1-tick 非同步延遲),
+    // 但畫面跑 ~60Hz。若直接拿權威 progress 畫,物品每 50ms 才跳一步 → 顯示 FPS 高但物品移動體感僅 ~15。
+    // 解法:渲染端以「等速追趕」平滑——每幀依實際幀距把顯示進度 _riProgress 朝權威進度前進固定速度
+    // (物品沿線速度 efficiency*TILE/總長),追上即停。權威倒退/跳變(合流換線、重路由、重置)直接吸附不平滑。
+    // 需搭配「每幀重畫 transfer 層」(見 MainScene.updateLogisticsLayer)才有效。
+    static getInterpolatedProgress(transfer, authProgress, routePoints, scene) {
+        const t = transfer;
+        if (typeof window !== 'undefined' && window.LOGISTICS_INTERP === false) return authProgress;
+        const now = (scene && scene.time && scene.time.now) || 0;
+        // 首次、或路線換了(合流 remap/重路由換 routePoints 參照):直接吸附,避免跨不同路徑做插值造成瞬移。
+        if (t._riProgress === undefined || t._riRoute !== routePoints) {
+            t._riProgress = authProgress;
+            t._riTime = now;
+            t._riRoute = routePoints;
+            return authProgress;
+        }
+        const frameDelta = Math.max(0, Math.min(0.1, (now - t._riTime) / 1000));
+        t._riTime = now;
+        // 權威倒退或跳變過大(>5%):吸附,不平滑(合流插入/重路由/堆積回退)。
+        if (authProgress < t._riProgress || Math.abs(authProgress - t._riProgress) > 0.05) {
+            t._riProgress = authProgress;
+            return t._riProgress;
+        }
+        if (t._riProgress < authProgress) {
+            const geom = LogisticsRenderer._getTransferPathGeometry(routePoints);
+            const total = geom ? geom.totalPixels : 0;
+            const progPerSec = total > 0 ? ((Number(t.efficiency) || 4) * (GameEngine.TILE_SIZE || 20)) / total : 0;
+            t._riProgress = Math.min(authProgress, t._riProgress + progPerSec * frameDelta);
+        }
+        return t._riProgress;
+    }
+
     static render(graphics, state, scene, options = {}) {
         graphics.clear();
         const logCfg = UI_CONFIG.LogisticsSystem || {
@@ -2086,7 +2118,8 @@ export class LogisticsRenderer {
                     LogisticsRenderer.annotateRoutePoints(routePoints);
                     t._routeAnnotated = true;
                 }
-                const transferProgress = LogisticsRenderer.resolveTransferProgress(t, routePoints, GameEngine.TILE_SIZE);
+                const authProgress = LogisticsRenderer.resolveTransferProgress(t, routePoints, GameEngine.TILE_SIZE);
+                const transferProgress = LogisticsRenderer.getInterpolatedProgress(t, authProgress, routePoints, scene);
 
                 // DOD: Try fetching dense path first
                 let usedDense = false;
@@ -2125,7 +2158,8 @@ export class LogisticsRenderer {
 
                 if (Array.isArray(routePoints) && routePoints.length >= 2) {
                     LogisticsRenderer.annotateRoutePoints(routePoints);
-                    const transferProgress = LogisticsRenderer.resolveTransferProgress(t, routePoints, GameEngine.TILE_SIZE);
+                    const authProgress = LogisticsRenderer.resolveTransferProgress(t, routePoints, GameEngine.TILE_SIZE);
+                    const transferProgress = LogisticsRenderer.getInterpolatedProgress(t, authProgress, routePoints, scene);
                     const pathPoint = LogisticsRenderer.getPointOnMergeTransferPath(routePoints, transferProgress, t, state) ||
                         LogisticsRenderer.getPointOnTransferPath(routePoints, transferProgress, 0, t);
                     if (!pathPoint) return;
