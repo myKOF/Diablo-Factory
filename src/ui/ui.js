@@ -3156,9 +3156,11 @@ export class UIManager {
                 // 固定位置不在此更新，由 applyAnchorStyle 處理
             } else {
                 // 智慧偏置計算 (相對於物體中心的位移)
-                // 選單水平居中於建築下方：X 向左偏 menuWidth/2，Y 向下偏 offsetY
-                let finalX = sx - menuWidth / 2 + (cfg.offsetX || 0);
-                let finalY = sy + (cfg.offsetY || 100);
+                // 選單預設開啟於建築物右側，垂直居中
+                const fp = GameEngine.getFootprint(this.activeMenuEntity.type1);
+                const bWidth = fp ? fp.uw * GameEngine.TILE_SIZE : 40;
+                let finalX = sx + bWidth / 2 + (cfg.offsetX || 20);
+                let finalY = sy - visualMenuHeight / 2 + (cfg.offsetY || 0);
 
                 // --- 邊界檢查與反向邏輯 (針對 1920x1080) ---
 

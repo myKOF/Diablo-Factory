@@ -481,6 +481,36 @@ export class LogisticsTransferSystem {
         return normalizedPoints.length >= 2 ? normalizedPoints : null;
     }
 
+    // [送達防呆] 由路線終點反查目的地建築 id。線端點解析(LogisticsEndpointResolver)在某些情況
+    // (例如密排長蛇線 orderByDirection 跨相鄰平行列短路、或終點落在端口配對門檻外)可能讓 conn.id=null,
+    // 導致發出的 transfer.targetId=null → 被當成「斷點」停在終點不入庫(產率 0、物品堆滿帶子)。
+    // 此處僅在 conn.id 失效時兜底:找路線終點附近(canInput 端口或建築本體)的建築。找不到則維持 null
+    // (真正的斷點線),不會誤綁。
+    _resolveTargetIdFromRouteEnd(state, endPoint, sourceId) {
+        if (!endPoint || !Array.isArray(state.mapEntities)) return null;
+        const TS = this.engine?.TILE_SIZE || 20;
+        const tol = TS * 1.5;
+        const entId = (e) => e.id || `${e.type1}_${e.x}_${e.y}`;
+        let bestId = null;
+        let bestDist = tol;
+        for (const ent of state.mapEntities) {
+            if (!ent || ent.isUnderConstruction || entId(ent) === sourceId) continue;
+            const cfg = this.engine?.getEntityConfig ? this.engine.getEntityConfig(ent.type1) : null;
+            if (!cfg || !cfg.logistics || !cfg.logistics.canInput) continue;
+            const ports = (typeof window !== 'undefined' && window.UIManager?.getBuildingPortSlots)
+                ? (window.UIManager.getBuildingPortSlots(ent) || [])
+                : [];
+            let md = Infinity;
+            for (const p of ports) {
+                if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+                const d = Math.abs(p.x - endPoint.x) + Math.abs(p.y - endPoint.y);
+                if (d < md) md = d;
+            }
+            if (md <= tol && md < bestDist) { bestDist = md; bestId = entId(ent); }
+        }
+        return bestId;
+    }
+
     createActiveTransfer(state, source, conn, itemType) {
         if (!source || !conn || !itemType) return null;
         const sourceId = source.id || `${source.type1}_${source.x}_${source.y}`;
@@ -510,6 +540,21 @@ export class LogisticsTransferSystem {
         // this.logTransferRouteDebug(source, target, conn, itemType, rawRoutePoints, routePoints);
         const transferId = `transfer_${Date.now().toString(36)}_${Math.floor(Math.random() * 10000).toString(36)}`;
 
+        // [送達防呆] conn.id 失效(null 或指向不存在建築)時,由路線終點兜底反查目的地,避免 targetId=null
+        // 讓物品被當成斷點堆死在終點不入庫。解析成功則寫回 conn.id,後續同線發料免再掃描、亦修復連線綁定。
+        const endPoint = (Array.isArray(routePoints) && routePoints.length >= 2)
+            ? routePoints[routePoints.length - 1] : null;
+        let resolvedTargetId = conn.id || null;
+        const targetValid = resolvedTargetId &&
+            state.mapEntities.some(e => e && (e.id || `${e.type1}_${e.x}_${e.y}`) === resolvedTargetId);
+        if (!targetValid && endPoint) {
+            const fallbackId = this._resolveTargetIdFromRouteEnd(state, endPoint, sourceId);
+            if (fallbackId) {
+                resolvedTargetId = fallbackId;
+                conn.id = fallbackId;
+            }
+        }
+
         // [新增] 自動設定追蹤目標
         if (state && !state.trackedTransferId) {
             state.trackedTransferId = transferId;
@@ -522,7 +567,7 @@ export class LogisticsTransferSystem {
             id: transferId,
             lastSegment: -1, // 初始化區段紀錄
             sourceId,
-            targetId: conn.id,
+            targetId: resolvedTargetId,
             itemType,
             progress: 0,
             transportIndex: 0,

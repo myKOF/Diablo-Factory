@@ -620,9 +620,9 @@ export const UI_CONFIG = {
     },
     // -- 建築指令選單 ---------------------------
     ActionMenu: {
-        anchor: "BOTTOM_CENTER",         // 錨點位置 (底部置中)
-        offsetX: 0,                      // 水平偏移
-        offsetY: 30,                     // 垂直偏移 (距底部距離)
+        anchor: null,                    // 取消固定錨點，改為動態跟隨建築 (預設右側)
+        offsetX: 20,                     // 水平偏移 (距建築右側邊緣)
+        offsetY: 0,                      // 垂直偏移 (0 代表垂直置中對齊建築)
         width: 440,                      // 面板寬度
         minWidth: 440,                   // 最小寬度
         height: 200,                     // 面板高度 (確保內容量充足)
