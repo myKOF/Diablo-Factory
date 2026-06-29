@@ -3235,7 +3235,7 @@ export class UIManager {
             this.applyAnchorStyle(menuContainer, cfg);
             menuContainer.style.display = "flex";
             menuContainer.style.flexDirection = "column";
-            menuContainer.style.alignItems = "center";
+            menuContainer.style.alignItems = "stretch"; // 改為 stretch 讓兩層等寬
             menuContainer.style.gap = `${cfg.gap}px`;
             this.uiLayer.appendChild(menuContainer);
         }
@@ -3245,9 +3245,10 @@ export class UIManager {
         const level2Container = document.createElement("div");
         level2Container.id = "bottom_building_menu_level2";
         level2Container.style.display = this.selectedBuildingGroup ? "flex" : "none";
-        level2Container.style.gap = "8px";
-        level2Container.style.height = `${cfg.level2Height || 60}px`;
-        level2Container.style.padding = "6px";
+        level2Container.style.gap = "12px";
+        level2Container.style.height = "auto";
+        level2Container.style.padding = "12px 24px";
+        level2Container.style.justifyContent = "center";
         level2Container.style.background = this.hexToRgba(cfg.bgColor, cfg.bgAlpha);
         level2Container.style.border = `1.5px solid ${cfg.borderColor}`;
         level2Container.style.borderRadius = "8px";
@@ -3262,9 +3263,9 @@ export class UIManager {
         const level1Container = document.createElement("div");
         level1Container.id = "bottom_building_menu_level1";
         level1Container.style.display = "flex";
-        level1Container.style.gap = "8px";
-        level1Container.style.height = `${cfg.level1Height}px`;
-        level1Container.style.padding = "8px";
+        level1Container.style.gap = "12px";
+        level1Container.style.height = "auto";
+        level1Container.style.padding = "12px 24px";
         level1Container.style.background = this.hexToRgba(cfg.bgColor, cfg.bgAlpha);
         level1Container.style.border = `1.5px solid ${cfg.borderColor}`;
         level1Container.style.borderRadius = "8px";
@@ -3324,7 +3325,7 @@ export class UIManager {
             const btn = document.createElement("div");
             btn.className = "building-group-btn";
             btn.style.width = `${cfg.itemWidth}px`;
-            btn.style.height = `100%`;
+            btn.style.height = `${cfg.itemHeight}px`; // 使用設定的固定高度
             btn.style.display = "flex";
             btn.style.flexDirection = "column";
             btn.style.alignItems = "center";
@@ -3335,7 +3336,7 @@ export class UIManager {
             btn.style.border = `2px solid ${this.selectedBuildingGroup === type ? cfg.selectedBorderColor : "transparent"}`;
             btn.style.boxSizing = "border-box";
             btn.style.transition = "all 0.1s";
-            
+
             // 加入安全檢查，避免未定義的圖示或文字
             const displayIcon = cfg.groupIcons[type] || '📦';
             const displayName = cfg.groupNames[type] || type;
@@ -3357,7 +3358,8 @@ export class UIManager {
         // 最右側刪除按鈕
         const delBtn = document.createElement("div");
         delBtn.style.width = `${cfg.itemWidth}px`;
-        delBtn.style.height = `100%`;
+        delBtn.style.height = `${cfg.itemHeight}px`;
+        delBtn.style.marginLeft = "auto"; // 推至最右側
         delBtn.style.display = "flex";
         delBtn.style.alignItems = "center";
         delBtn.style.justifyContent = "center";
@@ -3382,7 +3384,7 @@ export class UIManager {
             list.forEach(c => {
                 const btn = document.createElement("div");
                 btn.style.width = `${l2Width}px`;
-                btn.style.height = `100%`;
+                btn.style.height = `${cfg.level2ItemHeight || 50}px`;
                 btn.style.display = "flex";
                 btn.style.flexDirection = "column";
                 btn.style.alignItems = "center";
@@ -3392,13 +3394,33 @@ export class UIManager {
                 btn.style.border = `1px solid rgba(255,255,255,0.1)`;
                 btn.style.borderRadius = "4px";
                 btn.style.boxSizing = "border-box";
-                
+
                 const icon = this.getBuildingIcon(c.model) || "🏗️";
-                btn.innerHTML = `<span style="font-size:20px;">${icon}</span>`;
+                if (c.model === 'transport_line') {
+                    const initialCount = GameEngine.state.resources?.[c.model] || 0;
+                    btn.innerHTML = `
+                        <div style="font-size:20px; line-height:1; display:flex; align-items:center; justify-content:center; height:24px;">${icon}</div>
+                        <div class="shortcut-count" data-resource="${c.model}" style="font-size:11px; color:#fbc02d; font-weight:900; margin-top:2px;">${initialCount}</div>
+                    `;
+                } else {
+                    btn.innerHTML = `
+                        <div style="font-size:20px; line-height:1; display:flex; align-items:center; justify-content:center; height:100%;">${icon}</div>
+                    `;
+                }
 
                 btn.onmouseenter = () => {
                     btn.style.border = `1px solid ${cfg.selectedBorderColor}`;
-                    showTooltip(btn, `${c.name}\n<span style="font-size:12px;color:#aaa">${c.desc || ""}</span>`);
+                    let tooltipText = `${c.name}\n<span style="font-size:12px;color:#aaa">${c.desc || ""}</span>`;
+
+                    if (c.costs && Object.keys(c.costs).length > 0) {
+                        tooltipText += `\n<div style="font-size:12px;color:#81c784;margin-top:4px;">所需資源:</div>`;
+                        for (const [resKey, amount] of Object.entries(c.costs)) {
+                            const resName = GameEngine.state.strings?.[resKey] || resKey;
+                            tooltipText += `<div style="font-size:11px;color:#e0e0e0;margin-left:8px;">- ${resName}: ${amount}</div>`;
+                        }
+                    }
+
+                    showTooltip(btn, tooltipText);
                 };
                 btn.onmouseleave = () => {
                     btn.style.border = `1px solid rgba(255,255,255,0.1)`;
@@ -3409,7 +3431,7 @@ export class UIManager {
                 btn.onclick = (e) => {
                     e.stopPropagation();
                     hideTooltip();
-                    
+
                     // 改用原本存在的 startStampMode 來進入建造模式
                     if (GameEngine.state.placingType === c.model) {
                         this.cancelBuildingMode();

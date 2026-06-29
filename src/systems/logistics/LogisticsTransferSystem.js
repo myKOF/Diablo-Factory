@@ -869,11 +869,15 @@ export class LogisticsTransferSystem {
                 last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"].join("|");
         };
         // [發料防稀疏] worker 模式下主執行緒位置落後 worker 一段時間,直接拿落後位置判斷起點是否淨空,
-        // 會把領頭物品誤判為仍在起點附近 → 發料太晚 → 間距 = cell + lag×速度,且隨 worker 落後加大而變疏
-        // (實測 22→31px)。故把每個物品的位置依估計的落後秒數投影到「當下」再比較。投影過量也安全:
-        // worker 自身間距邏輯會以 cell 為硬下限,不會重疊。主執行緒(無 worker)lag=0,行為不變。
+        // 會把領頭物品誤判為仍在起點附近 → 發料太晚 → 間距 = cell + lag×速度,且隨 worker 落後加大而變疏。
+        // 故把物品位置依「落後秒數」投影到當下再比較。
+        // [防過量發料反饋] 但投影量必須設上限!否則 worker 過載時 lag↑ → 投影過頭 → 發料更積極 →
+        // 物品更多 → worker 更慢 → lag 更大 …形成正反饋,間距被壓到 < cell(實測 1200 物品時 12.5px)、
+        // 發料飆到 >5/s、移動降到 1/3、FPS 腰斬。上限取約 2.4 個 tick(0.12s,實測健康負載 lag≈0.11s):
+        // 正常負載照常補償(間距=cell);過載時 lag 被夾住 → 發料自動節流讓 worker 追上,而非越發越多。
+        const MAX_DISPATCH_LAG_PROJECTION = 0.12;
         const positionLagSeconds = this._workerBridge
-            ? this._workerBridge.getPositionLagSeconds(deltaTime)
+            ? Math.min(MAX_DISPATCH_LAG_PROJECTION, this._workerBridge.getPositionLagSeconds(deltaTime))
             : 0;
         const canStartTransfer = (transfer) => {
             if (!transfer || !Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) return true;
@@ -920,6 +924,10 @@ export class LogisticsTransferSystem {
 
                 const itemDispatchInterval = 2; // 基準：1 名工人每 2 秒發送一個物品。
                 ent.logisticsTimer = (ent.logisticsTimer || 0) + deltaTime * efficiency;
+                // [防爆發] 計時器上限 = 一個發送間隔。否則帶子滿載期間發料被 canStartTransfer 擋住時,
+                // 計時器會無上限累積「發料額度」;一旦起點鬆動就連續每 tick 補發 → 發料速率瞬間衝高再回落
+                // (使用者觀察到的「逐步衝快又降下」震盪之一)。夾上限後:阻塞解除只補發一個,之後回正常節奏。
+                if (ent.logisticsTimer > itemDispatchInterval) ent.logisticsTimer = itemDispatchInterval;
                 if (ent.logisticsTimer >= itemDispatchInterval) {
                     let itemSpawned = false;
 
