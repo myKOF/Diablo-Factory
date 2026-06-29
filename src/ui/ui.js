@@ -473,44 +473,10 @@ export class UIManager {
 
         this.uiLayer.appendChild(resourceBar);
 
-        // 2. 建築面板
-        const bpCfg = UI_CONFIG.BuildingPanel;
-        const buildingPanel = document.createElement("div");
-        buildingPanel.className = "panel";
-        buildingPanel.id = "building_panel";
-        this.applyAnchorStyle(buildingPanel, bpCfg);
-        buildingPanel.style.pointerEvents = "auto";
-        this.makeDraggable(buildingPanel, "building_panel");
+        // 2. 底部建築選單 (取代舊的建築面板)
+        this.renderBottomBuildingMenu();
 
-        const title = document.createElement("div");
-        title.className = "title";
-        title.innerText = bpCfg.title;
-        title.style.fontSize = bpCfg.titleSize;
-        title.style.color = bpCfg.titleColor;
-        title.style.borderBottomColor = bpCfg.titleColor;
-        buildingPanel.appendChild(title);
 
-        const listContainer = document.createElement("div");
-        listContainer.id = "building_list";
-        this.refreshBuildingList(listContainer, bpCfg);
-
-        buildingPanel.appendChild(listContainer);
-        this.uiLayer.appendChild(buildingPanel);
-
-        // 3. 日誌面板
-        const shortcutCfg = UI_CONFIG.ShortcutBar;
-        if (shortcutCfg) {
-            const shortcutBar = document.createElement("div");
-            shortcutBar.className = "panel shortcut-bar";
-            shortcutBar.id = "shortcut_bar";
-            this.applyAnchorStyle(shortcutBar, shortcutCfg);
-            shortcutBar.style.pointerEvents = "auto";
-            const shortcutList = document.createElement("div");
-            shortcutList.id = "shortcut_list";
-            this.refreshShortcutBar(shortcutList, shortcutCfg);
-            shortcutBar.appendChild(shortcutList);
-            this.uiLayer.appendChild(shortcutBar);
-        }
 
         const logCfg = UI_CONFIG.LogPanel;
         const logPanel = document.createElement("div");
@@ -1096,70 +1062,7 @@ export class UIManager {
         });
     }
 
-    static refreshShortcutBar(container, bp) {
-        container.innerHTML = "";
-        const configs = GameEngine.state.buildingConfigs || {};
-        if (Object.keys(configs).length === 0) {
-            setTimeout(() => this.refreshShortcutBar(container, bp), 500);
-            return;
-        }
 
-        this.getBuildConfigsByUiLocation(2, []).forEach(cfg => {
-            this.createBuildingBtn(container, bp, {
-                id: cfg.model,
-                name: cfg.name,
-                icon: this.getBuildingIcon(cfg.model),
-                desc: `成本 ${this.getCostText(cfg)}`,
-                countResource: cfg.model
-            }, { compact: true });
-        });
-        this.createLogisticsDeleteToolButtons(container, bp);
-    }
-
-    static createLogisticsDeleteToolButtons(container, bp) {
-        const makeBtn = (id, label, title, clickHandler) => {
-            const btn = document.createElement("button");
-            btn.id = id;
-            btn.type = "button";
-            btn.title = title;
-            btn.textContent = label;
-            btn.style.cssText = `
-                width: ${Math.min(52, bp.itemWidth || 52)}px;
-                height: ${bp.itemHeight || 52}px;
-                border: 1.5px solid rgba(255,255,255,0.10);
-                background: rgba(45,45,45,0.62);
-                color: ${bp.titleColor || "#fbc02d"};
-                cursor: pointer;
-                border-radius: 4px;
-                font-size: 18px;
-                font-weight: 900;
-                box-sizing: border-box;
-            `;
-            btn.onclick = (event) => {
-                event.stopPropagation();
-                clickHandler(event);
-            };
-            container.appendChild(btn);
-            return btn;
-        };
-
-        const deleteBtn = makeBtn(
-            "logistics_delete_tool_btn",
-            "",
-            `物流線刪除刷子（目前 ${GameEngine.state.logisticsDeleteBrushSize || 1}x${GameEngine.state.logisticsDeleteBrushSize || 1}，鍵盤 +/- 調整）`,
-            () => this.toggleLogisticsDeleteTool()
-        );
-        deleteBtn.innerHTML = `
-            <svg viewBox="0 0 48 48" width="34" height="34" aria-hidden="true">
-                <rect x="7" y="19" width="34" height="10" rx="2" fill="#6f7375"/>
-                <path d="M12 24h24" stroke="#d7d7d7" stroke-width="3" stroke-linecap="round" stroke-dasharray="4 5"/>
-                <path d="M15 13L33 35M33 13L15 35" stroke="#ff3434" stroke-width="5" stroke-linecap="round"/>
-            </svg>
-        `;
-        deleteBtn.className = "shortcut-tool-btn";
-        this.refreshLogisticsDeleteToolButtonState(deleteBtn);
-
-    }
 
     static refreshLogisticsDeleteToolButtonState(button = null) {
         const btn = button || document.getElementById("logistics_delete_tool_btn");
@@ -1725,10 +1628,28 @@ export class UIManager {
         this.updateValues(true);
     }
 
-    static deleteLogisticsLinesInBrush(worldX, worldY, ctrlMode = false) {
+    static deleteLogisticsLinesInBrush(worldX, worldY, ctrlMode = false, clientX = null, clientY = null) {
         const state = GameEngine.state;
         if (!state.logisticsDeleteToolActive || !Number.isFinite(worldX) || !Number.isFinite(worldY)) return;
         const brushRect = this.getLogisticsDeleteBrushRect(worldX, worldY);
+
+        // 檢查是否點擊到建築物 (單點模式下優先觸發)
+        if (!ctrlMode) {
+            const clickedBuilding = state.mapEntities.find(ent => {
+                const fp = this.getEntityFootprint(ent);
+                return (brushRect.left <= ent.x + fp.w / 2 && brushRect.right >= ent.x - fp.w / 2 &&
+                    brushRect.top <= ent.y + fp.h / 2 && brushRect.bottom >= ent.y - fp.h / 2);
+            });
+
+            if (clickedBuilding && window.BuildingMenuUI && typeof window.BuildingMenuUI.confirmDestroy === 'function') {
+                state.logisticsDeleteToolActive = false;
+                this.refreshLogisticsDeleteToolButtonState();
+                this.renderBottomBuildingMenu();
+                window.BuildingMenuUI.confirmDestroy(clickedBuilding, clientX || window.innerWidth / 2, clientY || window.innerHeight / 2);
+                return;
+            }
+        }
+
         const touchedLines = this.getLogisticsLinesInBrush(worldX, worldY, ctrlMode);
         if (ctrlMode) {
             const groupIds = [...new Set(touchedLines.map(line => line?.groupId || line?.id || null).filter(Boolean))];
@@ -2086,7 +2007,7 @@ export class UIManager {
         this.updateLogisticsToolCursor(e.clientX, e.clientY, worldX, worldY, e.ctrlKey);
         if (GameEngine.state.logisticsDeleteToolActive) {
             GameEngine.state.logisticsDeleteBrushDragging = true;
-            this.deleteLogisticsLinesInBrush(worldX, worldY, e.ctrlKey);
+            this.deleteLogisticsLinesInBrush(worldX, worldY, e.ctrlKey, e.clientX, e.clientY);
             return;
         }
         const clickedBuilding = GameEngine.state.mapEntities.find(ent => {
@@ -3297,6 +3218,208 @@ export class UIManager {
 
         cam.pan(tc.x, tc.y, duration, 'Cubic.easeInOut');
         GameEngine.addLog(`相機移動至城鎮中心 (距離: ${Math.round(dist)}px)`);
+    }
+
+    // --- 底部建築選單邏輯 ---
+    static selectedBuildingGroup = null;
+
+    static renderBottomBuildingMenu() {
+        const cfg = UI_CONFIG.BottomBuildingMenu;
+        if (!cfg) return;
+
+        let menuContainer = document.getElementById("bottom_building_menu");
+        if (!menuContainer) {
+            menuContainer = document.createElement("div");
+            menuContainer.id = "bottom_building_menu";
+            menuContainer.style.pointerEvents = "none";
+            this.applyAnchorStyle(menuContainer, cfg);
+            menuContainer.style.display = "flex";
+            menuContainer.style.flexDirection = "column";
+            menuContainer.style.alignItems = "center";
+            menuContainer.style.gap = `${cfg.gap}px`;
+            this.uiLayer.appendChild(menuContainer);
+        }
+        menuContainer.innerHTML = "";
+
+        // Level 2 Menu (Items in selected group)
+        const level2Container = document.createElement("div");
+        level2Container.id = "bottom_building_menu_level2";
+        level2Container.style.display = this.selectedBuildingGroup ? "flex" : "none";
+        level2Container.style.gap = "8px";
+        level2Container.style.height = `${cfg.level2Height || 60}px`;
+        level2Container.style.padding = "6px";
+        level2Container.style.background = this.hexToRgba(cfg.bgColor, cfg.bgAlpha);
+        level2Container.style.border = `1.5px solid ${cfg.borderColor}`;
+        level2Container.style.borderRadius = "8px";
+        level2Container.style.pointerEvents = "auto";
+        level2Container.style.transition = "opacity 0.2s ease, transform 0.2s ease";
+        level2Container.style.opacity = this.selectedBuildingGroup ? "1" : "0";
+        level2Container.style.transform = this.selectedBuildingGroup ? "translateY(0)" : "translateY(10px)";
+        if (cfg.glass) level2Container.classList.add("glass-panel");
+        menuContainer.appendChild(level2Container);
+
+        // Level 1 Menu (Groups + Delete)
+        const level1Container = document.createElement("div");
+        level1Container.id = "bottom_building_menu_level1";
+        level1Container.style.display = "flex";
+        level1Container.style.gap = "8px";
+        level1Container.style.height = `${cfg.level1Height}px`;
+        level1Container.style.padding = "8px";
+        level1Container.style.background = this.hexToRgba(cfg.bgColor, cfg.bgAlpha);
+        level1Container.style.border = `1.5px solid ${cfg.borderColor}`;
+        level1Container.style.borderRadius = "8px";
+        level1Container.style.pointerEvents = "auto";
+        if (cfg.glass) level1Container.classList.add("glass-panel");
+        menuContainer.appendChild(level1Container);
+
+        const configs = GameEngine.state.buildingConfigs || {};
+
+        // 分組
+        const groups = {};
+        Object.values(configs).forEach(c => {
+            const g = c.group_index || { type: 'other', order: 99 };
+            if (!groups[g.type]) groups[g.type] = [];
+            groups[g.type].push({ ...c, order: g.order });
+        });
+
+        const groupKeys = Object.keys(groups).sort((a, b) => {
+            const orderA = groups[a][0] ? groups[a][0].order : 99;
+            const orderB = groups[b][0] ? groups[b][0].order : 99;
+            return orderA - orderB;
+        });
+
+        // 建立或取得自訂 Tooltip
+        let customTooltip = document.getElementById("custom_building_tooltip");
+        if (!customTooltip) {
+            customTooltip = document.createElement("div");
+            customTooltip.id = "custom_building_tooltip";
+            customTooltip.style.position = "absolute";
+            customTooltip.style.display = "none";
+            customTooltip.style.background = "rgba(0,0,0,0.85)";
+            customTooltip.style.color = "#fff";
+            customTooltip.style.padding = "4px 8px";
+            customTooltip.style.borderRadius = "4px";
+            customTooltip.style.border = "1px solid #fbc02d";
+            customTooltip.style.fontSize = "14px";
+            customTooltip.style.whiteSpace = "pre-line";
+            customTooltip.style.zIndex = "10000";
+            customTooltip.style.pointerEvents = "none";
+            // 這裡必須 append 到 document.body，這樣 getBoundingClientRect 算出來的座標才能直接當 fixed / absolute
+            document.body.appendChild(customTooltip);
+        }
+
+        const showTooltip = (btn, text) => {
+            customTooltip.innerHTML = text;
+            customTooltip.style.display = "block";
+            const rect = btn.getBoundingClientRect();
+            customTooltip.style.left = `${rect.left + rect.width / 2}px`;
+            customTooltip.style.top = `${rect.top - customTooltip.offsetHeight - 5}px`;
+            customTooltip.style.transform = "translateX(-50%)";
+        };
+        const hideTooltip = () => {
+            customTooltip.style.display = "none";
+        };
+
+        groupKeys.forEach(type => {
+            const btn = document.createElement("div");
+            btn.className = "building-group-btn";
+            btn.style.width = `${cfg.itemWidth}px`;
+            btn.style.height = `100%`;
+            btn.style.display = "flex";
+            btn.style.flexDirection = "column";
+            btn.style.alignItems = "center";
+            btn.style.justifyContent = "center";
+            btn.style.cursor = "pointer";
+            btn.style.background = "rgba(255,255,255,0.1)";
+            btn.style.borderRadius = "6px";
+            btn.style.border = `2px solid ${this.selectedBuildingGroup === type ? cfg.selectedBorderColor : "transparent"}`;
+            btn.style.boxSizing = "border-box";
+            btn.style.transition = "all 0.1s";
+            
+            // 加入安全檢查，避免未定義的圖示或文字
+            const displayIcon = cfg.groupIcons[type] || '📦';
+            const displayName = cfg.groupNames[type] || type;
+            btn.innerHTML = `<span style="font-size:24px;">${displayIcon}</span><span style="font-size:${cfg.fontSize}; color:${cfg.fontColor}; margin-top:4px;">${displayName}</span>`;
+
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                if (this.selectedBuildingGroup === type) {
+                    this.selectedBuildingGroup = null; // Toggle off
+                } else {
+                    this.selectedBuildingGroup = type;
+                }
+                hideTooltip();
+                this.renderBottomBuildingMenu();
+            };
+            level1Container.appendChild(btn);
+        });
+
+        // 最右側刪除按鈕
+        const delBtn = document.createElement("div");
+        delBtn.style.width = `${cfg.itemWidth}px`;
+        delBtn.style.height = `100%`;
+        delBtn.style.display = "flex";
+        delBtn.style.alignItems = "center";
+        delBtn.style.justifyContent = "center";
+        delBtn.style.cursor = "pointer";
+        delBtn.style.background = this.hexToRgba(cfg.deleteBtnColor, 0.8);
+        delBtn.style.borderRadius = "6px";
+        delBtn.style.border = `2px solid ${GameEngine.state.logisticsDeleteToolActive ? cfg.selectedBorderColor : "transparent"}`;
+        delBtn.style.boxSizing = "border-box";
+        delBtn.innerHTML = `<span style="font-size:24px;">🗑️</span>`;
+        delBtn.title = "刪除建築/物流線";
+        delBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.toggleLogisticsDeleteTool();
+            this.renderBottomBuildingMenu();
+        };
+        level1Container.appendChild(delBtn);
+
+        // 生成 Level 2 Building 按鈕
+        if (this.selectedBuildingGroup && groups[this.selectedBuildingGroup]) {
+            const list = groups[this.selectedBuildingGroup].sort((a, b) => a.order - b.order);
+            const l2Width = cfg.level2ItemWidth || 50;
+            list.forEach(c => {
+                const btn = document.createElement("div");
+                btn.style.width = `${l2Width}px`;
+                btn.style.height = `100%`;
+                btn.style.display = "flex";
+                btn.style.flexDirection = "column";
+                btn.style.alignItems = "center";
+                btn.style.justifyContent = "center";
+                btn.style.cursor = "pointer";
+                btn.style.background = "rgba(45,45,45,0.6)";
+                btn.style.border = `1px solid rgba(255,255,255,0.1)`;
+                btn.style.borderRadius = "4px";
+                btn.style.boxSizing = "border-box";
+                
+                const icon = this.getBuildingIcon(c.model) || "🏗️";
+                btn.innerHTML = `<span style="font-size:20px;">${icon}</span>`;
+
+                btn.onmouseenter = () => {
+                    btn.style.border = `1px solid ${cfg.selectedBorderColor}`;
+                    showTooltip(btn, `${c.name}\n<span style="font-size:12px;color:#aaa">${c.desc || ""}</span>`);
+                };
+                btn.onmouseleave = () => {
+                    btn.style.border = `1px solid rgba(255,255,255,0.1)`;
+                    hideTooltip();
+                };
+
+                // 添加建築點擊邏輯
+                btn.onclick = (e) => {
+                    e.stopPropagation();
+                    hideTooltip();
+                    
+                    // 改用原本存在的 startStampMode 來進入建造模式
+                    if (GameEngine.state.placingType === c.model) {
+                        this.cancelBuildingMode();
+                    } else {
+                        this.startStampMode(c.model);
+                    }
+                };
+                level2Container.appendChild(btn);
+            });
+        }
     }
 }
 

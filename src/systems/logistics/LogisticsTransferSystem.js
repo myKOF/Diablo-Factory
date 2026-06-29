@@ -666,6 +666,29 @@ export class LogisticsTransferSystem {
                         }
                         let gapSum = 0, gapN = 0;
                         for (const arr of byLine.values()) { arr.sort((a, b) => a - b); for (let i = 1; i < arr.length; i++) { gapSum += arr[i] - arr[i - 1]; gapN++; } }
+                        // [入庫=0 診斷] 為何抵達不入庫:統計接近終點(progress≥0.99)、無 targetId、終點偏離 targetPoint 的數量。
+                        const cell = this.engine?.TILE_SIZE || 20;
+                        let nearEnd = 0, noTargetId = 0, tpMismatch = 0, sample = null;
+                        for (const t of (state.activeTransfers || [])) {
+                            if (!t) continue;
+                            if (!t.targetId) noTargetId++;
+                            const p = t.progress || 0;
+                            if (p >= 0.99) {
+                                nearEnd++;
+                                const rp = t.routePoints;
+                                const endPt = Array.isArray(rp) && rp.length >= 2 ? rp[rp.length - 1] : null;
+                                const tp = t.targetPoint;
+                                const reached = !tp || (endPt && (Math.abs(endPt.x - tp.x) + Math.abs(endPt.y - tp.y)) <= cell * 1.5);
+                                if (tp && !reached) tpMismatch++;
+                                if (!sample) sample = {
+                                    progress: +p.toFixed(3), targetId: t.targetId || null, lineId: t.lineId || null,
+                                    endPt: endPt ? { x: Math.round(endPt.x), y: Math.round(endPt.y) } : null,
+                                    targetPoint: tp ? { x: Math.round(tp.x), y: Math.round(tp.y) } : null,
+                                    reached: !!reached, queueBlocked: t.queueBlocked === true,
+                                    maxAllowed: +(t.maxAllowedProgress !== undefined ? t.maxAllowedProgress : 1).toFixed(3)
+                                };
+                            }
+                        }
                         const br = sys._workerBridge;
                         const report = {
                             worker: !!br,
@@ -681,7 +704,11 @@ export class LogisticsTransferSystem {
                             worker位置落後ms: br ? +(br.getPositionLagSeconds(0) * 1000).toFixed(0) : null,
                             待消費抵達佇列: br ? (br._arrivalQueue ? br._arrivalQueue.length : 0) : null,
                             平均間距px: gapN ? +(gapSum / gapN).toFixed(1) : 0,
-                            cellSize: this.engine?.TILE_SIZE || 20
+                            cellSize: this.engine?.TILE_SIZE || 20,
+                            接近終點數: nearEnd,
+                            無targetId數: noTargetId,
+                            終點偏離targetPoint數: tpMismatch,
+                            卡終點樣本: sample
                         };
                         console.log('[logiDiag] 結果:', JSON.stringify(report, null, 2));
                         window.__logiDiagLast = report;

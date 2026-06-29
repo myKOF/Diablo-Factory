@@ -409,7 +409,8 @@ export class ConfigManager {
                 idxIngredientsProd = hIdx('ingredients_production'),
                 idxProductionPlace = hIdx('production_place'),
                 idxUiLocation = hIdx('ui_location'),
-                idxEfficiency = hIdx('efficiency');
+                idxEfficiency = hIdx('efficiency'),
+                idxGroupIndex = hIdx('group_index');
 
             console.log(`[CSV載入] 建築配置欄位索引結果:`, { model: idxModel, type1: idxType1, prod: idxProd, prodType: idxProdType });
 
@@ -446,6 +447,16 @@ export class ConfigManager {
                 const resValCosts = ConfigManager.parseResourceCosts(row[idxResourceValue]);
                 const parsedBuildTime = parseFloat(row[idxUpgradeTimes]);
                 const ports = (idxPort !== -1) ? ConfigManager.parseBuildingPorts(row[idxPort]) : [];
+                
+                // --- 解析 group_index ---
+                let groupIndex = null;
+                if (idxGroupIndex !== -1 && row[idxGroupIndex]) {
+                    const gArr = this.parseBracketArray(row[idxGroupIndex]);
+                    if (gArr.length >= 2) groupIndex = { type: String(gArr[0]), order: parseInt(gArr[1]) || 99 };
+                } else {
+                    groupIndex = { type: 'other', order: 99 };
+                }
+
                 const cfg = {
                     name: (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx].trim() : model,
                     desc: (descIdx !== -1 && row[descIdx]) ? row[descIdx].trim() : "",
@@ -471,7 +482,8 @@ export class ConfigManager {
                     need_villagers: (idxNeedVillagers !== -1 && row[idxNeedVillagers]) ? parseInt(row[idxNeedVillagers]) : 0,
                     ingredients_production_raw: (idxIngredientsProd !== -1 && row[idxIngredientsProd]) ? row[idxIngredientsProd].trim() : "",
                     ports: ports,
-                    port: ports
+                    port: ports,
+                    group_index: groupIndex
                 };
 
 

@@ -108,23 +108,54 @@ export const UI_CONFIG = {
             { id: "tank_workshop" }
         ]
     },
-
-    // -- 右下角日誌通知欄 -----------------------------------------
-    ShortcutBar: {
+    // -- 底部 1+2 級建築選單 (BottomBuildingMenu) -------------------------
+    BottomBuildingMenu: {
         anchor: "BOTTOM_CENTER",
         offsetX: 0,
-        offsetY: 24,
-        width: 620,
-        height: 86,
-        itemWidth: 74,
-        itemHeight: 62,
-        titleColor: "#fbc02d",
-        textColor: "#e0e0e0",
-        descColor: "#e0e0e0",
-        descAlpha: 0.72,
+        offsetY: 20,
+        level1Height: 70,
+        level2Height: 60,
+        itemWidth: 60,
+        itemHeight: 60,
+        level2ItemWidth: 50,
+        level2ItemHeight: 50,
+        gap: 10,
+        bgColor: "#1a1a1a",
+        bgAlpha: 0.95,
+        borderColor: "#fbc02d",
+        selectedBorderColor: "#ffeb3b",
+        deleteBtnColor: "#d32f2f",
+        glass: true,
         fontSize: "12px",
-        glass: true
+        fontColor: "#ffffff",
+        groupIcons: {
+            'village': '🏠',
+            'production': '⛏️',
+            'processing_plant': '🏭',
+            'battle': '⚔️',
+            'logistics': '🛤️',
+            'core': '🏠',
+            'gathering': '⛏️',
+            'processing': '🏭',
+            'military': '⚔️',
+            'other': '📦'
+        },
+        groupNames: {
+            'village': '城鎮',
+            'production': '生產',
+            'processing_plant': '加工',
+            'battle': '軍事',
+            'logistics': '物流',
+            'core': '核心',
+            'gathering': '採集',
+            'processing': '加工',
+            'military': '軍事',
+            'other': '其他'
+        }
     },
+
+    // -- 右下角日誌通知欄 -----------------------------------------
+
     LogPanel: {
         anchor: "BOTTOM_RIGHT",
         offsetX: 20,
