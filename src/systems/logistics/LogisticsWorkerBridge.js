@@ -9,7 +9,8 @@ export class LogisticsWorkerBridge {
     constructor(workerUrl) {
         this.worker = new Worker(workerUrl, { type: 'module' });
         this.worker.onmessage = (e) => this._onMessage(e.data);
-        this.latest = null;          // 最近一次 worker 結果(尚未套用)
+        this.latest = null;          // 最近一次 worker 結果(尚未套用);kin 為絕對位置,新覆蓋舊無損
+        this._arrivalQueue = [];     // [抵達不漏] 抵達是「事件」非絕對狀態:跨多個未消費結果累積,不可被覆蓋丟失
         this.seq = 0;
         this.sentIds = new Set();     // 已送交 worker 的 transfer id
         this.topoSig = null;
@@ -22,11 +23,38 @@ export class LogisticsWorkerBridge {
         this._pendingDt = 0;
         this._pendingState = null;
         this._pendingTileSize = 20;
+        // [發料防稀疏] 估算主執行緒位置「落後 worker 多少模擬秒數」:已送出但結果尚未套用的 sim 時間。
+        // 發料閘據此把落後的位置投影到當下,否則 worker 落後越多、物品被發得越疏(實測間距 22→31)。
+        this.sentSimTime = 0;      // 累計送交 worker 的 dt
+        this.appliedSimTime = 0;   // 最近套用結果中 worker 回報的累計已推進 dt
+        // [防佇列堆積] worker 單步往返的實測壁鐘時間(EMA)。看門狗閾值依此自適應,
+        // 避免「step 比固定 500ms 久」時誤判逾時、在前一步未回前又送新步 → worker 訊息佇列無限堆積、
+        // 延遲隨時間越積越大(表現為移動越來越頓、停頓從 0.2s 漲到 1s)。
+        this._stepTimeEma = 0;
+    }
+
+    // 主執行緒位置相對「當下」落後的模擬秒數估計:在途(已送未套)+ 已累積未送 + 本 tick 即將送出的 dt。
+    getPositionLagSeconds(extraDt = 0) {
+        const inFlight = Math.max(0, this.sentSimTime - this.appliedSimTime);
+        return inFlight + (this._pendingDt || 0) + (extraDt || 0);
     }
 
     _onMessage(msg) {
         if (msg && msg.type === 'result') {
+            // [抵達不漏] 高負載下 worker 會背靠背回多個結果(本函式末端的 _flush 會再觸發下一步),
+            // 而主執行緒每 tick 才 pullResult 一次。kin 是絕對位置,只留最新即可;但 arrivals 是一次性事件,
+            // 若直接 this.latest = msg 覆蓋舊結果,未消費的舊結果其 arrivals 會永遠遺失 →
+            // 物品在 worker 已 byId.delete、主執行緒卻仍留在 activeTransfers(凍結、不再更新、永不入庫),
+            // 表現為「產率隨負載逐漸降低 + 線上殘留卡死物品」。故 arrivals 必須跨結果累積。
+            if (msg.arrivals && msg.arrivals.length) {
+                for (const a of msg.arrivals) this._arrivalQueue.push(a);
+            }
             this.latest = msg;
+            // [防佇列堆積] 記錄本步往返壁鐘時間,供自適應看門狗用。
+            if (this._lastFlushTime) {
+                const stepMs = performance.now() - this._lastFlushTime;
+                if (stepMs > 0) this._stepTimeEma = this._stepTimeEma ? (this._stepTimeEma * 0.7 + stepMs * 0.3) : stepMs;
+            }
             this.inFlight = false;
             // worker 完成上一步;期間若有累積的時間/新增物品,立即送出下一步,避免空轉。
             if (this._pendingDt > 0 && this._pendingState) this._flush();
@@ -68,10 +96,13 @@ export class LogisticsWorkerBridge {
     pullResult(state) {
         const msg = this.latest;
         this.latest = null;
-        if (!msg) return [];
+        // [抵達不漏] 即使本 tick 沒有新的 kin(msg 為 null),仍可能有跨結果累積、尚未消費的 arrivals 待入庫。
+        // [發料防稀疏] 更新 worker 已推進的累計時間(取最新結果),供 getPositionLagSeconds 估算落後量。
+        if (msg && typeof msg.appliedSimTime === 'number') this.appliedSimTime = msg.appliedSimTime;
+        if (!msg && this._arrivalQueue.length === 0) return [];
         const byId = new Map();
         for (const t of state.activeTransfers) if (t && t.id) byId.set(t.id, t);
-        for (const k of msg.kin) {
+        for (const k of (msg ? msg.kin : [])) {
             const t = byId.get(k.id);
             if (!t) continue;
             // [合流重映射] 先套用換線(若有):worker 內部合流交接已把物品移到輸出線,主執行緒必須同步
@@ -97,9 +128,12 @@ export class LogisticsWorkerBridge {
             if (k.mergeVisualTurn) t._mergeVisualTurn = k.mergeVisualTurn; else delete t._mergeVisualTurn;
         }
         const arrivals = [];
-        if (msg.arrivals && msg.arrivals.length) {
-            const arrivedIds = new Set(msg.arrivals.map(a => a.id));
-            for (const a of msg.arrivals) {
+        // [抵達不漏] 消費跨結果累積的 arrivals(而非僅 msg.arrivals),避免高負載下背靠背結果覆蓋丟事件。
+        if (this._arrivalQueue.length) {
+            const queued = this._arrivalQueue;
+            this._arrivalQueue = [];
+            const arrivedIds = new Set(queued.map(a => a.id));
+            for (const a of queued) {
                 const t = byId.get(a.id);
                 arrivals.push({ id: a.id, targetId: a.targetId, itemType: a.itemType, transfer: t });
                 this.sentIds.delete(a.id);
@@ -115,8 +149,12 @@ export class LogisticsWorkerBridge {
         this._pendingDt = Math.min(this._pendingDt + deltaTime, 0.2);
         this._pendingState = state;
         this._pendingTileSize = tileSize;
-        // 看門狗:若上一步逾 500ms 仍無回覆(訊息遺失/worker 卡住),解除 in-flight 以免永久凍結。
-        if (this.inFlight && this._lastFlushTime && (performance.now() - this._lastFlushTime > 500)) {
+        // [防佇列堆積] 看門狗只該攔截「真正遺失/卡死的訊息」,不該因 step 比固定門檻久而誤判。
+        // 閾值自適應:取實測單步往返 EMA 的 4 倍(下限 1s)。否則高負載下 step>500ms 時每 tick 誤判逾時、
+        // 在前一步未回前又送新步 → worker 訊息佇列無限堆積、延遲越積越大(停頓從 0.2s 漲到 1s,且不會自癒)。
+        // 維持嚴格「最多 1 個 in-flight」:落後時退化為平順慢動作,而非堆積式越來越頓。
+        const watchdogMs = Math.max(1000, this._stepTimeEma * 4);
+        if (this.inFlight && this._lastFlushTime && (performance.now() - this._lastFlushTime > watchdogMs)) {
             this.inFlight = false;
         }
         if (!this.inFlight) this._flush();
@@ -142,6 +180,7 @@ export class LogisticsWorkerBridge {
         }
         const dt = this._pendingDt;
         this._pendingDt = 0;
+        this.sentSimTime += dt; // [發料防稀疏] 累計已送出的模擬時間,供落後量估算
         this.inFlight = true;
         this._lastFlushTime = performance.now();
         this.worker.postMessage({ type: 'step', seq: ++this.seq, deltaTime: dt, adds, removes });

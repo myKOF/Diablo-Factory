@@ -621,6 +621,74 @@ export class LogisticsTransferSystem {
                     return `物流 Web Worker: ${on ? '啟用' : '停用'}(已記住)`;
                 };
             }
+            // [診斷] 在真實場景量測產率衰減來源。console 執行 logiDiag()(預設取樣 6 秒),
+            // 結束後印出:發料率/入庫率(每秒)、在途數量趨勢、凍結(progress 多秒未動)數、
+            // worker 落後(pendingDt/inFlight)、平均沿線間距。用以區分:worker 落後 / 凍結孤兒 / 變疏 / 欠發。
+            if (typeof window.logiDiag !== 'function') {
+                window.logiDiag = (secs = 6) => {
+                    const sys = this;
+                    const state = window.GAME_STATE;
+                    if (!state) return '無 GAME_STATE';
+                    const sampleProgress = () => {
+                        const m = new Map();
+                        for (const t of (state.activeTransfers || [])) if (t && t.id) m.set(t.id, t.progress || 0);
+                        return m;
+                    };
+                    const startDelivered = sys._diagDelivered || 0;
+                    const startDispatched = sys._diagDispatched || 0;
+                    const t0 = performance.now();
+                    const progAt0 = sampleProgress();
+                    const activeSeries = [];
+                    const tickT = setInterval(() => { activeSeries.push((state.activeTransfers || []).length); }, 500);
+                    console.log(`[logiDiag] 取樣 ${secs}s...`);
+                    setTimeout(() => {
+                        clearInterval(tickT);
+                        const dtSec = (performance.now() - t0) / 1000;
+                        const delivered = (sys._diagDelivered || 0) - startDelivered;
+                        const dispatched = (sys._diagDispatched || 0) - startDispatched;
+                        const progAt1 = sampleProgress();
+                        // 凍結:取樣前後都存在、progress 完全沒變、且未在合流門口被正當卡住(maxAllowedProgress>progress)
+                        let frozen = 0, persisted = 0;
+                        for (const t of (state.activeTransfers || [])) {
+                            if (!t || !t.id || !progAt0.has(t.id)) continue;
+                            persisted++;
+                            const p0 = progAt0.get(t.id), p1 = t.progress || 0;
+                            const max = t.maxAllowedProgress !== undefined ? t.maxAllowedProgress : 1;
+                            if (Math.abs(p1 - p0) < 1e-6 && p1 < 0.999 && p1 < max - 1e-4 && t.queueBlocked !== true) frozen++;
+                        }
+                        // 平均沿線間距(以 lineId 分組,取相鄰 progress*routeLen 差)
+                        const byLine = new Map();
+                        for (const t of (state.activeTransfers || [])) {
+                            if (!t || !t.lineId || !Array.isArray(t.routePoints) || t.routePoints.length < 2) continue;
+                            let len = 0; for (let i = 1; i < t.routePoints.length; i++) len += Math.abs(t.routePoints[i].x - t.routePoints[i - 1].x) + Math.abs(t.routePoints[i].y - t.routePoints[i - 1].y);
+                            if (!byLine.has(t.lineId)) byLine.set(t.lineId, []);
+                            byLine.get(t.lineId).push((t.progress || 0) * len);
+                        }
+                        let gapSum = 0, gapN = 0;
+                        for (const arr of byLine.values()) { arr.sort((a, b) => a - b); for (let i = 1; i < arr.length; i++) { gapSum += arr[i] - arr[i - 1]; gapN++; } }
+                        const br = sys._workerBridge;
+                        const report = {
+                            worker: !!br,
+                            活躍: (state.activeTransfers || []).length,
+                            活躍趨勢: activeSeries,
+                            發料每秒: +(dispatched / dtSec).toFixed(2),
+                            入庫每秒: +(delivered / dtSec).toFixed(2),
+                            凍結數: frozen,
+                            取樣存活數: persisted,
+                            worker_pendingDt: br ? +(br._pendingDt || 0).toFixed(3) : null,
+                            worker_inFlight: br ? br.inFlight : null,
+                            worker單步ms: br ? +(br._stepTimeEma || 0).toFixed(1) : null,
+                            worker位置落後ms: br ? +(br.getPositionLagSeconds(0) * 1000).toFixed(0) : null,
+                            待消費抵達佇列: br ? (br._arrivalQueue ? br._arrivalQueue.length : 0) : null,
+                            平均間距px: gapN ? +(gapSum / gapN).toFixed(1) : 0,
+                            cellSize: this.engine?.TILE_SIZE || 20
+                        };
+                        console.log('[logiDiag] 結果:', JSON.stringify(report, null, 2));
+                        window.__logiDiagLast = report;
+                    }, secs * 1000);
+                    return `[logiDiag] 量測中,請維持遊戲運行 ${secs} 秒,結果將印在 console(也存於 window.__logiDiagLast)`;
+                };
+            }
             if (window.LOGISTICS_WORKER === undefined) {
                 // [效能] 非測試環境(無 navigator.webdriver 且無 ?test 參數)預設啟用 Web Worker
                 const isTest = typeof navigator !== 'undefined' &&
@@ -701,6 +769,7 @@ export class LogisticsTransferSystem {
                 }
                 if (window.UIManager) window.UIManager.updateValues(true);
             }
+            this._diagDelivered = (this._diagDelivered || 0) + 1; // [診斷] 入庫計數(logiDiag 讀)
             if (state && state.trackedTransferId === arrival.id) {
                 state.trackedTransferId = null;
                 if (this.engine && typeof this.engine.addLog === 'function') {
@@ -772,6 +841,13 @@ export class LogisticsTransferSystem {
             return ["route", first ? `${Math.round(first.x)},${Math.round(first.y)}` : "start",
                 last ? `${Math.round(last.x)},${Math.round(last.y)}` : "end"].join("|");
         };
+        // [發料防稀疏] worker 模式下主執行緒位置落後 worker 一段時間,直接拿落後位置判斷起點是否淨空,
+        // 會把領頭物品誤判為仍在起點附近 → 發料太晚 → 間距 = cell + lag×速度,且隨 worker 落後加大而變疏
+        // (實測 22→31px)。故把每個物品的位置依估計的落後秒數投影到「當下」再比較。投影過量也安全:
+        // worker 自身間距邏輯會以 cell 為硬下限,不會重疊。主執行緒(無 worker)lag=0,行為不變。
+        const positionLagSeconds = this._workerBridge
+            ? this._workerBridge.getPositionLagSeconds(deltaTime)
+            : 0;
         const canStartTransfer = (transfer) => {
             if (!transfer || !Array.isArray(transfer.routePoints) || transfer.routePoints.length < 2) return true;
             const key = getTransferPathKey(transfer);
@@ -787,7 +863,9 @@ export class LogisticsTransferSystem {
                 if (!samePathKey && !sameRouteSignature) return false;
                 const activeTotal = getTransferRouteMetrics(active).totalPixels || totalLength;
                 const activeDistance = this.transportArrayState.getTransferDistance(active, activeTotal, cellSize);
-                return activeDistance < cellSize;
+                const projectedDistance = activeDistance +
+                    positionLagSeconds * (Number(active.efficiency) || 4) * cellSize;
+                return projectedDistance < cellSize;
             });
         };
 
@@ -842,6 +920,7 @@ export class LogisticsTransferSystem {
                                     if (window.UIManager) window.UIManager.updateValues(true);
                                     this.assignTransferSerial(state, transfer);
                                     state.activeTransfers.push(transfer);
+                                    this._diagDispatched = (this._diagDispatched || 0) + 1; // [診斷]
                                     itemSpawned = true;
                                     ent.nextLogisticsOutputTargetIndex = (connIndex + 1) % outputTargets.length;
                                     const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);
@@ -858,6 +937,7 @@ export class LogisticsTransferSystem {
                                     if (window.UIManager) window.UIManager.updateValues(true);
                                     this.assignTransferSerial(state, transfer);
                                     state.activeTransfers.push(transfer);
+                                    this._diagDispatched = (this._diagDispatched || 0) + 1; // [診斷]
                                     itemSpawned = true;
                                     ent.nextLogisticsOutputTargetIndex = (connIndex + 1) % outputTargets.length;
                                     const target = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === conn.id);

@@ -27,6 +27,7 @@ const byId = new Map(); // id -> transfer(含 routePoints)
 // transfer.routePoints 換成輸出線的新陣列(參照改變);偵測到參照變動即把新路線/身分一併回報,
 // 否則主執行緒仍以舊輸入線路徑渲染 → 物品在合流點後看似消失/卡住。
 const routeRefById = new Map(); // id -> 上次回報的 routePoints 參照
+let appliedSimTime = 0; // worker 累計已推進的模擬時間(秒);回報給主執行緒估算位置落後量
 
 function applyAdds(adds) {
     if (!Array.isArray(adds)) return;
@@ -56,6 +57,9 @@ self.onmessage = (e) => {
         applyRemoves(msg.removes);
         applyAdds(msg.adds);
         state.activeTransfers = Array.from(byId.values());
+        // [發料防稀疏] 累計 worker 實際推進的模擬時間,回報主執行緒以估算「位置落後量」。
+        // 主執行緒的發料閘 canStartTransfer 用此 lag 把(落後的)位置投影到當下,避免因落後而把物品發得太疏。
+        appliedSimTime += Number(msg.deltaTime) || 0;
 
         const { arrivals } = runLogisticsKinematics(
             { simSystem: simCtx, engine: fakeEngine, transportArrayState: logisticsTransportArrayState },
@@ -94,6 +98,6 @@ self.onmessage = (e) => {
             return entry;
         });
 
-        self.postMessage({ type: 'result', seq: msg.seq, kin, arrivals: arrived });
+        self.postMessage({ type: 'result', seq: msg.seq, kin, arrivals: arrived, appliedSimTime });
     }
 };
