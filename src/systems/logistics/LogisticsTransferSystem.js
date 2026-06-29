@@ -746,6 +746,7 @@ export class LogisticsTransferSystem {
                             worker_pendingDt: br ? +(br._pendingDt || 0).toFixed(3) : null,
                             worker_inFlight: br ? br.inFlight : null,
                             worker單步ms: br ? +(br._stepTimeEma || 0).toFixed(1) : null,
+                            worker計算ms: br ? +(br._computeMsEma || 0).toFixed(1) : null,
                             worker位置落後ms: br ? +(br.getPositionLagSeconds(0) * 1000).toFixed(0) : null,
                             待消費抵達佇列: br ? (br._arrivalQueue ? br._arrivalQueue.length : 0) : null,
                             平均間距px: gapN ? +(gapSum / gapN).toFixed(1) : 0,

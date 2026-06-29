@@ -195,16 +195,17 @@ function updateDragNow(currentX, currentY) {
 
     const routeStartDir = this.activeDrag.isLineExtension ? null : this.activeDrag.sourcePort?.dir;
     const routePath = this.router.findPath(sourceRouteGrid, targetRouteGrid, routeStartDir, this.activeDrag.bendMode, widthOffsets);
+    const safeSourcePortGrid = this.activeDrag.sourcePort ? sourcePortGrid : null;
     const rawPreviewPath = buildRawPreviewPath(sourceRouteGrid, targetRouteGrid, this.activeDrag.bendMode);
     const rawPreviewGhosts = rawPreviewPath
         ? this.router.processPath(
-            this.buildPortSafePath(rawPreviewPath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid) || rawPreviewPath,
+            this.buildPortSafePath(rawPreviewPath, safeSourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid) || rawPreviewPath,
             dragTarget.building,
             GameEngine.state.logisticsLines || []
         )
         : [];
     const rawPreviewIsValid = rawPreviewGhosts.length >= 1 && this.validateGhosts(rawPreviewGhosts);
-    let path = this.buildPortSafePath(routePath, sourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
+    let path = this.buildPortSafePath(routePath, safeSourcePortGrid, sourceRouteGrid, dragTarget.port ? targetPortGrid : null, targetRouteGrid);
     path = this.dedupeExtensionStart(path);
 
     const isReverseExtension = this.isReverseLogisticsExtension(this.activeDrag, path, true);
@@ -237,7 +238,7 @@ function updateDragNow(currentX, currentY) {
         ghosts: this.ghosts,
         routeKey,
         lastWorldPoint: { x: currentX, y: currentY },
-        costSegmentCount: Math.max(1, this.ghosts.length - 1),
+        costSegmentCount: Math.max(1, this.getLogisticsBuildSegmentCount(this.ghosts)),
         isValid: this.isValid
     };
 

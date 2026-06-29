@@ -284,16 +284,23 @@ export class ConveyorSystem {
     validateGhosts(ghosts) {
         if (!this.router) return false;
         const routeWidth = this.activeDrag?.routeWidth || 1;
+        const costSegmentCount = this.getLogisticsBuildSegmentCount(ghosts);
 
         // [核心優化] 統一調用 Router 的驗證邏輯，保持 Single Source of Truth
         const isFootprintValid = this.router.validateRouteFootprint(ghosts, routeWidth, (segmentCount) => {
             if (!UI_CONFIG.ConveyorBuild) return true;
 
             // 道具消耗檢查
-            return this.canAffordTransportLine(segmentCount);
+            return this.canAffordTransportLine(costSegmentCount || segmentCount);
         });
 
         return isFootprintValid;
+    }
+
+    getLogisticsBuildSegmentCount(ghosts) {
+        if (!Array.isArray(ghosts) || ghosts.length === 0) return 0;
+        const buildableGhosts = ghosts.filter(ghost => !ghost.isPortConnector && !ghost.isVirtualEnd);
+        return buildableGhosts.length > 0 ? buildableGhosts.length : Math.max(0, ghosts.length - 1);
     }
 
     buildOrthogonalRoute(startPoint, endPoint, startDir = null, endDir = null, biasPoint = null) {

@@ -134,8 +134,7 @@ function submitDrag() {
             }
         }
         const beforeCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : 0;
-        const segmentCostCount = Math.max(1, buildGhosts.length - 1);
-        const allowsShortMergeConnector = !!touchedTargetLine;
+        const segmentCostCount = Math.max(1, this.getLogisticsBuildSegmentCount(buildGhosts));
         const maxCosts = this.getTransportLineCost(segmentCostCount);
         const missing = Object.entries(maxCosts).find(([resource, amount]) => (GameEngine.state.resources[resource] || 0) < amount);
         if (missing) {
@@ -299,13 +298,14 @@ function submitDrag() {
         }
         const afterCount = Array.isArray(GameEngine.state.logisticsLines) ? GameEngine.state.logisticsLines.length : beforeCount;
         const builtSegments = Math.max(0, afterCount - beforeCount);
-        if (!BuildingSystem.spendResources(GameEngine.state, this.getTransportLineCost(builtSegments))) {
+        const chargedSegments = Math.max(1, routeContext?.costSegmentCount || segmentCostCount);
+        if (!BuildingSystem.spendResources(GameEngine.state, this.getTransportLineCost(chargedSegments))) {
             this.restoreLogisticsBuildUndoSnapshot(buildUndoSnapshot, GameEngine.state);
             this.cancelDrag();
             return null;
         }
         this.recordLogisticsBuildUndoSnapshot(buildUndoSnapshot, GameEngine.state);
-        const continuationPoint = points[points.length - 1] || lastPoint;
+        const continuationProbePoint = this.snapPointToGridCenter(points[points.length - 1] || lastPoint);
         let selectedContinuationLine = null;
         if (finalGroupId && GameEngine.state) {
             const finalSegments = this.getLogisticsSegmentsByGroupId(finalGroupId);
@@ -313,7 +313,7 @@ function submitDrag() {
             const activeSegment = finalSegments.find(seg => {
                 const segPoints = Array.isArray(seg?.routePoints) ? seg.routePoints : [];
                 const end = segPoints[segPoints.length - 1] || null;
-                return end && continuationPoint && Math.hypot(end.x - continuationPoint.x, end.y - continuationPoint.y) <= endpointMatchDistance;
+                return end && continuationProbePoint && Math.hypot(end.x - continuationProbePoint.x, end.y - continuationProbePoint.y) <= endpointMatchDistance;
             }) || finalSegments
                 .slice()
                 .sort((a, b) =>
@@ -333,11 +333,13 @@ function submitDrag() {
             }
             selectedContinuationLine = activeSegment || null;
         }
-        GameEngine.addLog(`[物流] 傳送帶建造完成，共 ${builtSegments} 節。`, 'LOGISTICS');
+        GameEngine.addLog(`[物流] 傳送帶建造完成，共 ${chargedSegments} 節。`, 'LOGISTICS');
         const continuationLine = selectedContinuationLine
             || createdLine
-            || this.findTouchedLogisticsLineAt(continuationPoint, null, (GameEngine.TILE_SIZE || 20) * 0.75)
+            || this.findTouchedLogisticsLineAt(continuationProbePoint, null, (GameEngine.TILE_SIZE || 20) * 0.75)
             || null;
+        const continuationRoute = Array.isArray(continuationLine?.routePoints) ? continuationLine.routePoints : [];
+        const continuationPoint = continuationRoute[continuationRoute.length - 1] || continuationProbePoint;
         const result = {
             built: builtSegments > 0,
             finalGroupId,

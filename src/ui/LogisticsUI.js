@@ -488,6 +488,8 @@ export class LogisticsUI {
         window.UIManager.hideContextMenu();
         const startX = (typeof clickX === 'number') ? clickX : line.x;
         const startY = (typeof clickY === 'number') ? clickY : line.y;
+        GameEngine.state.selectedLogisticsClickX = startX;
+        GameEngine.state.selectedLogisticsClickY = startY;
         conveyorSystem.startDrag(startX, startY, null, LogisticsUI.getLogisticsLineDragPort(line, startX, startY), line);
         return true;
     }

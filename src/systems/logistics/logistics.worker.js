@@ -61,11 +61,13 @@ self.onmessage = (e) => {
         // 主執行緒的發料閘 canStartTransfer 用此 lag 把(落後的)位置投影到當下,避免因落後而把物品發得太疏。
         appliedSimTime += Number(msg.deltaTime) || 0;
 
+        const _computeT0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
         const { arrivals } = runLogisticsKinematics(
             { simSystem: simCtx, engine: fakeEngine, transportArrayState: logisticsTransportArrayState },
             state,
             msg.deltaTime
         );
+        const _computeMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - _computeT0;
 
         // kinematics 已將抵達者移出 state.activeTransfers;同步從 byId 移除
         const arrived = arrivals.map(a => ({ id: a.id, targetId: a.targetId, itemType: a.itemType }));
@@ -98,6 +100,6 @@ self.onmessage = (e) => {
             return entry;
         });
 
-        self.postMessage({ type: 'result', seq: msg.seq, kin, arrivals: arrived, appliedSimTime });
+        self.postMessage({ type: 'result', seq: msg.seq, kin, arrivals: arrived, appliedSimTime, computeMs: _computeMs });
     }
 };

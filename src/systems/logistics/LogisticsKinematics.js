@@ -210,17 +210,19 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
                 return len > best.length ? { points: transfer.routePoints, length: len } : best;
             }, { points: null, length: 0 });
 
-            // [效能] 引用相等的路徑直接視為一致，無須走訪座標
-            const useCanonical = groupTransfers.length > 1 && canonical.length > 0 && groupTransfers.some(transfer => {
-                if (transfer.routePoints === canonical.points) return false;
-                const points = transfer.routePoints || [];
-                const canonicalPoints = canonical.points || [];
-                if (points.length !== canonicalPoints.length) return true;
-                return points.some((point, index) => {
-                    const other = canonicalPoints[index];
-                    return !other || Math.hypot(point.x - other.x, point.y - other.y) > 0.1;
-                });
-            });
+            // [效能] 判斷組內是否存在「與 canonical 不同的路徑」。原本逐 transfer 逐座標點 hypot 比對,
+            // 是 O(transfers × routePoints) 且「每子步」重算——在 worker 模式下每個 transfer 的 routePoints
+            // 是各自反序列化的獨立陣列(參照不同),引用相等快取永遠 miss → 整組長蛇線每子步全量座標比對,
+            // 物品多 + 路徑點多時成為主要熱點(profiling 證實)。改用「以參照記憶化的簽章字串」比對:
+            // 簽章只在每個陣列首次出現時計算一次(WeakMap 快取),之後僅字串比較,等價但攤銷後近 O(transfers)。
+            let useCanonical = false;
+            if (groupTransfers.length > 1 && canonical.length > 0 && canonical.points) {
+                const canonicalSig = routePointsSignature(canonical.points);
+                useCanonical = groupTransfers.some(transfer =>
+                    transfer.routePoints !== canonical.points &&
+                    routePointsSignature(transfer.routePoints) !== canonicalSig
+                );
+            }
 
             // [效能] 優化走訪查找：使用快取段結構
             const getPointOnPathByDistance = (pts, distance) => {

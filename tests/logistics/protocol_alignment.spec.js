@@ -2314,3 +2314,202 @@ test('preview valid 後 submit 前 footprint 被佔用時必須拒絕建造', as
 
     expect(result.success, result.error).toBe(true);
 });
+
+test('空白場景首次建造物流線時成本與接續錨點必須對齊最後一格', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const state = GameEngine.state;
+        const originalState = JSON.parse(JSON.stringify(state));
+        const originalResolveDragTarget = conveyorSystem.resolveDragTarget;
+        const originalRandom = Math.random;
+        const previousTileSize = GameEngine.TILE_SIZE;
+
+        try {
+            Math.random = () => 0.2468;
+            GameEngine.TILE_SIZE = 20;
+            state.pathfinding = {
+                grid: Array.from({ length: 12 }, () => Array.from({ length: 12 }, () => 0))
+            };
+            state.mapOffset = { x: 0, y: 0 };
+            state.mapEntities = [];
+            state.logisticsLines = [];
+            state.logisticsMergeNodes = [];
+            state.logisticsTurnArrowOverrides = [];
+            state.activeTransfers = [];
+
+            const transportConfig = conveyorSystem.getTransportLineConfig();
+            const costResource = Object.keys(transportConfig?.costs || {})[0] || 'transport_line';
+            state.resources = { wood: 9999, stone: 9999, iron: 9999, copper: 9999 };
+            Object.keys(transportConfig?.costs || {}).forEach(resource => {
+                state.resources[resource] = 9999;
+            });
+            if (!Number.isFinite(state.resources[costResource])) state.resources[costResource] = 9999;
+
+            conveyorSystem.resolveDragTarget = (x, y) => {
+                conveyorSystem.activeDrag.targetBuilding = null;
+                conveyorSystem.activeDrag.targetPort = null;
+                return { x, y, building: null, port: null };
+            };
+
+            conveyorSystem.startDrag(0, 10, null, null, null);
+            conveyorSystem.updateDragNow(90, 10);
+
+            const ghosts = GameEngine.state.conveyorGhosts || [];
+            const buildableGhostCount = ghosts.filter(ghost => !ghost.isPortConnector && !ghost.isVirtualEnd).length;
+            if (buildableGhostCount !== 5) {
+                return {
+                    success: false,
+                    error: `首次空白建造應預覽 5 格可建物流線，ghosts=${JSON.stringify(ghosts)}`
+                };
+            }
+
+            const before = state.resources[costResource] || 0;
+            const submitResult = conveyorSystem.submitDrag();
+            const after = state.resources[costResource] || 0;
+            const spent = before - after;
+            if (spent !== 5) {
+                return {
+                    success: false,
+                    error: `首次建造 5 格物流線應扣 5，實際扣 ${spent}，ghosts=${JSON.stringify(ghosts)} lines=${JSON.stringify(state.logisticsLines)}`
+                };
+            }
+
+            const continuationPoint = submitResult?.continuationPoint || null;
+            const routePoints = submitResult?.continuationLine?.routePoints || [];
+            const lineEnd = routePoints[routePoints.length - 1] || null;
+            if (!continuationPoint || !lineEnd || Math.hypot(continuationPoint.x - lineEnd.x, continuationPoint.y - lineEnd.y) > 0.1) {
+                return {
+                    success: false,
+                    error: `接續錨點必須等於最後線段端點，point=${JSON.stringify(continuationPoint)} line=${JSON.stringify(submitResult?.continuationLine)}`
+                };
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        } finally {
+            Math.random = originalRandom;
+            conveyorSystem.resolveDragTarget = originalResolveDragTarget;
+            conveyorSystem.cancelDrag();
+            GameEngine.TILE_SIZE = previousTileSize;
+            GameEngine.state = originalState;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});
+
+test('空白場景首次建造後自動續拉時選取線段與拖曳起點必須同在最後端點', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        const { LogisticsUI } = await import('/src/ui/LogisticsUI.js');
+        const { conveyorSystem } = await import('/src/systems/ConveyorSystem.js');
+        const { GameEngine } = await import('/src/systems/game_systems.js');
+
+        const state = GameEngine.state;
+        const originalState = JSON.parse(JSON.stringify(state));
+        const originalResolveDragTarget = conveyorSystem.resolveDragTarget;
+        const originalRandom = Math.random;
+        const previousTileSize = GameEngine.TILE_SIZE;
+
+        try {
+            Math.random = () => 0.1357;
+            GameEngine.TILE_SIZE = 20;
+            state.pathfinding = {
+                grid: Array.from({ length: 12 }, () => Array.from({ length: 12 }, () => 0))
+            };
+            state.mapOffset = { x: 0, y: 0 };
+            state.mapEntities = [];
+            state.logisticsLines = [];
+            state.logisticsMergeNodes = [];
+            state.logisticsTurnArrowOverrides = [];
+            state.activeTransfers = [];
+
+            const transportConfig = conveyorSystem.getTransportLineConfig();
+            state.resources = { wood: 9999, stone: 9999, iron: 9999, copper: 9999 };
+            Object.keys(transportConfig?.costs || {}).forEach(resource => {
+                state.resources[resource] = 9999;
+            });
+
+            conveyorSystem.resolveDragTarget = (x, y) => {
+                conveyorSystem.activeDrag.targetBuilding = null;
+                conveyorSystem.activeDrag.targetPort = null;
+                return { x, y, building: null, port: null };
+            };
+
+            conveyorSystem.startDrag(0, 10, null, null, null);
+            conveyorSystem.updateDragNow(90, 10);
+            const submitResult = conveyorSystem.submitDrag();
+            const continuationPoint = submitResult?.continuationPoint || null;
+            if (!continuationPoint || !submitResult?.continuationLine) {
+                return {
+                    success: false,
+                    error: `首次建造後必須提供接續線段與端點，result=${JSON.stringify(submitResult)}`
+                };
+            }
+
+            if (!LogisticsUI.beginLogisticsDragFromLine(submitResult.continuationLine, continuationPoint.x, continuationPoint.y)) {
+                return { success: false, error: '無法從首次建造結果啟動接續拖曳' };
+            }
+
+            if (state.selectedLogisticsClickX !== continuationPoint.x || state.selectedLogisticsClickY !== continuationPoint.y) {
+                return {
+                    success: false,
+                    error: `自動續拉必須把選取點寫成最後端點，point=${JSON.stringify(continuationPoint)} selected=(${state.selectedLogisticsClickX},${state.selectedLogisticsClickY})`
+                };
+            }
+
+            conveyorSystem.updateDragNow(110, 30);
+            const activeLine = LogisticsUI.activeLogisticsLine || null;
+            const activeLineEnd = Array.isArray(activeLine?.routePoints)
+                ? activeLine.routePoints[activeLine.routePoints.length - 1]
+                : null;
+            if (!activeLineEnd || Math.hypot(activeLineEnd.x - continuationPoint.x, activeLineEnd.y - continuationPoint.y) > 0.1) {
+                return {
+                    success: false,
+                    error: `自動續拉的 activeLogisticsLine 必須落在最後端點，point=${JSON.stringify(continuationPoint)} active=${JSON.stringify(activeLine)}`
+                };
+            }
+
+            const startGrid = conveyorSystem.activeDrag?.startGrid || null;
+            const expectedStartGrid = conveyorSystem.toGrid(continuationPoint.x, continuationPoint.y);
+            if (!startGrid || startGrid.x !== expectedStartGrid.x || startGrid.y !== expectedStartGrid.y) {
+                return {
+                    success: false,
+                    error: `接續拖曳起點必須是最後端點 grid，expected=${JSON.stringify(expectedStartGrid)} actual=${JSON.stringify(startGrid)}`
+                };
+            }
+
+            const ghosts = GameEngine.state.conveyorGhosts || [];
+            const firstGhost = ghosts[0] || null;
+            if (!firstGhost || firstGhost.x !== expectedStartGrid.x || firstGhost.y !== expectedStartGrid.y) {
+                return {
+                    success: false,
+                    error: `接續虛影第一格必須從最後端點開始，expected=${JSON.stringify(expectedStartGrid)} ghosts=${JSON.stringify(ghosts)}`
+                };
+            }
+
+            return { success: true };
+        } catch (error) {
+            return { success: false, error: error.message };
+        } finally {
+            Math.random = originalRandom;
+            conveyorSystem.resolveDragTarget = originalResolveDragTarget;
+            conveyorSystem.cancelDrag();
+            LogisticsUI.isLogisticsDragging = false;
+            LogisticsUI.logisticsSourceLine = null;
+            LogisticsUI.activeLogisticsLine = null;
+            GameEngine.TILE_SIZE = previousTileSize;
+            GameEngine.state = originalState;
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+});

@@ -50,6 +50,10 @@ export class LogisticsWorkerBridge {
                 for (const a of msg.arrivals) this._arrivalQueue.push(a);
             }
             this.latest = msg;
+            // [診斷] worker 自報的純計算時間(不含序列化/排程往返),用以區分瓶頸在 kinematics 還是訊息傳遞。
+            if (typeof msg.computeMs === 'number') {
+                this._computeMsEma = this._computeMsEma ? (this._computeMsEma * 0.7 + msg.computeMs * 0.3) : msg.computeMs;
+            }
             // [防佇列堆積] 記錄本步往返壁鐘時間,供自適應看門狗用。
             if (this._lastFlushTime) {
                 const stepMs = performance.now() - this._lastFlushTime;
