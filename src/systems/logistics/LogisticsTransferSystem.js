@@ -966,7 +966,7 @@ export class LogisticsTransferSystem {
 
                 // 修正規則：不再因為工人不足而停擺。
                 // 1 名工人是 1 倍效率，N 名工人是 N 倍效率。
-                const efficiency = Math.max(0, currentWorkers);
+                const efficiency = Math.max(1, currentWorkers);
 
                 const itemDispatchInterval = 2; // 基準：1 名工人每 2 秒發送一個物品。
                 ent.logisticsTimer = (ent.logisticsTimer || 0) + deltaTime * efficiency;

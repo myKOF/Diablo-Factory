@@ -6,6 +6,7 @@ import { WarehouseUI } from "./WarehouseUI.js";
 import { LogisticsUI } from "./LogisticsUI.js";
 import { BuildingMenuUI } from "./BuildingMenuUI.js";
 import { LogisticsRenderer } from "../renderers/logistics_renderer.js";
+import { ScriptRecorder } from "../debug/ScriptRecorder.js";
 
 
 /**
@@ -337,6 +338,15 @@ export class UIManager {
         });
         window.addEventListener("keydown", (e) => {
             const key = String(e.key || "").toLowerCase();
+
+            if (e.altKey && (e.code === "KeyR" || e.key.toLowerCase() === "r")) {
+                e.preventDefault();
+                e.stopPropagation();
+                const isRec = ScriptRecorder.toggle();
+                UIManager.updateScriptRecorderBtnState(isRec);
+                return;
+            }
+
             if ((e.key === "Control" || e.key === "Meta") && GameEngine.state.logisticsDeleteToolActive && !this.isTextInputEvent(e)) {
                 this.syncLogisticsDeleteBrushCtrlMode(true);
             }
@@ -455,6 +465,29 @@ export class UIManager {
         return tagName === "input" || tagName === "textarea" || tagName === "select" || e.target?.isContentEditable;
     }
 
+    static updateScriptRecorderBtnState(isRecording) {
+        const btn = document.getElementById("record_script_btn");
+        if (!btn) return;
+        if (isRecording) {
+            btn.innerHTML = "⏹ 停止錄製 (Alt+R)";
+            btn.style.background = "#d32f2f";
+            btn.style.borderColor = "#f44336";
+            // Flash effect for recording
+            if (!document.getElementById("rec_style")) {
+                const style = document.createElement('style');
+                style.id = "rec_style";
+                style.innerHTML = `@keyframes recPulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }`;
+                document.head.appendChild(style);
+            }
+            btn.style.animation = "recPulse 1.5s infinite";
+        } else {
+            btn.innerHTML = "🔴 錄製腳本 (Alt+R)";
+            btn.style.background = "#222";
+            btn.style.borderColor = "#555";
+            btn.style.animation = "none";
+        }
+    }
+
     static renderAll() {
         this.uiLayer.innerHTML = "";
 
@@ -477,6 +510,25 @@ export class UIManager {
 
         // 2. 底部建築選單 (取代舊的建築面板)
         this.renderBottomBuildingMenu();
+
+        // 2.5 腳本錄製按鈕 (左下角)
+        const recordBtn = document.createElement("button");
+        recordBtn.id = "record_script_btn";
+        recordBtn.innerHTML = "🔴 錄製腳本 (Alt+R)";
+        recordBtn.title = "錄製測試腳本";
+        recordBtn.style.cssText = `
+            position: absolute; left: 10px; bottom: 10px; 
+            padding: 8px 12px; font-size: 14px; border-radius: 5px; 
+            border: 2px solid #555; background: #222; color: #fff;
+            cursor: pointer; pointer-events: auto; z-index: 1000;
+            transition: all 0.2s; box-shadow: 0 0 5px rgba(0,0,0,0.5);
+        `;
+        recordBtn.onclick = (e) => {
+            e.stopPropagation();
+            const isRec = ScriptRecorder.toggle();
+            this.updateScriptRecorderBtnState(isRec);
+        };
+        this.uiLayer.appendChild(recordBtn);
 
 
 

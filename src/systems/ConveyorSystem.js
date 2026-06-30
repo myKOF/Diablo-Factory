@@ -242,6 +242,32 @@ export class ConveyorSystem {
         return this.dragSubmission.submitDrag(...arguments);
     }
 
+    simulateDragAndSubmit(startX, startY, endX, endY, sourceEntityId, sourcePortData, sourceLineId, finalGroupId, bendMode, ghostsData) {
+        let sourceEnt = null;
+        if (sourceEntityId && window.GameEngine) {
+            sourceEnt = window.GameEngine.state.mapEntities.find(e => e.id === sourceEntityId);
+        }
+        let sourceLine = null;
+        if (sourceLineId) {
+            sourceLine = this.getLogisticsLineById(sourceLineId) || (this.getLogisticsSegmentsByGroupId(sourceLineId) || [])[0];
+        }
+        this.dragSession.startDrag(startX, startY, sourceEnt, sourcePortData, sourceLine);
+        
+        if (bendMode && this.activeDrag) {
+            this.activeDrag.bendMode = bendMode;
+            this.activeDrag.directionLocked = true;
+        }
+
+        this.dragSession.updateDragNow(endX, endY);
+        
+        if (ghostsData && ghostsData.length > 0) {
+            this.ghosts = ghostsData;
+        }
+
+        const result = this.dragSubmission.submitDrag(null, finalGroupId);
+        return result;
+    }
+
     applyExtensionTurnArrowOverride(drag, points) {
         return this.extensionCoordinator.applyExtensionTurnArrowOverride(...arguments);
     }
@@ -894,3 +920,4 @@ export class ConveyorSystem {
 }
 
 export const conveyorSystem = new ConveyorSystem();
+if (typeof window !== 'undefined') window.conveyorSystem = conveyorSystem;

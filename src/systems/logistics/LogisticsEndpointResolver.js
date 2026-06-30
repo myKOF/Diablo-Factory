@@ -393,7 +393,14 @@ function recalculateLogisticsGroupEndpoints(groupId) {
     }
 
     if (!targetEnt) {
-        if (preservedTargetId && preservedTargetPort && this.doesLogisticsGroupContainConnectionPoint(groupId, preservedTargetPort, TS * 0.75, state)) {
+        // [延伸防呆] 舊目標端口僅在它仍是群組「物理末端」(靠近 endPt)時才保留。
+        // 線被延伸越過舊目標後,該端口落到線的中段(仍被 doesLogisticsGroupContainConnectionPoint
+        // 視為包含),若無此限制會把終點釘回舊目標、派貨路徑止於中段,讓物品走舊路堵在舊端口、
+        // 新延伸段成為死段。延伸後末端已遠離舊端口,改由新物理末端接手。
+        const preservedTargetNearEnd = preservedTargetPort &&
+            Math.hypot(preservedTargetPort.x - endPt.x, preservedTargetPort.y - endPt.y) <= TS * 1.5;
+        if (preservedTargetId && preservedTargetPort && preservedTargetNearEnd &&
+            this.doesLogisticsGroupContainConnectionPoint(groupId, preservedTargetPort, TS * 0.75, state)) {
             targetEnt = findEntityById(preservedTargetId);
             targetPort = preservedTargetPort;
         }

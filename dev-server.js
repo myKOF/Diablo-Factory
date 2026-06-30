@@ -2,7 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 8080;
+const PORT = process.env.PORT || parseInt(process.argv[2]) || 8080;
 const ROOT_DIR = __dirname;
 const WATCH_DIRS = ['src', 'config', 'assets'];
 const WATCH_FILES = ['index.html', 'style.css'];
@@ -141,6 +141,49 @@ const server = http.createServer((req, res) => {
         res.write(`retry: 3000\ndata: init:${serverStartTime}\n\n`);
         clients.add(res);
         req.on('close', () => clients.delete(res));
+    }
+
+    if (req.method === 'POST' && req.url === '/api/save-script') {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        req.on('end', () => {
+            try {
+                const data = JSON.parse(body);
+                const filename = data.filename || 'record_test.spec.js';
+                const content = data.content || '';
+                
+                // Security check - 禁止路徑穿越，但允許 test_scripts/ 子目錄
+                if (filename.includes('..') || filename.includes('\\\\')) {
+                    res.writeHead(400);
+                    res.end(JSON.stringify({ success: false, error: 'Invalid filename' }));
+                    return;
+                }
+                
+                const saveDir = path.join(ROOT_DIR, 'src', 'debug');
+                const savePath = path.join(saveDir, filename);
+                // 確保最終路徑仍在 src/debug 範圍內（二次防護）
+                if (!savePath.startsWith(saveDir)) {
+                    res.writeHead(400);
+                    res.end(JSON.stringify({ success: false, error: 'Path traversal detected' }));
+                    return;
+                }
+                
+                const saveSubDir = path.dirname(savePath);
+                if (!fs.existsSync(saveSubDir)) {
+                    fs.mkdirSync(saveSubDir, { recursive: true });
+                }
+                
+                fs.writeFileSync(savePath, content, 'utf8');
+                
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, path: savePath }));
+            } catch (err) {
+                res.writeHead(500);
+                res.end(JSON.stringify({ success: false, error: err.message }));
+            }
+        });
         return;
     }
 
@@ -155,6 +198,7 @@ const server = http.createServer((req, res) => {
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 
     fs.readFile(filePath, (error, content) => {
+        if (res.headersSent) return;
         if (error) {
             if (error.code === 'ENOENT') {
                 res.writeHead(404);
@@ -167,13 +211,15 @@ const server = http.createServer((req, res) => {
         }
 
         const body = ext === '.html' ? injectLiveReload(content) : content;
-        res.writeHead(200, {
-            'Content-Type': contentType,
-            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-            Pragma: 'no-cache',
-            Expires: '0'
-        });
-        res.end(body);
+        if (!res.headersSent) {
+            res.writeHead(200, {
+                'Content-Type': contentType,
+                'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+                Pragma: 'no-cache',
+                Expires: '0'
+            });
+            res.end(body, 'utf-8');
+        }
     });
 });
 

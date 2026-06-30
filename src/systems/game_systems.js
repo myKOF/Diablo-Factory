@@ -183,6 +183,44 @@ export class GameEngine {
     static _executeSingleProduction(clickedConfigId, building) { BuildingSystem._executeSingleProduction(this.state, this, clickedConfigId, building); }
     static resolveAppropriateUnitId(clickedId, building) { return BuildingSystem.resolveAppropriateUnitId(this.state, this, clickedId, building); }
 
+    static issueCommand(unitIds, command, targetId, x, y) {
+        // 標準化的工人指令介面，方便邏輯錄製與腳本化執行
+        if (!unitIds || !Array.isArray(unitIds)) return;
+        const allUnits = [...(this.state.units.villagers || []), ...(this.state.units.npcs || [])];
+        const selectedUnits = allUnits.filter(u => unitIds.includes(u.id));
+        if (selectedUnits.length === 0) return;
+
+        let target = null;
+        if (targetId) {
+            target = this.state.mapEntities.find(e => e.id === targetId || `${e.type1}_${e.x}_${e.y}` === targetId);
+            if (!target && targetId.includes('_')) {
+                const parts = targetId.split('_');
+                const gx = parseInt(parts[1], 10);
+                const gy = parseInt(parts[2], 10);
+                target = { isGridResource: true, id: targetId, type1: parts[0], gx, gy };
+            }
+        }
+
+        selectedUnits.forEach(v => {
+            if (command === 'GATHER' && target) {
+                v.state = 'MOVING_TO_RESOURCE';
+                v.targetResource = target;
+                if (!target.isGridResource) {
+                    this.addLog(`[命令] 工人 ${v.id} 前往採集: ${target.type1}`, 'SYSTEM');
+                } else {
+                    this.addLog(`[命令] 工人 ${v.id} 前往網格採集: ${target.type1} (${target.gx}, ${target.gy})`, 'SYSTEM');
+                }
+            } else if (command === 'MOVE') {
+                this.workerSystem?.moveVillager(v, x, y);
+                this.addLog(`[命令] 工人 ${v.id} 移動至 (${x}, ${y})`, 'SYSTEM');
+            } else if (command === 'ATTACK' && target) {
+                v.state = 'MOVING_TO_ATTACK';
+                v.targetEnemy = target;
+                this.addLog(`[命令] 工人 ${v.id} 攻擊目標: ${target.type1}`, 'SYSTEM');
+            }
+        });
+    }
+
 
     static updateSpatialGrid() {
         MapGenerator.updateSpatialGrid(this.state, this);
@@ -317,8 +355,9 @@ export class GameEngine {
         if (options && options.x !== undefined) spawnX = options.x;
         if (options && options.y !== undefined) spawnY = options.y;
 
+        GameEngine.state.unitCounter = (GameEngine.state.unitCounter || 0) + 1;
         const v = {
-            id: 'unit_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            id: 'unit_' + GameEngine.state.unitCounter,
             x: spawnX, y: spawnY,
             spawnX: spawnX, spawnY: spawnY, // 記錄初始位置用於巡邏
             state: 'IDLE', targetId: null, cargo: 0,
