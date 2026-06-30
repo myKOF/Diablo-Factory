@@ -49,8 +49,7 @@ test('Web Worker 模式下沒有權威結果時主執行緒不得自行推進物
             system._workerBridge = {
                 pullResult: () => [],
                 pushStep: () => { pushed = true; },
-                dispose: () => {},
-                getPositionLagSeconds: () => 0
+                dispose: () => { }
             };
 
             system.processAutomatedLogistics(state, 0.5);

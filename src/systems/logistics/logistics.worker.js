@@ -11,6 +11,7 @@
 import { LogisticsSimContext } from './LogisticsSimContext.js';
 import { runLogisticsKinematics } from './LogisticsKinematics.js';
 import { logisticsTransportArrayState } from './LogisticsTransportArrayState.js';
+import { routePointsSignature } from './LogisticsRouteCache.js';
 
 let TILE_SIZE = 20;
 const state = {
@@ -29,10 +30,28 @@ const byId = new Map(); // id -> transfer(含 routePoints)
 const routeRefById = new Map(); // id -> 上次回報的 routePoints 參照
 let appliedSimTime = 0; // worker 累計已推進的模擬時間(秒);回報給主執行緒估算位置落後量
 
+// [效能] 路線內聯(interning):主執行緒每個 transfer 各自序列化路線,worker 反序列化後成為「座標相同但
+// 參照不同」的獨立陣列。所有以 routePoints 參照為鍵的快取(getManhattanSegments / routePointsSignature /
+// getCachedPathMetrics / 路線度量)與 kinematics 的 useCanonical 引用相等捷徑因此全部 miss → 同一條線上
+// 數百物品的路線幾何被逐物品重算,單步計算成本隨「路線點數 × 物品數」線性飆升(實測 800點×800物品 ~119ms)。
+// 解法:同簽章(座標相同)的路線共用同一陣列實例 → 所有參照快取命中、useCanonical 走 O(1) 捷徑。
+// 路線唯讀(kinematics 只讀;合流換線是重新賦值新陣列,非就地改),共用安全。
+const routeInternBySig = new Map(); // signature -> 共用 routePoints 陣列
+function internRoute(points) {
+    if (!Array.isArray(points) || points.length < 2) return points;
+    const sig = routePointsSignature(points);
+    const existing = routeInternBySig.get(sig);
+    if (existing) return existing;
+    routeInternBySig.set(sig, points);
+    return points;
+}
+
 function applyAdds(adds) {
     if (!Array.isArray(adds)) return;
     for (const t of adds) {
         if (!t || !t.id) continue;
+        // 同路線的物品共用一份 routePoints 陣列,讓參照快取命中(見上)。
+        if (t.routePoints) t.routePoints = internRoute(t.routePoints);
         byId.set(t.id, t);
         // 新增物品的路線與主執行緒一致,先記下參照;僅 worker 內部之後的變動才需重映射回報。
         routeRefById.set(t.id, t.routePoints);
@@ -51,6 +70,7 @@ self.onmessage = (e) => {
         fakeEngine.TILE_SIZE = TILE_SIZE;
         state.logisticsLines = Array.isArray(msg.lines) ? msg.lines : [];
         state.logisticsMergeNodes = Array.isArray(msg.nodes) ? msg.nodes : [];
+        routeInternBySig.clear(); // 拓樸變更:舊路線簽章可能失效,清空內聯表避免無限增長
         return;
     }
     if (msg.type === 'step') {
@@ -62,11 +82,21 @@ self.onmessage = (e) => {
         appliedSimTime += Number(msg.deltaTime) || 0;
 
         const _computeT0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-        const { arrivals } = runLogisticsKinematics(
-            { simSystem: simCtx, engine: fakeEngine, transportArrayState: logisticsTransportArrayState },
-            state,
-            msg.deltaTime
-        );
+        // [效能] 開「計算快取窗口」——與主執行緒 processAutomatedLogistics 一致。合流節點/線段拓樸查詢
+        // (getSegmentsByGroupId / getLogisticsMergeNodeOutputRoute / 拓樸有效性)在窗口內 per-node 記憶化,
+        // 否則 worker 直接呼叫 runLogisticsKinematics 不開窗口 → 合流計算退回逐 transfer×逐子步的 O(n²)
+        // (實測使用者 800+ 物品含合流時 worker計算ms 達 ~190ms)。窗口內只讀記憶化、同步單執行緒,安全。
+        let arrivals;
+        if (typeof simCtx.beginLogisticsComputeCache === 'function') simCtx.beginLogisticsComputeCache();
+        try {
+            ({ arrivals } = runLogisticsKinematics(
+                { simSystem: simCtx, engine: fakeEngine, transportArrayState: logisticsTransportArrayState },
+                state,
+                msg.deltaTime
+            ));
+        } finally {
+            if (typeof simCtx.endLogisticsComputeCache === 'function') simCtx.endLogisticsComputeCache();
+        }
         const _computeMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - _computeT0;
 
         // kinematics 已將抵達者移出 state.activeTransfers;同步從 byId 移除

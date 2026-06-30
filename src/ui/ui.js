@@ -63,6 +63,7 @@ export class UIManager {
 
             e.stopPropagation();
             isDragging = true;
+            el.isBeingDragged = true;
 
             // 1. 獲取初始虛擬鼠標位置
             const localStart = this.getLocalMouse(e);
@@ -118,6 +119,7 @@ export class UIManager {
             const onMouseUp = () => {
                 if (!isDragging) return;
                 isDragging = false;
+                el.isBeingDragged = false;
                 el.style.cursor = "default";
                 el.style.transition = "";
 
@@ -3129,6 +3131,7 @@ export class UIManager {
     static updateStickyPositions() {
         if (this.activeMenuEntity) {
             const menu = document.getElementById("context_menu");
+            if (menu && menu.isBeingDragged) return; // 拖曳中不干涉位置更新
             const scene = window.PhaserScene;
             const activeCfg = GameEngine.getBuildingConfig(this.activeMenuEntity.type1, this.activeMenuEntity.lv || 1);
             const isProcessingPlantMenu = !!(activeCfg && activeCfg.type2 === "processing_plant");
@@ -3152,27 +3155,32 @@ export class UIManager {
             const virtualHeight = 1080;
 
             // --- 判斷是智慧定位還是固定錨點 ---
-            if (cfg.anchor) {
+            const lookupId = menu.dataset.dragId || menu.id;
+            if (this.uiPositions && this.uiPositions[lookupId]) {
+                const saved = this.uiPositions[lookupId];
+                menu.style.left = saved.left;
+                menu.style.top = saved.top;
+            } else if (cfg.anchor) {
                 // 固定位置不在此更新，由 applyAnchorStyle 處理
             } else {
                 // 智慧偏置計算 (相對於物體中心的位移)
-                // 選單預設開啟於建築物右側，垂直居中
+                // 選單預設開啟於建築物下方，水平居中
                 const fp = GameEngine.getFootprint(this.activeMenuEntity.type1);
-                const bWidth = fp ? fp.uw * GameEngine.TILE_SIZE : 40;
-                let finalX = sx + bWidth / 2 + (cfg.offsetX || 20);
-                let finalY = sy - visualMenuHeight / 2 + (cfg.offsetY || 0);
+                const bHeight = fp ? fp.uh * GameEngine.TILE_SIZE : 40;
+                let finalX = sx - visualMenuWidth / 2 + (cfg.offsetX || 0);
+                let finalY = sy + bHeight / 2 + (cfg.offsetY || 20);
 
                 // --- 邊界檢查與反向邏輯 (針對 1920x1080) ---
 
-                // 1. 水平檢查：如果右側超出虛擬邊界，改往左顯示
-                if (finalX + visualMenuWidth > virtualWidth - 20) {
-                    finalX = sx - visualMenuWidth - (cfg.offsetX || 15);
+                // 1. 垂直檢查：如果下方超出虛擬邊界，改往上顯示
+                if (finalY + visualMenuHeight > virtualHeight - 20) {
+                    finalY = sy - bHeight / 2 - visualMenuHeight - (cfg.offsetY || 20);
                 }
 
-                // 2. 垂直檢查：一般選單底部超出才翻到上方
-                // 加工廠選單固定同一側，避免清除/重選產品時因高度變化跳位
-                if (!isProcessingPlantMenu && finalY + visualMenuHeight > virtualHeight - 20) {
-                    finalY = sy - menuHeight - (cfg.offsetY || 100);
+                // 2. 水平檢查：一般選單右側超出才推向左
+                // 加工廠選單固定同一側，避免清除/重選產品時因寬度變化跳位
+                if (!isProcessingPlantMenu && finalX + visualMenuWidth > virtualWidth - 20) {
+                    finalX = virtualWidth - visualMenuWidth - 20;
                 }
 
                 // 3. 全域安全區域確保 (防止跑出 1920x1080 範圍)
