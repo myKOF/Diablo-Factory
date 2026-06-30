@@ -2791,13 +2791,36 @@ export class LogisticsRenderer {
                 if (radius >= 1) {
                     corners.push({
                         currIndex: i, curr,
+                        prevLen, nextLen,
                         entry: { x: curr.x - inDir.x * radius, y: curr.y - inDir.y * radius },
                         exit: { x: curr.x + outDir.x * radius, y: curr.y + outDir.y * radius },
-                        distAtCorner: distanceAtPoint, radius
+                        distAtCorner: distanceAtPoint, radius,
+                        inDir, outDir
                     });
                 }
             }
         }
+        for (let i = 0; i < corners.length - 1; i++) {
+            const left = corners[i];
+            const right = corners[i + 1];
+            if (!left || !right || right.currIndex !== left.currIndex + 1) continue;
+            const sharedLen = left.nextLen;
+            const radiusSum = left.radius + right.radius;
+            if (!Number.isFinite(sharedLen) || sharedLen <= 0 || radiusSum <= sharedLen) continue;
+            const scale = sharedLen / radiusSum;
+            left.radius *= scale;
+            right.radius *= scale;
+        }
+        corners.forEach(corner => {
+            corner.entry = {
+                x: corner.curr.x - corner.inDir.x * corner.radius,
+                y: corner.curr.y - corner.inDir.y * corner.radius
+            };
+            corner.exit = {
+                x: corner.curr.x + corner.outDir.x * corner.radius,
+                y: corner.curr.y + corner.outDir.y * corner.radius
+            };
+        });
         const geom = { segments, corners, totalPixels };
         LogisticsRenderer._transferPathGeomCache.set(points, geom);
         return geom;

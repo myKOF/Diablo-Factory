@@ -55,3 +55,40 @@ test('渲染插值:平滑追趕 + 路線換線吸附 + 靜止不漂移', async (
     expect(r.maxStat, '靜止物品不應漂移超過權威進度').toBeLessThanOrEqual(0.3 + 1e-6);
     expect(r.off, '關閉插值應直接回傳權威進度').toBeCloseTo(0.77, 5);
 });
+
+test('連續轉彎物品渲染取樣不可跳幀瞬移', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!(window.GameEngine), { timeout: 15000 });
+
+    const result = await page.evaluate(async () => {
+        const { LogisticsRenderer } = await import('/src/renderers/logistics_renderer.js?v=' + Date.now());
+        const { GameEngine } = await import('/src/systems/game_systems.js?v=' + Date.now());
+        const tile = GameEngine.TILE_SIZE || 20;
+        const route = [
+            { x: 0, y: 0 },
+            { x: 0, y: tile },
+            { x: tile, y: tile },
+            { x: tile, y: tile * 2 }
+        ];
+        const geom = LogisticsRenderer._getTransferPathGeometry(route);
+        const samples = [];
+        for (let distance = 0; distance <= geom.totalPixels; distance += 1) {
+            const point = LogisticsRenderer.getPointOnTransferPath(route, distance / geom.totalPixels);
+            samples.push({ distance, x: point.x, y: point.y });
+        }
+        let maxStep = 0;
+        let worst = null;
+        for (let i = 1; i < samples.length; i++) {
+            const prev = samples[i - 1];
+            const curr = samples[i];
+            const step = Math.hypot(curr.x - prev.x, curr.y - prev.y);
+            if (step > maxStep) {
+                maxStep = step;
+                worst = { prev, curr, step };
+            }
+        }
+        return { maxStep, worst, totalPixels: geom.totalPixels };
+    });
+
+    expect(result.maxStep, JSON.stringify(result.worst)).toBeLessThanOrEqual(2);
+});

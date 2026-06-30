@@ -12,6 +12,7 @@ import { LogisticsSimContext } from './LogisticsSimContext.js';
 import { runLogisticsKinematics } from './LogisticsKinematics.js';
 import { logisticsTransportArrayState } from './LogisticsTransportArrayState.js';
 import { routePointsSignature } from './LogisticsRouteCache.js';
+import { getPathDistanceToPoint, getPathTotalLength, getPointOnPathProgress } from './LogisticsPathMetrics.js';
 
 let TILE_SIZE = 20;
 const state = {
@@ -29,6 +30,7 @@ const byId = new Map(); // id -> transfer(含 routePoints)
 // 否則主執行緒仍以舊輸入線路徑渲染 → 物品在合流點後看似消失/卡住。
 const routeRefById = new Map(); // id -> 上次回報的 routePoints 參照
 let appliedSimTime = 0; // worker 累計已推進的模擬時間(秒);回報給主執行緒估算位置落後量
+let topoEpoch = 0; // [拓樸紀元] 最近套用的拓樸版本;隨結果回報,讓主執行緒辨識「過期拓樸算出的 remap」並略過
 
 // [效能] 路線內聯(interning):主執行緒每個 transfer 各自序列化路線,worker 反序列化後成為「座標相同但
 // 參照不同」的獨立陣列。所有以 routePoints 參照為鍵的快取(getManhattanSegments / routePointsSignature /
@@ -62,6 +64,42 @@ function applyRemoves(removes) {
     for (const id of removes) { byId.delete(id); routeRefById.delete(id); }
 }
 
+// [拓樸變更自癒] worker 持有在途物品的權威路線。線段被中段延伸切分/重塑後,「已合流到輸出線」的在途物品
+// 其 routePoints 仍指向已切離的舊下游(失效),而 worker 不會自行重算 → 物品續走舊路、到不了新尾段堵死。
+// 收到新拓樸時,對每個位於「合流輸出群組」的在途物品,以新的合流輸出路線重建路線並把目前位置投影過去;
+// routePoints 參照改變後,下個 result 會經 remap 通道把新路線/targetPoint 回報主執行緒。
+function rerouteMergedTransfersOnTopologyChange() {
+    const nodes = Array.isArray(state.logisticsMergeNodes) ? state.logisticsMergeNodes : [];
+    if (!nodes.length || byId.size === 0) return;
+    const outRouteByGroup = new Map();
+    const getOutRoute = (groupId) => {
+        if (outRouteByGroup.has(groupId)) return outRouteByGroup.get(groupId);
+        const node = nodes.find(n => n && n.outputGroupId === groupId && Array.isArray(n.inputGroupIds) && n.inputGroupIds.length > 0);
+        let route = null;
+        if (node && typeof simCtx.getLogisticsMergeNodeOutputRoute === 'function') {
+            const r = simCtx.getLogisticsMergeNodeOutputRoute(node);
+            if (Array.isArray(r) && r.length >= 2) route = r;
+        }
+        outRouteByGroup.set(groupId, route);
+        return route;
+    };
+    for (const t of byId.values()) {
+        if (!t || !Array.isArray(t.routePoints) || t.routePoints.length < 2) continue;
+        const newRoute = getOutRoute(t.lineId);
+        if (!newRoute) continue;
+        const oldEnd = t.routePoints[t.routePoints.length - 1];
+        const newEnd = newRoute[newRoute.length - 1];
+        if (oldEnd && Math.hypot((oldEnd.x || 0) - newEnd.x, (oldEnd.y || 0) - newEnd.y) < 2) continue; // 末端已一致
+        const pos = getPointOnPathProgress(t.routePoints, t.progress);
+        const newRP = newRoute.map(p => ({ x: p.x, y: p.y }));
+        const total = getPathTotalLength(newRP);
+        const along = pos ? getPathDistanceToPoint(newRP, pos) : 0;
+        t.routePoints = internRoute(newRP);
+        t.targetPoint = { x: newEnd.x, y: newEnd.y };
+        t.progress = total > 0 ? Math.max(0, Math.min(1, along / total)) : 0;
+    }
+}
+
 self.onmessage = (e) => {
     const msg = e.data;
     if (!msg) return;
@@ -70,7 +108,9 @@ self.onmessage = (e) => {
         fakeEngine.TILE_SIZE = TILE_SIZE;
         state.logisticsLines = Array.isArray(msg.lines) ? msg.lines : [];
         state.logisticsMergeNodes = Array.isArray(msg.nodes) ? msg.nodes : [];
+        if (Number.isFinite(msg.topoEpoch)) topoEpoch = msg.topoEpoch;
         routeInternBySig.clear(); // 拓樸變更:舊路線簽章可能失效,清空內聯表避免無限增長
+        rerouteMergedTransfersOnTopologyChange();
         return;
     }
     if (msg.type === 'step') {
@@ -130,6 +170,6 @@ self.onmessage = (e) => {
             return entry;
         });
 
-        self.postMessage({ type: 'result', seq: msg.seq, kin, arrivals: arrived, appliedSimTime, computeMs: _computeMs });
+        self.postMessage({ type: 'result', seq: msg.seq, kin, arrivals: arrived, appliedSimTime, computeMs: _computeMs, topoEpoch });
     }
 };

@@ -14,6 +14,10 @@ export class LogisticsWorkerBridge {
         this.seq = 0;
         this.sentIds = new Set();     // 已送交 worker 的 transfer id
         this.topoSig = null;
+        // [拓樸紀元] 每次拓樸變更遞增。worker 結果延遲一拍,變更當下仍在算的舊步會以舊拓樸把正在合流的
+        // 物品 remap 到舊輸出路線(指向已切離的舊下游)。其結果回報的紀元 < 當前紀元 → 視為過期,
+        // 套用時略過 remap(換線/換路),避免把過期舊路蓋回剛重算好的主執行緒路線。
+        this.topoEpoch = 0;
         this.ready = true;
         // [流量控制] worker 在高物品數時單步運算可能 > tick 間隔(實測 1000 物品 ~61ms > 50ms)。
         // 若每 tick 無條件送 step,worker queue 會無上限堆積、越落越後,新發物品在 worker ack 前
@@ -85,9 +89,11 @@ export class LogisticsWorkerBridge {
         const sig = this._topologySignature(state);
         if (sig === this.topoSig) return;
         this.topoSig = sig;
+        this.topoEpoch++;
         this.worker.postMessage({
             type: 'topology',
             tileSize,
+            topoEpoch: this.topoEpoch,
             lines: (state.logisticsLines || []).map(l => structuredCloneSafe(l)),
             nodes: (state.logisticsMergeNodes || []).map(n => structuredCloneSafe(n))
         });
@@ -106,9 +112,13 @@ export class LogisticsWorkerBridge {
         if (!msg && this._arrivalQueue.length === 0) return [];
         const byId = new Map();
         for (const t of state.activeTransfers) if (t && t.id) byId.set(t.id, t);
-        for (const k of (msg ? msg.kin : [])) {
+        // [拓樸紀元] 此結果若在拓樸變更前算出(紀元落後),其合流 remap 帶的是過期舊輸出路線 → 略過 remap,
+        // 保留主執行緒重算後的路線;運動學純量(progress 等)仍套用(位置 1 拍內近似有效)。
+        const remapStale = Number.isFinite(msg?.topoEpoch) && msg.topoEpoch !== this.topoEpoch;
+        for (let k of (msg ? msg.kin : [])) {
             const t = byId.get(k.id);
             if (!t) continue;
+            if (k.remap && remapStale) k = { ...k, remap: null };
             // [合流重映射] 先套用換線(若有):worker 內部合流交接已把物品移到輸出線,主執行緒必須同步
             // routePoints/lineId/targetPoint 等,否則渲染仍沿舊輸入線路徑 → 物品在合流點後消失/卡住,
             // 且 targetId 未更新會讓入庫判定失準。換陣列參照同時自動失效以參照為鍵的渲染/邏輯幾何快取。

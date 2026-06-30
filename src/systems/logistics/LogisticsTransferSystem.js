@@ -829,9 +829,22 @@ export class LogisticsTransferSystem {
             if (typeof this._workerBridge._topologySignature === 'function') {
                 const topoSig = this._workerBridge._topologySignature(state);
                 if (this._lastWorkerTopoSig !== undefined && this._lastWorkerTopoSig !== topoSig) {
-                    conveyorSystem.updateActiveTransfersOnLogisticsChange(state, null);
+                    // worker 結果延遲一拍:在它收到新拓樸前的空窗會以舊拓樸把正在合流的物品 remap 到舊輸出路線
+                    // (指向已切離的舊下游)。單拍重算來不及涵蓋這批殘留,故開一段視窗持續清理。
+                    this._workerRerouteCountdown = 20;
                 }
                 this._lastWorkerTopoSig = topoSig;
+                if (this._workerRerouteCountdown > 0) {
+                    this._workerRerouteCountdown--;
+                    conveyorSystem.updateActiveTransfersOnLogisticsChange(state, null);
+                    // rerouter 只改主執行緒 routePoints;sentIds 僅在拓樸變更時清除,否則修正後路線不會重送 worker。
+                    // 視窗內把「仍在線」物品從 sentIds 移除以強制重送修正後路線;保留「已回收移除」者的 id,
+                    // 讓 _flush 的 removes 仍能正確通知 worker 刪除。
+                    const sent = this._workerBridge.sentIds;
+                    if (sent && typeof sent.delete === 'function') {
+                        for (const t of state.activeTransfers) if (t && t.id) sent.delete(t.id);
+                    }
+                }
             }
         } else {
             arrivals = runLogisticsKinematics(
