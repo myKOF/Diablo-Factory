@@ -821,6 +821,18 @@ export class LogisticsTransferSystem {
         let arrivals;
         if (this._workerBridge) {
             arrivals = this._workerBridge.pullResult(state);
+            // [拓樸變更重新路由] worker 持有在途物品的「權威路線」;線段被延伸/重塑/刪除後,這些 routePoints
+            // 可能指向已不存在的舊末端而失效。主執行緒在 build/delete 時的重算未必涵蓋所有在途物品
+            // (例如合流輸出群組的已合流物品),而 worker 自身不會重算 → 物品沿失效舊路推進、走錯路堵死
+            // (關 worker 則正常)。解法:於本 tick 偵測拓樸簽章變動時,先在主執行緒重算全部在途路線
+            // (沿用已驗證的 rerouter),稍後 pushStep 的 _maybeSyncTopology 會以同一簽章把修正後的路線重送 worker。
+            if (typeof this._workerBridge._topologySignature === 'function') {
+                const topoSig = this._workerBridge._topologySignature(state);
+                if (this._lastWorkerTopoSig !== undefined && this._lastWorkerTopoSig !== topoSig) {
+                    conveyorSystem.updateActiveTransfersOnLogisticsChange(state, null);
+                }
+                this._lastWorkerTopoSig = topoSig;
+            }
         } else {
             arrivals = runLogisticsKinematics(
                 { simSystem: conveyorSystem, engine: this.engine, transportArrayState: this.transportArrayState },
@@ -964,9 +976,11 @@ export class LogisticsTransferSystem {
 
 
 
-                // 修正規則：不再因為工人不足而停擺。
-                // 1 名工人是 1 倍效率，N 名工人是 N 倍效率。
-                const efficiency = Math.max(1, currentWorkers);
+                // 修正規則：若建築需要工人，則必須有工人進駐才有物流效率。
+                // 若建築不需要工人 (need_villagers 未設定或為 0)，則預設效率為 1。
+                const efficiency = needWorkers > 0 ? currentWorkers : 1;
+                
+                if (efficiency <= 0) return; // 沒有效率即不發料
 
                 const itemDispatchInterval = 2; // 基準：1 名工人每 2 秒發送一個物品。
                 ent.logisticsTimer = (ent.logisticsTimer || 0) + deltaTime * efficiency;

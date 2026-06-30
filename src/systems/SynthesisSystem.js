@@ -138,10 +138,7 @@ export class SynthesisSystem {
 
             const isProcessingPlant = cfg.type2 === 'processing_plant';
             const stationedWorkers = ent.assignedWorkers ? ent.assignedWorkers.length : 0;
-            const configuredWorkers = ent.targetWorkerCount || 0;
-            const hasWorkers = isProcessingPlant
-                ? (stationedWorkers > 0 || configuredWorkers > 0)
-                : stationedWorkers > 0;
+            const hasWorkers = stationedWorkers > 0;
 
             if (!hasWorkers) {
                 ent.isCraftingActive = false;

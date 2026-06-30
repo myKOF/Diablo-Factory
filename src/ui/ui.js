@@ -2267,7 +2267,7 @@ export class UIManager {
                 this.updateValues();
                 return;
             }
-            if (submitResult?.continuationPoint && submitResult?.continuationLine) {
+            if (!submitResult?.isTargetPort && submitResult?.continuationPoint && submitResult?.continuationLine) {
                 const point = submitResult.continuationPoint;
                 if (LogisticsUI.beginLogisticsDragFromLine(submitResult.continuationLine, point.x, point.y)) {
                     const world = this.getWorldPoint(e.clientX, e.clientY);
@@ -2276,11 +2276,18 @@ export class UIManager {
                     return;
                 }
             }
+            
+            // 如果連到了端口，則結束拖拉後，恢復成一般的物流線建造狀態
+            if (submitResult?.isTargetPort) {
+                this.startStampMode('transport_line');
+            }
+
             this.logisticsSourceEntity = null;
             this.logisticsSourceLine = null;
             this.isLogisticsDragging = false;
             GameEngine.state.logisticsDragLine = null;
             this.updateValues();
+            this.renderBottomBuildingMenu();
             return;
         }
 
@@ -3453,7 +3460,11 @@ export class UIManager {
                 btn.style.justifyContent = "center";
                 btn.style.cursor = "pointer";
                 btn.style.background = "rgba(45,45,45,0.6)";
-                btn.style.border = `1px solid rgba(255,255,255,0.1)`;
+
+                const isSelected = GameEngine.state.placingType === c.model || (c.model === 'transport_line' && LogisticsUI.isTransportLinePlacementActive());
+                const normalBorder = isSelected ? `2px solid ${cfg.selectedBorderColor}` : `1px solid rgba(255,255,255,0.1)`;
+
+                btn.style.border = normalBorder;
                 btn.style.borderRadius = "4px";
                 btn.style.boxSizing = "border-box";
 
@@ -3471,7 +3482,7 @@ export class UIManager {
                 }
 
                 btn.onmouseenter = () => {
-                    btn.style.border = `1px solid ${cfg.selectedBorderColor}`;
+                    btn.style.border = `2px solid ${cfg.selectedBorderColor}`;
                     let tooltipText = `${c.name}\n<span style="font-size:12px;color:#aaa">${c.desc || ""}</span>`;
 
                     if (c.costs && Object.keys(c.costs).length > 0) {
@@ -3485,7 +3496,8 @@ export class UIManager {
                     showTooltip(btn, tooltipText);
                 };
                 btn.onmouseleave = () => {
-                    btn.style.border = `1px solid rgba(255,255,255,0.1)`;
+                    const stillSelected = GameEngine.state.placingType === c.model || (c.model === 'transport_line' && LogisticsUI.isTransportLinePlacementActive());
+                    btn.style.border = stillSelected ? `2px solid ${cfg.selectedBorderColor}` : `1px solid rgba(255,255,255,0.1)`;
                     hideTooltip();
                 };
 
@@ -3494,12 +3506,13 @@ export class UIManager {
                     e.stopPropagation();
                     hideTooltip();
 
-                    // 改用原本存在的 startStampMode 來進入建造模式
-                    if (GameEngine.state.placingType === c.model) {
+                    const currentlySelected = GameEngine.state.placingType === c.model || (c.model === 'transport_line' && LogisticsUI.isTransportLinePlacementActive());
+                    if (currentlySelected) {
                         this.cancelBuildingMode();
                     } else {
                         this.startStampMode(c.model);
                     }
+                    this.renderBottomBuildingMenu();
                 };
                 level2Container.appendChild(btn);
             });

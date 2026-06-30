@@ -344,7 +344,8 @@ function submitDrag() {
             built: builtSegments > 0,
             finalGroupId,
             continuationPoint,
-            continuationLine
+            continuationLine,
+            isTargetPort: !!targetPort
         };
         this.cancelDrag();
         return result;
