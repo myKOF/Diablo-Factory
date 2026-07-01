@@ -2276,7 +2276,7 @@ export class UIManager {
                     return;
                 }
             }
-            
+
             // 如果連到了端口，則結束拖拉後，恢復成一般的物流線建造狀態
             if (submitResult?.isTargetPort) {
                 this.startStampMode('transport_line');

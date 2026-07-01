@@ -111,6 +111,16 @@ export class WorkerSystem {
         return (this.state.mapEntities || []).find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === id);
     }
 
+    moveVillager(v, x, y) {
+        v.state = 'MOVING';
+        v.idleTarget = { x, y };
+        v.commandCenter = null;
+        if (v.targetResource) v.targetResource = null;
+        if (v.targetEnemy) v.targetEnemy = null;
+        v.path = null;
+        v.currentPathIndex = 0;
+    }
+
     updateVillagerMovement(v, deltaTime) {
         // 核心邏輯：只有 npc_data 中類型為 'villagers' 的才具備採集與建設能力，非村民僅處理 IDLE 巡邏或集結點移動
         if (v.config.type !== 'villagers') {

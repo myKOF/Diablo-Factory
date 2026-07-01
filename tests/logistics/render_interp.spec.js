@@ -92,3 +92,103 @@ test('連續轉彎物品渲染取樣不可跳幀瞬移', async ({ page }) => {
 
     expect(result.maxStep, JSON.stringify(result.worst)).toBeLessThanOrEqual(2);
 });
+
+test('轉彎物品應沿固定半徑圓弧旋轉', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForFunction(() => !!(window.GameEngine), { timeout: 15000 });
+
+    const result = await page.evaluate(async () => {
+        const { LogisticsRenderer } = await import('/src/renderers/logistics_renderer.js?v=' + Date.now());
+        const { GameEngine } = await import('/src/systems/game_systems.js?v=' + Date.now());
+        const tile = GameEngine.TILE_SIZE || 20;
+        const route = [
+            { x: 0, y: 0 },
+            { x: 0, y: tile },
+            { x: tile, y: tile }
+        ];
+        const geom = LogisticsRenderer._getTransferPathGeometry(route);
+        const corner = geom.corners[0];
+        const point = LogisticsRenderer.getPointOnTransferPath(route, corner.distAtCorner / geom.totalPixels);
+        const center = {
+            x: corner.curr.x - corner.inDir.x * corner.radius + corner.outDir.x * corner.radius,
+            y: corner.curr.y - corner.inDir.y * corner.radius + corner.outDir.y * corner.radius
+        };
+        return {
+            radius: corner.radius,
+            distanceToCenter: Math.hypot(point.x - center.x, point.y - center.y),
+            point,
+            center
+        };
+    });
+
+    expect(result.distanceToCenter).toBeCloseTo(result.radius, 5);
+});
+
+test('物流物品 sprite 必須套用轉彎角度旋轉', async ({ page }) => {
+    await page.goto('/');
+
+    const result = await page.evaluate(async () => {
+        const { LogisticsRenderer } = await import('/src/renderers/logistics_renderer.js?v=' + Date.now());
+        const noop = () => {};
+        const ctx = {
+            clearRect: noop,
+            fillRect: noop,
+            strokeRect: noop,
+            strokeText: noop,
+            fillText: noop
+        };
+        let createdImage = null;
+        const texture = {
+            getContext: () => ctx,
+            add: noop,
+            refresh: noop,
+            has: () => false
+        };
+        const scene = {
+            logisticsTransferGraphics: { depth: 900000 },
+            logisticsTransferAtlases: new Map(),
+            textures: {
+                exists: () => false,
+                get: () => texture,
+                createCanvas: () => texture
+            },
+            add: {
+                image: (x, y, key, frame) => {
+                    createdImage = {
+                        x, y, key, frame,
+                        rotation: 0,
+                        visible: true,
+                        depth: 0,
+                        setOrigin(value) { this.origin = value; return this; },
+                        setDepth(value) { this.depth = value; return this; },
+                        setRotation(value) { this.rotation = value; return this; },
+                        setPosition(nx, ny) { this.x = nx; this.y = ny; return this; },
+                        setTexture(nextKey, nextFrame) { this.key = nextKey; this.frame = nextFrame; return this; },
+                        setVisible(value) { this.visible = value; return this; },
+                        setAlpha(value) { this.alpha = value; return this; },
+                        destroy: noop
+                    };
+                    return createdImage;
+                },
+                blitter: () => ({
+                    texture: { get: () => ({}) },
+                    setDepth() { return this; },
+                    create: () => ({})
+                })
+            }
+        };
+        const angle = Math.PI / 4;
+        LogisticsRenderer.renderTransferSprite(scene, { id: 'turning-item' }, 100, 120, 0x00ff00, 20, 2, angle);
+        return {
+            usedImage: !!createdImage,
+            rotation: createdImage?.rotation ?? null,
+            x: createdImage?.x ?? null,
+            y: createdImage?.y ?? null
+        };
+    });
+
+    expect(result.usedImage).toBe(true);
+    expect(result.rotation).toBeCloseTo(Math.PI / 4, 5);
+    expect(result.x).toBe(100);
+    expect(result.y).toBe(120);
+});

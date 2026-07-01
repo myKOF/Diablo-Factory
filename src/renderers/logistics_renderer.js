@@ -2436,17 +2436,16 @@ export class LogisticsRenderer {
 
     static beginTransferSprites(scene) {
         if (!scene) return;
-        if (!scene.logisticsTransferBlitters) scene.logisticsTransferBlitters = new Map();
         if (!scene.logisticsTransferBobs) scene.logisticsTransferBobs = new Map();
         scene.logisticsVisibleTransferSpriteIds = new Set();
     }
 
     static endTransferSprites(scene) {
         if (!scene || !scene.logisticsTransferBobs) return;
-        // [效能] 配合 Blitter，將已送達的 bob 銷毀並從池中刪除。
-        scene.logisticsTransferBobs.forEach((bobData, key) => {
+        scene.logisticsTransferBobs.forEach((spriteData, key) => {
             if (!scene.logisticsVisibleTransferSpriteIds || !scene.logisticsVisibleTransferSpriteIds.has(key)) {
-                if (bobData.bob && bobData.bob.destroy) bobData.bob.destroy();
+                const renderObject = spriteData.sprite || spriteData.bob;
+                if (renderObject && renderObject.destroy) renderObject.destroy();
                 scene.logisticsTransferBobs.delete(key);
             }
         });
@@ -2557,35 +2556,38 @@ export class LogisticsRenderer {
 
         const depth = scene.logisticsTransferGraphics?.depth || 900000;
 
-        let blitter = scene.logisticsTransferBlitters.get(textureKey);
-        if (!blitter) {
-            blitter = scene.add.blitter(0, 0, textureKey).setDepth(depth);
-            scene.logisticsTransferBlitters.set(textureKey, blitter);
-        } else if (blitter.depth !== depth) {
-            blitter.setDepth(depth);
-        }
-
-        let bobData = scene.logisticsTransferBobs.get(key);
-        if (!bobData) {
-            const bob = blitter.create(x, y, frame || undefined);
-            bobData = { bob, blitterKey: textureKey };
-            scene.logisticsTransferBobs.set(key, bobData);
+        let spriteData = scene.logisticsTransferBobs.get(key);
+        if (!spriteData) {
+            const sprite = scene.add.image(x, y, textureKey, frame || undefined)
+                .setOrigin(0.5)
+                .setDepth(depth);
+            spriteData = { sprite, textureKey, frame };
+            scene.logisticsTransferBobs.set(key, spriteData);
         } else {
-            // 若材質更換（極少發生），需重建 bob
-            if (bobData.blitterKey !== textureKey) {
-                if (bobData.bob && bobData.bob.destroy) bobData.bob.destroy();
-                const newBob = blitter.create(x, y, frame || undefined);
-                bobData = { bob: newBob, blitterKey: textureKey };
-                scene.logisticsTransferBobs.set(key, bobData);
-            } else {
-                if (frame) bobData.bob.frame = blitter.texture.get(frame);
+            if (spriteData.bob && !spriteData.sprite) {
+                if (spriteData.bob.destroy) spriteData.bob.destroy();
+                const sprite = scene.add.image(x, y, textureKey, frame || undefined)
+                    .setOrigin(0.5)
+                    .setDepth(depth);
+                spriteData = { sprite, textureKey, frame };
+                scene.logisticsTransferBobs.set(key, spriteData);
+            } else if (spriteData.textureKey !== textureKey || spriteData.frame !== frame) {
+                if (spriteData.sprite.setTexture) spriteData.sprite.setTexture(textureKey, frame || undefined);
+                spriteData.textureKey = textureKey;
+                spriteData.frame = frame;
             }
         }
 
-        // Phaser Bob 原點固定在左上角，因此這裡加上偏移量達到居中效果
-        bobData.bob.x = x - itemSize / 2;
-        bobData.bob.y = y - itemSize / 2;
-        bobData.bob.alpha = 1;
+        const sprite = spriteData.sprite;
+        if (sprite.setPosition) sprite.setPosition(x, y);
+        else { sprite.x = x; sprite.y = y; }
+        if (sprite.setRotation) sprite.setRotation(angle || 0);
+        else sprite.rotation = angle || 0;
+        if (sprite.setDepth && sprite.depth !== depth) sprite.setDepth(depth);
+        if (sprite.setAlpha) sprite.setAlpha(1);
+        else sprite.alpha = 1;
+        if (sprite.setVisible) sprite.setVisible(true);
+        else sprite.visible = true;
 
         scene.logisticsVisibleTransferSpriteIds.add(key);
     }
@@ -2883,18 +2885,24 @@ export class LogisticsRenderer {
             const start = activeCorner.distAtCorner - activeCorner.radius;
             const t = (targetDistance - start) / (2 * activeCorner.radius);
 
-            // 二次貝氏曲線插值
+            // 以固定半徑四分之一圓弧取樣，避免轉彎時像平移穿過角落。
             const entry = activeCorner.entry;
-            const control = activeCorner.curr;
             const exit = activeCorner.exit;
-
-            const px = (1 - t) * (1 - t) * entry.x + 2 * (1 - t) * t * control.x + t * t * exit.x;
-            const py = (1 - t) * (1 - t) * entry.y + 2 * (1 - t) * t * control.y + t * t * exit.y;
-
-            // 切線方向作為旋轉角度
-            const tx = 2 * (1 - t) * (control.x - entry.x) + 2 * t * (exit.x - control.x);
-            const ty = 2 * (1 - t) * (control.y - entry.y) + 2 * t * (exit.y - control.y);
-            const angle = Math.atan2(ty, tx);
+            const radius = activeCorner.radius;
+            const center = {
+                x: activeCorner.curr.x - activeCorner.inDir.x * radius + activeCorner.outDir.x * radius,
+                y: activeCorner.curr.y - activeCorner.inDir.y * radius + activeCorner.outDir.y * radius
+            };
+            const startAngle = Math.atan2(entry.y - center.y, entry.x - center.x);
+            const endAngle = Math.atan2(exit.y - center.y, exit.x - center.x);
+            const turnCross = activeCorner.inDir.x * activeCorner.outDir.y - activeCorner.inDir.y * activeCorner.outDir.x;
+            let angleDelta = endAngle - startAngle;
+            if (turnCross > 0 && angleDelta < 0) angleDelta += Math.PI * 2;
+            if (turnCross < 0 && angleDelta > 0) angleDelta -= Math.PI * 2;
+            const arcAngle = startAngle + angleDelta * t;
+            const px = center.x + Math.cos(arcAngle) * radius;
+            const py = center.y + Math.sin(arcAngle) * radius;
+            const angle = arcAngle + (turnCross >= 0 ? Math.PI / 2 : -Math.PI / 2);
 
             return { x: px, y: py, angle };
         }

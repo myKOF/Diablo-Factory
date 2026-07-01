@@ -250,6 +250,24 @@ export class ConveyorSystem {
         let sourceLine = null;
         if (sourceLineId) {
             sourceLine = this.getLogisticsLineById(sourceLineId) || (this.getLogisticsSegmentsByGroupId(sourceLineId) || [])[0];
+            // [動態 ID 防錯原則] 若透過硬編碼 ID 找不到，改用拖曳起點座標反查最近物流線 (容差 10 像素)
+            if (!sourceLine) {
+                const searchRadius = 10;
+                let minDist = Infinity;
+                const lines = this.ensureLogisticsLineStore();
+                for (const group of lines.values()) {
+                    for (const seg of group) {
+                        const dist = Math.hypot(seg.x - startX, seg.y - startY);
+                        if (dist <= searchRadius && dist < minDist) {
+                            minDist = dist;
+                            sourceLine = seg;
+                        }
+                    }
+                }
+                if (sourceLine && window.GameEngine) {
+                    window.GameEngine.addLog(`[防呆機制] 找不到物流線 ID ${sourceLineId}，已透過座標(${startX}, ${startY})配對。`, 'SYSTEM');
+                }
+            }
         }
         this.dragSession.startDrag(startX, startY, sourceEnt, sourcePortData, sourceLine);
         

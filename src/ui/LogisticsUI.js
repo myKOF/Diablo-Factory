@@ -476,9 +476,9 @@ export class LogisticsUI {
         LogisticsUI.isLogisticsDragging = true;
         LogisticsUI.activeLogisticsLine = line;
         LogisticsUI.activeLogisticsConnection = null;
-        GameEngine.state.buildingMode = 'NONE';
-        GameEngine.state.placingType = null;
-        GameEngine.state.activeTransportLineType = null;
+        GameEngine.state.buildingMode = 'STAMP';
+        GameEngine.state.placingType = 'transport_line';
+        GameEngine.state.activeTransportLineType = 'transport_line';
         GameEngine.state.lineStartPos = null;
         GameEngine.state.linePreviewEntities = [];
         GameEngine.state.previewPos = null;
@@ -501,6 +501,11 @@ export class LogisticsUI {
         LogisticsUI.logisticsSourceLine = null;
         LogisticsUI.isLogisticsDragging = true;
         window.UIManager.hideContextMenu();
+
+        GameEngine.state.buildingMode = 'STAMP';
+        GameEngine.state.placingType = 'transport_line';
+        GameEngine.state.activeTransportLineType = 'transport_line';
+
         conveyorSystem.startDrag(sourcePort.x, sourcePort.y, ent, sourcePort);
         GameEngine.state.logisticsDragLine = { active: true };
         return true;
@@ -518,6 +523,11 @@ export class LogisticsUI {
             conveyorSystem.startDrag(worldX, worldY, null, null, null);
         }
         GameEngine.state.logisticsDragLine = { active: true, buildMode: 'transport_line' };
+
+        GameEngine.state.buildingMode = 'STAMP';
+        GameEngine.state.placingType = 'transport_line';
+        GameEngine.state.activeTransportLineType = 'transport_line';
+
         return true;
     }
 

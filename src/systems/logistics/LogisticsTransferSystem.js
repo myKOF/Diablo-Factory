@@ -511,6 +511,35 @@ export class LogisticsTransferSystem {
         return bestId;
     }
 
+    // [多端口入庫補判] 見呼叫處說明。回傳「已抵達目標建築某 input 端口、但未被 kinematics 判定抵達」的物品,
+    // 並將其移出 activeTransfers(交由呼叫端統一入庫)。
+    collectTargetPortArrivals(state, alreadyArrived) {
+        if (!Array.isArray(state?.activeTransfers) || state.activeTransfers.length === 0) return [];
+        const TS = this.engine?.TILE_SIZE || 20;
+        const arrivedIds = new Set((alreadyArrived || []).map(a => a && a.id).filter(Boolean));
+        const getEntId = (e) => e ? (e.id || `${e.type1}_${e.x}_${e.y}`) : null;
+        const extra = [];
+        for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
+            const t = state.activeTransfers[i];
+            if (!t || !t.id || !t.targetId || arrivedIds.has(t.id)) continue;
+            if ((Number(t.progress) || 0) < 0.999) continue;
+            const rp = Array.isArray(t.routePoints) ? t.routePoints : null;
+            const endPt = rp && rp.length >= 2 ? rp[rp.length - 1] : null;
+            if (!endPt) continue;
+            const tp = t.targetPoint;
+            // route-end 已在 targetPoint 附近 → kinematics 會處理,不重複補判
+            if (tp && (Math.abs(endPt.x - tp.x) + Math.abs(endPt.y - tp.y)) <= TS * 1.5) continue;
+            const ent = (state.mapEntities || []).find(e => getEntId(e) === t.targetId);
+            if (!ent || ent.isUnderConstruction) continue;
+            const ports = window.UIManager?.getBuildingPortSlots?.(ent) || [];
+            const atPort = ports.some(p => p && Math.hypot((p.x || 0) - endPt.x, (p.y || 0) - endPt.y) <= TS * 1.1);
+            if (!atPort) continue;
+            extra.push({ id: t.id, targetId: t.targetId, itemType: t.itemType, transfer: t });
+            state.activeTransfers.splice(i, 1);
+        }
+        return extra;
+    }
+
     createActiveTransfer(state, source, conn, itemType) {
         if (!source || !conn || !itemType) return null;
         const sourceId = source.id || `${source.type1}_${source.x}_${source.y}`;
@@ -853,6 +882,13 @@ export class LogisticsTransferSystem {
                 deltaTime
             ).arrivals;
         }
+
+        // [多端口入庫補判] kinematics 的抵達判定只比對單一 targetPoint。大型建築有多個 input 端口時,
+        // 物品可能停在「另一個合法端口」(route-end 落在有效端口卻 ≠ targetPoint,例如改拉線後 targetPoint 殘留
+        // 指向舊端口)→ 永遠判定未抵達、堵在終點擋住後車。主執行緒(有建築資料)在此補判:progress≈1、
+        // 有 targetId、route-end 落在目標建築任一 input 端口 → 視為抵達入庫。斷點(非端口)不會誤判,故仍保有斷線防護。
+        const portArrivals = this.collectTargetPortArrivals(state, arrivals);
+        if (portArrivals.length) arrivals = arrivals.concat(portArrivals);
 
         // 入庫(主執行緒專屬:存入建築 / 扣資源 / 更新 UI)。kinematics 已將抵達者移出 activeTransfers。
         for (let a = 0; a < arrivals.length; a++) {

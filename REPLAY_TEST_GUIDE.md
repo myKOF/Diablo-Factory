@@ -23,7 +23,8 @@
 3. 若使用者只提供檔名，優先在 `tests/` 目錄底下尋找同名檔案。
 4. 測試檔建議位於 `tests/` 或其子資料夾內，並使用 `.spec.js` 或 `.test.js` 檔名。
 5. 預設使用可見瀏覽器執行，讓使用者能觀察重播流程。
-6. 執行完成後，必須執行 `npm.cmd run finalize`。
+6. **動態 ID 防錯原則**：如果遇到腳本中寫死單位 ID（例如 `unit_676`）導致指令失效，應主動將其改為動態抓取（例如 `window.GameEngine.state.units.villagers[0].id`），以防遊戲生成順序改變導致硬編碼 ID 失效。
+7. 執行完成後，必須執行 `npm run finalize`。
 
 ## 可見重播指令
 
