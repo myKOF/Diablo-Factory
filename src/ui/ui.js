@@ -1119,15 +1119,9 @@ export class UIManager {
 
 
     static refreshLogisticsDeleteToolButtonState(button = null) {
-        const btn = button || document.getElementById("logistics_delete_tool_btn");
-        if (!btn) return;
-        const active = !!GameEngine.state.logisticsDeleteToolActive;
-        btn.classList.toggle("active", active);
-        btn.style.border = active ? "3px solid var(--aoe-gold)" : "1.5px solid rgba(255,255,255,0.10)";
-        btn.style.boxShadow = active ? "0 0 20px rgba(251,192,45,0.62), inset 0 0 10px rgba(255,52,52,0.18)" : "none";
-        btn.style.background = active ? "rgba(139,110,75,0.30)" : "rgba(45,45,45,0.62)";
-        const size = GameEngine.state.logisticsDeleteBrushSize || 1;
-        btn.title = `物流線刪除刷子（目前 ${size}x${size}，鍵盤 +/- 調整，右鍵取消）`;
+        if (typeof this.renderBottomBuildingMenu === 'function') {
+            this.renderBottomBuildingMenu();
+        }
     }
 
     static createBuildingBtn(container, bp, item, options = {}) {
@@ -2264,14 +2258,10 @@ export class UIManager {
         }
 
         if (this.potentialLogisticsDrag) {
-            const pending = this.potentialLogisticsDrag;
             this.potentialLogisticsDrag = null;
             this.potentialTransportLineBuildDrag = null;
-            if (LogisticsUI.beginLogisticsDragFromBuilding(pending.entity, pending.sourcePort)) {
-                const world = this.getWorldPoint(e.clientX, e.clientY);
-                conveyorSystem.updateDrag(world.x, world.y);
-            }
-            return;
+            // DO NOT start drag here. Dragging from ports requires actual mouse movement (handled in handleWorldMouseMove).
+            // This allows a simple click to proceed to handleWorldClick and open the Port Menu.
         }
 
         if (this.isLogisticsDragging) {

@@ -174,6 +174,17 @@ export class InputSystem {
                     return;
                 }
 
+                if (GameEngine.state.logisticsDeleteToolActive) {
+                    if (window.UIManager?.cancelLogisticsDeleteTool) {
+                        window.UIManager.cancelLogisticsDeleteTool();
+                    } else {
+                        GameEngine.state.logisticsDeleteToolActive = false;
+                    }
+                    this.rightDownInfo = null;
+                    this.didMove = false;
+                    return;
+                }
+
                 if (GameEngine.state.placingType || GameEngine.state.rightClickStartedInPlacementMode) {
                     if (this.scene.cancelPlacement) {
                         this.scene.cancelPlacement();

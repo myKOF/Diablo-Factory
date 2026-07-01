@@ -470,15 +470,22 @@ export class LogisticsUI {
 
     static beginLogisticsDragFromLine(line, clickX = null, clickY = null) {
         if (!line) return false;
+        if (window.UIManager) {
+            window.UIManager.startStampMode('transport_line');
+            if (typeof window.UIManager.renderBottomBuildingMenu === 'function') {
+                window.UIManager.renderBottomBuildingMenu();
+            }
+        } else {
+            GameEngine.state.buildingMode = 'STAMP';
+            GameEngine.state.placingType = 'transport_line';
+            GameEngine.state.activeTransportLineType = 'transport_line';
+        }
         window.UIManager.clearWorldSelectionMarquee();
         LogisticsUI.logisticsSourceEntity = null;
         LogisticsUI.logisticsSourceLine = line;
         LogisticsUI.isLogisticsDragging = true;
         LogisticsUI.activeLogisticsLine = line;
         LogisticsUI.activeLogisticsConnection = null;
-        GameEngine.state.buildingMode = 'STAMP';
-        GameEngine.state.placingType = 'transport_line';
-        GameEngine.state.activeTransportLineType = 'transport_line';
         GameEngine.state.lineStartPos = null;
         GameEngine.state.linePreviewEntities = [];
         GameEngine.state.previewPos = null;
@@ -496,15 +503,21 @@ export class LogisticsUI {
 
     static beginLogisticsDragFromBuilding(ent, sourcePort) {
         if (!ent || !sourcePort) return false;
+        if (window.UIManager) {
+            window.UIManager.startStampMode('transport_line');
+            if (typeof window.UIManager.renderBottomBuildingMenu === 'function') {
+                window.UIManager.renderBottomBuildingMenu();
+            }
+        } else {
+            GameEngine.state.buildingMode = 'STAMP';
+            GameEngine.state.placingType = 'transport_line';
+            GameEngine.state.activeTransportLineType = 'transport_line';
+        }
         window.UIManager.clearWorldSelectionMarquee();
         LogisticsUI.logisticsSourceEntity = ent;
         LogisticsUI.logisticsSourceLine = null;
         LogisticsUI.isLogisticsDragging = true;
         window.UIManager.hideContextMenu();
-
-        GameEngine.state.buildingMode = 'STAMP';
-        GameEngine.state.placingType = 'transport_line';
-        GameEngine.state.activeTransportLineType = 'transport_line';
 
         conveyorSystem.startDrag(sourcePort.x, sourcePort.y, ent, sourcePort);
         GameEngine.state.logisticsDragLine = { active: true };
@@ -512,6 +525,16 @@ export class LogisticsUI {
     }
 
     static beginTransportLineBuildDrag(worldX, worldY, sourceLine = null) {
+        if (window.UIManager) {
+            window.UIManager.startStampMode('transport_line');
+            if (typeof window.UIManager.renderBottomBuildingMenu === 'function') {
+                window.UIManager.renderBottomBuildingMenu();
+            }
+        } else {
+            GameEngine.state.buildingMode = 'STAMP';
+            GameEngine.state.placingType = 'transport_line';
+            GameEngine.state.activeTransportLineType = 'transport_line';
+        }
         window.UIManager.clearWorldSelectionMarquee();
         LogisticsUI.logisticsSourceEntity = null;
         LogisticsUI.logisticsSourceLine = sourceLine || null;
@@ -523,10 +546,6 @@ export class LogisticsUI {
             conveyorSystem.startDrag(worldX, worldY, null, null, null);
         }
         GameEngine.state.logisticsDragLine = { active: true, buildMode: 'transport_line' };
-
-        GameEngine.state.buildingMode = 'STAMP';
-        GameEngine.state.placingType = 'transport_line';
-        GameEngine.state.activeTransportLineType = 'transport_line';
 
         return true;
     }
@@ -545,6 +564,9 @@ export class LogisticsUI {
         if (window.UIManager) {
             window.UIManager.updateValues();
             window.UIManager.updateLogisticsToolCursor();
+            if (typeof window.UIManager.renderBottomBuildingMenu === 'function') {
+                window.UIManager.renderBottomBuildingMenu();
+            }
         }
         return true;
     }

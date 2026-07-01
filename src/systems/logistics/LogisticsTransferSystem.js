@@ -839,6 +839,26 @@ export class LogisticsTransferSystem {
         return Number(window.MAX_ACTIVE_TRANSFERS) || 0;
     }
 
+    // [拓樸變更範圍偵測] 依 groupId 彙總每條物流線段的輕量簽章(id/點數/起訖點/來源目標)+ 該群組目前的
+    // 線段數,供上方逐 tick 比對「這次拓樸變更實際改到了哪些群組」以及「是否有群組被切分(線段數變少)」。
+    _computeLogisticsGroupSigMap(state) {
+        const map = new Map();
+        for (const line of (state.logisticsLines || [])) {
+            if (!line) continue;
+            const gid = line.groupId || line.id;
+            if (!gid) continue;
+            const rp = Array.isArray(line.routePoints) ? line.routePoints : null;
+            const rpLen = rp ? rp.length : 0;
+            const first = rpLen ? `${rp[0].x},${rp[0].y}` : '';
+            const last = rpLen ? `${rp[rpLen - 1].x},${rp[rpLen - 1].y}` : '';
+            const seg = `${line.id || ''}:${rpLen}:${first}:${last}:${line.targetId || ''}:${line.sourceId || ''}`;
+            const entry = map.get(gid);
+            if (entry) { entry.sig += `|${seg}`; entry.segCount++; }
+            else map.set(gid, { sig: seg, segCount: 1 });
+        }
+        return map;
+    }
+
     _processAutomatedLogisticsImpl(state, deltaTime) {
         if (!state.activeTransfers) state.activeTransfers = [];
 
@@ -857,21 +877,82 @@ export class LogisticsTransferSystem {
             // (沿用已驗證的 rerouter),稍後 pushStep 的 _maybeSyncTopology 會以同一簽章把修正後的路線重送 worker。
             if (typeof this._workerBridge._topologySignature === 'function') {
                 const topoSig = this._workerBridge._topologySignature(state);
+                // [拓樸變更範圍偵測] 每個 tick 都取樣一次逐群組簽章,而非只在偵測到變動的那個 tick 才取樣,
+                // 否則變動當下(baseline 尚未建立)那一拍會被誤判成「什麼都沒變」而漏掉真正改到的群組
+                // (例如斷點延伸接通端口的那個 tick)。上一拍快照永遠是這一拍 diff 的正確基準。
+                const newGroupSig = this._computeLogisticsGroupSigMap(state);
+                const changedGroupIds = new Set();
+                // [分叉/切分保護] 中段延伸從既有(可能已合流)群組拉出新分支時,舊群組會被 detach 成孤兒群組
+                // (線段數變少)。這類「群組被切分」在 live 拖曳+真實 worker 時序下是已知的多步 timing race
+                // (見 memory: logistics-worker-split-reroute-bug、對話「Logistics line routing issue」——
+                // 三個 headless 重現皆正確改線、抓不到 live 才會壞的案例,故無法只靠精準 diff 保證修到)。
+                // 偵測到任何群組線段數變少(切分/detach 的訊號)時,保守退回舊有的「全地圖不篩選」重算/重送,
+                // 犧牲一次 0.5~1 秒的全域延遲(僅切分當下這一次,非每次建線都觸發),換取不比切分修復前更差。
+                let splitDetected = false;
+                if (this._lastLogisticsGroupSig) {
+                    const prev = this._lastLogisticsGroupSig;
+                    for (const gid of new Set([...prev.keys(), ...newGroupSig.keys()])) {
+                        const prevEntry = prev.get(gid);
+                        const newEntry = newGroupSig.get(gid);
+                        if ((prevEntry?.sig) !== (newEntry?.sig)) changedGroupIds.add(gid);
+                        if (prevEntry && (newEntry?.segCount || 0) < prevEntry.segCount) splitDetected = true;
+                    }
+                }
+                this._lastLogisticsGroupSig = newGroupSig;
+
                 if (this._lastWorkerTopoSig !== undefined && this._lastWorkerTopoSig !== topoSig) {
                     // worker 結果延遲一拍:在它收到新拓樸前的空窗會以舊拓樸把正在合流的物品 remap 到舊輸出路線
                     // (指向已切離的舊下游)。單拍重算來不及涵蓋這批殘留,故開一段視窗持續清理。
                     this._workerRerouteCountdown = 20;
+                    this._workerRerouteBlanket = false;
                 }
+                if (splitDetected) this._workerRerouteBlanket = true;
                 this._lastWorkerTopoSig = topoSig;
                 if (this._workerRerouteCountdown > 0) {
                     this._workerRerouteCountdown--;
-                    conveyorSystem.updateActiveTransfersOnLogisticsChange(state, null);
-                    // rerouter 只改主執行緒 routePoints;sentIds 僅在拓樸變更時清除,否則修正後路線不會重送 worker。
-                    // 視窗內把「仍在線」物品從 sentIds 移除以強制重送修正後路線;保留「已回收移除」者的 id,
-                    // 讓 _flush 的 removes 仍能正確通知 worker 刪除。
-                    const sent = this._workerBridge.sentIds;
-                    if (sent && typeof sent.delete === 'function') {
-                        for (const t of state.activeTransfers) if (t && t.id) sent.delete(t.id);
+                    // [範圍收斂] 過去以 null(=全地圖不篩選)呼叫 updateActiveTransfersOnLogisticsChange,
+                    // 導致建造/刪除任一物流線(即使與其他物品的路線完全無關)都會讓地圖上「所有」在途物品
+                    // 連續 20 tick 被重新計算並從 sentIds 移除強制重送 worker——包含已抵達終點正等待 worker
+                    // 確認入庫的物品,其 worker 端權威 progress 被主執行緒的舊快照覆蓋,表現為「隨便建一條
+                    // 無關的線,所有物品送達終點後都會多停約 0.5~1 秒才消失」。
+                    // 改為只對「本次拓樸變更真正改動到的群組」(changedGroupIds,見上方逐 tick 偵測)
+                    // +「合流節點輸入/輸出群組」做這個修補;真正無關的線與物品完全不受影響。
+                    // 「本次改動到的群組」涵蓋斷點延伸後接通目標端口這類情境——物品在斷點卡住時 lineId 對應
+                    // 舊(較短)路線,延伸/接通後同一 groupId 的線段簽章(端點/點數)改變會被偵測為「已改動」,
+                    // 物品的 sentIds 因而被清除以重送修正後路線,否則物品的主執行緒路線雖已被
+                    // LogisticsLineFinalizer 修好,worker 端仍持有舊路線副本、永遠算不到新終點 → 物品在端口前
+                    // 堵死不入庫。
+                    //
+                    // [分叉/切分逃生艙] 但若本次(或本視窗內任一 tick)偵測到群組被切分(splitDetected/
+                    // _workerRerouteBlanket),精準 diff 不足以信任——這正是「中段延伸 fork」已知的多步
+                    // timing race(worker 合流 remap 跟切分動作之間的時序競態,3 個 headless 重現皆無法
+                    // 重現、只在 live 拖曳+真實 worker 時序下出現,見對話「Logistics line routing issue」)。
+                    // 此時退回舊有全地圖不篩選行為,不比修這個 bug 之前更差。
+                    const affectedGroupIds = this._workerRerouteBlanket
+                        ? null
+                        : new Set(changedGroupIds);
+                    // [合流競態保護] worker 結果延遲一拍:在它收到新拓樸前的空窗會以舊拓樸把正在合流的物品
+                    // remap 到舊輸出路線(指向已切離的舊下游)。這與該群組「本身簽章是否變動」無關(問題在
+                    // 時序競態),故合流節點涉及的群組無論是否偵測到變動都持續納入,直到倒數視窗結束。
+                    if (affectedGroupIds) {
+                        for (const n of (state.logisticsMergeNodes || [])) {
+                            if (!n) continue;
+                            if (n.outputGroupId) affectedGroupIds.add(n.outputGroupId);
+                            if (Array.isArray(n.inputGroupIds)) n.inputGroupIds.forEach(id => id && affectedGroupIds.add(id));
+                        }
+                    }
+                    if (affectedGroupIds === null || affectedGroupIds.size > 0) {
+                        conveyorSystem.updateActiveTransfersOnLogisticsChange(state, affectedGroupIds);
+                        // rerouter 只改主執行緒 routePoints;sentIds 僅在拓樸變更時清除,否則修正後路線不會重送 worker。
+                        // 視窗內把「路線屬於本次改動群組」(或逃生艙下的全部)的物品從 sentIds 移除以強制重送。
+                        const sent = this._workerBridge.sentIds;
+                        if (sent && typeof sent.delete === 'function') {
+                            for (const t of state.activeTransfers) {
+                                if (t && t.id && (affectedGroupIds === null || (t.lineId && affectedGroupIds.has(t.lineId)))) {
+                                    sent.delete(t.id);
+                                }
+                            }
+                        }
                     }
                 }
             }
