@@ -540,8 +540,12 @@ export class LogisticsUI {
         LogisticsUI.potentialLogisticsDrag = null;
         LogisticsUI.isLogisticsDragging = false;
         GameEngine.state.logisticsDragLine = null;
+        LogisticsUI.clearLogisticsSelection();
         GameEngine.addLog(`[物流] 已取消物流線建造。`, 'LOGISTICS');
-        if (window.UIManager) window.UIManager.updateValues();
+        if (window.UIManager) {
+            window.UIManager.updateValues();
+            window.UIManager.updateLogisticsToolCursor();
+        }
         return true;
     }
 

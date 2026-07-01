@@ -55,9 +55,9 @@ export class InputSystem {
             }
 
             const cam = this.scene.cameras.main;
-            this.rightDownInfo = { 
-                id: pointer.id, 
-                x: pointer.x, 
+            this.rightDownInfo = {
+                id: pointer.id,
+                x: pointer.x,
                 y: pointer.y,
                 time: Date.now(),
                 scrollX: cam ? cam.scrollX : 0,
@@ -131,8 +131,8 @@ export class InputSystem {
 
             let cameraMoved = false;
             if (cam) {
-                cameraMoved = Math.abs(cam.scrollX - this.rightDownInfo.scrollX) > 0.1 || 
-                              Math.abs(cam.scrollY - this.rightDownInfo.scrollY) > 0.1;
+                cameraMoved = Math.abs(cam.scrollX - this.rightDownInfo.scrollX) > 0.1 ||
+                    Math.abs(cam.scrollY - this.rightDownInfo.scrollY) > 0.1;
             }
 
             const isFinalDrag = this.didMove || totalDist > this.DRAG_THRESHOLD;
@@ -158,20 +158,23 @@ export class InputSystem {
 
             // 3. 核心判定：判定為移動才執行動作
             if (canMove) {
-                if ((GameEngine.state.logisticsDragLine || window.UIManager?.isLogisticsDragging) && window.UIManager?.cancelLogisticsDrag?.()) {
-                    GameEngine.state.suppressRightClickMoveUntil = now + 250;
-                    GameEngine.state.rightClickStartedInPlacementMode = false;
-                    this.rightDownInfo = null;
-                    this.didMove = false;
-                    return;
+                if ((GameEngine.state.logisticsDragLine || window.UIManager?.isLogisticsDragging)) {
+                    if (window.LogisticsUI?.cancelLogisticsDrag?.()) {
+                        GameEngine.state.suppressRightClickMoveUntil = now + 250;
+                        GameEngine.state.rightClickStartedInPlacementMode = false;
+                        this.rightDownInfo = null;
+                        this.didMove = false;
+                        return;
+                    }
                 }
+                
                 if (GameEngine.state.suppressRightClickMoveUntil && now < GameEngine.state.suppressRightClickMoveUntil) {
                     this.rightDownInfo = null;
                     this.didMove = false;
                     return;
                 }
+
                 if (GameEngine.state.placingType || GameEngine.state.rightClickStartedInPlacementMode) {
-                    GameEngine.addLog(`[Input] 單擊：取消建築`, 'INPUT');
                     if (this.scene.cancelPlacement) {
                         this.scene.cancelPlacement();
                     } else if (window.UIManager) {
@@ -186,14 +189,14 @@ export class InputSystem {
                 } else if (window.UIManager && window.UIManager.activeMenuEntity) {
                     const activeEnt = window.UIManager.activeMenuEntity;
                     const bCfg = GameEngine.state.buildingConfigs[activeEnt.type1];
-                    
+
                     // 如果選中的建築可以集結 (有生產功能)
                     if (bCfg && bCfg.npcProduction && bCfg.npcProduction.length > 0) {
                         const isMulti = GameEngine.state.selectedBuildingIds && GameEngine.state.selectedBuildingIds.length > 1;
                         if (isMulti) {
                             // 多選模式：為所有同類型的選中建築設定集結點
                             const type1 = activeEnt.type1;
-                            const targets = GameEngine.state.mapEntities.filter(e => 
+                            const targets = GameEngine.state.mapEntities.filter(e =>
                                 GameEngine.state.selectedBuildingIds.includes(e.id || `${e.type1}_${e.x}_${e.y}`) &&
                                 e.type1 === type1 && !e.isUnderConstruction
                             );
@@ -234,8 +237,8 @@ export class InputSystem {
             if (found) {
                 clickedTarget = found;
                 targetType = 'UNIT';
-            } 
-            
+            }
+
             // B. 檢查是否點擊到建築物或屍體
             if (!clickedTarget) {
                 found = state.mapEntities.find(e => (e.id || `${e.type1}_${e.x}_${e.y}`) === hid);
@@ -253,11 +256,11 @@ export class InputSystem {
                     if (!isNaN(gx) && !isNaN(gy)) {
                         const res = state.mapData.getResource(gx, gy);
                         if (res && res.type !== 0) {
-                            clickedTarget = { 
-                                id: `res_${gx}_${gy}`, 
-                                gx, gy, 
-                                x: gx * TS + TS / 2, 
-                                y: gy * TS + TS / 2, 
+                            clickedTarget = {
+                                id: `res_${gx}_${gy}`,
+                                gx, gy,
+                                x: gx * TS + TS / 2,
+                                y: gy * TS + TS / 2,
                                 type: 'RESOURCE_NODE',
                                 resourceType: ['NONE', 'WOOD', 'STONE', 'FOOD', 'GOLD', 'IRON', 'COAL', 'MAGIC_HERB', 'WOLF', 'BEAR'][res.type]
                             };
@@ -351,7 +354,7 @@ export class InputSystem {
                     const cScale = (UI_CONFIG.ResourceSelection && UI_CONFIG.ResourceSelection.corpseSelectionScale) || 0.8;
                     w = cScale * TS;
                     h = cScale * TS;
-                    padding = 5; 
+                    padding = 5;
                 }
 
                 if (pointer.worldX >= e.x - w / 2 - padding && pointer.worldX <= e.x + w / 2 + padding &&

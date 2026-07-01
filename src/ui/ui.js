@@ -1342,6 +1342,7 @@ export class UIManager {
         this.potentialTransportLineBuildDrag = null;
         this.updateLogisticsToolCursor();
         this.updateValues();
+        this.renderBottomBuildingMenu();
     }
 
     static getWorldMousePos(clientX, clientY) {
@@ -1437,11 +1438,20 @@ export class UIManager {
     }
 
     static updateLogisticsToolCursor(clientX = null, clientY = null, worldX = null, worldY = null, ctrlMode = false) {
+        if (clientX === null) {
+            clientX = this.lastClientX || window.innerWidth / 2;
+            clientY = this.lastClientY || window.innerHeight / 2;
+            if (typeof this.getWorldPoint === "function") {
+                const world = this.getWorldPoint(clientX, clientY);
+                worldX = world.x;
+                worldY = world.y;
+            }
+        }
         const cursor = this.ensureLogisticsToolCursor();
         const state = GameEngine.state;
         const TS = GameEngine.TILE_SIZE || 64;
         const deleteActive = !!state.logisticsDeleteToolActive;
-        const buildActive = LogisticsUI.isTransportLinePlacementActive() && !this.isLogisticsDragging && !deleteActive;
+        const buildActive = LogisticsUI.isTransportLinePlacementActive() && !deleteActive;
         if (!deleteActive && !buildActive) {
             cursor.style.display = "none";
             return;
@@ -2151,6 +2161,8 @@ export class UIManager {
     }
 
     static handleWorldMouseMove(e) {
+        this.lastClientX = e.clientX;
+        this.lastClientY = e.clientY;
         const toolWorld = this.getWorldPoint(e.clientX, e.clientY);
         this.updateLogisticsToolCursor(e.clientX, e.clientY, toolWorld.x, toolWorld.y, e.ctrlKey);
         if (GameEngine.state.logisticsDeleteToolActive && GameEngine.state.logisticsDeleteBrushDragging) {
@@ -2230,24 +2242,8 @@ export class UIManager {
     static handleWorldMouseUp(e) {
         // [右鍵邏輯專區]
         if (e.button === 2) {
-            let isDrag = false;
-            if (this.rightMouseDownPos) {
-                const dist = Math.hypot(e.clientX - this.rightMouseDownPos.x, e.clientY - this.rightMouseDownPos.y);
-                const timeDiff = Date.now() - (this.rightMouseDownTime || 0);
-                if (dist > 10 || timeDiff > 250) {
-                    isDrag = true;
-                }
-            }
-
-            if (!isDrag && this.cancelActiveConstructionPreview()) {
-                GameEngine.state.rightClickStartedInPlacementMode = false;
-                GameEngine.state.suppressRightClickMoveUntil = Date.now() + 250;
-                if (typeof e.preventDefault === "function") e.preventDefault();
-                if (typeof e.stopPropagation === "function") e.stopPropagation();
-                this.rightMouseDownPos = null;
-                return;
-            }
-            // 所有右鍵行為（取消建築、設定集結點）已全數整合至 InputSystem.js 處理
+            // 所有右鍵行為（取消建築、設定集結點、取消物流線虛影）已全數整合至 InputSystem.js 處理
+            // 在這裡執行會導致雙重觸發：InputSystem 取消虛影後，這裡的 mouseup 又以為沒有虛影而取消了建造狀態。
             this.rightMouseDownPos = null;
             return;
         }
@@ -2258,8 +2254,25 @@ export class UIManager {
             GameEngine.state.logisticsDeleteBrushDragging = false;
             return;
         }
-        this.potentialLogisticsDrag = null;
-        this.potentialTransportLineBuildDrag = null;
+        if (this.potentialTransportLineBuildDrag) {
+            const pending = this.potentialTransportLineBuildDrag;
+            this.potentialTransportLineBuildDrag = null;
+            this.potentialLogisticsDrag = null;
+            LogisticsUI.beginTransportLineBuildDrag(pending.worldX, pending.worldY, pending.clickedLine);
+            conveyorSystem.updateDrag(pending.worldX, pending.worldY);
+            return;
+        }
+
+        if (this.potentialLogisticsDrag) {
+            const pending = this.potentialLogisticsDrag;
+            this.potentialLogisticsDrag = null;
+            this.potentialTransportLineBuildDrag = null;
+            if (LogisticsUI.beginLogisticsDragFromBuilding(pending.entity, pending.sourcePort)) {
+                const world = this.getWorldPoint(e.clientX, e.clientY);
+                conveyorSystem.updateDrag(world.x, world.y);
+            }
+            return;
+        }
 
         if (this.isLogisticsDragging) {
             const submitResult = conveyorSystem.submitDrag();
