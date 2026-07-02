@@ -13,12 +13,14 @@ export class ScriptRecorder {
     static actions = [];
     static startTime = 0;
     static originalHooks = {};
+    static selectedLogTypes = new Set();
 
-    static start() {
+    static start(logTypes = []) {
         if (this.isRecording) return;
         this.isRecording = true;
         this.actions = [];
         this.startTime = Date.now();
+        this.setLogTypes(logTypes);
 
         this.recordAction('// --- 邏輯錄製開始 ---');
         this._patchEngine();
@@ -51,19 +53,29 @@ export class ScriptRecorder {
         this.actions.push({ time: timeOffset, code: codeLine, comment: comment });
     }
 
+    static setLogTypes(logTypes = []) {
+        this.selectedLogTypes = new Set(
+            (Array.isArray(logTypes) ? logTypes : [])
+                .map(type => String(type || '').toUpperCase())
+                .filter(Boolean)
+        );
+    }
+
+    static shouldRecordLog(type, msg) {
+        if (!this.isRecording || !msg || this.selectedLogTypes.size === 0) return false;
+        if (String(msg).includes('腳本錄製')) return false;
+        const category = String(type || 'COMMON').toUpperCase();
+        return this.selectedLogTypes.has(category);
+    }
+
     static _patchEngine() {
         const self = this;
 
-        // 1. 攔截 GameEngine.addLog
-        // 只收錄「日誌篩選器」(log_filter 漏斗選單,見 ui.js UIManager.logFilters)勾選中的分類,
-        // 讓使用者錄製前勾選想要的類別(例如只勾「物流訊息」),匯出檔案就只含該分類的日誌,
-        // 不會被其他分類(戰鬥/尋路/右鍵行為...)洗版。
+        // 1. 攔截 GameEngine.addLog，依錄製開始前選定的分類寫入匯出腳本。
         this.originalHooks.addLog = GameEngine.addLog;
         GameEngine.addLog = function(msg, type) {
-            const category = type || 'COMMON';
-            const filters = window.UIManager && window.UIManager.logFilters;
-            const allowed = !filters || filters[category] === true;
-            if (self.isRecording && msg && allowed && !msg.includes('腳本錄製')) {
+            const category = String(type || 'COMMON').toUpperCase();
+            if (self.shouldRecordLog(category, msg)) {
                 self.recordAction('', `// [${category}] ${msg}`);
             }
             return self.originalHooks.addLog.call(GameEngine, msg, type);

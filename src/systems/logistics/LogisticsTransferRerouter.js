@@ -127,9 +127,27 @@ export class LogisticsTransferRerouter {
         };
         const groupRouteCache = new Map();
 
+        // [TEMP-DIAG] 中段拉分支後在途物品 routeEnd 與 targetPoint 對不上的即時偵測(問題定位後移除)。
+        // 只在真的超出抵達容差時才印,避免洗版;藉此分辨是「本次沒被納入重算範圍(shouldUpdateTransfer
+        // 跳過)」還是「重算了但結果本身就對不上」兩種可能。
+        const mismatchDist = (tr) => {
+            if (!tr || !Array.isArray(tr.routePoints) || tr.routePoints.length < 2 || !tr.targetPoint) return 0;
+            const end = tr.routePoints[tr.routePoints.length - 1];
+            return Math.hypot((end.x || 0) - tr.targetPoint.x, (end.y || 0) - tr.targetPoint.y);
+        };
+
         for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
             const t = state.activeTransfers[i];
-            if (!shouldUpdateTransfer(t)) continue;
+            if (!shouldUpdateTransfer(t)) {
+                const md = mismatchDist(t);
+                if (md > TS * 1.5 && GameEngine && typeof GameEngine.addLog === 'function') {
+                    GameEngine.addLog(
+                        `[WORKER診斷] rerouter 跳過(不在本次重算範圍) id=${t.id} lineId=${t.lineId} 落差=${Math.round(md)}px progress=${(+t.progress || 0).toFixed(4)} affectedSetSize=${affectedSet ? affectedSet.size : 'null'}`,
+                        'LOGISTICS'
+                    );
+                }
+                continue;
+            }
             if (!Array.isArray(t.routePoints) || t.routePoints.length < 2) continue;
 
             const currentPos = getPointOnPathProgress(t.routePoints, t.progress, pathMetricsCache);
@@ -400,6 +418,18 @@ export class LogisticsTransferRerouter {
             if (currentSeg.targetId) {
                 const newEnd = pathPoints[pathPoints.length - 1];
                 t.targetPoint = { x: newEnd.x, y: newEnd.y };
+            }
+
+            // [TEMP-DIAG] 理論上這裡剛把 targetPoint 設成 pathPoints 的尾端,不該再有落差;
+            // 若還是超出容差,代表問題不在「跳過重算」而在重算本身算錯(例如選錯 sink/graph 路徑)。
+            {
+                const md = mismatchDist(t);
+                if (md > TS * 1.5 && GameEngine && typeof GameEngine.addLog === 'function') {
+                    GameEngine.addLog(
+                        `[WORKER診斷] rerouter 重算後仍有落差 id=${t.id} lineId=${t.lineId} 落差=${Math.round(md)}px targetId=${t.targetId} progress=${(+t.progress || 0).toFixed(4)}`,
+                        'LOGISTICS'
+                    );
+                }
             }
         }
 

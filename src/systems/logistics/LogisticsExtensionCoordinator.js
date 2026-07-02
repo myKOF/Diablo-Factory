@@ -298,11 +298,12 @@ function splitSourceGroupForMiddleExtension(drag) {
     backSegments.forEach(seg => {
         if (!seg) return;
         seg.groupId = newGroupId;
+        // [根因修正] 來源建築的 outputTargets/conn bookkeeping 現在歸併入分支的 front 群組所有,
+        // 故清空 sourceId/sourcePort。但下游終點實體上沒有改變(只是群組身分被切開),
+        // 保留 targetId/targetPort/targetPoint,讓被切離的下游殘段仍能獨立送達,
+        // 否則物品送到此殘段會因 targetId=null 永遠卡在終點。
         seg.sourceId = null;
-        seg.targetId = null;
         seg.sourcePort = null;
-        seg.targetPort = null;
-        seg.targetPoint = null;
         seg.detachedFromGroupId = sourceGroupId;
         if (detachKey) seg.detachedAtKey = detachKey;
         delete seg.detachedByDeletedGap;

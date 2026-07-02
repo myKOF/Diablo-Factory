@@ -4,6 +4,8 @@ import { GameEngine } from "../systems/game_systems.js";
  * ScriptRunner - 負責在遊戲內直接讀取並執行 Playwright 錄製的 E2E 腳本
  */
 export class ScriptRunner {
+    static selectedScriptContent = null;
+    static selectedScriptName = null;
 
     static importAndRun() {
         const input = document.createElement('input');
@@ -20,7 +22,13 @@ export class ScriptRunner {
             reader.onload = async (evt) => {
                 const content = evt.target.result;
                 document.body.removeChild(input);
-                await this.runScript(content, file.name);
+                
+                ScriptRunner.selectedScriptContent = content;
+                ScriptRunner.selectedScriptName = file.name;
+                
+                if (window.UIManager && typeof window.UIManager.showSelectedScriptUI === 'function') {
+                    window.UIManager.showSelectedScriptUI(file.name);
+                }
             };
             reader.readAsText(file);
         };

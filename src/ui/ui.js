@@ -143,6 +143,8 @@ export class UIManager {
     static logHeight = 200; // 預設日誌高度
     static isResizingLog = false;
     static logFilters = { COMMON: false, PATH: false, INPUT: false, BATTLE: false, SYSTEM: false, TASK: false, GATHER: false, LOGISTICS: false }; // 日誌篩選器
+    static logCategoryLabels = { COMMON: "一般訊息", PATH: "尋路訊息", INPUT: "右鍵行動訊息", BATTLE: "戰鬥訊息", SYSTEM: "系統訊息", TASK: "任務訊息", GATHER: "採集訊息", LOGISTICS: "物流訊息" };
+    static scriptRecorderLogSelection = { COMMON: false, PATH: false, INPUT: false, BATTLE: false, SYSTEM: false, TASK: false, GATHER: false, LOGISTICS: false };
     static startY = 0;
     static startHeight = 200;
     static leftMouseDownPos = null; // 記錄左鍵按下位置，用於過濾框選後的誤觸
@@ -303,9 +305,28 @@ export class UIManager {
         window.WarehouseUI = WarehouseUI;
         window.LogisticsUI = LogisticsUI;
         window.BuildingMenuUI = BuildingMenuUI;
+        window.ScriptRecorder = ScriptRecorder;
 
         this.loadUIPositions();
         this.renderAll();
+
+        // 檢查是否有 session 暫存的重播腳本，支援重新整理後自動重播
+        const autoplayContent = sessionStorage.getItem("autoplay_script_content");
+        const autoplayName = sessionStorage.getItem("autoplay_script_name");
+        if (autoplayContent && autoplayName) {
+            ScriptRunner.selectedScriptContent = autoplayContent;
+            ScriptRunner.selectedScriptName = autoplayName;
+            sessionStorage.removeItem("autoplay_script_content");
+            sessionStorage.removeItem("autoplay_script_name");
+            
+            // 立即顯示已選擇的腳本名稱與重播按鈕
+            this.showSelectedScriptUI(autoplayName);
+            
+            // 延遲執行以確保 Phaser 和 GameEngine 充分就緒
+            setTimeout(() => {
+                ScriptRunner.runScript(autoplayContent, autoplayName);
+            }, 500);
+        }
 
         // 綁定世界級事件
         window.addEventListener("mousedown", (e) => this.handleWorldMouseDown(e));
@@ -343,8 +364,7 @@ export class UIManager {
             if (e.altKey && (e.code === "KeyR" || e.key.toLowerCase() === "r")) {
                 e.preventDefault();
                 e.stopPropagation();
-                const isRec = ScriptRecorder.toggle();
-                UIManager.updateScriptRecorderBtnState(isRec);
+                UIManager.handleScriptRecorderButton();
                 return;
             }
 
@@ -489,6 +509,117 @@ export class UIManager {
         }
     }
 
+    static handleScriptRecorderButton() {
+        if (ScriptRecorder.isRecording) {
+            ScriptRecorder.stop();
+            this.updateScriptRecorderBtnState(false);
+            this.hideScriptRecordLogMenu();
+            return;
+        }
+        this.showScriptRecordLogMenu();
+    }
+
+    static showScriptRecordLogMenu() {
+        let menu = document.getElementById("script_record_log_menu");
+        if (!menu) {
+            menu = this.createScriptRecordLogMenu();
+            this.uiLayer.appendChild(menu);
+        }
+        menu.style.display = "flex";
+    }
+
+    static hideScriptRecordLogMenu() {
+        const menu = document.getElementById("script_record_log_menu");
+        if (menu) menu.style.display = "none";
+    }
+
+    static createScriptRecordLogMenu() {
+        const menu = document.createElement("div");
+        menu.id = "script_record_log_menu";
+        menu.className = "panel";
+        menu.style.cssText = `
+            position: absolute; left: 10px; bottom: 54px; min-width: 168px;
+            background: rgba(24, 18, 14, 0.96); border: 1.5px solid #7a5a3a;
+            border-radius: 4px; padding: 10px; display: none; flex-direction: column; gap: 8px;
+            color: #fff; font-size: 13px; z-index: 1300; pointer-events: auto;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.55);
+        `;
+        menu.onclick = (e) => e.stopPropagation();
+
+        const masterItem = document.createElement("label");
+        masterItem.style.cssText = `display: flex; align-items: center; gap: 8px; color: #ffeb3b; cursor: pointer; border-bottom: 1.5px solid rgba(255,255,255,0.15); padding-bottom: 6px; margin-bottom: 4px; font-weight: bold;`;
+        const masterCheckbox = document.createElement("input");
+        masterCheckbox.type = "checkbox";
+        masterCheckbox.id = "script_record_log_master";
+        masterCheckbox.checked = Object.values(this.scriptRecorderLogSelection).every(Boolean);
+        masterItem.appendChild(masterCheckbox);
+        masterItem.appendChild(document.createTextNode("全選 / 取消全選"));
+        menu.appendChild(masterItem);
+
+        const updateMaster = () => {
+            masterCheckbox.checked = Object.values(this.scriptRecorderLogSelection).every(Boolean);
+        };
+
+        masterCheckbox.onchange = (e) => {
+            e.stopPropagation();
+            const checked = masterCheckbox.checked;
+            Object.keys(this.scriptRecorderLogSelection).forEach(key => {
+                this.scriptRecorderLogSelection[key] = checked;
+            });
+            menu.querySelectorAll("input[data-log-category]").forEach(input => {
+                input.checked = checked;
+            });
+        };
+
+        Object.entries(this.logCategoryLabels).forEach(([key, label]) => {
+            const item = document.createElement("label");
+            item.style.cssText = `display: flex; align-items: center; gap: 8px; color: #fff; cursor: pointer;`;
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.dataset.logCategory = key;
+            checkbox.checked = this.scriptRecorderLogSelection[key];
+            checkbox.onchange = (e) => {
+                e.stopPropagation();
+                this.scriptRecorderLogSelection[key] = checkbox.checked;
+                updateMaster();
+            };
+            item.appendChild(checkbox);
+            item.appendChild(document.createTextNode(label));
+            menu.appendChild(item);
+        });
+
+        const actions = document.createElement("div");
+        actions.style.cssText = `display: flex; justify-content: flex-end; gap: 8px; border-top: 1.5px solid rgba(255,255,255,0.15); padding-top: 8px; margin-top: 2px;`;
+
+        const cancelBtn = document.createElement("button");
+        cancelBtn.id = "script_record_log_cancel";
+        cancelBtn.textContent = "取消";
+        cancelBtn.style.cssText = `padding: 4px 8px; border-radius: 4px; border: 1px solid #666; background: #2b2b2b; color: #fff; cursor: pointer;`;
+        cancelBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.hideScriptRecordLogMenu();
+        };
+
+        const confirmBtn = document.createElement("button");
+        confirmBtn.id = "script_record_log_confirm";
+        confirmBtn.textContent = "確定";
+        confirmBtn.style.cssText = `padding: 4px 10px; border-radius: 4px; border: 1px solid #ffb74d; background: #6d3b12; color: #fff; cursor: pointer;`;
+        confirmBtn.onclick = (e) => {
+            e.stopPropagation();
+            const selectedTypes = Object.entries(this.scriptRecorderLogSelection)
+                .filter(([, selected]) => selected)
+                .map(([key]) => key);
+            ScriptRecorder.start(selectedTypes);
+            this.updateScriptRecorderBtnState(true);
+            this.hideScriptRecordLogMenu();
+        };
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(confirmBtn);
+        menu.appendChild(actions);
+        return menu;
+    }
+
     static renderAll() {
         this.uiLayer.innerHTML = "";
 
@@ -526,8 +657,7 @@ export class UIManager {
         `;
         recordBtn.onclick = (e) => {
             e.stopPropagation();
-            const isRec = ScriptRecorder.toggle();
-            this.updateScriptRecorderBtnState(isRec);
+            this.handleScriptRecorderButton();
         };
         this.uiLayer.appendChild(recordBtn);
 
@@ -732,7 +862,7 @@ export class UIManager {
             z-index: 400; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
         `;
 
-        const categories = { COMMON: "一般訊息", PATH: "尋路訊息", INPUT: "右鍵行為訊息", BATTLE: "戰鬥訊息", SYSTEM: "系統訊息", TASK: "任務訊息", GATHER: "採集訊息", LOGISTICS: "物流訊息" };
+        const categories = this.logCategoryLabels;
 
         // --- [新增] 全選/取消全選功能 ---
         const masterItem = document.createElement("label");
@@ -3539,6 +3669,67 @@ export class UIManager {
                 level2Container.appendChild(btn);
             });
         }
+    }
+
+    static showSelectedScriptUI(name) {
+        if (!this.uiLayer) return;
+
+        // 1. 移除舊的標籤和重播按鈕以防重複
+        const oldLabel = document.getElementById("selected_script_label");
+        if (oldLabel) oldLabel.remove();
+        const oldReplayBtn = document.getElementById("replay_script_btn");
+        if (oldReplayBtn) oldReplayBtn.remove();
+
+        // 2. 建立新標籤顯示於「導入腳本」按鈕上方
+        const label = document.createElement("div");
+        label.id = "selected_script_label";
+        label.innerHTML = `📄 ${name}`;
+        label.style.cssText = `
+            position: absolute; left: 180px; bottom: 52px; 
+            font-size: 12px; color: #ffeb3b; background: rgba(0,0,0,0.75);
+            padding: 4px 8px; border-radius: 4px; border: 1.5px dashed #ffeb3b;
+            font-family: 'Outfit', 'Inter', sans-serif;
+            max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            pointer-events: auto; z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        `;
+        this.uiLayer.appendChild(label);
+
+        // 3. 建立重播按鈕並排在「導入腳本」按鈕右側
+        const replayBtn = document.createElement("button");
+        replayBtn.id = "replay_script_btn";
+        replayBtn.innerHTML = "🔄 重播";
+        replayBtn.style.cssText = `
+            position: absolute; left: 290px; bottom: 10px; 
+            padding: 8px 12px; font-size: 14px; border-radius: 5px; 
+            border: 2px solid #ff9100; background: #3e2723; color: #fff;
+            cursor: pointer; pointer-events: auto; z-index: 1000;
+            transition: all 0.2s; box-shadow: 0 0 5px rgba(255,145,0,0.5);
+            font-family: 'Outfit', 'Inter', sans-serif;
+            font-weight: bold;
+        `;
+
+        replayBtn.onmouseenter = () => {
+            replayBtn.style.background = "#d84315";
+            replayBtn.style.borderColor = "#ffb74d";
+        };
+        replayBtn.onmouseleave = () => {
+            replayBtn.style.background = "#3e2723";
+            replayBtn.style.borderColor = "#ff9100";
+        };
+
+        replayBtn.onclick = (e) => {
+            e.stopPropagation();
+            if (ScriptRunner.selectedScriptContent && ScriptRunner.selectedScriptName) {
+                sessionStorage.setItem("autoplay_script_content", ScriptRunner.selectedScriptContent);
+                sessionStorage.setItem("autoplay_script_name", ScriptRunner.selectedScriptName);
+                window.location.reload();
+            } else {
+                console.error("無可重播的腳本內容");
+            }
+        };
+
+        this.uiLayer.appendChild(replayBtn);
     }
 }
 
