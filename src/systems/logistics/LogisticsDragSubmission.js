@@ -271,6 +271,9 @@ function submitDrag() {
             splitOnBlockedOverlap: !!drag.isLineExtension && !touchedTargetGroupId
         });
         let finalGroupId = createdLine?.groupId || null;
+        if (conn && finalGroupId) {
+            conn.lineId = finalGroupId;
+        }
         const submitAffectedGroupIds = new Set([
             finalGroupId,
             sourceGroupId,

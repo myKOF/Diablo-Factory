@@ -118,10 +118,16 @@ export class LogisticsUI {
         const outputTargets = Array.isArray(sourceEnt?.outputTargets) ? sourceEnt.outputTargets : [];
         const hintedSegment = lineId ? conveyorSystem.getLogisticsLineById(lineId) : null;
         const hintedGroupId = hintedSegment?.groupId || hintedSegment?.id || null;
-        const connForLine = connHint ||
+        let connForLine = connHint ||
             outputTargets.find(t => t.id === targetId && (!hintedGroupId || t.lineId === hintedGroupId)) ||
             outputTargets.find(t => hintedGroupId && t.lineId === hintedGroupId) ||
             null;
+        // [腳本回放防錯] 當 lineId 過期 (hintedGroupId=null) 且 targetId 也配對不到時，
+        // 嘗試以 targetId 寬鬆比對，或若只有單一 outputTarget 則直接使用
+        if (!connForLine && outputTargets.length > 0) {
+            connForLine = outputTargets.find(t => t.id === targetId) ||
+                (outputTargets.length === 1 ? outputTargets[0] : null);
+        }
         const groupId = connForLine?.lineId || hintedSegment?.groupId || null;
         const selectedSegment = lineId ? conveyorSystem.getLogisticsLineById(lineId) : (groupId ? conveyorSystem.getLogisticsLineById(groupId) : null);
         const selectedLineId = selectedSegment ? conveyorSystem.getLogisticsLineSelectionKey(selectedSegment) : null;

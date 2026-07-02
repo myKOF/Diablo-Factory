@@ -518,22 +518,37 @@ export class LogisticsTransferSystem {
         const TS = this.engine?.TILE_SIZE || 20;
         const arrivedIds = new Set((alreadyArrived || []).map(a => a && a.id).filter(Boolean));
         const getEntId = (e) => e ? (e.id || `${e.type1}_${e.x}_${e.y}`) : null;
+        const routeLength = (points) => {
+            if (!Array.isArray(points) || points.length < 2) return 0;
+            let total = 0;
+            for (let i = 1; i < points.length; i++) {
+                total += Math.abs((points[i].x || 0) - (points[i - 1].x || 0)) +
+                    Math.abs((points[i].y || 0) - (points[i - 1].y || 0));
+            }
+            return total;
+        };
         const extra = [];
         for (let i = state.activeTransfers.length - 1; i >= 0; i--) {
             const t = state.activeTransfers[i];
             if (!t || !t.id || !t.targetId || arrivedIds.has(t.id)) continue;
-            if ((Number(t.progress) || 0) < 0.999) continue;
             const rp = Array.isArray(t.routePoints) ? t.routePoints : null;
             const endPt = rp && rp.length >= 2 ? rp[rp.length - 1] : null;
             if (!endPt) continue;
             const tp = t.targetPoint;
-            // route-end 已在 targetPoint 附近 → kinematics 會處理,不重複補判
-            if (tp && (Math.abs(endPt.x - tp.x) + Math.abs(endPt.y - tp.y)) <= TS * 1.5) continue;
             const ent = (state.mapEntities || []).find(e => getEntId(e) === t.targetId);
             if (!ent || ent.isUnderConstruction) continue;
             const ports = window.UIManager?.getBuildingPortSlots?.(ent) || [];
+            const endAtTargetPoint = !!tp &&
+                (Math.abs(endPt.x - tp.x) + Math.abs(endPt.y - tp.y)) <= TS * 1.5;
             const atPort = ports.some(p => p && Math.hypot((p.x || 0) - endPt.x, (p.y || 0) - endPt.y) <= TS * 1.1);
-            if (!atPort) continue;
+            if (!atPort && !endAtTargetPoint) continue;
+            const progress = Number(t.progress) || 0;
+            const maxAllowed = Number.isFinite(Number(t.maxAllowedProgress)) ? Number(t.maxAllowedProgress) : 1;
+            const total = routeLength(rp);
+            const heldAtTerminalGate = total > 0 &&
+                progress >= maxAllowed - 0.0001 &&
+                (1 - maxAllowed) * total <= TS + 0.1;
+            if (progress < 0.999 && !heldAtTerminalGate) continue;
             extra.push({ id: t.id, targetId: t.targetId, itemType: t.itemType, transfer: t });
             state.activeTransfers.splice(i, 1);
         }
@@ -609,6 +624,9 @@ export class LogisticsTransferSystem {
             // 避免線被切斷後路線止於斷點卻被誤判已送達而讓物品憑空消失。
             targetPoint: (Array.isArray(routePoints) && routePoints.length >= 2)
                 ? { x: routePoints[routePoints.length - 1].x, y: routePoints[routePoints.length - 1].y }
+                : null,
+            targetPort: conn.targetPort
+                ? { x: conn.targetPort.x, y: conn.targetPort.y, dir: conn.targetPort.dir, width: conn.targetPort.width }
                 : null
         };
     }
@@ -693,6 +711,220 @@ export class LogisticsTransferSystem {
                     window.LOGISTICS_WORKER = !!on;
                     try { localStorage.setItem('LOGISTICS_WORKER', on ? '1' : '0'); } catch (e) { }
                     return `物流 Web Worker: ${on ? '啟用' : '停用'}(已記住)`;
+                };
+            }
+            // [TEMP-DIAG][worker 內部狀態追查] console 執行 setLogisticsWorkerLineDiag() (不帶參數,預設
+            // 監控全部物流線)開啟後,worker 每步結束會逐線檢查「凍結物品數」是否變化,一有變化就把該線
+            // 前幾筆完整欄位(含 worker 內部才有的 _queuedDistance/transportIndex/transportOffset)
+            // 寫進遊戲內日誌(分類 LOGISTICS,見 _logWorkerDiagEvent),可被錄製功能一併收進匯出腳本。
+            // 若只想鎖定一條線降低量,傳入該 lineId:setLogisticsWorkerLineDiag('該lineId')。
+            // 執行 setLogisticsWorkerLineDiag(false) 關閉。
+            if (typeof window.setLogisticsWorkerLineDiag !== 'function') {
+                window.setLogisticsWorkerLineDiag = (lineId = '*') => {
+                    if (!this._workerBridge) return '尚未啟用 Web Worker(setLogisticsWorker(true) 先開)';
+                    if (!lineId) {
+                        this._workerBridge.setDiagLineId(null);
+                        return '[WORKER診斷] 已關閉';
+                    }
+                    this._workerBridge.setDiagLineId(lineId);
+                    return lineId === '*' ? '[WORKER診斷] 開始追蹤全部物流線' : `[WORKER診斷] 開始追蹤 lineId=${lineId}`;
+                };
+            }
+            // [TEMP-DIAG] console 執行 dumpLogisticsWorkerDiag() 一次性把 worker 緩衝區內容印出來
+            // (不即時洗版;async,執行後結果會印在 console,也存於 window.__logisticsWorkerDiagDump)。
+            if (typeof window.dumpLogisticsWorkerDiag !== 'function') {
+                window.dumpLogisticsWorkerDiag = async () => {
+                    if (!this._workerBridge) return '尚未啟用 Web Worker(setLogisticsWorker(true) 先開)';
+                    const entries = await this._workerBridge.requestDiagDump();
+                    window.__logisticsWorkerDiagDump = entries;
+                    console.log('[WORKER診斷-DUMP] 共 ' + entries.length + ' 筆', JSON.stringify(entries, null, 2));
+                    return `共 ${entries.length} 筆,已印出並存於 window.__logisticsWorkerDiagDump`;
+                };
+            }
+            // [TEMP-DIAG] 實機堵點一次性快照。console 執行 await dumpLogisticsStuckDiag()
+            // 會輸出接近終點/排隊中的 transfer、目標端口命中、線段 metadata 與 worker 診斷摘要。
+            if (typeof window.dumpLogisticsStuckDiag !== 'function') {
+                window.dumpLogisticsStuckDiag = async () => {
+                    const state = window.GAME_STATE || this.state;
+                    const TS = this.engine?.TILE_SIZE || 20;
+                    const getId = (ent) => window.UIManager?.getEntityId?.(ent) || ent?.id || null;
+                    const point = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y)
+                        ? { x: Math.round(p.x), y: Math.round(p.y) }
+                        : null;
+                    const dist = (a, b) => a && b ? Math.hypot((a.x || 0) - (b.x || 0), (a.y || 0) - (b.y || 0)) : Infinity;
+                    const routeTotal = (route) => {
+                        if (!Array.isArray(route) || route.length < 2) return 0;
+                        let total = 0;
+                        for (let i = 1; i < route.length; i++) {
+                            total += Math.abs((route[i].x || 0) - (route[i - 1].x || 0)) +
+                                Math.abs((route[i].y || 0) - (route[i - 1].y || 0));
+                        }
+                        return total;
+                    };
+                    const pointAtDistance = (route, distance) => {
+                        if (!Array.isArray(route) || route.length === 0) return null;
+                        let remaining = Math.max(0, Number(distance) || 0);
+                        for (let i = 1; i < route.length; i++) {
+                            const a = route[i - 1];
+                            const b = route[i];
+                            const len = Math.abs((b.x || 0) - (a.x || 0)) + Math.abs((b.y || 0) - (a.y || 0));
+                            if (remaining <= len || i === route.length - 1) {
+                                const t = len > 0 ? Math.max(0, Math.min(1, remaining / len)) : 0;
+                                return {
+                                    x: (a.x || 0) + ((b.x || 0) - (a.x || 0)) * t,
+                                    y: (a.y || 0) + ((b.y || 0) - (a.y || 0)) * t
+                                };
+                            }
+                            remaining -= len;
+                        }
+                        return route[route.length - 1] || null;
+                    };
+                    const portsOf = (ent) => window.UIManager?.getBuildingPortSlots?.(ent) || [];
+                    const lineGroups = new Map();
+                    for (const line of (state.logisticsLines || [])) {
+                        const gid = line?.groupId || line?.id || null;
+                        if (!gid) continue;
+                        if (!lineGroups.has(gid)) lineGroups.set(gid, []);
+                        lineGroups.get(gid).push(line);
+                    }
+                    const entityById = new Map((state.mapEntities || []).map(ent => [getId(ent), ent]));
+                    const outputTargets = [];
+                    for (const ent of (state.mapEntities || [])) {
+                        for (const conn of (ent.outputTargets || [])) {
+                            outputTargets.push({
+                                sourceId: getId(ent),
+                                id: conn?.id || null,
+                                lineId: conn?.lineId || null,
+                                sourcePort: point(conn?.sourcePort),
+                                targetPort: point(conn?.targetPort),
+                                routeEnd: Array.isArray(conn?.routePoints) && conn.routePoints.length
+                                    ? point(conn.routePoints[conn.routePoints.length - 1])
+                                    : null
+                            });
+                        }
+                    }
+                    const transferReports = (state.activeTransfers || [])
+                        .filter(t => {
+                            const progress = Number(t?.progress) || 0;
+                            const maxAllowed = t?.maxAllowedProgress !== undefined ? Number(t.maxAllowedProgress) : 1;
+                            return progress >= 0.95 ||
+                                t?.queueBlocked === true ||
+                                Math.abs(progress - maxAllowed) < 0.0001;
+                        })
+                        .map(t => {
+                            const route = Array.isArray(t.routePoints) ? t.routePoints : [];
+                            const routeEnd = route.length >= 2 ? route[route.length - 1] : null;
+                            const totalPixels = routeTotal(route);
+                            const hasArrayPosition = Number.isFinite(Number(t.transportIndex)) &&
+                                Number.isFinite(Number(t.transportOffset));
+                            const currentDistance = hasArrayPosition
+                                ? Math.max(0, Math.min(totalPixels,
+                                    (Math.max(0, Math.floor(Number(t.transportIndex) || 0)) +
+                                        Math.max(0, Math.min(1, Number(t.transportOffset) || 0))) * TS))
+                                : Math.max(0, Math.min(1, Number(t.progress) || 0)) * totalPixels;
+                            const maxAllowedDistance = Math.max(0, Math.min(1, Number(t.maxAllowedProgress ?? 1))) * totalPixels;
+                            const currentPoint = pointAtDistance(route, currentDistance);
+                            const target = entityById.get(t.targetId || null) || null;
+                            const targetPorts = portsOf(target);
+                            const nearestTargetPort = targetPorts
+                                .map(port => ({ port, distance: dist(port, routeEnd) }))
+                                .sort((a, b) => a.distance - b.distance)[0] || null;
+                            const targetPointDistance = dist(routeEnd, t.targetPoint);
+                            const targetPortDistance = dist(routeEnd, t.targetPort);
+                            const reachedTargetPoint = !t.targetPoint || targetPointDistance <= TS * 1.5;
+                            const reachedTargetPort = !!t.targetPort && targetPortDistance <= TS * 1.5;
+                            const reachedTarget = reachedTargetPoint || reachedTargetPort;
+                            const terminalGateArrival = !!t.targetId && reachedTarget && totalPixels > 0 &&
+                                currentDistance >= totalPixels - TS - 0.1;
+                            const groupLines = lineGroups.get(t.lineId || '') || [];
+                            return {
+                                id: t.id,
+                                itemType: t.itemType || null,
+                                lineId: t.lineId || null,
+                                sourceId: t.sourceId || null,
+                                targetId: t.targetId || null,
+                                progress: Number((Number(t.progress) || 0).toFixed(4)),
+                                maxAllowedProgress: t.maxAllowedProgress ?? null,
+                                queueBlocked: t.queueBlocked === true,
+                                transportIndex: t.transportIndex ?? null,
+                                transportOffset: t.transportOffset ?? null,
+                                transportDistance: Math.round(currentDistance),
+                                totalPixels: Math.round(totalPixels),
+                                distanceToEnd: Math.round(Math.max(0, totalPixels - currentDistance)),
+                                maxAllowedDistance: Math.round(maxAllowedDistance),
+                                maxAllowedDistanceToEnd: Math.round(Math.max(0, totalPixels - maxAllowedDistance)),
+                                currentPoint: point(currentPoint),
+                                currentToTargetPointDistance: Number.isFinite(dist(currentPoint, t.targetPoint))
+                                    ? Math.round(dist(currentPoint, t.targetPoint))
+                                    : null,
+                                routeLen: route.length,
+                                routeStart: point(route[0]),
+                                routeEnd: point(routeEnd),
+                                targetPoint: point(t.targetPoint),
+                                targetPort: point(t.targetPort),
+                                targetPointDistance: Number.isFinite(targetPointDistance) ? Math.round(targetPointDistance) : null,
+                                targetPortDistance: Number.isFinite(targetPortDistance) ? Math.round(targetPortDistance) : null,
+                                reachedTargetPoint,
+                                reachedTargetPort,
+                                reachedTarget,
+                                terminalGateArrival,
+                                targetPortCount: targetPorts.length,
+                                nearestTargetPort: nearestTargetPort ? point(nearestTargetPort.port) : null,
+                                nearestTargetPortDistance: nearestTargetPort ? Math.round(nearestTargetPort.distance) : null,
+                                atAnyTargetPort: !!nearestTargetPort && nearestTargetPort.distance <= TS * 1.1,
+                                relevantMergeNodes: (state.logisticsMergeNodes || [])
+                                    .filter(node => node && (node.outputGroupId === t.lineId ||
+                                        (Array.isArray(node.inputGroupIds) && node.inputGroupIds.includes(t.lineId))))
+                                    .map(node => ({
+                                        id: node.id || null,
+                                        outputGroupId: node.outputGroupId || null,
+                                        inputGroupIds: Array.isArray(node.inputGroupIds) ? node.inputGroupIds.slice() : [],
+                                        point: point(node.point || { x: node.x, y: node.y }),
+                                        currentActiveSlot: node.currentActiveSlot ?? null,
+                                        roundRobinIndex: node.roundRobinIndex ?? null,
+                                        zipperTurn: node.zipperTurn || null,
+                                        awaitingMainPass: node.awaitingMainPass === true,
+                                        lastAdmittedTransferId: node.lastAdmittedTransferId || null,
+                                        lastThroughTransferId: node.lastThroughTransferId || null
+                                    })),
+                                lineSegmentCount: groupLines.length,
+                                lineSegments: groupLines.slice(0, 12).map(line => {
+                                    const pts = Array.isArray(line.routePoints) ? line.routePoints : [];
+                                    return {
+                                        id: line.id || null,
+                                        groupId: line.groupId || null,
+                                        sourceId: line.sourceId || null,
+                                        targetId: line.targetId || null,
+                                        sourcePort: point(line.sourcePort),
+                                        targetPort: point(line.targetPort),
+                                        targetPoint: point(line.targetPoint),
+                                        start: point(pts[0]),
+                                        end: point(pts[pts.length - 1])
+                                    };
+                                }),
+                                matchingOutputTargets: outputTargets.filter(conn => conn.lineId === t.lineId || conn.id === t.targetId)
+                            };
+                        });
+                    const workerEntries = this._workerBridge && typeof this._workerBridge.requestDiagDump === 'function'
+                        ? await this._workerBridge.requestDiagDump()
+                        : [];
+                    const report = {
+                        time: new Date().toISOString(),
+                        workerActive: !!this._workerBridge,
+                        activeTransfers: (state.activeTransfers || []).length,
+                        nearEndOrBlockedTransfers: transferReports,
+                        counts: {
+                            noTargetId: transferReports.filter(t => !t.targetId).length,
+                            targetPointMismatch: transferReports.filter(t => t.targetPoint && !t.reachedTargetPoint).length,
+                            atPortButNotReachedTargetPoint: transferReports.filter(t => t.atAnyTargetPort && !t.reachedTargetPoint).length,
+                            noLineSegments: transferReports.filter(t => t.lineSegmentCount === 0).length
+                        },
+                        outputTargets,
+                        workerDiagTail: workerEntries.slice(-20)
+                    };
+                    window.__logisticsStuckDiag = report;
+                    console.log('[物流堵點診斷]', JSON.stringify(report, null, 2));
+                    return report;
                 };
             }
             // [診斷] 在真實場景量測產率衰減來源。console 執行 logiDiag()(預設取樣 6 秒),
@@ -808,6 +1040,7 @@ export class LogisticsTransferSystem {
             try {
                 const url = new URL('./logistics.worker.js', import.meta.url);
                 this._workerBridge = new LogisticsWorkerBridge(url);
+                this._workerBridge.onDiagEvent = (entry) => this._logWorkerDiagEvent(entry);
                 if (this.engine && typeof this.engine.addLog === 'function') this.engine.addLog('[物流] Web Worker 運動學已啟用', 'SYSTEM');
             } catch (err) {
                 console.error('[物流] Web Worker 啟用失敗,回退主執行緒同步:', err);
@@ -818,6 +1051,28 @@ export class LogisticsTransferSystem {
             this._workerBridge.dispose();
             this._workerBridge = null;
         }
+    }
+
+    // [TEMP-DIAG] 把 worker 即時轉發的診斷事件(setLogisticsWorkerLineDiag 追蹤中才會產生,量少)
+    // 轉成可讀文字寫入遊戲內日誌系統(分類 LOGISTICS)。這樣勾選「物流訊息」錄製時,
+    // 診斷資料會隨錄製檔案一併匯出,不必再手動跑 dumpLogisticsWorkerDiag() 來回貼log。
+    _logWorkerDiagEvent(entry) {
+        if (!entry || !this.engine || typeof this.engine.addLog !== 'function') return;
+        let msg;
+        if (entry.kind === 'topology') {
+            const parts = Array.isArray(entry.changed)
+                ? entry.changed.map(c => `${c.lineId}:${c.segCountBefore}→${c.segCountAfter}`)
+                : [];
+            msg = `[WORKER診斷] 拓樸變更 段數異動[${parts.join(', ')}] 總線段=${entry.totalLinesAfter} ` +
+                `合流節點=${entry.mergeNodesAfter} epoch=${entry.topoEpoch}`;
+        } else if (entry.kind === 'frozenChange') {
+            const sample = Array.isArray(entry.sample) ? entry.sample.slice(0, 2) : [];
+            msg = `[WORKER診斷] line=${entry.lineId} 凍結物品數 ${entry.frozenCountBefore}→${entry.frozenCountNow}(共${entry.itemCount}件) seq=${entry.seq}` +
+                (sample.length ? ` ${JSON.stringify(sample)}` : '');
+        } else {
+            msg = `[WORKER診斷] ${JSON.stringify(entry)}`;
+        }
+        this.engine.addLog(msg, 'LOGISTICS');
     }
 
     // [C: 密度上限] 在途物品上限(0=不限)。可持久化調整:console 執行 setMaxActiveTransfers(n)。
@@ -969,7 +1224,12 @@ export class LogisticsTransferSystem {
         // 指向舊端口)→ 永遠判定未抵達、堵在終點擋住後車。主執行緒(有建築資料)在此補判:progress≈1、
         // 有 targetId、route-end 落在目標建築任一 input 端口 → 視為抵達入庫。斷點(非端口)不會誤判,故仍保有斷線防護。
         const portArrivals = this.collectTargetPortArrivals(state, arrivals);
-        if (portArrivals.length) arrivals = arrivals.concat(portArrivals);
+        if (portArrivals.length) {
+            if (this._workerBridge && typeof this._workerBridge.removeTransfers === 'function') {
+                this._workerBridge.removeTransfers(portArrivals.map(a => a.id));
+            }
+            arrivals = arrivals.concat(portArrivals);
+        }
 
         // 入庫(主執行緒專屬:存入建築 / 扣資源 / 更新 UI)。kinematics 已將抵達者移出 activeTransfers。
         for (let a = 0; a < arrivals.length; a++) {

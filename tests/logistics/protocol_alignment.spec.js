@@ -2315,6 +2315,71 @@ test('preview valid 後 submit 前 footprint 被佔用時必須拒絕建造', as
     expect(result.success, result.error).toBe(true);
 });
 
+test('已接通建築端口不得以填滿底色遮住終點物流格', async ({ page }) => {
+    test.setTimeout(45000);
+    await loadGame(page);
+
+    const result = await page.evaluate(async () => {
+        try {
+            const { LogisticsRenderer } = await import('/src/renderers/logistics_renderer.js?v=' + Date.now());
+            const { GameEngine } = await import('/src/systems/game_systems.js');
+
+            const originalLines = GameEngine.state.logisticsLines;
+            const prevGetPortSlots = window.UIManager?.getBuildingPortSlots;
+            const prevGetPortSlotRect = window.UIManager?.getPortSlotRect;
+            const prevCanShow = window.UIManager?.canShowLogisticsPorts;
+            const prevGetConfig = GameEngine.getEntityConfig;
+            try {
+                const port = { x: 100, y: 100, dir: 'up', width: 1, slotIndex: 0, defIndex: 0 };
+                const ent = { id: 'target', type1: 'village', x: 100, y: 80, portSlots: [port] };
+                GameEngine.state.logisticsLines = [{
+                    id: 'line_a',
+                    groupId: 'line_a',
+                    targetId: 'target',
+                    targetPort: port,
+                    routePoints: [{ x: 100, y: 120 }, { x: 100, y: 100 }]
+                }];
+                if (window.UIManager) {
+                    window.UIManager.getBuildingPortSlots = e => e?.portSlots || [];
+                    window.UIManager.getPortSlotRect = p => ({ x: p.x - 10, y: p.y - 10, w: 20, h: 20 });
+                    window.UIManager.canShowLogisticsPorts = () => true;
+                }
+                GameEngine.getEntityConfig = () => ({ logistics: { canInput: true, canOutput: true } });
+
+                const calls = [];
+                const graphics = {
+                    fillStyle: (color, alpha) => calls.push({ op: 'fillStyle', color, alpha }),
+                    fillRect: (x, y, w, h) => calls.push({ op: 'fillRect', x, y, w, h }),
+                    lineStyle: (width, color, alpha) => calls.push({ op: 'lineStyle', width, color, alpha }),
+                    strokeRect: (x, y, w, h) => calls.push({ op: 'strokeRect', x, y, w, h })
+                };
+                const scene = { hexOrRgba: () => ({ color: 0xffffff }) };
+
+                LogisticsRenderer.renderSourcePortCells(graphics, GameEngine.state, scene);
+                LogisticsRenderer.renderBuildingPortCells(graphics, [ent], scene);
+                return {
+                    success: true,
+                    fillRectCount: calls.filter(call => call.op === 'fillRect').length,
+                    strokeRectCount: calls.filter(call => call.op === 'strokeRect').length,
+                    calls
+                };
+            } finally {
+                GameEngine.state.logisticsLines = originalLines;
+                if (window.UIManager && prevGetPortSlots) window.UIManager.getBuildingPortSlots = prevGetPortSlots;
+                if (window.UIManager && prevGetPortSlotRect) window.UIManager.getPortSlotRect = prevGetPortSlotRect;
+                if (window.UIManager && prevCanShow) window.UIManager.canShowLogisticsPorts = prevCanShow;
+                GameEngine.getEntityConfig = prevGetConfig;
+            }
+        } catch (error) {
+            return { success: false, error: error.message + '\n' + error.stack };
+        }
+    });
+
+    expect(result.success, result.error).toBe(true);
+    expect(result.fillRectCount, `已接通端口不應填滿遮線:${JSON.stringify(result.calls)}`).toBe(0);
+    expect(result.strokeRectCount, `已接通端口仍應保留邊框:${JSON.stringify(result.calls)}`).toBeGreaterThanOrEqual(1);
+});
+
 test('空白場景首次建造物流線時成本與接續錨點必須對齊最後一格', async ({ page }) => {
     test.setTimeout(45000);
     await loadGame(page);

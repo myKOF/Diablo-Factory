@@ -7,6 +7,7 @@ import { LogisticsUI } from "./LogisticsUI.js";
 import { BuildingMenuUI } from "./BuildingMenuUI.js";
 import { LogisticsRenderer } from "../renderers/logistics_renderer.js";
 import { ScriptRecorder } from "../debug/ScriptRecorder.js";
+import { ScriptRunner } from "../debug/ScriptRunner.js";
 
 
 /**
@@ -529,6 +530,24 @@ export class UIManager {
             this.updateScriptRecorderBtnState(isRec);
         };
         this.uiLayer.appendChild(recordBtn);
+
+        // 2.6 導入腳本按鈕 (左下角)
+        const importScriptBtn = document.createElement("button");
+        importScriptBtn.id = "import_script_btn";
+        importScriptBtn.innerHTML = "📂 導入腳本";
+        importScriptBtn.title = "導入並執行測試腳本";
+        importScriptBtn.style.cssText = `
+            position: absolute; left: 180px; bottom: 10px; 
+            padding: 8px 12px; font-size: 14px; border-radius: 5px; 
+            border: 2px solid #555; background: #222; color: #fff;
+            cursor: pointer; pointer-events: auto; z-index: 1000;
+            transition: all 0.2s; box-shadow: 0 0 5px rgba(0,0,0,0.5);
+        `;
+        importScriptBtn.onclick = (e) => {
+            e.stopPropagation();
+            ScriptRunner.importAndRun();
+        };
+        this.uiLayer.appendChild(importScriptBtn);
 
 
 

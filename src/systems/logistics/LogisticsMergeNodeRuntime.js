@@ -390,6 +390,9 @@ export class LogisticsMergeNodeRuntime {
             const mergePoint = node.point || { x: node.x, y: node.y };
             if (!this.isPointOnTransferPath(route, mergePoint)) return;
             const mergeDistance = this.getPathDistanceToPoint(route, mergePoint);
+            // [終點端口防堵] 合流節點若因重拉/重接殘留在輸出線終點，不能再把輸出線物品當「穿越主線」讓行。
+            // 終點由建築入庫處理；若在此套用 mergeDistance - spacing，前車會永久停在端口前一格。
+            if (mergeDistance >= total - 0.1) return;
             const distFromMerge = distance - mergeDistance;
             if (isLastAdmitted && distFromMerge >= -0.1 && distFromMerge < spacing - 0.1) {
                 return;

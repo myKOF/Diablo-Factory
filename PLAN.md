@@ -1,23 +1,20 @@
-# 建造界面改造計劃
+# 導入腳本功能實作計劃
 
-## 1. 修改設定檔與解析器
-- **buildings.csv**: 新增 `group_index` 欄位 (格式如 `{群組類型, 順序}`)。為現有建築分配適當的群組與順序，例如核心建築群組 `{core, 1}`、資源群組 `{resource, 1}`、加工群組 `{processing, 1}` 等。
-- **ConfigManager.js**: 在解析建築設定時，讀取並解析 `group_index`，並存入 `state.buildingConfigsByType` 中。
+## 1. 核心目標
+在遊戲左下角新增「導入腳本」按鈕，讓玩家能夠選擇本機的 Playwright 測試腳本 (`.spec.js`) 並在遊戲內直接重播。這項功能用以自動化大量重複性的測試動作（如覆蓋建築、延伸合併物流線等）。
 
-## 2. 修改 UI 設定 (ui_config.js)
-- 刪除或取代舊的 `BuildingPanel` 設定。
-- 新增 `BottomBuildingMenu` 設定，定義 1 級與 2 級選單的位置、高度、背景色、按鈕尺寸與顏色 (包含紅色的刪除按鈕)。
+## 2. 實作策略
+- **無需後端修改**：利用 `<input type="file" accept=".js">` 讓使用者選擇本機腳本。
+- **解析與執行框架 (`ScriptRunner.js`)**：
+  - 在 `src/debug/` 下建立 `ScriptRunner.js`。
+  - 攔截腳本中 `require('@playwright/test')` 的調用，替換為 Mock 的 `test` 和 `expect` 函式。
+  - 攔截並解析腳本中與 Playwright 相關的指令 (如 `page.waitForTimeout`, `page.evaluate`)，並將其轉譯為在遊戲內部能運作的呼叫（例如使用 `setTimeout` 模擬等待，用 `new Function` 模擬 `evaluate`）。
 
-## 3. 修改 UI 渲染與互動邏輯 (ui.js)
-- 移除原有的左側面板 (`building_panel`) 建立邏輯。
-- 在 `renderAll()` 中，根據 `BottomBuildingMenu` 建立 1 級選單與 2 級選單容器，並置於畫面正下方 (`anchor: BOTTOM_CENTER`)。
-- **1 級選單**: 
-  - 動態讀取所有的 `group_index.type` 生成群組按鈕。
-  - 在最右側生成紅色的「刪除」按鈕。
-  - 當點擊群組按鈕時，選中該按鈕 (外框變黃色)，並展開顯示 2 級選單。
-- **2 級選單**:
-  - 根據當前選中的群組，讀取對應的建築列表，依照 `group_index.order` 排序並生成按鈕。
-  - 點擊按鈕時觸發建造模式 (同舊有邏輯)。
-- **刪除功能**:
-  - 點擊「刪除」按鈕後，進入全域刪除模式 (`GameEngine.state.deleteToolActive = true`)。
-  - 點擊任何建築或物流線時，彈出二次確認視窗 (`BuildingMenuUI.confirmDestroy`) 或進行物流線刪除邏輯。
+## 3. UI 調整
+- 於 `src/ui/ui.js` 中左下角 (`record_script_btn` 旁邊) 新增「導入腳本」按鈕。
+- 點擊時觸發 `ScriptRunner.importAndRun()` 開啟檔案選擇。
+
+## 4. 驗證
+- 點擊按鈕能成功開啟檔案選擇。
+- 選擇已有的測試腳本（如 `test_scripts_logical_test.spec.js`）後，遊戲能照著錄製好的流程自動建造。
+- 確保腳本執行中若發生錯誤，會輸出到遊戲內的系統日誌 (`GameEngine.addLog`) 中。

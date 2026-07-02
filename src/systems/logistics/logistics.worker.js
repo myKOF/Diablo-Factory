@@ -32,6 +32,21 @@ const routeRefById = new Map(); // id -> 上次回報的 routePoints 參照
 let appliedSimTime = 0; // worker 累計已推進的模擬時間(秒);回報給主執行緒估算位置落後量
 let topoEpoch = 0; // [拓樸紀元] 最近套用的拓樸版本;隨結果回報,讓主執行緒辨識「過期拓樸算出的 remap」並略過
 
+// [TEMP-DIAG][worker 內部狀態追查] 純記錄,不改邏輯,問題定位後移除。
+// 即時 console.warn 在 20Hz 下會洗版看不清楚,改為錄進固定長度緩衝區,由主執行緒喊話一次性取出。
+let DIAG_MODE = null; // null=關閉;'*'=監控全部線;其他字串=只監控該 lineId(降低量用)
+const _diagFrozenCountByLine = new Map(); // lineId -> 上次凍結物品數,監控多線時逐線邊緣觸發
+const _diagBuffer = [];
+const DIAG_BUFFER_MAX = 300;
+function pushDiag(entry) {
+    const full = { t: Date.now(), ...entry };
+    _diagBuffer.push(full);
+    if (_diagBuffer.length > DIAG_BUFFER_MAX) _diagBuffer.shift();
+    // [TEMP-DIAG] 同步即時轉發(entry 本身已是邊緣觸發,量少),讓主執行緒能把它寫進遊戲內日誌系統
+    // (分類 LOGISTICS),藉此被錄製功能一併收進匯出腳本,不必再靠手動 console dump 來回貼log。
+    self.postMessage({ type: 'diagEvent', entry: full });
+}
+
 // [效能] 路線內聯(interning):主執行緒每個 transfer 各自序列化路線,worker 反序列化後成為「座標相同但
 // 參照不同」的獨立陣列。所有以 routePoints 參照為鍵的快取(getManhattanSegments / routePointsSignature /
 // getCachedPathMetrics / 路線度量)與 kinematics 的 useCanonical 引用相等捷徑因此全部 miss → 同一條線上
@@ -103,7 +118,60 @@ function rerouteMergedTransfersOnTopologyChange() {
 self.onmessage = (e) => {
     const msg = e.data;
     if (!msg) return;
+    if (msg.type === 'diag') {
+        // [TEMP-DIAG] 主執行緒呼叫 setLogisticsWorkerLineDiag(lineId) 送來此訊息以開關追查目標。
+        // lineId 為 '*' 時監控全部線(逐線邊緣觸發,量仍受控);給特定 lineId 時只監控該線。
+        DIAG_MODE = msg.lineId || null;
+        _diagFrozenCountByLine.clear();
+        return;
+    }
+    if (msg.type === 'diagDump') {
+        // [TEMP-DIAG] 主執行緒呼叫 dumpLogisticsWorkerDiag() 送來此訊息,一次性取回緩衝區內容。
+        self.postMessage({ type: 'diagDumpResult', entries: _diagBuffer.slice() });
+        return;
+    }
+    if (msg.type === 'remove') {
+        applyRemoves(msg.ids);
+        state.activeTransfers = Array.from(byId.values());
+        return;
+    }
     if (msg.type === 'topology') {
+        // [TEMP-DIAG] 拓樸變更當下的快照:此時 state.logisticsLines 尚未套用 msg.lines,故先記「變更前」。
+        // 逐 groupId 統計線段數,只回報「段數實際有變化」的群組(新建線/分支/合併都會反映在段數上),
+        // 監控全部線('*')時也只有真的異動的線才會產生一筆,不會每次拓樸同步都洗版。
+        if (DIAG_MODE) {
+            const countByGroup = (lines) => {
+                const m = new Map();
+                for (const l of lines) {
+                    if (!l) continue;
+                    const gid = l.groupId || l.id;
+                    if (!gid) continue;
+                    m.set(gid, (m.get(gid) || 0) + 1);
+                }
+                return m;
+            };
+            const beforeMap = countByGroup(state.logisticsLines);
+            const afterLines = Array.isArray(msg.lines) ? msg.lines : [];
+            const afterMap = countByGroup(afterLines);
+            const watchIds = DIAG_MODE === '*'
+                ? new Set([...beforeMap.keys(), ...afterMap.keys()])
+                : new Set([DIAG_MODE]);
+            const changed = [];
+            for (const gid of watchIds) {
+                const before = beforeMap.get(gid) || 0;
+                const after = afterMap.get(gid) || 0;
+                if (before !== after) changed.push({ lineId: gid, segCountBefore: before, segCountAfter: after });
+            }
+            if (changed.length) {
+                pushDiag({
+                    kind: 'topology',
+                    topoEpoch: msg.topoEpoch,
+                    changed,
+                    totalLinesAfter: afterLines.length,
+                    mergeNodesAfter: (Array.isArray(msg.nodes) ? msg.nodes : []).length
+                });
+            }
+        }
         TILE_SIZE = msg.tileSize || 20;
         fakeEngine.TILE_SIZE = TILE_SIZE;
         state.logisticsLines = Array.isArray(msg.lines) ? msg.lines : [];
@@ -142,6 +210,86 @@ self.onmessage = (e) => {
         // kinematics 已將抵達者移出 state.activeTransfers;同步從 byId 移除
         const arrived = arrivals.map(a => ({ id: a.id, targetId: a.targetId, itemType: a.itemType }));
         for (const a of arrived) { byId.delete(a.id); routeRefById.delete(a.id); }
+
+        // [TEMP-DIAG] 每步結束後檢查追查目標(單線或全部線)是否進入「凍結」狀態(maxAllowedProgress ==
+        // progress 且非正常排隊卡住),逐線邊緣觸發印出前幾筆完整欄位,避免每 tick 洗版。監控全部線時
+        // 按 lineId 分組各自比較,只有真的「凍結物品數變化」的那條線才產生一筆。
+        if (DIAG_MODE) {
+            const groups = new Map(); // lineId -> items[]
+            for (const t of state.activeTransfers) {
+                if (!t) continue;
+                if (DIAG_MODE !== '*' && t.lineId !== DIAG_MODE) continue;
+                let arr = groups.get(t.lineId);
+                if (!arr) { arr = []; groups.set(t.lineId, arr); }
+                arr.push(t);
+            }
+            const routeTotal = (points) => Array.isArray(points)
+                ? points.reduce((s, p, i, arr) => i === 0 ? 0 : s + Math.abs(p.x - arr[i - 1].x) + Math.abs(p.y - arr[i - 1].y), 0)
+                : 0;
+            const pt = (p) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y))
+                ? { x: Math.round(Number(p.x)), y: Math.round(Number(p.y)) }
+                : null;
+            for (const [lineId, items] of groups) {
+                const frozen = items.filter(t => {
+                    const mp = t.maxAllowedProgress !== undefined ? t.maxAllowedProgress : 1;
+                    return Math.abs(mp - (t.progress || 0)) < 1e-6 && (t.progress || 0) > 0.001 && t.queueBlocked !== true;
+                });
+                const prevCount = _diagFrozenCountByLine.has(lineId) ? _diagFrozenCountByLine.get(lineId) : -1;
+                if (frozen.length !== prevCount) {
+                    pushDiag({
+                        kind: 'frozenChange',
+                        lineId,
+                        seq: msg.seq, itemCount: items.length,
+                        frozenCountBefore: prevCount, frozenCountNow: frozen.length,
+                        sample: frozen.slice(0, 5).map(t => {
+                            const route = Array.isArray(t.routePoints) ? t.routePoints : [];
+                            const total = routeTotal(route);
+                            const endPt = route.length >= 2 ? route[route.length - 1] : null;
+                            const targetPoint = t.targetPoint || null;
+                            const targetPort = t.targetPort || null;
+                            const currentDistance = total > 0
+                                ? logisticsTransportArrayState.getTransferDistance(t, total, TILE_SIZE)
+                                : 0;
+                            const reachedTargetPoint = !targetPoint || (endPt &&
+                                (Math.abs(endPt.x - targetPoint.x) + Math.abs(endPt.y - targetPoint.y)) <= TILE_SIZE * 1.5);
+                            const reachedTargetPort = !!targetPort && endPt &&
+                                (Math.abs(endPt.x - targetPort.x) + Math.abs(endPt.y - targetPort.y)) <= TILE_SIZE * 1.5;
+                            const reachedTarget = reachedTargetPoint || reachedTargetPort;
+                            const terminalGateArrival = !!t.targetId && reachedTarget && total > 0 &&
+                                currentDistance >= total - TILE_SIZE - 0.1;
+                            return {
+                                id: t.id, progress: +((+t.progress) || 0).toFixed(4),
+                                targetId: t.targetId || null,
+                                targetPoint: pt(targetPoint),
+                                targetPort: pt(targetPort),
+                                routeEnd: pt(endPt),
+                                maxAllowedProgress: t.maxAllowedProgress,
+                                queuedDistance: t._queuedDistance,
+                                routeLen: route.length,
+                                routeTotalPixels: total,
+                                currentDistance: Math.round(currentDistance),
+                                distanceToEnd: Math.round(Math.max(0, total - currentDistance)),
+                                queueBlocked: t.queueBlocked === true,
+                                transportIndex: t.transportIndex, transportOffset: t.transportOffset,
+                                arrivalGate: {
+                                    reachedTargetPoint,
+                                    reachedTargetPort,
+                                    reachedTarget,
+                                    terminalGateArrival
+                                }
+                            };
+                        })
+                    });
+                    _diagFrozenCountByLine.set(lineId, frozen.length);
+                }
+            }
+            // 清掉已消失的線,避免 Map 無限增長,也避免同 lineId 重新出現時被誤判為延續舊狀態
+            if (_diagFrozenCountByLine.size > groups.size) {
+                for (const lineId of Array.from(_diagFrozenCountByLine.keys())) {
+                    if (!groups.has(lineId)) _diagFrozenCountByLine.delete(lineId);
+                }
+            }
+        }
 
         const kin = state.activeTransfers.map(t => {
             const entry = {

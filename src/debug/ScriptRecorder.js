@@ -55,10 +55,16 @@ export class ScriptRecorder {
         const self = this;
 
         // 1. 攔截 GameEngine.addLog
+        // 只收錄「日誌篩選器」(log_filter 漏斗選單,見 ui.js UIManager.logFilters)勾選中的分類,
+        // 讓使用者錄製前勾選想要的類別(例如只勾「物流訊息」),匯出檔案就只含該分類的日誌,
+        // 不會被其他分類(戰鬥/尋路/右鍵行為...)洗版。
         this.originalHooks.addLog = GameEngine.addLog;
         GameEngine.addLog = function(msg, type) {
-            if (self.isRecording && msg && !msg.includes('腳本錄製')) {
-                self.recordAction('', `// [系統日誌] ${msg}`);
+            const category = type || 'COMMON';
+            const filters = window.UIManager && window.UIManager.logFilters;
+            const allowed = !filters || filters[category] === true;
+            if (self.isRecording && msg && allowed && !msg.includes('腳本錄製')) {
+                self.recordAction('', `// [${category}] ${msg}`);
             }
             return self.originalHooks.addLog.call(GameEngine, msg, type);
         };
@@ -112,12 +118,35 @@ export class ScriptRecorder {
                 const isResource = !!(clickedTarget && (clickedTarget.gx !== undefined || clickedTarget.resourceType || clickedTarget.type1 === 'farmland' || clickedTarget.type1 === 'tree_plantation'));
                 const isEnemy = clickedTarget && (clickedTarget.camp === 'enemy' || clickedTarget.camp === 'neutral' || clickedTarget.isEnemy);
                 const command = isResource ? 'GATHER' : (isEnemy ? 'ATTACK' : 'MOVE');
-                let targetId = clickedTarget ? (clickedTarget.id || `${clickedTarget.gx}_${clickedTarget.gy}`) : null;
-                // 防止 null 字串化問題
-                targetId = targetId ? `'${targetId}'` : 'null';
-                self.recordAction(`await executeLogic(page, () => window.GameEngine.issueCommand(['${unit.id}'], '${command}', ${targetId}, ${pointer.worldX}, ${pointer.worldY}));`, `// 命令單位 ${unit.id} 執行 ${command}`);
+                
+                let targetIdStr = 'null';
+                if (clickedTarget) {
+                    if (clickedTarget.gx !== undefined && !clickedTarget.id) {
+                        targetIdStr = `'res_${clickedTarget.gx}_${clickedTarget.gy}'`;
+                    } else {
+                        targetIdStr = `window.GameEngine.resolveDynamicId('${clickedTarget.id}', '${clickedTarget.type1 || clickedTarget.model}', ${clickedTarget.x}, ${clickedTarget.y})`;
+                    }
+                }
+                const unitStr = `window.GameEngine.resolveDynamicId('${unit.id}', '${unit.type1}', ${unit.x}, ${unit.y})`;
+                
+                self.recordAction(`await executeLogic(page, () => window.GameEngine.issueCommand([${unitStr}], '${command}', ${targetIdStr}, ${pointer.worldX}, ${pointer.worldY}));`, `// 命令單位 ${unit.id} 執行 ${command}`);
             }
             return self.originalHooks.handleRightClickCommand.call(this, unit, pointer, clickedTarget, cmdCenter);
+        };
+
+        // 6.5 攔截 handleRallyPoint (建築設定集結點)
+        this.originalHooks.handleRallyPoint = InputSystem.prototype.handleRallyPoint;
+        InputSystem.prototype.handleRallyPoint = function(pointer, ent, bCfg) {
+            if (self.isRecording) {
+                const entFallback = `window.GameEngine.resolveDynamicId('${ent.id}', '${ent.type1}', ${ent.x}, ${ent.y})`;
+                self.recordAction(`await executeLogic(page, () => {
+    const bEnt = window.GameEngine.state.mapEntities.find(e => e.id === ${entFallback});
+    if (bEnt && window.PhaserScene && window.PhaserScene.inputSystem) {
+        window.PhaserScene.inputSystem.handleRallyPoint({worldX: ${pointer.worldX}, worldY: ${pointer.worldY}}, bEnt, window.GameEngine.state.buildingConfigs[bEnt.type1]);
+    }
+});`, `// 建築 ${ent.id} 設定集結點至 (${pointer.worldX.toFixed(0)}, ${pointer.worldY.toFixed(0)})`);
+            }
+            return self.originalHooks.handleRallyPoint.call(this, pointer, ent, bCfg);
         };
 
         // 7. 攔截 LogisticsDragSubmission.submitDrag (物流線錄製)
@@ -135,8 +164,9 @@ export class ScriptRecorder {
                     const lineId = drag.sourceLine ? (drag.sourceLine.id || drag.sourceLine.groupId) : null;
                     const bendMode = drag.bendMode || 'x-first';
                     const ghostsStr = JSON.stringify(this.system.ghosts || []);
+                    const targetEntId = drag.targetBuilding ? drag.targetBuilding.id : null;
                     
-                    self.recordAction(`await executeLogic(page, () => window.conveyorSystem.simulateDragAndSubmit(${startX}, ${startY}, ${endX}, ${endY}, ${entId ? `'${entId}'` : 'null'}, ${pPort}, ${lineId ? `'${lineId}'` : 'null'}, '${finalGroupId || ""}', '${bendMode}', ${ghostsStr}));`, `// 拖曳建造物流線 (GroupId: ${finalGroupId || 'new'})`);
+                    self.recordAction(`await executeLogic(page, () => window.conveyorSystem.simulateDragAndSubmit(${startX}, ${startY}, ${endX}, ${endY}, ${entId ? `'${entId}'` : 'null'}, ${pPort}, ${lineId ? `'${lineId}'` : 'null'}, '${finalGroupId || ""}', '${bendMode}', ${ghostsStr}, ${targetEntId ? `'${targetEntId}'` : 'null'}));`, `// 拖曳建造物流線 (GroupId: ${finalGroupId || 'new'})`);
                 }
             }
             return self.originalHooks.submitDrag.call(this, routeContext, finalGroupId, points);
@@ -153,6 +183,95 @@ export class ScriptRecorder {
                 return self.originalHooks.showEntityHUD.call(window.UIManager, entity);
             };
         }
+
+        // 9. 攔截 LogisticsUI (物流過濾器)
+        if (window.LogisticsUI) {
+            this.originalHooks.showLogisticsMenu = window.LogisticsUI.showLogisticsMenu;
+            window.LogisticsUI.showLogisticsMenu = function(sourceEnt, targetId, mouseX, mouseY, lineId, connHint) {
+                if (self.isRecording && sourceEnt) {
+                    const id = sourceEnt.id || `${sourceEnt.type1}_${sourceEnt.x}_${sourceEnt.y}`;
+                    self.recordAction(`await executeLogic(page, () => { const e = window.GameEngine.state.mapEntities.find(x => x.id === '${id}') || window.GameEngine.state.mapEntities.find(x => x.x === ${sourceEnt.x} && x.y === ${sourceEnt.y}); if(e && window.LogisticsUI) window.LogisticsUI.showLogisticsMenu(e, '${targetId}', 0, 0, ${lineId ? `'${lineId}'` : 'null'}); });`, `// 開啟物流線介面: ${sourceEnt.type1} -> ${targetId}`);
+                }
+                return self.originalHooks.showLogisticsMenu.call(window.LogisticsUI, sourceEnt, targetId, mouseX, mouseY, lineId, connHint);
+            };
+
+            this.originalHooks.setLogisticsFilter = window.LogisticsUI.setLogisticsFilter;
+            window.LogisticsUI.setLogisticsFilter = function(event, filterItem) {
+                if (self.isRecording) {
+                    const activeConn = window.LogisticsUI.activeLogisticsConnection;
+                    if (activeConn && activeConn.source) {
+                        const id = activeConn.source.id || `${activeConn.source.type1}_${activeConn.source.x}_${activeConn.source.y}`;
+                        const targetId = activeConn.targetId;
+                        const lineId = activeConn.lineId;
+                        self.recordAction(`await executeLogic(page, () => {
+    const src = window.GameEngine.state.mapEntities.find(x => x.id === '${id}') || window.GameEngine.state.mapEntities.find(x => x.x === ${activeConn.source.x} && x.y === ${activeConn.source.y});
+    if (src && window.LogisticsUI) {
+        window.LogisticsUI.showLogisticsMenu(src, '${targetId}', 0, 0, ${lineId ? `'${lineId}'` : 'null'});
+        window.LogisticsUI.setLogisticsFilter(null, '${filterItem}');
+        const menu = document.getElementById('logistics_menu');
+        if (menu) menu.style.display = 'none'; // 模擬設定後隱藏或維持不干擾
+    }
+});`, `// 設定物流線過濾器: ${filterItem}`);
+                    }
+                }
+                return self.originalHooks.setLogisticsFilter.call(window.LogisticsUI, event, filterItem);
+            };
+
+            this.originalHooks.clearLogisticsFilter = window.LogisticsUI.clearLogisticsFilter;
+            window.LogisticsUI.clearLogisticsFilter = function(event) {
+                if (self.isRecording) {
+                    const activeConn = window.LogisticsUI.activeLogisticsConnection;
+                    if (activeConn && activeConn.source) {
+                        const id = activeConn.source.id || `${activeConn.source.type1}_${activeConn.source.x}_${activeConn.source.y}`;
+                        const targetId = activeConn.targetId;
+                        const lineId = activeConn.lineId;
+                        self.recordAction(`await executeLogic(page, () => {
+    const src = window.GameEngine.state.mapEntities.find(x => x.id === '${id}') || window.GameEngine.state.mapEntities.find(x => x.x === ${activeConn.source.x} && x.y === ${activeConn.source.y});
+    if (src && window.LogisticsUI) {
+        window.LogisticsUI.showLogisticsMenu(src, '${targetId}', 0, 0, ${lineId ? `'${lineId}'` : 'null'});
+        window.LogisticsUI.clearLogisticsFilter(null);
+    }
+});`, `// 清除物流線過濾器`);
+                    }
+                }
+                return self.originalHooks.clearLogisticsFilter.call(window.LogisticsUI, event);
+            };
+        }
+
+        // 10. 攔截 UIManager 面板操作
+        if (window.UIManager) {
+            this.originalHooks.selectRecipe = window.UIManager.selectRecipe;
+            window.UIManager.selectRecipe = function(event, uid, type) {
+                if (self.isRecording) {
+                    self.recordAction(`await executeLogic(page, () => { if (window.UIManager) window.UIManager.selectRecipe(null, '${uid}', '${type}'); });`, `// 選擇生產配方: ${type}`);
+                }
+                return self.originalHooks.selectRecipe.call(window.UIManager, event, uid, type);
+            };
+
+            this.originalHooks.clearFactoryProduct = window.UIManager.clearFactoryProduct;
+            window.UIManager.clearFactoryProduct = function(event) {
+                if (self.isRecording) {
+                    self.recordAction(`await executeLogic(page, () => { if (window.UIManager) window.UIManager.clearFactoryProduct(null); });`, `// 清除生產配方`);
+                }
+                return self.originalHooks.clearFactoryProduct.call(window.UIManager, event);
+            };
+
+            this.originalHooks.adjustWorkers = window.UIManager.adjustWorkers;
+            window.UIManager.adjustWorkers = function(event, delta) {
+                if (self.isRecording) {
+                    self.recordAction(`await executeLogic(page, () => { if (window.UIManager) window.UIManager.adjustWorkers(null, ${delta}); });`, `// 調整工人數量: ${delta > 0 ? '+' : ''}${delta}`);
+                }
+                return self.originalHooks.adjustWorkers.call(window.UIManager, event, delta);
+            };
+
+            this.originalHooks.dismissWorkers = window.UIManager.dismissWorkers;
+            window.UIManager.dismissWorkers = function(event) {
+                if (self.isRecording) {
+                    self.recordAction(`await executeLogic(page, () => { if (window.UIManager) window.UIManager.dismissWorkers(null); });`, `// 解散工人`);
+                }
+                return self.originalHooks.dismissWorkers.call(window.UIManager, event);
+            };
+        }
     }
 
     static _unpatchEngine() {
@@ -165,12 +284,28 @@ export class ScriptRecorder {
         if (this.originalHooks.handleRightClickCommand) {
             InputSystem.prototype.handleRightClickCommand = this.originalHooks.handleRightClickCommand;
         }
+        if (this.originalHooks.handleRallyPoint) {
+            InputSystem.prototype.handleRallyPoint = this.originalHooks.handleRallyPoint;
+        }
         if (this.originalHooks.submitDrag) {
             LogisticsDragSubmission.prototype.submitDrag = this.originalHooks.submitDrag;
         }
         
         if (window.UIManager && this.originalHooks.showEntityHUD) {
             window.UIManager.showEntityHUD = this.originalHooks.showEntityHUD;
+        }
+
+        if (window.LogisticsUI && this.originalHooks.setLogisticsFilter) {
+            window.LogisticsUI.showLogisticsMenu = this.originalHooks.showLogisticsMenu;
+            window.LogisticsUI.setLogisticsFilter = this.originalHooks.setLogisticsFilter;
+            window.LogisticsUI.clearLogisticsFilter = this.originalHooks.clearLogisticsFilter;
+        }
+
+        if (window.UIManager && this.originalHooks.selectRecipe) {
+            window.UIManager.selectRecipe = this.originalHooks.selectRecipe;
+            window.UIManager.clearFactoryProduct = this.originalHooks.clearFactoryProduct;
+            window.UIManager.adjustWorkers = this.originalHooks.adjustWorkers;
+            window.UIManager.dismissWorkers = this.originalHooks.dismissWorkers;
         }
         
         this.originalHooks = {};

@@ -278,9 +278,24 @@ export class LogisticsTransferRerouter {
 
                         let targetAnchor = null;
                         if (targetEnt) {
-                            const targetPort = currentSeg.targetPort || t.targetPort
-                                ? window.UIManager.resolveCurrentPortSlot(targetEnt, currentSeg.targetPort || t.targetPort, last?.x, last?.y)
-                                : window.UIManager.getNearestPortSlot(targetEnt, last?.x ?? (sourceEnt ? sourceEnt.x : last?.x), last?.y ?? (sourceEnt ? sourceEnt.y : last?.y));
+                            const storedTargetPort = currentSeg.targetPort || t.targetPort || null;
+                            const nearestTargetPort = window.UIManager.getNearestPortSlot(
+                                targetEnt,
+                                last?.x ?? (sourceEnt ? sourceEnt.x : targetEnt.x),
+                                last?.y ?? (sourceEnt ? sourceEnt.y : targetEnt.y)
+                            );
+                            let targetPort = storedTargetPort
+                                ? window.UIManager.resolveCurrentPortSlot(targetEnt, storedTargetPort, last?.x, last?.y)
+                                : nearestTargetPort;
+                            if (targetPort && nearestTargetPort && last) {
+                                const resolvedDist = Math.hypot(targetPort.x - last.x, targetPort.y - last.y);
+                                const nearestDist = Math.hypot(nearestTargetPort.x - last.x, nearestTargetPort.y - last.y);
+                                // 重接到同建築另一端口時，舊 targetPort 的 slotIndex 仍可能匹配成功；
+                                // 若它已遠離新路線尾端，必須以物理尾端最近端口為準，避免入庫判定被釘回舊端口。
+                                if (resolvedDist > TS * 1.1 && nearestDist < resolvedDist) {
+                                    targetPort = nearestTargetPort;
+                                }
+                            }
                             targetAnchor = targetPort ? { x: targetPort.x, y: targetPort.y } : { x: targetEnt.x, y: targetEnt.y };
                         }
                         const isOpenEndedLine = !targetAnchor && !currentSeg.targetId;
@@ -375,6 +390,17 @@ export class LogisticsTransferRerouter {
             t.sourceId = currentSeg.sourceId || null;
             t.targetId = currentSeg.targetId || null;
             t.efficiency = Number(currentSeg.efficiency) || 0;
+            // [根因修正] 這裡只更新了 routePoints/targetId,卻沒有同步 targetPoint。LogisticsKinematics 的抵達
+            // 判定要求 routePoints 末端落在 targetPoint 附近(見該檔案「斷線防護」註解:線被切斷時 routePoints
+            // 會縮到斷點、但 targetPoint 刻意保持不變,兩者不一致才能分辨「真斷線」而不誤判抵達)。
+            // 但這裡目前解出了「有效」的新目的地(currentSeg.targetId 非空)時,若不同步更新 targetPoint,
+            // 它會永遠停留在舊值(例如中段延伸前的舊端點/舊分支目標),導致 routePoints 末端從此再也對不上
+            // targetPoint → 永遠判定未抵達 → 物品在新端口前堵死不入庫。只在確實解出有效目標時更新,
+            // 沒有目標(真斷線)時保留原值,維持斷線防護語意不變。
+            if (currentSeg.targetId) {
+                const newEnd = pathPoints[pathPoints.length - 1];
+                t.targetPoint = { x: newEnd.x, y: newEnd.y };
+            }
         }
 
         system.applyLogisticsMergeNodes(state);

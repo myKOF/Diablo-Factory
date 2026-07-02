@@ -376,19 +376,31 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
                 }
             }
 
-            if (t.progress >= 1) {
-                // [斷線防護] 僅在「路線終點確實到達目標端口(targetPoint)」時才入庫。線被切斷後 rerouter 會把路線
-                // 縮短到斷點,終點偏離原目標;此時不可誤判抵達(否則物品在斷點憑空消失/被當成已送達),改為停在
-                // 斷點等待重連/重路由。無 targetPoint(舊資料)則維持原行為。
-                const rp = t.routePoints;
-                const endPt = Array.isArray(rp) && rp.length >= 2 ? rp[rp.length - 1] : null;
-                const tp = t.targetPoint;
-                const reachedTarget = !tp || (endPt && (Math.abs(endPt.x - tp.x) + Math.abs(endPt.y - tp.y)) <= getCellSize() * 1.5);
+            const rp = t.routePoints;
+            const endPt = Array.isArray(rp) && rp.length >= 2 ? rp[rp.length - 1] : null;
+            const tp = t.targetPoint;
+            const targetPort = t.targetPort;
+            const reachedTargetPoint = !tp || (endPt && (Math.abs(endPt.x - tp.x) + Math.abs(endPt.y - tp.y)) <= getCellSize() * 1.5);
+            const reachedTargetPort = !!targetPort && endPt &&
+                (Math.abs(endPt.x - targetPort.x) + Math.abs(endPt.y - targetPort.y)) <= getCellSize() * 1.5;
+            const reachedTarget = reachedTargetPoint || reachedTargetPort;
+            const arrivalMetrics = getTransferRouteMetrics(t);
+            const currentDistance = arrivalMetrics.totalPixels > 0
+                ? transportArrayState.getTransferDistance(t, arrivalMetrics.totalPixels, getCellSize())
+                : 0;
+            const terminalGateArrival = t.targetId && reachedTarget && arrivalMetrics.totalPixels > 0 &&
+                currentDistance >= arrivalMetrics.totalPixels - getCellSize() - 0.1;
+
+            if (t.progress >= 1 || terminalGateArrival) {
+                // [斷線防護] 僅在「路線終點確實到達目標端口(targetPoint/targetPort)」時才入庫。線被切斷後 rerouter
+                // 會把路線縮短到斷點,終點偏離原目標;此時不可誤判抵達,改為停在斷點等待重連/重路由。
+                // [終點閘門] 滿載時前車會被 spacing 壓在終點前一格(maxAllowed=total-cell),此時仍應視為抵達,
+                // 否則 worker 內會留下前車並永久限制後車。
                 if (t.targetId && reachedTarget) {
                     arrivals.push({ id: t.id, targetId: t.targetId, itemType: t.itemType, transfer: t });
                     state.activeTransfers.splice(i, 1);
                 } else {
-                    setTransferDistance(t, getTransferRouteMetrics(t).totalPixels);
+                    setTransferDistance(t, arrivalMetrics.totalPixels);
                 }
             }
         }

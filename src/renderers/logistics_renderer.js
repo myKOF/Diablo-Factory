@@ -145,11 +145,14 @@ export class LogisticsRenderer {
         }
         const frameDelta = Math.max(0, Math.min(0.1, (now - t._riTime) / 1000));
         t._riTime = now;
-        // 權威倒退或跳變過大(>5%):吸附,不平滑(合流插入/重路由/堆積回退)。
-        if (authProgress < t._riProgress || Math.abs(authProgress - t._riProgress) > 0.05) {
+        const delta = authProgress - t._riProgress;
+        // 權威大幅跳變(>5%):吸附,不平滑(合流插入/重路由/堆積回退)。
+        if (Math.abs(delta) > 0.05) {
             t._riProgress = authProgress;
             return t._riProgress;
         }
+        // worker arrival/kin 批次可能讓同一路線上的權威位置小幅回落；畫面保持原位等待權威追上,避免全線倒退抖動。
+        if (delta < 0) return t._riProgress;
         if (t._riProgress < authProgress) {
             const geom = LogisticsRenderer._getTransferPathGeometry(routePoints);
             const total = geom ? geom.totalPixels : 0;
@@ -1911,8 +1914,8 @@ export class LogisticsRenderer {
             const key = `${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.w)},${Math.round(rect.h)}`;
             if (drawn.has(key)) return;
             drawn.add(key);
-            graphics.fillStyle(fillColor, alpha);
-            graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
+            // 已接通端口位於物流線終點格上方；若填滿底色，會遮住端口前的物流底圖，看起來像線段消失。
+            // 連線端口保留邊框即可，未連接端口由 renderBuildingPortCells 顯示填色提示。
             graphics.lineStyle(Math.max(2, Math.round(TS * 0.12)), strokeColor, strokeAlpha);
             graphics.strokeRect(rect.x, rect.y, rect.w, rect.h);
         };
@@ -1974,8 +1977,10 @@ export class LogisticsRenderer {
 
                 const connected = isPortConnected(entityId, slot);
 
-                graphics.fillStyle(connected ? fillColor : disconnectedFillColor, alpha);
-                graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
+                if (!connected) {
+                    graphics.fillStyle(disconnectedFillColor, alpha);
+                    graphics.fillRect(rect.x, rect.y, rect.w, rect.h);
+                }
                 graphics.lineStyle(Math.max(2, Math.round(TS * 0.12)), connected ? strokeColor : disconnectedStrokeColor, strokeAlpha);
                 graphics.strokeRect(rect.x, rect.y, rect.w, rect.h);
             });

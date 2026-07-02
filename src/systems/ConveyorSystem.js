@@ -242,26 +242,37 @@ export class ConveyorSystem {
         return this.dragSubmission.submitDrag(...arguments);
     }
 
-    simulateDragAndSubmit(startX, startY, endX, endY, sourceEntityId, sourcePortData, sourceLineId, finalGroupId, bendMode, ghostsData) {
+    simulateDragAndSubmit(startX, startY, endX, endY, sourceEntityId, sourcePortData, sourceLineId, finalGroupId, bendMode, ghostsData, targetEntityId = null) {
         let sourceEnt = null;
         if (sourceEntityId && window.GameEngine) {
             sourceEnt = window.GameEngine.state.mapEntities.find(e => e.id === sourceEntityId);
+            // [動態 ID 防錯原則] 若透過硬編碼 ID 找不到建築，改用座標反查
+            if (!sourceEnt) {
+                sourceEnt = window.GameEngine.state.mapEntities.find(e => 
+                    window.UIManager?.isPointInsideEntity(e, startX, startY)
+                );
+                if (sourceEnt) {
+                    window.GameEngine.addLog(`[防錯] 成功將物流線起點 ${sourceEntityId} 取代為新的 ID: ${sourceEnt.id}`, "SYSTEM");
+                }
+            }
         }
         let sourceLine = null;
         if (sourceLineId) {
             sourceLine = this.getLogisticsLineById(sourceLineId) || (this.getLogisticsSegmentsByGroupId(sourceLineId) || [])[0];
             // [動態 ID 防錯原則] 若透過硬編碼 ID 找不到，改用拖曳起點座標反查最近物流線 (容差 10 像素)
             if (!sourceLine) {
-                const searchRadius = 10;
+                const searchRadius = 15; // 增加容差
                 let minDist = Infinity;
                 const lines = this.ensureLogisticsLineStore();
-                for (const group of lines.values()) {
-                    for (const seg of group) {
-                        const dist = Math.hypot(seg.x - startX, seg.y - startY);
-                        if (dist <= searchRadius && dist < minDist) {
-                            minDist = dist;
-                            sourceLine = seg;
-                        }
+                for (const seg of lines) {
+                    // 將邏輯座標轉換為世界座標進行比對
+                    const TS = window.GameEngine ? window.GameEngine.TILE_SIZE : 20;
+                    const segWorldX = seg.worldX ?? (seg.gridX !== undefined ? seg.x : seg.x * TS);
+                    const segWorldY = seg.worldY ?? (seg.gridY !== undefined ? seg.y : seg.y * TS);
+                    const dist = Math.hypot(segWorldX - startX, segWorldY - startY);
+                    if (dist <= searchRadius && dist < minDist) {
+                        minDist = dist;
+                        sourceLine = seg;
                     }
                 }
                 if (sourceLine && window.GameEngine) {
@@ -276,10 +287,88 @@ export class ConveyorSystem {
             this.activeDrag.directionLocked = true;
         }
 
+        // [腳本回放修復]
+        // 由於腳本只提供了拖曳起訖點的最終座標，缺乏玩家拖曳時經過端口所產生的「鎖定歷史(hover history)」。
+        // 若落點(endX, endY)在建築內但非精確命中端口，將導致判定斷線(無法連接建築)。
+        // 這裡透過手動指定目標建築與最近端口，以觸發後續的 targetPort 鎖定邏輯。
+        if (this.activeDrag && window.GameEngine && window.UIManager) {
+            let targetBuilding = null;
+            if (targetEntityId) {
+                targetBuilding = window.GameEngine.state.mapEntities.find(e => e.id === targetEntityId);
+            }
+            if (!targetBuilding) {
+                targetBuilding = window.GameEngine.state.mapEntities.find(e => 
+                    window.UIManager.isPointInsideEntity(e, endX, endY)
+                );
+            }
+            // [向下相容] 若沒有傳入 targetEntityId 且坐標反查失敗，則從 ghostsData 的最後一點反查 (以相容舊腳本)
+            if (!targetBuilding && Array.isArray(ghostsData) && ghostsData.length > 0) {
+                const lastGhost = ghostsData[ghostsData.length - 1];
+                const TS = window.GameEngine.TILE_SIZE || 20;
+                const offset = window.GameEngine.state.mapOffset || { x: 0, y: 0 };
+                const scale = this.getRouteScale();
+                const gridUnit = TS / scale;
+                // ghostsData 是 grid coordinates (scale 轉換過的值)
+                const ghostWorldX = (lastGhost.x + offset.x * scale) * gridUnit;
+                const ghostWorldY = (lastGhost.y + offset.y * scale) * gridUnit;
+                targetBuilding = window.GameEngine.state.mapEntities.find(e => 
+                    window.UIManager.isPointInsideEntity(e, ghostWorldX, ghostWorldY) || 
+                    Math.hypot(e.x - ghostWorldX, e.y - ghostWorldY) < (Math.max(e.w, e.h) || TS) * 1.5
+                );
+            }
+            if (targetBuilding) {
+                const ports = window.UIManager.getBuildingPortSlots(targetBuilding) || [];
+                let bestPort = null;
+                let minDist = Infinity;
+                // [腳本回放修復] 使用 ghost 端點的世界座標計算最近端口，而非滑鼠座標 (endX/endY)
+                let refX = endX, refY = endY;
+                if (Array.isArray(ghostsData) && ghostsData.length > 0) {
+                    const lastGhost = ghostsData[ghostsData.length - 1];
+                    const TS = window.GameEngine.TILE_SIZE || 20;
+                    const offset = window.GameEngine.state.mapOffset || { x: 0, y: 0 };
+                    const scale = this.getRouteScale();
+                    const gridUnit = TS / scale;
+                    refX = (lastGhost.x + offset.x * scale) * gridUnit;
+                    refY = (lastGhost.y + offset.y * scale) * gridUnit;
+                }
+                for (const p of ports) {
+                    const dist = Math.hypot(p.x - refX, p.y - refY);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        bestPort = p;
+                    }
+                }
+                if (bestPort) {
+                    this.activeDrag.targetBuilding = targetBuilding;
+                    this.activeDrag.targetPort = bestPort;
+                }
+            }
+        }
+
         this.dragSession.updateDragNow(endX, endY);
         
         if (ghostsData && ghostsData.length > 0) {
             this.ghosts = ghostsData;
+            this.isValid = true;
+            if (this.activeDrag) {
+                // [腳本回放修復] 將 targetBuilding 與 targetPort 注入 routeContext
+                const tbld = this.activeDrag.targetBuilding || null;
+                const tprt = this.activeDrag.targetPort || null;
+                if (this.activeDrag.routeContext) {
+                    this.activeDrag.routeContext.isValid = true;
+                    this.activeDrag.routeContext.ghosts = ghostsData;
+                    if (tbld) this.activeDrag.routeContext.targetBuilding = tbld;
+                    if (tprt) this.activeDrag.routeContext.targetPort = tprt;
+                } else {
+                    this.activeDrag.routeContext = {
+                        isValid: true,
+                        ghosts: ghostsData,
+                        routeWidth: this.activeDrag.routeWidth || 1,
+                        targetBuilding: tbld,
+                        targetPort: tprt
+                    };
+                }
+            }
         }
 
         const result = this.dragSubmission.submitDrag(null, finalGroupId);

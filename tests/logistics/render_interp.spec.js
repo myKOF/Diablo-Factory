@@ -56,6 +56,32 @@ test('渲染插值:平滑追趕 + 路線換線吸附 + 靜止不漂移', async (
     expect(r.off, '關閉插值應直接回傳權威進度').toBeCloseTo(0.77, 5);
 });
 
+test('渲染插值:worker 權威位置小幅回落時不得讓畫面倒退抖動', async ({ page }) => {
+    test.setTimeout(45000);
+    await page.goto('/');
+    await page.waitForFunction(() => !!(window.GameEngine), { timeout: 15000 });
+
+    const result = await page.evaluate(async () => {
+        const { LogisticsRenderer } = await import('/src/renderers/logistics_renderer.js?v=' + Date.now());
+
+        const route = [{ x: 0, y: 0 }, { x: 400, y: 0 }];
+        let nowMs = 1000;
+        const scene = { time: { get now() { return nowMs; } } };
+        const transfer = { id: 'small-regression', efficiency: 4, routePoints: route };
+
+        LogisticsRenderer.getInterpolatedProgress(transfer, 0.5, route, scene);
+        nowMs += 16;
+        const smallRegression = LogisticsRenderer.getInterpolatedProgress(transfer, 0.495, route, scene);
+        nowMs += 16;
+        const largeRegression = LogisticsRenderer.getInterpolatedProgress(transfer, 0.42, route, scene);
+
+        return { smallRegression, largeRegression };
+    });
+
+    expect(result.smallRegression, '小幅權威回落應保持顯示位置,避免全線倒退抖動').toBeCloseTo(0.5, 5);
+    expect(result.largeRegression, '大幅回落仍應吸附,保留重路由/換線防護').toBeCloseTo(0.42, 5);
+});
+
 test('連續轉彎物品渲染取樣不可跳幀瞬移', async ({ page }) => {
     await page.goto('/');
     await page.waitForFunction(() => !!(window.GameEngine), { timeout: 15000 });

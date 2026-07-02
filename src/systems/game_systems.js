@@ -183,11 +183,83 @@ export class GameEngine {
     static _executeSingleProduction(clickedConfigId, building) { BuildingSystem._executeSingleProduction(this.state, this, clickedConfigId, building); }
     static resolveAppropriateUnitId(clickedId, building) { return BuildingSystem.resolveAppropriateUnitId(this.state, this, clickedId, building); }
 
+    /**
+     * 動態 ID 解析與雙驗證
+     * 如果依賴的硬編碼 ID 找不到，利用座標與類型自動搜尋合適的目標並取代。
+     */
+    static resolveDynamicId(originalId, type, x, y, radius = 50) {
+        if (!originalId && !type) return originalId;
+        
+        // 1. 嘗試完全匹配
+        let found = this.state.mapEntities.find(e => e.id === originalId);
+        if (!found && this.state.units) {
+            for (const cat in this.state.units) {
+                found = this.state.units[cat].find(u => u.id === originalId);
+                if (found) break;
+            }
+        }
+        if (found) return found.id;
+
+        // 2. 如果沒給 fallback 座標與類型，只能放棄
+        if (!type || typeof x !== 'number' || typeof y !== 'number') return originalId;
+
+        GameEngine.addLog(`[防錯] 找不到實體 ${originalId}，嘗試透過雙驗證反查 (${type} at ${x},${y})...`, "SYSTEM");
+
+        // 3. 掃描最近的建築
+        let closest = null;
+        let minDist = radius;
+
+        this.state.mapEntities.forEach(e => {
+            if (e.type1 === type || e.model === type) {
+                const dist = Math.hypot(e.x - x, e.y - y);
+                if (dist <= minDist) {
+                    minDist = dist;
+                    closest = e;
+                }
+            }
+        });
+
+        // 4. 掃描最近的單位
+        if (!closest && this.state.units) {
+            for (const cat in this.state.units) {
+                this.state.units[cat].forEach(u => {
+                    if (u.type1 === type || u.model === type) {
+                        const dist = Math.hypot(u.x - x, u.y - y);
+                        if (dist <= minDist) {
+                            minDist = dist;
+                            closest = u;
+                        }
+                    }
+                });
+            }
+        }
+
+        if (closest) {
+            GameEngine.addLog(`[防錯] 成功將 ${originalId} 取代為新的 ID: ${closest.id}`, "SYSTEM");
+            return closest.id;
+        }
+
+        GameEngine.addLog(`[防錯] 雙驗證失敗，無法在 (${x},${y}) 附近找到類型 ${type} 的實體。`, "SYSTEM");
+        return originalId;
+    }
+
     static issueCommand(unitIds, command, targetId, x, y) {
         // 標準化的工人指令介面，方便邏輯錄製與腳本化執行
         if (!unitIds || !Array.isArray(unitIds)) return;
         const allUnits = [...(this.state.units.villagers || []), ...(this.state.units.npcs || [])];
-        const selectedUnits = allUnits.filter(u => unitIds.includes(u.id));
+        let selectedUnits = allUnits.filter(u => unitIds.includes(u.id));
+
+        // [相容舊版腳本防錯] 若硬編碼 ID 找不到單位，自動指派閒置單位代勞
+        if (selectedUnits.length === 0) {
+            const idleVillagers = (this.state.units.villagers || []).filter(v => v.state === 'IDLE' || !v.task);
+            if (idleVillagers.length > 0) {
+                selectedUnits = idleVillagers.slice(0, Math.max(1, unitIds.length));
+                GameEngine.addLog(`[防錯] 找不到指定單位，自動指派 ${selectedUnits.length} 名閒置工人代勞。`, "SYSTEM");
+            } else if (this.state.units.villagers && this.state.units.villagers.length > 0) {
+                selectedUnits = [this.state.units.villagers[0]];
+            }
+        }
+
         if (selectedUnits.length === 0) return;
 
         let target = null;
@@ -211,7 +283,14 @@ export class GameEngine {
                     this.addLog(`[命令] 工人 ${v.id} 前往網格採集: ${target.type1} (${target.gx}, ${target.gy})`, 'SYSTEM');
                 }
             } else if (command === 'MOVE') {
-                this.workerSystem?.moveVillager(v, x, y);
+                if (target && this.workerSystem) {
+                    const handled = this.workerSystem.handleWorkerCommand(v, target);
+                    if (!handled) {
+                        this.workerSystem.moveVillager(v, x, y);
+                    }
+                } else {
+                    this.workerSystem?.moveVillager(v, x, y);
+                }
                 this.addLog(`[命令] 工人 ${v.id} 移動至 (${x}, ${y})`, 'SYSTEM');
             } else if (command === 'ATTACK' && target) {
                 v.state = 'MOVING_TO_ATTACK';

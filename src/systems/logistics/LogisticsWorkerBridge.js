@@ -35,6 +35,24 @@ export class LogisticsWorkerBridge {
         // 避免「step 比固定 500ms 久」時誤判逾時、在前一步未回前又送新步 → worker 訊息佇列無限堆積、
         // 延遲隨時間越積越大(表現為移動越來越頓、停頓從 0.2s 漲到 1s)。
         this._stepTimeEma = 0;
+        // [TEMP-DIAG] worker 即時轉發的診斷事件(topology/frozenChange)掛勾;由 LogisticsTransferSystem
+        // 接上,把事件寫進 engine.addLog(...,'LOGISTICS'),讓錄製功能可一併收進匯出腳本。
+        this.onDiagEvent = null;
+    }
+
+    // [TEMP-DIAG][worker 內部狀態追查] 純轉發,不改邏輯,問題定位後移除。
+    // 讓 worker 針對指定 lineId 記錄內部凍結狀態(存於 worker 內部緩衝區,不即時洗版)。
+    setDiagLineId(lineId) {
+        if (this.worker) this.worker.postMessage({ type: 'diag', lineId: lineId || null });
+    }
+
+    // [TEMP-DIAG] 一次性取回 worker 緩衝區內容(Promise,resolve 為 entries 陣列)。
+    requestDiagDump() {
+        if (!this.worker) return Promise.resolve([]);
+        return new Promise((resolve) => {
+            this._diagDumpResolve = resolve;
+            this.worker.postMessage({ type: 'diagDump' });
+        });
     }
 
     // 主執行緒位置相對「當下」落後的模擬秒數估計:在途(已送未套)+ 已累積未送 + 本 tick 即將送出的 dt。
@@ -44,6 +62,20 @@ export class LogisticsWorkerBridge {
     }
 
     _onMessage(msg) {
+        // [TEMP-DIAG] worker 一次性回報緩衝區內容(見 dumpLogisticsWorkerDiag())。
+        if (msg && msg.type === 'diagDumpResult') {
+            if (typeof this._diagDumpResolve === 'function') {
+                const resolve = this._diagDumpResolve;
+                this._diagDumpResolve = null;
+                resolve(msg.entries || []);
+            }
+            return;
+        }
+        if (msg && msg.type === 'diagEvent') {
+            // [TEMP-DIAG] worker 即時轉發的單筆診斷事件(見 logistics.worker.js pushDiag)。
+            if (typeof this.onDiagEvent === 'function') this.onDiagEvent(msg.entry);
+            return;
+        }
         if (msg && msg.type === 'result') {
             // [抵達不漏] 高負載下 worker 會背靠背回多個結果(本函式末端的 _flush 會再觸發下一步),
             // 而主執行緒每 tick 才 pullResult 一次。kin 是絕對位置,只留最新即可;但 arrivals 是一次性事件,
@@ -72,14 +104,49 @@ export class LogisticsWorkerBridge {
     _topologySignature(state) {
         const lines = state.logisticsLines || [];
         const nodes = state.logisticsMergeNodes || [];
+        const num = (value) => Number.isFinite(Number(value)) ? Math.round(Number(value) * 100) / 100 : '';
+        const pointSig = (point) => point ? `${num(point.x)},${num(point.y)}` : '';
+        const portSig = (port) => {
+            if (!port) return '';
+            return [
+                pointSig(port),
+                port.dir || '',
+                port.width || '',
+                port.slotIndex ?? '',
+                port.defIndex ?? ''
+            ].join(',');
+        };
         let s = `${lines.length}|${nodes.length}`;
         for (let i = 0; i < lines.length; i++) {
-            const rp = lines[i] && lines[i].routePoints;
-            s += `;${lines[i] && (lines[i].id || lines[i].groupId) || ''}:${Array.isArray(rp) ? rp.length : 0}`;
+            const line = lines[i];
+            const rp = line && line.routePoints;
+            const routeSig = Array.isArray(rp)
+                ? rp.map(pointSig).join('>')
+                : '';
+            s += [
+                ';',
+                line && (line.id || line.groupId) || '',
+                line?.groupId || '',
+                line?.sourceId || '',
+                line?.targetId || '',
+                portSig(line?.sourcePort),
+                portSig(line?.targetPort),
+                pointSig(line?.targetPoint),
+                Array.isArray(rp) ? rp.length : 0,
+                routeSig
+            ].join(':');
         }
         for (let i = 0; i < nodes.length; i++) {
             const n = nodes[i];
-            s += `;${n && n.cellKey || ''}>${n && n.outputGroupId || ''}<${(n && n.inputGroupIds || []).join(',')}`;
+            s += [
+                ';node',
+                n && n.cellKey || '',
+                pointSig(n?.point),
+                n && n.outputGroupId || '',
+                (n && n.inputGroupIds || []).join(','),
+                n?.roundRobinIndex ?? '',
+                n?.currentActiveSlot ?? ''
+            ].join(':');
         }
         return s;
     }
@@ -155,6 +222,20 @@ export class LogisticsWorkerBridge {
             state.activeTransfers = state.activeTransfers.filter(t => !arrivedIds.has(t.id));
         }
         return arrivals;
+    }
+
+    // 主執行緒可能用建築端口資料補判入庫(例如多端口/終點前一格閘門),worker 必須立即忘掉同一批物品。
+    // 否則 worker 內的舊前車會繼續限制後車 maxAllowedProgress,形成「主執行緒已入庫但 worker 仍堵線」。
+    removeTransfers(ids) {
+        const doomed = new Set((Array.isArray(ids) ? ids : [ids]).filter(Boolean));
+        if (!doomed.size) return;
+        for (const id of doomed) this.sentIds.delete(id);
+        if (this._arrivalQueue.length) this._arrivalQueue = this._arrivalQueue.filter(a => !doomed.has(a?.id));
+        if (this.latest) {
+            if (Array.isArray(this.latest.kin)) this.latest.kin = this.latest.kin.filter(k => !doomed.has(k?.id));
+            if (Array.isArray(this.latest.arrivals)) this.latest.arrivals = this.latest.arrivals.filter(a => !doomed.has(a?.id));
+        }
+        if (this.worker) this.worker.postMessage({ type: 'remove', ids: Array.from(doomed) });
     }
 
     // [流量控制] 累積本 tick 的 deltaTime;worker 閒置時才真正送出 step(否則等它回覆再送)。
