@@ -87,6 +87,12 @@ function broadcastReload(changedPath) {
 function handleFileChange(dirName, filename) {
     if (!filename) return;
 
+    // 忽略 src/debug 下的所有變更（例如存檔錄製的腳本），避免自動刷新瀏覽器
+    const normalizedRelative = path.join(dirName, filename).replace(/\\/g, '/');
+    if (normalizedRelative.startsWith('src/debug/')) {
+        return;
+    }
+
     const ext = path.extname(filename).toLowerCase();
     if (!ALLOWED_EXTENSIONS.has(ext)) return;
 

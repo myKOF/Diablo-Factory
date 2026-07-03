@@ -234,9 +234,6 @@ export class LogisticsTransferQueues {
 
                 const blockedAtBreakpoint = !transfer.targetId && !isMergeInput && queuedDistance >= breakpointLimit - 0.1;
                 transfer.queueBlocked = queuedDistance < desired - 0.1 || blockedAtBreakpoint;
-                if (useCanonical) {
-                    transfer.routePoints = canonical.points.map(point => ({ ...point }));
-                }
                 let nextDistance = stopBeforeSuppressedEndpoint && currentDistance > breakpointLimit
                     ? breakpointLimit
                     : queuedDistance;
@@ -245,7 +242,22 @@ export class LogisticsTransferQueues {
                 if (!(stopBeforeSuppressedEndpoint && currentDistance > breakpointLimit)) {
                     nextDistance = Math.max(nextDistance, Math.min(currentDistance, totalLength));
                 }
-                logisticsTransportArrayState.setTransferDistance(transfer, nextDistance, totalLength, TS);
+                // [根因修正] nextDistance/totalLength 在 useCanonical 時是「投影到 canonical 路線」算出來的。
+                // canonical 空間只負責排序與間距比較,套用回這台車自己時必須換回自己路線的座標系,
+                // 且完全不動 routePoints/targetPoint 本身(曾有舊寫法直接把 routePoints 換成別人的路線,
+                // targetPoint 未跟著換而永久卡死)。換算不可用「canonical 上的點最近點投影回自己路線」:
+                // 同群組混雜新舊世代路線(中段拉分支後的常態過渡)時,自己的路線在分岔點後與 canonical
+                // 幾何分歧,own→canonical→own 的往返投影非恆等變換——排隊維持不動的物品會被每個子步
+                // 吸回分岔點,progress 精準釘死並經間距鏈鎖住整條隊伍。改為把 canonical 空間決定的
+                // 「位移量」(nextDistance - desired)直接平移到自己路線:共同前綴段上與點投影逐點等價,
+                // 分岔段後保證只停不退,物品沿自己的路線走完並以自洽的 targetPoint 正常送達。
+                let ownDistance = nextDistance;
+                let ownTotalLength = totalLength;
+                if (useCanonical) {
+                    ownDistance = Math.max(0, Math.min(sourceLength, sourceDistance + (nextDistance - desired)));
+                    ownTotalLength = sourceLength;
+                }
+                logisticsTransportArrayState.setTransferDistance(transfer, ownDistance, ownTotalLength, TS);
                 transfer._queuedDistance = nextDistance;
                 if (transfer.targetId || isMergeInput) {
                     delete transfer.blockedOnBrokenLine;

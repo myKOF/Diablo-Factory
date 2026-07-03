@@ -307,6 +307,11 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
 
                 let spacing = cellSize;
                 const desired = (t.progress || 0) * totalLength;
+                // [多世代路線] own↔canonical 換算一律以「當前位置」為錨點平移(canonicalCurrent ± Δ),
+                // 不用「起點偏移」(startDistOnCanonical + ownDist):起點偏移假設整條 own 路線與 canonical
+                // 幾何重合,同群組混雜新舊世代路線(中段拉分支後的常態)時分岔段的換算會失真。
+                // 共同前綴段上兩種算法代數相等,既有行為不變。
+                const canonicalCurrent = useCanonical ? getDistance(t) : desired;
 
                 let maxDist = totalLength;
                 if (j === 0) {
@@ -323,9 +328,9 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
                     const frontStep = stepDt * getTransferSpeed(frontItem) * cellSize;
                     const frontProjectedCanonical = Math.min(frontCanonicalDist + frontStep, prevMaxCanonicalDist);
                     const physicalLimitCanonical = Math.max(startDistOnCanonical, frontProjectedCanonical - spacing);
-                    let limitCanonical = startDistOnCanonical + totalLength;
+                    let limitCanonical = canonicalCurrent + (totalLength - desired);
                     if (desired <= dist_pn) {
-                        const targetLimitCanonical = startDistOnCanonical + dist_pn;
+                        const targetLimitCanonical = canonicalCurrent + (dist_pn - desired);
                         if (frontCanonicalDist > targetLimitCanonical || prevMaxCanonicalDist > targetLimitCanonical) {
                             limitCanonical = Math.min(targetLimitCanonical, physicalLimitCanonical);
                         } else {
@@ -334,7 +339,7 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
                     } else {
                         limitCanonical = physicalLimitCanonical;
                     }
-                    maxDist = Math.max(0, limitCanonical - startDistOnCanonical);
+                    maxDist = Math.max(0, desired + (limitCanonical - canonicalCurrent));
                 }
 
                 if (isMergeOutputTransfer(t) && simSystem &&
@@ -343,7 +348,7 @@ export function runLogisticsKinematics(ctx, state, deltaTime) {
                     if (Number.isFinite(yieldLimit)) maxDist = Math.min(maxDist, yieldLimit);
                 }
 
-                prevMaxCanonicalDist = startDistOnCanonical + maxDist;
+                prevMaxCanonicalDist = canonicalCurrent + (maxDist - desired);
                 t.maxAllowedProgress = maxDist / totalLength;
                 if (isMergeInput) t.queueBlocked = maxDist < totalLength - 0.1 && desired >= maxDist - 0.1;
             }

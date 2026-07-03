@@ -25,7 +25,15 @@ export class LogisticsTransferRerouter {
     }
 
     updateOnLogisticsChange(state, affectedGroupIds = null) {
-        if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return;
+        // [根因修正] 找不到 currentSeg / 算不出有效路線時,這裡會把物品從 state.activeTransfers
+        // 退款+移除,但從未告知 worker——worker 的 byId 裡這個 id 永遠不會被清掉,變成一個「幽靈物品」
+        // 繼續參與該線的排隊間距計算(佔住位置擋住後車),永遠卡在移除當下的 progress/maxAllowedProgress,
+        // 且完全不會出現在主執行緒的 activeTransfers,導致所有掃描主執行緒資料的診斷都看不到它、
+        // 而 worker 端凍結物品數卻持續攀升——這正是「拉分支後過幾秒才顯現的卡死,且找不到主執行緒側落差」
+        // 的真根因。改為收集本次被移除的 id,回傳給呼叫端(見 LogisticsTransferSystem)通知
+        // workerBridge.removeTransfers(...) 一併清掉。
+        const removedTransferIds = [];
+        if (!state || !Array.isArray(state.activeTransfers) || state.activeTransfers.length === 0) return removedTransferIds;
         const system = this.system;
         const GameEngine = this.gameEngine;
         const TS = GameEngine.TILE_SIZE || 20;
@@ -152,23 +160,45 @@ export class LogisticsTransferRerouter {
 
             const currentPos = getPointOnPathProgress(t.routePoints, t.progress, pathMetricsCache);
 
+            // [根因修正] 純「距離最近者勝」會讓中段拉出的新分支(即使跟這個物品毫無關係、只是幾何上剛好經過
+            // 附近)把正在正常運送的物品「搶走」——物品被重新指派到新分支上,若新分支還沒接到任何終點
+            // (targetId 為空),物品從此進度雖然還會前進,卻永遠送不到、也不再回報任何錯誤(靜默遺失產能)。
+            // 優先保留物品目前所在的群組(只要它仍是容差內的有效候選),只有在目前群組不再是候選時
+            // (真的斷線/延伸/接回等既有情境)才照舊選「距離最近」的線段。
+            // [根因修正 2] 同一個群組內,不同線段各自的 targetId 可能不一致(把一條無終點的死路分支
+            // 合併進原本正常送貨的群組後,群組裡就同時存在「有終點」與「無終點」的線段)。純比同群組
+            // 還不夠,還要在「同群組」內優先選有 targetId 的線段,否則物品可能被同群組裡剛好距離更近的
+            // 死路段搶走,一樣會靜默送不到。
+            // [根因修正 3] 中段再次拉分支時,原本物品實際延續的那段路(舊 back segments)會被切割改配
+            // 到全新的 detachedGroupId(但仍保有 targetId);而新拉出的那條分支,無論有沒有設終點,
+            // 一律沿用原本的 sourceGroupId(見 LogisticsDragSubmission.js 的 upsertLogisticsLine 呼叫)。
+            // 若「同群組」優先於「有終點」,就會讓「同群組但無終點」的新分支(tier 舊版=1)搶贏
+            // 「跨群組但有終點」的正確延續段(tier 舊版=2),物品從此送不到。
+            // 故改為「有終點」優先於「同群組」:0=同群組+有終點(最優)、1=跨群組+有終點、
+            // 2=同群組但無終點、3=跨群組且無終點(真斷線,才會落到這裡)。
             let currentSeg = null;
             let bestSegDist = Infinity;
+            let currentSegTier = Infinity;
             getCandidateLines(currentPos).forEach(line => {
                 if (!line) return;
                 const route = Array.isArray(line.routePoints) && line.routePoints.length >= 2
                     ? line.routePoints
                     : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
                 const d = getDistanceToPath(route, currentPos, pathMetricsCache);
-                if (d < bestSegDist && d <= TS * 0.75) {
+                if (d > TS * 0.75) return;
+                const sameGroup = (line.groupId || line.id) === t.lineId;
+                const tier = line.targetId ? (sameGroup ? 0 : 1) : (sameGroup ? 2 : 3);
+                if (tier < currentSegTier || (tier === currentSegTier && d < bestSegDist)) {
                     bestSegDist = d;
                     currentSeg = line;
+                    currentSegTier = tier;
                 }
             });
 
             if (!currentSeg) {
                 recoverTransferToSource(t);
                 state.activeTransfers.splice(i, 1);
+                removedTransferIds.push(t.id);
                 continue;
             }
 
@@ -398,6 +428,7 @@ export class LogisticsTransferRerouter {
             if (pathPoints.length < 2) {
                 recoverTransferToSource(t);
                 state.activeTransfers.splice(i, 1);
+                removedTransferIds.push(t.id);
                 continue;
             }
 
@@ -435,5 +466,6 @@ export class LogisticsTransferRerouter {
 
         system.applyLogisticsMergeNodes(state);
         system.applyBlockedTransferQueues(state);
+        return removedTransferIds;
     }
 }

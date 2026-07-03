@@ -65,3 +65,42 @@ test('Import and Replay Flow E2E Test', async ({ page }) => {
         fs.unlinkSync(dummyPath);
     } catch (e) {}
 });
+
+test('Save Script No Reload Test', async ({ page }) => {
+    // 1. 開啟遊戲頁面
+    await page.goto('/');
+    await page.waitForTimeout(1000);
+
+    // 2. 在 window 上設定自訂標記，用以偵測是否刷新
+    await page.evaluate(() => {
+        window.NO_RELOAD_TEST_FLAG = 'STAY_SAME';
+    });
+
+    // 3. 模擬呼叫保存腳本 API 寫入 src/debug/ 目錄
+    const saveResponse = await page.evaluate(async () => {
+        const response = await fetch('/api/save-script', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                filename: 'test_scripts/temp_no_reload_test.spec.js',
+                content: '// temporary file for testing'
+            })
+        });
+        return await response.json();
+    });
+
+    expect(saveResponse.success).toBe(true);
+
+    // 4. 等待 2 秒，確保 dev-server 檔案監聽反應時間已過
+    await page.waitForTimeout(2000);
+
+    // 5. 驗證 window 上的標記依然存在，未被重新整理刷新
+    const flag = await page.evaluate(() => window.NO_RELOAD_TEST_FLAG);
+    expect(flag).toBe('STAY_SAME');
+
+    // 清理生成的臨時測試檔案
+    const tempFile = path.join(__dirname, '../../src/debug/test_scripts/temp_no_reload_test.spec.js');
+    try {
+        fs.unlinkSync(tempFile);
+    } catch (e) {}
+});

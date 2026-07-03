@@ -1069,6 +1069,12 @@ export class LogisticsTransferSystem {
             const sample = Array.isArray(entry.sample) ? entry.sample.slice(0, 2) : [];
             msg = `[WORKER診斷] line=${entry.lineId} 凍結物品數 ${entry.frozenCountBefore}→${entry.frozenCountNow}(共${entry.itemCount}件) seq=${entry.seq}` +
                 (sample.length ? ` ${JSON.stringify(sample)}` : '');
+        } else if (entry.kind === 'readdMismatch' || entry.kind === 'freshAddMismatch') {
+            const label = entry.kind === 'readdMismatch' ? '重送' : '首次新增';
+            msg = `[WORKER診斷] worker ${label}落差 id=${entry.id} lineId=${entry.lineId} progress=${entry.newProgress} ` +
+                `落差 ${entry.oldMismatch === null ? '(無舊值)' : entry.oldMismatch + 'px'}→${entry.newMismatch}px ` +
+                `舊(end=${JSON.stringify(entry.oldEnd)},target=${JSON.stringify(entry.oldTargetPoint)}) ` +
+                `新(end=${JSON.stringify(entry.newEnd)},target=${JSON.stringify(entry.newTargetPoint)})`;
         } else {
             msg = `[WORKER診斷] ${JSON.stringify(entry)}`;
         }
@@ -1125,6 +1131,27 @@ export class LogisticsTransferSystem {
         let arrivals;
         if (this._workerBridge) {
             arrivals = this._workerBridge.pullResult(state);
+            // [TEMP-DIAG] 每 tick(不侷限在拓樸變更後的 20-tick 重算視窗內)直接掃一次主執行緒自己的
+            // activeTransfers,找 routePoints 末端跟 targetPoint 對不上的項目——因為凍結物品往往是在
+            // 拓樸變更後「過了好幾秒、進度推進到終點附近」才顯現落差,遠超過 20-tick(=1 秒)視窗,
+            // 之前把診斷放在視窗內導致永遠看不到。每個 id 只記第一次發現,避免每 tick 重複洗版。
+            if (window.LOGISTICS_WORKER === true && this.engine && typeof this.engine.addLog === 'function') {
+                if (!this._diagReportedMismatchIds) this._diagReportedMismatchIds = new Set();
+                const TS = this.engine?.TILE_SIZE || 20;
+                for (const t of state.activeTransfers) {
+                    if (!t || !t.id || this._diagReportedMismatchIds.has(t.id)) continue;
+                    const end = Array.isArray(t.routePoints) && t.routePoints.length ? t.routePoints[t.routePoints.length - 1] : null;
+                    const tp = t.targetPoint;
+                    const md = (end && tp) ? Math.hypot((end.x || 0) - tp.x, (end.y || 0) - tp.y) : 0;
+                    if (md > TS * 1.5) {
+                        this._diagReportedMismatchIds.add(t.id);
+                        this.engine.addLog(
+                            `[WORKER診斷] 主執行緒側落差(每tick掃描) id=${t.id} lineId=${t.lineId} 落差=${Math.round(md)}px progress=${(+t.progress || 0).toFixed(4)} routeEnd=${JSON.stringify(end)} targetPoint=${JSON.stringify(tp)}`,
+                            'LOGISTICS'
+                        );
+                    }
+                }
+            }
             // [拓樸變更重新路由] worker 持有在途物品的「權威路線」;線段被延伸/重塑/刪除後,這些 routePoints
             // 可能指向已不存在的舊末端而失效。主執行緒在 build/delete 時的重算未必涵蓋所有在途物品
             // (例如合流輸出群組的已合流物品),而 worker 自身不會重算 → 物品沿失效舊路推進、走錯路堵死
@@ -1197,13 +1224,21 @@ export class LogisticsTransferSystem {
                         }
                     }
                     if (affectedGroupIds === null || affectedGroupIds.size > 0) {
-                        conveyorSystem.updateActiveTransfersOnLogisticsChange(state, affectedGroupIds);
+                        // [根因修正] rerouter 找不到有效路線時會把物品從 state.activeTransfers 移除退款,
+                        // 但 worker 端的 byId 副本從未被告知——變成永遠留在 worker 排隊間距計算裡的「幽靈
+                        // 物品」,卡在移除當下的 progress 擋住後車,且完全不出現在主執行緒資料裡讓人查不到。
+                        // 這裡把 rerouter 回報的已移除 id 轉告 workerBridge 一併清除。
+                        const removedByRerouter = conveyorSystem.updateActiveTransfersOnLogisticsChange(state, affectedGroupIds);
+                        if (Array.isArray(removedByRerouter) && removedByRerouter.length && typeof this._workerBridge.removeTransfers === 'function') {
+                            this._workerBridge.removeTransfers(removedByRerouter);
+                        }
                         // rerouter 只改主執行緒 routePoints;sentIds 僅在拓樸變更時清除,否則修正後路線不會重送 worker。
                         // 視窗內把「路線屬於本次改動群組」(或逃生艙下的全部)的物品從 sentIds 移除以強制重送。
                         const sent = this._workerBridge.sentIds;
                         if (sent && typeof sent.delete === 'function') {
                             for (const t of state.activeTransfers) {
-                                if (t && t.id && (affectedGroupIds === null || (t.lineId && affectedGroupIds.has(t.lineId)))) {
+                                if (!t || !t.id) continue;
+                                if (affectedGroupIds === null || (t.lineId && affectedGroupIds.has(t.lineId))) {
                                     sent.delete(t.id);
                                 }
                             }

@@ -67,6 +67,33 @@ function applyAdds(adds) {
     if (!Array.isArray(adds)) return;
     for (const t of adds) {
         if (!t || !t.id) continue;
+        // [TEMP-DIAG] 兩種情況都要抓:(a) 重送(re-add,同 id 覆蓋既有項)有沒有把舊的落差修正掉,
+        // (b) 送進來的這筆本身(不論是不是第一次)routeEnd 跟 targetPoint 是否本來就對不上——
+        // 只檢查前者會漏掉「送進來的資料本身就在這一刻才產生落差」的情況。只在超出容差時才記。
+        const existing = byId.get(t.id);
+        if (DIAG_MODE) {
+            const newEndRaw = Array.isArray(t.routePoints) && t.routePoints.length ? t.routePoints[t.routePoints.length - 1] : null;
+            const newTP = t.targetPoint;
+            const newMismatch = (newEndRaw && newTP) ? Math.hypot((newEndRaw.x || 0) - newTP.x, (newEndRaw.y || 0) - newTP.y) : 0;
+            let oldMismatch = null;
+            let oldEnd = null;
+            let oldTP = null;
+            if (existing) {
+                oldEnd = Array.isArray(existing.routePoints) && existing.routePoints.length ? existing.routePoints[existing.routePoints.length - 1] : null;
+                oldTP = existing.targetPoint;
+                oldMismatch = (oldEnd && oldTP) ? Math.hypot((oldEnd.x || 0) - oldTP.x, (oldEnd.y || 0) - oldTP.y) : 0;
+            }
+            if (newMismatch > TILE_SIZE * 1.5 || (oldMismatch !== null && oldMismatch > TILE_SIZE * 1.5)) {
+                pushDiag({
+                    kind: existing ? 'readdMismatch' : 'freshAddMismatch',
+                    id: t.id, lineId: t.lineId,
+                    oldMismatch: oldMismatch === null ? null : Math.round(oldMismatch),
+                    newMismatch: Math.round(newMismatch),
+                    oldEnd, oldTargetPoint: oldTP, newEnd: newEndRaw, newTargetPoint: newTP,
+                    newProgress: +((+t.progress) || 0).toFixed(4)
+                });
+            }
+        }
         // 同路線的物品共用一份 routePoints 陣列,讓參照快取命中(見上)。
         if (t.routePoints) t.routePoints = internRoute(t.routePoints);
         byId.set(t.id, t);
