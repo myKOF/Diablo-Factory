@@ -78,24 +78,51 @@ export class RoutingGridBuilder {
         }
     }
 
+    // [建造卡頓根因] 相位計時實測:整個拖曳建造 ~200ms 卡頓的 ~90% 在本函式(每次 ~90-100ms,
+    // startDrag 與 submitDrag 的 revalidate 各跑一次),且成本與新線長短無關——是「全地圖格網逐格
+    // 展開 + 再整份冗餘複製」的固定成本。三層優化,語意完全等價:
+    //   ①基底展開格網以 (pathfinding.grid 參照, routeScale) 快取——只有建築增減換新 grid 才重建;
+    //   ②成品格網以 (grid, logisticsLines 參照+長度, ignoreLine 群組) memo——同一次拖曳
+    //     startDrag→submitDrag 兩次呼叫參數相同,第二次直接重用(建造會 replaceLogisticsLines
+    //     換陣列參照,自然失效)。router 對格網的臨時改寫(起訖點鬆綁)皆成對還原,重用安全;
+    //   ③展開改為預配置陣列逐格寫入,並只在產出成品時做一次行複製。
     createRoutingGrid(grid, ignoreLine = null) {
-        const expanded = [];
         const routeScale = this.system.getRouteScale();
-        for (let y = 0; y < grid.length; y++) {
-            const sourceRows = [];
-            for (let row = 0; row < routeScale; row++) sourceRows.push([]);
-            for (let x = 0; x < grid[y].length; x++) {
-                const values = Array(routeScale).fill(grid[y][x]);
-                sourceRows.forEach(row => row.push(...values));
-            }
-            expanded.push(...sourceRows);
+        const lines = this.gameEngine.state.logisticsLines || [];
+        const ignoreKey = ignoreLine ? String(ignoreLine.groupId || ignoreLine.id || '') : '';
+        const memo = this._routingGridMemo;
+        if (memo &&
+            memo.grid === grid &&
+            memo.routeScale === routeScale &&
+            memo.lines === lines &&
+            memo.linesLen === lines.length &&
+            memo.ignoreKey === ignoreKey) {
+            return memo.result;
         }
-        const routeGrid = expanded.map(row => row.slice());
 
-        (this.gameEngine.state.logisticsLines || []).forEach(line => {
+        let base = this._baseGridCache;
+        if (!base || base.grid !== grid || base.routeScale !== routeScale) {
+            const expanded = [];
+            for (let y = 0; y < grid.length; y++) {
+                const srcRow = grid[y];
+                const expandedRow = new Array(srcRow.length * routeScale);
+                for (let x = 0; x < srcRow.length; x++) {
+                    const v = srcRow[x];
+                    for (let r = 0; r < routeScale; r++) expandedRow[x * routeScale + r] = v;
+                }
+                // 同一來源列的 routeScale 份內容相同,共用參照;產出成品時的行複製會各自分離。
+                for (let row = 0; row < routeScale; row++) expanded.push(expandedRow);
+            }
+            base = { grid, routeScale, expanded };
+            this._baseGridCache = base;
+        }
+
+        const routeGrid = base.expanded.map(row => row.slice());
+        lines.forEach(line => {
             if (ignoreLine && (line.id === ignoreLine.id || line.groupId === ignoreLine.groupId)) return;
             this.markLineOnGrid(routeGrid, line);
         });
+        this._routingGridMemo = { grid, routeScale, lines, linesLen: lines.length, ignoreKey, result: routeGrid };
         return routeGrid;
     }
 }

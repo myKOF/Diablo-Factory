@@ -1123,6 +1123,21 @@ export class LogisticsTransferSystem {
     _processAutomatedLogisticsImpl(state, deltaTime) {
         if (!state.activeTransfers) state.activeTransfers = [];
 
+        // [建造瞬移防護] 建造/刪除物流線的那一幀主執行緒被同步建造流程阻塞 200~400ms,下一個 logic tick
+        // 的 deltaTime 暴增(引擎上限 0.2s),模擬以粗步長一次補齊 → 全線物品同幀前跳數格(甚至一步跨過
+        // 抵達閘門直接入庫),渲染插值遇 >5% 進度跳變會直接吸附 → 使用者看到「拉分支瞬間物品瞬移/消失」。
+        // 對策:偵測到物流線段數變化(建造/刪除)的這個 tick,把 dt 鉗制回名目步長——被丟棄的是「卡頓那
+        // 一幀的補償時間」,僅建造當下一次;物品從原位置以正常速度繼續,符合「拓樸變更不得改變物品當下
+        // 位置」的不變量。持續高負載下的 worker 粗步長補償(bridge._pendingDt)不受影響。
+        const logisticsLinesLen = Array.isArray(state.logisticsLines) ? state.logisticsLines.length : 0;
+        if (this._lastLogisticsLinesLen !== undefined && logisticsLinesLen !== this._lastLogisticsLinesLen) {
+            deltaTime = Math.min(deltaTime, 0.05);
+            if (this._workerBridge && Number.isFinite(this._workerBridge._pendingDt)) {
+                this._workerBridge._pendingDt = Math.min(this._workerBridge._pendingDt, 0.05);
+            }
+        }
+        this._lastLogisticsLinesLen = logisticsLinesLen;
+
         // [Web Worker] 運動學來源:
         //   預設(旗標關閉)→ 主執行緒就地同步跑 runLogisticsKinematics(已驗證、零延遲)。
         //   啟用 worker(window.LOGISTICS_WORKER=true)→ 套用 worker 上一批結果(1-tick 延遲),

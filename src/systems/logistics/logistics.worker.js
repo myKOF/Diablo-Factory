@@ -326,7 +326,12 @@ self.onmessage = (e) => {
                 transportOffset: t.transportOffset,
                 maxAllowedProgress: t.maxAllowedProgress,
                 queueBlocked: t.queueBlocked === true,
-                mergeVisualTurn: t._mergeVisualTurn || null
+                mergeVisualTurn: t._mergeVisualTurn || null,
+                // [瞬移防護] 純量是在「worker 這份路線」的座標系算出來的;回報路線總長讓主執行緒
+                // 能辨識「主執行緒已換路線(重路由)」的過期純量並拒收,否則舊分數×新總長=物品沿線瞬移。
+                routeTotalPixels: Array.isArray(t.routePoints) && t.routePoints.length >= 2
+                    ? getPathTotalLength(t.routePoints)
+                    : 0
             };
             // [合流重映射] routePoints 參照變了(=worker 內部合流交接換線),把新路線與身分回報主執行緒,
             // 讓渲染改用新輸出線路徑,並更新派發/入庫所需的 targetId/targetPort 等欄位。

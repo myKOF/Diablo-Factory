@@ -134,6 +134,57 @@ export class LogisticsTransferRerouter {
             return groupSegmentsCache.get(groupId);
         };
         const groupRouteCache = new Map();
+        const getCandidateTier = (line, transfer) => {
+            const sameGroup = (line?.groupId || line?.id) === transfer?.lineId;
+            const lineTargetId = line?.targetId || null;
+            const transferTargetId = transfer?.targetId || null;
+            if (transferTargetId) {
+                if (lineTargetId === transferTargetId) return sameGroup ? 0 : 1;
+                if (lineTargetId) return sameGroup ? 2 : 3;
+                return sameGroup ? 4 : 5;
+            }
+            return lineTargetId ? (sameGroup ? 0 : 1) : (sameGroup ? 2 : 3);
+        };
+        const selectBestCandidateLine = (lines, transfer, currentPos) => {
+            let best = null;
+            let bestDist = Infinity;
+            let bestTier = Infinity;
+            (Array.isArray(lines) ? lines : []).forEach(line => {
+                if (!line) return;
+                const route = Array.isArray(line.routePoints) && line.routePoints.length >= 2
+                    ? line.routePoints
+                    : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
+                const d = getDistanceToPath(route, currentPos, pathMetricsCache);
+                if (d > TS * 0.75) return;
+                const tier = getCandidateTier(line, transfer);
+                if (tier < bestTier || (tier === bestTier && d < bestDist)) {
+                    best = line;
+                    bestDist = d;
+                    bestTier = tier;
+                }
+            });
+            return { line: best, tier: bestTier };
+        };
+        const getNearestRouteSubsegment = (route, point) => {
+            if (!Array.isArray(route) || route.length < 2 || !point) return null;
+            let best = null;
+            for (let idx = 0; idx < route.length - 1; idx++) {
+                const a = route[idx];
+                const b = route[idx + 1];
+                if (!a || !b) continue;
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const lenSq = dx * dx + dy * dy;
+                if (lenSq <= 0) continue;
+                const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
+                const proj = { x: a.x + dx * t, y: a.y + dy * t };
+                const distance = Math.hypot(point.x - proj.x, point.y - proj.y);
+                if (!best || distance < best.distance) {
+                    best = { index: idx, start: a, end: b, distance };
+                }
+            }
+            return best;
+        };
 
         // [TEMP-DIAG] 中段拉分支後在途物品 routeEnd 與 targetPoint 對不上的即時偵測(問題定位後移除)。
         // 只在真的超出抵達容差時才印,避免洗版;藉此分辨是「本次沒被納入重算範圍(shouldUpdateTransfer
@@ -176,26 +227,26 @@ export class LogisticsTransferRerouter {
             // 「跨群組但有終點」的正確延續段(tier 舊版=2),物品從此送不到。
             // 故改為「有終點」優先於「同群組」:0=同群組+有終點(最優)、1=跨群組+有終點、
             // 2=同群組但無終點、3=跨群組且無終點(真斷線,才會落到這裡)。
-            let currentSeg = null;
-            let bestSegDist = Infinity;
-            let currentSegTier = Infinity;
-            getCandidateLines(currentPos).forEach(line => {
-                if (!line) return;
-                const route = Array.isArray(line.routePoints) && line.routePoints.length >= 2
-                    ? line.routePoints
-                    : [{ x: line.x, y: line.y }, { x: line.x, y: line.y }];
-                const d = getDistanceToPath(route, currentPos, pathMetricsCache);
-                if (d > TS * 0.75) return;
-                const sameGroup = (line.groupId || line.id) === t.lineId;
-                const tier = line.targetId ? (sameGroup ? 0 : 1) : (sameGroup ? 2 : 3);
-                if (tier < currentSegTier || (tier === currentSegTier && d < bestSegDist)) {
-                    bestSegDist = d;
-                    currentSeg = line;
-                    currentSegTier = tier;
+            // [根因修正 4] 中段切分時,正確下游會被改到 detachedGroupId,但呼叫端的 affectedSet
+            // 可能只含原 sourceGroupId。若只看 affectedSet 內的 relevantLines,既有 targetId 的物品會被
+            // 新拉出的無終點分支搶走。當精準候選沒有找到同目標線段時,擴大到全物流線補找一次。
+            let selectedCandidate = selectBestCandidateLine(getCandidateLines(currentPos), t, currentPos);
+            if (t.targetId && selectedCandidate.tier > 1 && affectedSet) {
+                const expandedCandidate = selectBestCandidateLine(allLines, t, currentPos);
+                if (expandedCandidate.line && expandedCandidate.tier < selectedCandidate.tier) {
+                    selectedCandidate = expandedCandidate;
                 }
-            });
+            }
+            const currentSeg = selectedCandidate.line;
 
             if (!currentSeg) {
+                // [TEMP-DIAG] 拉分支瞬間物品消失/重置調查:記錄每一次「找不到候選線段→退回來源」的移除。
+                if (GameEngine && typeof GameEngine.addLog === 'function') {
+                    GameEngine.addLog(
+                        `[WORKER診斷] rerouter 移除退回來源(無候選線段) id=${t.id} lineId=${t.lineId} progress=${(+t.progress || 0).toFixed(4)} pos=${currentPos ? Math.round(currentPos.x) + ',' + Math.round(currentPos.y) : 'null'}`,
+                        'LOGISTICS'
+                    );
+                }
                 recoverTransferToSource(t);
                 state.activeTransfers.splice(i, 1);
                 removedTransferIds.push(t.id);
@@ -279,19 +330,48 @@ export class LogisticsTransferRerouter {
                 }
 
                 if (startPt && endPt) {
-                    const endpointKey = `${Math.round(startPt.x)},${Math.round(startPt.y)}>${Math.round(endPt.x)},${Math.round(endPt.y)}`;
-                    let shortest = routeCache.shortestPaths.get(endpointKey);
-                    if (!shortest) {
-                        shortest = findShortestNodePath(routeCache.nodes, startPt, endPt, { directed: true });
-                        if (!shortest || shortest.length === 0) {
-                            shortest = findShortestNodePath(routeCache.nodes, startPt, endPt, { directed: false });
-                            routeCache.shortestPaths.set(endpointKey + '_fallback', true);
+                    const findCachedPath = (fromPt, toPt) => {
+                        const endpointKey = `${Math.round(fromPt.x)},${Math.round(fromPt.y)}>${Math.round(toPt.x)},${Math.round(toPt.y)}`;
+                        let cached = routeCache.shortestPaths.get(endpointKey);
+                        if (!cached) {
+                            let points = findShortestNodePath(routeCache.nodes, fromPt, toPt, { directed: true });
+                            let isFallback = false;
+                            if (!points || points.length === 0) {
+                                points = findShortestNodePath(routeCache.nodes, fromPt, toPt, { directed: false });
+                                isFallback = true;
+                            }
+                            cached = { points, isFallback };
+                            routeCache.shortestPaths.set(endpointKey, cached);
                         }
-                        routeCache.shortestPaths.set(endpointKey, shortest);
+                        return {
+                            points: Array.isArray(cached.points) ? cached.points.map(point => ({ ...point })) : cached.points,
+                            isFallback: cached.isFallback === true
+                        };
+                    };
+
+                    let { points: shortest, isFallback } = findCachedPath(startPt, endPt);
+                    const currentRoute = Array.isArray(currentSeg?.routePoints) ? currentSeg.routePoints : [];
+                    const currentSubsegment = getNearestRouteSubsegment(currentRoute, currentPos);
+                    if (currentSubsegment && currentSubsegment.distance <= TS * 0.75) {
+                        // 同群組出現平行新路徑時，source->sink 最短路可能跳過物品所在舊線段；
+                        // 重算路線必須經過當前子段，否則整段回堵隊列會被投影到旁邊新線。
+                        const before = findCachedPath(startPt, currentSubsegment.start);
+                        const after = findCachedPath(currentSubsegment.end, endPt);
+                        if (Array.isArray(before.points) && before.points.length > 0 &&
+                            Array.isArray(after.points) && after.points.length > 0) {
+                            const viaCurrent = [];
+                            before.points.forEach(point => pushUniquePoint(viaCurrent, point));
+                            pushUniquePoint(viaCurrent, currentSubsegment.start);
+                            pushUniquePoint(viaCurrent, currentSubsegment.end);
+                            after.points.forEach(point => pushUniquePoint(viaCurrent, point));
+                            if (viaCurrent.length >= 2 &&
+                                getDistanceToPath(viaCurrent, currentPos, pathMetricsCache) <= TS * 0.75) {
+                                shortest = viaCurrent;
+                                isFallback = before.isFallback || after.isFallback;
+                            }
+                        }
                     }
-                    shortest = Array.isArray(shortest) ? shortest.map(point => ({ ...point })) : shortest;
                     if (shortest && shortest.length >= 2) {
-                        const isFallback = routeCache.shortestPaths.get(endpointKey + '_fallback') === true;
                         let sourceEnt = null;
                         let targetEnt = null;
 
@@ -426,6 +506,13 @@ export class LogisticsTransferRerouter {
             }
 
             if (pathPoints.length < 2) {
+                // [TEMP-DIAG] 拉分支瞬間物品消失/重置調查:記錄「重算不出有效路線→退回來源」的移除。
+                if (GameEngine && typeof GameEngine.addLog === 'function') {
+                    GameEngine.addLog(
+                        `[WORKER診斷] rerouter 移除退回來源(重算無有效路線) id=${t.id} lineId=${t.lineId} progress=${(+t.progress || 0).toFixed(4)} pos=${currentPos ? Math.round(currentPos.x) + ',' + Math.round(currentPos.y) : 'null'}`,
+                        'LOGISTICS'
+                    );
+                }
                 recoverTransferToSource(t);
                 state.activeTransfers.splice(i, 1);
                 removedTransferIds.push(t.id);

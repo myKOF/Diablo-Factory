@@ -1,3 +1,5 @@
+import { getPathTotalLength } from './LogisticsPathMetrics.js';
+
 // [Web Worker] 主執行緒橋接:管理物流運動學 worker、雙向狀態同步。
 // 預設不啟用(見 LogisticsTransferSystem 的旗標);啟用時把昂貴的運動學移出主執行緒。
 //
@@ -180,8 +182,15 @@ export class LogisticsWorkerBridge {
         const byId = new Map();
         for (const t of state.activeTransfers) if (t && t.id) byId.set(t.id, t);
         // [拓樸紀元] 此結果若在拓樸變更前算出(紀元落後),其合流 remap 帶的是過期舊輸出路線 → 略過 remap,
-        // 保留主執行緒重算後的路線;運動學純量(progress 等)仍套用(位置 1 拍內近似有效)。
+        // 保留主執行緒重算後的路線。
         const remapStale = Number.isFinite(msg?.topoEpoch) && msg.topoEpoch !== this.topoEpoch;
+        const routeTotalCache = new Map();
+        const routeTotal = (pts) => {
+            if (!Array.isArray(pts) || pts.length < 2) return 0;
+            let v = routeTotalCache.get(pts);
+            if (v === undefined) { v = getPathTotalLength(pts); routeTotalCache.set(pts, v); }
+            return v;
+        };
         for (let k of (msg ? msg.kin : [])) {
             const t = byId.get(k.id);
             if (!t) continue;
@@ -200,6 +209,16 @@ export class LogisticsWorkerBridge {
                 t._logicRouteMetrics = undefined;
                 t._logicRouteMetricsPoints = undefined;
                 t._logicRouteMetricsKey = undefined;
+            }
+            // [瞬移防護] k 的運動學純量是 worker 在「它那份路線」的座標系算出來的。主執行緒可能已在
+            // 這一拍重路由換掉 routePoints(中段拉分支等),舊路線座標系的 progress 分數套到新路線上
+            // 會讓物品沿線瞬移(路線變長=前跳、變短=後跳;實測拉分支瞬間前跳 60~100px)。比對兩邊
+            // 路線總長,不一致就拒收這筆純量、保留主執行緒剛投影好的位置;worker 收到重送的新路線後,
+            // 下一批結果總長吻合自然接手(1~2 拍的更新空窗由渲染等速插值平滑,不可感)。
+            // 註:曾寫成「純量仍套用(位置 1 拍內近似有效)」——該假設只在路線沒被換掉時成立。
+            if (Number.isFinite(k.routeTotalPixels) && k.routeTotalPixels > 0) {
+                const mainTotal = routeTotal(t.routePoints);
+                if (Math.abs(mainTotal - k.routeTotalPixels) > 0.5) continue;
             }
             t.progress = k.progress;
             t.transportIndex = k.transportIndex;

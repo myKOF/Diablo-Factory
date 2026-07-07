@@ -1,5 +1,24 @@
 # 導入腳本功能實作計劃
 
+## 2026-07-03 物流線分支瞬移修復
+
+### 1. 核心目標
+- 修正物流線已接通且正在運輸物品時，從既有物流線中段拉出新分支會讓在途物品瞬移、消失或被重置的問題。
+- 分支、切分、合併或重刷拓樸時，同一個在途物品的世界座標必須保持連續，只能沿新物流線方向自然移動。
+- 保留既有物流規則：中段切分需維持 detached 下游群組的終點 metadata，無終點新分支不得搶走正在送往有效目標的物品。
+
+### 2. 實作策略
+- 先新增 Playwright 回歸測試，直接覆蓋「中段分支提交前後，同一 transfer 的座標不跳、不得退回來源、不得被改到 targetId=null 的開放分支」。
+- 檢查 `LogisticsDragSubmission` 建立的 `submitAffectedGroupIds` 與 `LogisticsLineFinalizer` 內部 reroute 時機，確保 `middleExtensionSplit.detachedGroupId` 會進入實際 rerouter。
+- 在 `LogisticsTransferRerouter` 內加入候選線段防呆：既有 transfer 有有效 `targetId` / `targetPoint` 時，優先保留有終點的延續路徑，避免被同群組或近距離的開放分支搶走。
+- 重算時以舊 route 上的世界座標作為投影基準，且新 route 必須經過物品當前所在的線段，避免同群組平行新路徑被當成 source-to-sink 最短路後整段投影瞬移。
+- 另記錄獨立問題：建造提交瞬間若主執行緒卡頓，所有物品會同幀停頓並在下一幀補位移，視覺上也像整體瞬移；此項和本次「拓樸投影到錯線」分開分析。
+
+### 3. 驗證
+- 先跑新增規格確認紅燈，再完成最小修復並確認綠燈。
+- 執行相關物流 reroute / worker 規格，至少包含新增分支瞬移規格、平行回堵連續性規格、`test_scripts_diversion_test4.spec.js`、`stale_route_reroute.spec.js`、`worker_stale_route_after_topo.spec.js`。
+- 完工後執行 `npm.cmd run finalize`。
+
 ## 2026-07-02 錄製腳本日誌選單改造
 
 ### 1. 核心目標
